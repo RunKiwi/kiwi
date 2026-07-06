@@ -52,6 +52,12 @@ sequenceDiagram
 
 ---
 
+## Interactive Kanban Dashboard
+
+![Kiwi Dashboard](assets/dashboard.png)
+
+---
+
 ## Getting Started
 
 ### Prerequisites
