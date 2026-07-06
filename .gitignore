@@ -2,6 +2,9 @@
 kiwi
 kiwid
 
+# Agent session traces
+.agent-traces/
+
 # Task state logs
 task_state.json
 secrets.json

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -15,11 +16,13 @@ import (
 // Engine orchestrates the feedback loop (TDD actor-critic control loop)
 type Engine struct {
 	Provider      provider.Provider
+	Critic        provider.Critic
 	MaxSteps      int
 	LogOut        io.Writer
 	StateCallback func(string)
 	CostCallback  func(float64)
 	MaxBudget     float64
+	LLMMode       string // "mock" (default) or "anthropic"
 }
 
 // NewEngine creates a new Loop Orchestrator engine
@@ -78,6 +81,59 @@ func (e *Engine) resolveEnv(ctx context.Context, taskID string, reqKeys []string
 	return envs, nil
 }
 
+// composeActorInput appends any Critic feedback to the build output so the
+// Actor sees why its previous attempt was rejected. Signatures are fixed, so
+// feedback rides along inside the buildOutput argument.
+func composeActorInput(buildOutput, criticReasons string) string {
+	if strings.TrimSpace(criticReasons) == "" {
+		return buildOutput
+	}
+	return buildOutput + "\n\n[Critic feedback on your previous attempt]: " + criticReasons
+}
+
+// charge attributes the cost of the most recent call by `caller` to the budget.
+// Live providers report real token cost via UsageReporter; the mock uses a
+// small nominal fallback so the budget path stays exercised offline.
+func (e *Engine) charge(acc *float64, caller interface{}, fallback float64) {
+	cost := fallback
+	if r, ok := caller.(provider.UsageReporter); ok {
+		cost = r.LastCostUSD()
+	}
+	*acc += cost
+	if e.CostCallback != nil {
+		e.CostCallback(cost)
+	}
+}
+
+// resolveAPIKey resolves ANTHROPIC_API_KEY through the reverse tunnel (cache
+// first), falling back to the daemon environment. If neither is available it
+// pauses statefully until the client reconnects.
+func (e *Engine) resolveAPIKey(ctx context.Context, taskID string) (string, error) {
+	t := tunnel.GlobalRegistry.Get(taskID)
+	for {
+		if t != nil {
+			if val, err := t.GetSecret(ctx, "ANTHROPIC_API_KEY"); err == nil && val != "" {
+				if e.StateCallback != nil {
+					e.StateCallback("RUNNING")
+				}
+				return val, nil
+			}
+		}
+		if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
+			return val, nil
+		}
+		e.log("[Orchestrator] ANTHROPIC_API_KEY unavailable. Pausing until client reconnects...\n")
+		if e.StateCallback != nil {
+			e.StateCallback("PAUSED")
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
+	}
+}
+
 // RunTask starts the feedback loop to align the codebase to the desired state.
 func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task string, filePath string, testCmd string) error {
 	e.log("[Orchestrator] Desired State: %s\n", task)
@@ -85,6 +141,17 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 
 	accumulatedCost := 0.0
 	outputCounts := make(map[string]int)
+
+	// Build the live provider on demand (key resolved via tunnel / env).
+	if e.LLMMode == "anthropic" && e.Provider == nil {
+		key, err := e.resolveAPIKey(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve ANTHROPIC_API_KEY: %w", err)
+		}
+		ap := provider.NewAnthropicProvider(key)
+		e.Provider = ap
+		e.Critic = ap
+	}
 
 	// Resolve target credentials over the tunnel if required
 	env, err := e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
@@ -112,6 +179,9 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 
 	outputCounts[res.Output]++
 
+	lastBuildOutput := res.Output
+	criticReasons := ""
+
 	for step := 1; step <= e.MaxSteps; step++ {
 		e.log("\n=== Loop Iteration %d / %d ===\n", step, e.MaxSteps)
 
@@ -127,20 +197,39 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 			return fmt.Errorf("failed to read target file: %w", err)
 		}
 
-		e.log("[Actor] Simulating edit proposal...\n")
-		fixedCode, err := e.Provider.GetCodeEdit(ctx, task, filePath, string(content), res.Output)
+		// Actor proposes an edit (not yet written).
+		e.log("[Actor] Proposing edit...\n")
+		proposed, err := e.Provider.GetCodeEdit(ctx, task, filePath, string(content), composeActorInput(lastBuildOutput, criticReasons))
 		if err != nil {
 			return fmt.Errorf("failed to get code edit: %w", err)
 		}
+		e.charge(&accumulatedCost, e.Provider, 0.05)
+		criticReasons = ""
 
-		// Apply proposed patch/fix
-		err = os.WriteFile(filePath, []byte(fixedCode), 0644)
-		if err != nil {
+		// Critic reviews before applying.
+		verdict := provider.Verdict{Approved: true, Reasons: "no critic configured"}
+		if e.Critic != nil {
+			verdict, err = e.Critic.ReviewEdit(ctx, task, filePath, string(content), proposed, lastBuildOutput)
+			if err != nil {
+				return fmt.Errorf("critic review failed: %w", err)
+			}
+			e.charge(&accumulatedCost, e.Critic, 0.02)
+		}
+
+		if !verdict.Approved {
+			e.log("[Critic] Rejected edit: %s\n", verdict.Reasons)
+			criticReasons = verdict.Reasons
+			continue // do not apply, do not run tests; Actor retries with feedback
+		}
+		e.log("[Critic] Approved edit.\n")
+
+		// Apply the approved edit.
+		if err := os.WriteFile(filePath, []byte(proposed), 0644); err != nil {
 			return fmt.Errorf("failed to write fix back to target file: %w", err)
 		}
-		e.log("[Actor] Applied proposed code edits to target file.\n")
+		e.log("[Actor] Applied approved edit to target file.\n")
 
-		// Run compiler/tests in the sandbox
+		// Final gate: run the tests.
 		e.log("[Sandbox] Re-running build/tests...\n")
 		env, err = e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
 		if err != nil {
@@ -151,20 +240,14 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 			return fmt.Errorf("sandbox run failed: %w", err)
 		}
 
-		// Track cost
-		accumulatedCost += 0.05
-		if e.CostCallback != nil {
-			e.CostCallback(0.05)
-		}
-
-		// Critic phase
 		if res.Success {
-			e.log("[Critic] Success: Tests passed, compiler errors cleared.\n")
+			e.log("[Gate] Success: tests passed.\n")
 			return nil
 		}
 
-		e.log("[Critic] Fail: Target state still diverging.\n")
+		e.log("[Gate] Fail: target state still diverging.\n")
 		e.log("[Sandbox Output]:\n%s\n", res.Output)
+		lastBuildOutput = res.Output
 
 		// Check duplicate output count for loop safety
 		outputCounts[res.Output]++
