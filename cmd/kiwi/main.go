@@ -23,16 +23,18 @@ func main() {
 	resume := flag.Bool("resume", false, "resume an existing task instead of submitting")
 	taskID := flag.String("task-id", "", "task ID to resume (with -resume)")
 	interval := flag.Duration("interval", 2*time.Second, "status poll interval")
+	idempotencyKey := flag.String("idempotency-key", "", "optional Idempotency-Key to dedupe retried submissions")
 	flag.Parse()
 
-	if err := run(*server, *token, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval); err != nil {
+	if err := run(*server, *token, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval); err != nil {
 		fmt.Fprintf(os.Stderr, "\n[kiwi] error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(server, token, task, file, testCmd, dir, secretsPath string, resume bool, taskID string, interval time.Duration) error {
+func run(server, token, idempotencyKey, task, file, testCmd, dir, secretsPath string, resume bool, taskID string, interval time.Duration) error {
 	c := client.New(server, token)
+	c.IdempotencyKey = idempotencyKey
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
