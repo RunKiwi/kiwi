@@ -73,6 +73,10 @@ kiwi/
 │   │   └── sync.go          # Workspace zip/unzip package with Zip Slip protection and database filtering
 │   ├── provider/
 │   │   └── mock.go          # Offline simulated LLM Actor-Critic rules
+│   ├── client/
+│   │   ├── client.go        # HTTP client: SubmitTask / GetStatus / DownloadResult (Bearer auth)
+│   │   ├── secrets.go       # SecretLookup: secrets.json then env var, for the tunnel hook
+│   │   └── logs.go          # Incremental log-delta helper for live streaming
 │   ├── tunnel/
 │   │   └── tunnel.go        # Reverse credential tunnel multiplexer with memory caching
 │   └── dashboard/
@@ -101,6 +105,11 @@ kiwi/
     *   **Decoupled Frontend**: Moved the dashboard UI out of the Go daemon into a dedicated `/web/` directory containing static HTML, CSS, and JS.
     *   **CORS Preflight Middleware**: Added CORS handling to `kiwid` daemon task endpoints to permit cross-origin requests from the standalone browser page.
     *   **Token Authorization Settings Panel**: Added a configuration gear widget in the UI to save daemon URLs and Bearer Tokens inside browser `localStorage`.
+*   **Phase 7 (Completed)**: `kiwi` CLI Client (`cmd/kiwi`, `pkg/client`):
+    *   **Task Submission**: Packages the working directory via `sandbox.ZipDir` (skips `.git`, binaries, `secrets.json`) and uploads it to `POST /tasks` with Bearer auth.
+    *   **Reverse Tunnel Serving**: Drives `tunnel.ConnectAndListen`, answering the daemon's on-demand secret requests via `SecretLookup` (`secrets.json` first, then environment). Secrets never leave the machine except transiently.
+    *   **Live Log Streaming**: Polls `GET /tasks/{id}` and prints incremental log deltas until a terminal state.
+    *   **Non-Destructive Result Download**: On success, downloads the fixed codebase to `kiwi-fix-<task-id>.zip` — local files are never overwritten. Supports `-resume -task-id` to reconnect to a paused task.
 
 ---
 
