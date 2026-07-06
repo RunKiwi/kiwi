@@ -33,6 +33,19 @@ export KIWI_SERVER_TOKEN="my-secret-token-1234"
 ./kiwi -token "my-secret-token-1234" -resume -task-id <task_id>
 ```
 
+### Launching the Dashboard Frontend
+The dashboard is separated from the Go binary into a standalone single-page web app in the `/web/` folder. It can be served from any static port or opened directly:
+
+```bash
+# Option A: Start a static file server on port 3000
+npx -y serve -l 3000 web/
+
+# Option B: Open the index.html page directly in browser
+open web/index.html
+```
+
+*Note: Configure the Kiwi Daemon URL (e.g. `http://localhost:8080`) and your Bearer Authorization token inside the dashboard Settings gear panel in the upper-right corner (persists in `localStorage`).*
+
 ### Testing the Packages
 ```bash
 # Run unit tests (CGO_ENABLED=0 bypasses macOS dyld UUID checks for tests)
@@ -53,7 +66,7 @@ kiwi/
 ├── pkg/
 │   ├── orchestrator/
 │   │   ├── engine.go        # Actor-Critic feedback loop orchestrator (caching resolver, safety gates)
-│   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth middleware)
+│   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth middleware, CORS)
 │   │   └── db.go            # SQLite GORM persistence helper
 │   ├── sandbox/
 │   │   ├── exec.go          # Sandbox executor (local execution or isolated Docker container execution)
@@ -63,7 +76,11 @@ kiwi/
 │   ├── tunnel/
 │   │   └── tunnel.go        # Reverse credential tunnel multiplexer with memory caching
 │   └── dashboard/
-│       └── dashboard.go     # Embedded HTML/JS Kanban board UI
+│       └── dashboard.go     # Embedded HTML/JS Kanban board UI (Deprecated fallback)
+├── web/                     # Decoupled Standalone Dashboard Frontend
+│   ├── index.html           # Main UI DOM layout with settings configurations
+│   ├── style.css            # Dark-mode premium CSS styles
+│   └── app.js               # Ajax request client with localStorage credentials mapping
 ├── demo_project/            # A buggy Go project used for verification testing
 └── go.mod
 ```
@@ -75,14 +92,15 @@ kiwi/
 *   **Phase 1 (Completed)**: Core local Actor-Critic Loop Engine that corrects local compilation/test failures using LLM edit mock rules.
 *   **Phase 2 (Completed)**: Cloud Sandbox & Workspace Sync. Zips local codebase, uploads it to the daemon, runs execution loops inside sandbox directories, and syncs fixes back.
 *   **Phase 3 (Completed)**: Reverse Credential Tunneling. Relays developer credentials (`GITHUB_TOKEN`) on-demand from local client to cloud sandbox.
-*   **Phase 4 (Completed)**: Embedded Kanban Dashboard, Cost Budgets, & Loop Safety:
-    *   Sleek dark-mode dashboard hosted at `http://localhost:8080/dashboard`.
-    *   Semantic duplicate-error checker halts loop if compile error occurs 3 times.
-    *   Cost capping stops execution if task exceeds `$0.20` budget cap.
+*   **Phase 4 (Completed)**: Embedded Kanban Dashboard, Cost Budgets, & Loop Safety.
 *   **Phase 5 (Completed)**: Authentication & Docker Sandboxing:
     *   **Bearer Token Authorization**: Enforces API access checks. Uses custom tokens (via `KIWI_SERVER_TOKEN`) to validate CLI requests.
     *   **Docker Container Sandboxing**: Spawns isolated `golang:1.21-alpine` containers to execute compiler and test commands, preventing host pollution.
     *   **Credentials Caching**: Caches resolved credentials in-memory on first fetch. Allows developers to close their laptops and sever the tunnel while the cloud loop continues executing to completion.
+*   **Phase 6 (Completed)**: Standalone Frontend & CORS Support:
+    *   **Decoupled Frontend**: Moved the dashboard UI out of the Go daemon into a dedicated `/web/` directory containing static HTML, CSS, and JS.
+    *   **CORS Preflight Middleware**: Added CORS handling to `kiwid` daemon task endpoints to permit cross-origin requests from the standalone browser page.
+    *   **Token Authorization Settings Panel**: Added a configuration gear widget in the UI to save daemon URLs and Bearer Tokens inside browser `localStorage`.
 
 ---
 
@@ -106,7 +124,7 @@ kiwi/
 *   `[ ]` Secure JWT storage on the developer's client machine using platform-specific keychains (e.g., `keyring` in Linux, Keychain in macOS).
 *   `[ ]` Integrate JWT signature verification middleware on the server to replace the static token checks.
 
-#### 3. Interactive Web Dashboard Controls (`pkg/dashboard/`)
+#### 3. Interactive Web Dashboard Controls (`web/app.js`)
 *   `[ ]` Expose task cancellation (`POST /tasks/{id}/cancel`) and manual pausing (`POST /tasks/{id}/pause`) HTTP endpoints.
 *   `[ ]` Update the Kanban UI with buttons to:
     *   Pause/Resume execution loops.
@@ -121,4 +139,3 @@ kiwi/
 #### 5. High-Performance Log Streaming
 *   `[ ]` Move live streaming logs from SQLite/GORM updates to **Redis Streams** or WebSocket events.
 *   `[ ]` Save archived logs to an object store (e.g. AWS S3, Google Cloud Storage) upon task completion to keep the relational database clean and scalable.
-

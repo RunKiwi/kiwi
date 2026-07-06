@@ -96,7 +96,15 @@ sequenceDiagram
     ```
 
 4.  **Access the Dashboard**:
-    Open [http://localhost:8080](http://localhost:8080) in your web browser.
+    The dashboard frontend is fully decoupled into the `/web/` directory. You can serve it using a local static file server or open it directly in a browser:
+    ```bash
+    # Open index.html directly in a browser
+    open web/index.html
+
+    # Or serve static files on port 3000
+    npx -y serve -l 3000 web/
+    ```
+    *Note: Configure the Kiwi Daemon URL (e.g. `http://localhost:8080`) and your Bearer Authorization Token in the Settings panel in the upper-right corner of the dashboard (persists in `localStorage`).*
 
 ---
 

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiwi - Agentic Control Plane</title>
+    <!-- Inter & JetBrains Mono Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <div class="logo-section">
+                <h1>
+                    <svg style="width:24px;height:24px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+                    KIWI CONTROL PLANE
+                </h1>
+                <p>Secure Agentic Sandbox Loop Orchestration</p>
+            </div>
+            
+            <div class="header-controls">
+                <div class="stats-summary">
+                    <div class="stat-item"><span class="stat-dot" style="background:var(--accent-blue)"></span><span id="stat-running">0</span> Running</div>
+                    <div class="stat-item"><span class="stat-dot" style="background:var(--accent-green)"></span><span id="stat-success">0</span> Success</div>
+                    <div class="stat-item"><span class="stat-dot" style="background:var(--accent-red)"></span><span id="stat-failed">0</span> Failed</div>
+                    <div class="stat-item" style="border-left: 1px solid var(--border-color); padding-left: 1rem;"><span id="stat-cost" style="color:var(--accent-teal);font-weight:600">$0.00</span> Total Cost</div>
+                </div>
+                
+                <div class="search-bar">
+                    <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                    <input type="text" id="search-input" placeholder="Filter by ID or path..." oninput="applyFilter()">
+                </div>
+
+                <!-- Settings Gear Icon -->
+                <button class="settings-toggle-btn" id="settings-toggle" onclick="toggleSettingsPanel()">
+                    <svg style="width:20px;height:20px;fill:currentColor" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Settings Pane Popover -->
+    <div class="settings-overlay" id="settings-overlay" onclick="toggleSettingsPanel()">
+        <div class="settings-panel" onclick="event.stopPropagation()">
+            <h3>Configuration Settings</h3>
+            <div class="settings-group">
+                <label for="setting-server-url">Kiwi Daemon API Server URL</label>
+                <input type="text" id="setting-server-url" placeholder="http://localhost:8080">
+            </div>
+            <div class="settings-group">
+                <label for="setting-auth-token">Bearer Authorization Token</label>
+                <input type="password" id="setting-auth-token" placeholder="kiwi-auth-token-1234">
+            </div>
+            <button class="settings-save-btn" onclick="saveSettings()">Save Configuration</button>
+        </div>
+    </div>
+
+    <main>
+        <div class="kanban-grid">
+            <!-- Backlog -->
+            <div class="kanban-column" id="col-backlog">
+                <div class="column-header">
+                    <div class="column-title"><span style="color:var(--text-secondary)">●</span> Backlog</div>
+                    <div class="column-badge" id="badge-backlog">0</div>
+                </div>
+                <div class="column-cards" id="cards-backlog"></div>
+            </div>
+
+            <!-- Running -->
+            <div class="kanban-column" id="col-running">
+                <div class="column-header">
+                    <div class="column-title"><span style="color:var(--accent-blue)">●</span> Running</div>
+                    <div class="column-badge" id="badge-running">0</div>
+                </div>
+                <div class="column-cards" id="cards-running"></div>
+            </div>
+
+            <!-- Paused -->
+            <div class="kanban-column" id="col-paused">
+                <div class="column-header">
+                    <div class="column-title"><span style="color:var(--accent-orange)">●</span> Paused</div>
+                    <div class="column-badge" id="badge-paused">0</div>
+                </div>
+                <div class="column-cards" id="cards-paused"></div>
+            </div>
+
+            <!-- Success -->
+            <div class="kanban-column" id="col-success">
+                <div class="column-header">
+                    <div class="column-title"><span style="color:var(--accent-green)">●</span> Success</div>
+                    <div class="column-badge" id="badge-success">0</div>
+                </div>
+                <div class="column-cards" id="cards-success"></div>
+            </div>
+
+            <!-- Failed -->
+            <div class="kanban-column" id="col-failed">
+                <div class="column-header">
+                    <div class="column-title"><span style="color:var(--accent-red)">●</span> Failed</div>
+                    <div class="column-badge" id="badge-failed">0</div>
+                </div>
+                <div class="column-cards" id="cards-failed"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Logs -->
+    <div class="modal-overlay" id="logs-modal" onclick="closeModal(event)">
+        <div class="modal-container" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title-area">
+                    <h3 id="modal-task-title">Task Live Logs</h3>
+                    <p id="modal-task-sub">ID: <span id="modal-task-id" style="font-family:monospace">N/A</span> | File: <span id="modal-task-path">N/A</span></p>
+                </div>
+                <button class="modal-close-btn" onclick="hideModal()">
+                    <svg style="width:20px;height:20px" viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <div class="terminal-container" id="terminal-logs">
+                <div class="terminal-header">
+                    <span>KIWI TERMINAL v1.1.0</span>
+                    <span id="terminal-status">STATUS: IDLE</span>
+                </div>
+                <div id="terminal-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Standalone Script -->
+    <script src="app.js"></script>
+</body>
+</html>

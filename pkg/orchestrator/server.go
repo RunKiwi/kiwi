@@ -74,6 +74,18 @@ func (s *Server) validateAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func (s *Server) handleCORSAndPreflight(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return true
+	}
+	return false
+}
+
 func (s *Server) Start(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tasks", s.handleTasks)
@@ -101,6 +113,9 @@ func (s *Server) Start(addr string) error {
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if s.handleCORSAndPreflight(w, r) {
+		return
+	}
 	if !s.validateAuth(w, r) {
 		return
 	}
@@ -251,6 +266,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
+	if s.handleCORSAndPreflight(w, r) {
+		return
+	}
 	if !s.validateAuth(w, r) {
 		return
 	}

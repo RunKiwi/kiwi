@@ -557,7 +557,12 @@ const DashboardHTML = `<!DOCTYPE html>
         // Fetch tasks from server
         async function fetchTasks() {
             try {
-                const response = await fetch('/tasks');
+                const token = localStorage.getItem('kiwi_auth_token') || 'kiwi-auth-token-1234';
+                const response = await fetch('/tasks', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                });
                 if (!response.ok) throw new Error('Network response was not ok');
                 const data = await response.json();
                 
