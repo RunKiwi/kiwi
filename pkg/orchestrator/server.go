@@ -37,13 +37,86 @@ type TaskState struct {
 }
 
 type Server struct {
-	db *gorm.DB
+	db       *gorm.DB
+	launchFn func(taskID, sandboxPath, task, file, testCmd string)
 }
 
 func NewServer(db *gorm.DB) *Server {
-	return &Server{
-		db: db,
-	}
+	s := &Server{db: db}
+	s.launchFn = s.launchTask
+	return s
+}
+
+// launchTask runs the orchestration loop in the background for an
+// already-persisted task whose sandbox is populated on disk. Used by both
+// submission and boot recovery. It seeds the log buffer from the existing row so
+// recovered tasks keep their prior logs.
+func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
+	go func() {
+		logBuf := new(bytes.Buffer)
+		var existing TaskState
+		if err := s.db.First(&existing, "id = ?", taskID).Error; err == nil {
+			logBuf.WriteString(existing.Logs)
+		}
+
+		var engine *Engine
+		if os.Getenv("KIWI_LLM_PROVIDER") == "anthropic" {
+			engine = NewEngine(nil, 5) // provider built lazily after key resolution
+			engine.LLMMode = "anthropic"
+		} else {
+			engine = NewEngine(provider.NewMockProvider(), 5)
+			engine.Critic = provider.NewMockCritic()
+			engine.LLMMode = "mock"
+		}
+		engine.MaxBudget = maxBudget()
+		engine.LogOut = logBuf
+		engine.StateCallback = func(newStatus string) {
+			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("status", newStatus)
+		}
+		engine.CostCallback = func(amount float64) {
+			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("cost", gorm.Expr("cost + ?", amount))
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), taskTimeout())
+		defer cancel()
+
+		// Periodic background log synchronizer to SQLite row (every 500ms)
+		go func() {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("logs", logBuf.String())
+					return
+				case <-ticker.C:
+					s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("logs", logBuf.String())
+				}
+			}
+		}()
+
+		absFilePath := filepath.Join(sandboxPath, file)
+		fmt.Fprintf(logBuf, "[Orchestrator] Running task in sandbox: %s\n", sandboxPath)
+
+		err := engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
+
+		finalStatus := "SUCCESS"
+		if err != nil {
+			finalStatus = "FAILED"
+			fmt.Fprintf(logBuf, "\n[Execution Failure]: %v\n", err)
+		} else {
+			fmt.Fprintln(logBuf, "\n[Execution Success]: Task completed successfully.")
+			fixedZip, zerr := sandbox.ZipDir(sandboxPath)
+			if zerr == nil {
+				_ = os.WriteFile(filepath.Join(sandboxPath, "output.zip"), fixedZip, 0644)
+			}
+		}
+
+		s.db.Model(&TaskState{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+			"status": finalStatus,
+			"logs":   logBuf.String(),
+		})
+	}()
 }
 
 // GenerateTaskID generates a short unique hex ID
@@ -223,71 +296,8 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Launch loop orchestration in the background
-	go func() {
-		logBuf := new(bytes.Buffer)
-		var engine *Engine
-		if os.Getenv("KIWI_LLM_PROVIDER") == "anthropic" {
-			engine = NewEngine(nil, 5) // provider built lazily after key resolution
-			engine.LLMMode = "anthropic"
-		} else {
-			engine = NewEngine(provider.NewMockProvider(), 5)
-			engine.Critic = provider.NewMockCritic()
-			engine.LLMMode = "mock"
-		}
-		engine.MaxBudget = maxBudget()
-		engine.LogOut = logBuf // Capture logs to task buffer
-		engine.StateCallback = func(newStatus string) {
-			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("status", newStatus)
-		}
-		engine.CostCallback = func(amount float64) {
-			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("cost", gorm.Expr("cost + ?", amount))
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), taskTimeout())
-		defer cancel()
-
-		// Periodic background log synchronizer to SQLite row (every 500ms)
-		go func() {
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("logs", logBuf.String())
-					return
-				case <-ticker.C:
-					s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("logs", logBuf.String())
-				}
-			}
-		}()
-
-		absFilePath := filepath.Join(tempSandbox, file)
-
-		// Periodic status logger into buffer
-		fmt.Fprintf(logBuf, "[Orchestrator] Spawned cloud sandbox at: %s\n", tempSandbox)
-
-		err := engine.RunTask(ctx, taskID, tempSandbox, task, absFilePath, testCmd)
-
-		finalStatus := "SUCCESS"
-		if err != nil {
-			finalStatus = "FAILED"
-			fmt.Fprintf(logBuf, "\n[Execution Failure]: %v\n", err)
-		} else {
-			fmt.Fprintln(logBuf, "\n[Execution Success]: Task completed successfully.")
-
-			// Zip the fixed sandbox
-			fixedZip, err := sandbox.ZipDir(tempSandbox)
-			if err == nil {
-				_ = os.WriteFile(filepath.Join(tempSandbox, "output.zip"), fixedZip, 0644)
-			}
-		}
-
-		s.db.Model(&TaskState{}).Where("id = ?", taskID).Updates(map[string]interface{}{
-			"status": finalStatus,
-			"logs":   logBuf.String(),
-		})
-	}()
+	// Launch loop orchestration in the background (injectable for tests).
+	s.launchFn(taskID, tempSandbox, task, file, testCmd)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
