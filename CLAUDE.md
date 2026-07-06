@@ -120,7 +120,10 @@ kiwi/
     *   **Reverse Tunnel Serving**: Drives `tunnel.ConnectAndListen`, answering the daemon's on-demand secret requests via `SecretLookup` (`secrets.json` first, then environment). Secrets never leave the machine except transiently.
     *   **Live Log Streaming**: Polls `GET /tasks/{id}` and prints incremental log deltas until a terminal state.
     *   **Non-Destructive Result Download**: On success, downloads the fixed codebase to `kiwi-fix-<task-id>.zip` — local files are never overwritten. Supports `-resume -task-id` to reconnect to a paused task.
-*   **Phase 9 (Completed)**: Restart Recovery & Idempotency (`recovery.go`, `idempotency.go`):
+*   **Phase 9 (Completed)**: Pull Request Continuous Integration:
+    *   **CI Pipeline**: Configured a GitHub Actions workflow in `.github/workflows/ci.yml` that runs on all pull requests and pushes to `main`.
+    *   **Verification**: Automatically sets up Go `1.24` and executes formatting checks (`gofmt`), static analysis (`go vet`), unit tests (`go test`), and builds the binary targets for client and daemon on Linux.
+*   **Phase 10 (Completed)**: Restart Recovery & Idempotency (`recovery.go`, `idempotency.go`):
     *   **Injectable `launchTask`**: The task-run goroutine was extracted from `handleTasks` into `Server.launchTask` (behind an injectable `launchFn` for testing), so both submission and recovery share one code path. It seeds its log buffer from the existing row so recovered tasks keep prior logs.
     *   **Boot Recovery (`RecoverTasks`)**: On startup (called from `cmd/kiwid` before `Start`), the daemon scans `RUNNING`/`PAUSED` rows. If the task's sandbox still exists on disk it re-registers the tunnel and re-launches the loop; otherwise it marks the task `FAILED` with an "interrupted by restart" note. Eliminates zombie tasks.
     *   **Idempotent Submission**: `POST /tasks` reads an optional `Idempotency-Key` header; if a task with that key exists it returns the original `{task_id,status}` with no new sandbox/run. Client exposes `-idempotency-key`. (Single-daemon: dedupe is SELECT-then-create; the rare concurrent double-submit race is accepted.)
