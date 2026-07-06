@@ -33,7 +33,7 @@ sequenceDiagram
     end
 
     Note over Server: If a NEW un-cached secret is requested:
-    Server->>Server: Detect Disconnect, set State to "PAUSED" & Block thread
+    Server->>Server: Lookup fails (Tunnel offline), set State to "PAUSED" & Block thread
     Note over CLI: Laptop Reopened! (Resume task)
     CLI->>Server: Resume Task (kiwi -resume -task-id {id})
     Server->>Server: Set Task State back to "RUNNING" & Unblock
