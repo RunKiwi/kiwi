@@ -26,6 +26,9 @@ func main() {
 
 	server := orchestrator.NewServer(db)
 
+	// Recover tasks interrupted by a previous restart before accepting new work.
+	server.RecoverTasks()
+
 	err = server.Start(*addr)
 	if err != nil {
 		fmt.Printf("Error starting Kiwi daemon: %v\n", err)

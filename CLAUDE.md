@@ -66,7 +66,9 @@ kiwi/
 ├── pkg/
 │   ├── orchestrator/
 │   │   ├── engine.go        # Actor-Critic feedback loop orchestrator (caching resolver, safety gates)
-│   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth middleware, CORS)
+│   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth, CORS, launchTask)
+│   │   ├── recovery.go      # Boot recovery: re-launch or fail tasks interrupted by a restart
+│   │   ├── idempotency.go   # Idempotency-Key lookup for deduping task submissions
 │   │   └── db.go            # SQLite GORM persistence helper
 │   ├── sandbox/
 │   │   ├── exec.go          # Sandbox executor (local execution or isolated Docker container execution)
@@ -121,6 +123,10 @@ kiwi/
 *   **Phase 9 (Completed)**: Pull Request Continuous Integration:
     *   **CI Pipeline**: Configured a GitHub Actions workflow in `.github/workflows/ci.yml` that runs on all pull requests and pushes to `main`.
     *   **Verification**: Automatically sets up Go `1.24` and executes formatting checks (`gofmt`), static analysis (`go vet`), unit tests (`go test`), and builds the binary targets for client and daemon on Linux.
+*   **Phase 10 (Completed)**: Restart Recovery & Idempotency (`recovery.go`, `idempotency.go`):
+    *   **Injectable `launchTask`**: The task-run goroutine was extracted from `handleTasks` into `Server.launchTask` (behind an injectable `launchFn` for testing), so both submission and recovery share one code path. It seeds its log buffer from the existing row so recovered tasks keep prior logs.
+    *   **Boot Recovery (`RecoverTasks`)**: On startup (called from `cmd/kiwid` before `Start`), the daemon scans `RUNNING`/`PAUSED` rows. If the task's sandbox still exists on disk it re-registers the tunnel and re-launches the loop; otherwise it marks the task `FAILED` with an "interrupted by restart" note. Eliminates zombie tasks.
+    *   **Idempotent Submission**: `POST /tasks` reads an optional `Idempotency-Key` header; if a task with that key exists it returns the original `{task_id,status}` with no new sandbox/run. Client exposes `-idempotency-key`. (Single-daemon: dedupe is SELECT-then-create; the rare concurrent double-submit race is accepted.)
 
 ---
 
@@ -130,7 +136,7 @@ kiwi/
 1.  **Single Live Provider**: The live LLM path (`pkg/provider/llm.go`) integrates Anthropic (Claude) only. OpenAI and dynamic per-role model swapping (different model for Actor vs Critic) are not yet wired up. The rule-based mock (`pkg/provider/mock.go`) remains the default (`KIWI_LLM_PROVIDER` unset).
 2.  **Local Secrets Store**: The CLI client reads local secrets from an unencrypted `secrets.json` file in the workspace or defaults to standard environment variables.
 3.  **Local Host Mounted Sandboxes**: The Docker sandbox mode mounts directories from the host server (`/var/folders/...`) directly into the container. In multi-tenant systems, this leaks file descriptors and permissions, requiring independent Virtual Machine sandboxing.
-4.  **In-Memory Tunnel Cache**: The credentials cache on the server is kept inside the local daemon's memory. If the daemon restarts, cached credentials for running tasks are lost, prompting a stateful pause until the developer reconnects.
+4.  **In-Memory Tunnel Cache**: The credentials cache on the server is kept inside the local daemon's memory. If the daemon restarts, cached credentials are lost — but as of Phase 9 the *task itself* is recovered: on boot the daemon re-launches interrupted tasks whose sandbox survived, and the re-launched loop statefully pauses until the developer reconnects the tunnel (re-populating the cache). Only the cache is ephemeral, not the task.
 
 ### Remaining Work / TODOs
 

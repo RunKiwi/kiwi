@@ -52,6 +52,8 @@ sequenceDiagram
     *   **Circuit Breaker**: Detects infinite recursive loop states by tracking duplicate compiler stdout patterns (stops after 3 identical failures).
     *   **Budget Caps**: Sets strict cost controls per task to prevent budget drainage.
 7.  **Interactive Kanban Dashboard**: Embedded dark-themed dashboard featuring status cards, live polling, log filters, and a real-time console log viewer.
+8.  **Crash-Safe Restart Recovery**: On boot the daemon reconciles tasks left mid-flight by a previous lifetime — if the task's sandbox survived on disk it re-launches the loop (which resumes or statefully pauses awaiting a client reconnect); otherwise it marks the task `FAILED` with an "interrupted by restart" note. No more zombie `RUNNING` rows.
+9.  **Idempotent Submission**: `POST /tasks` honors an optional `Idempotency-Key` header (client `-idempotency-key` flag). Retrying a submission with the same key returns the original task instead of creating a duplicate task, sandbox, and LLM bill.
 
 ---
 
