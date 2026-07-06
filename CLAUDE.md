@@ -118,6 +118,9 @@ kiwi/
     *   **Reverse Tunnel Serving**: Drives `tunnel.ConnectAndListen`, answering the daemon's on-demand secret requests via `SecretLookup` (`secrets.json` first, then environment). Secrets never leave the machine except transiently.
     *   **Live Log Streaming**: Polls `GET /tasks/{id}` and prints incremental log deltas until a terminal state.
     *   **Non-Destructive Result Download**: On success, downloads the fixed codebase to `kiwi-fix-<task-id>.zip` — local files are never overwritten. Supports `-resume -task-id` to reconnect to a paused task.
+*   **Phase 9 (Completed)**: Pull Request Continuous Integration:
+    *   **CI Pipeline**: Configured a GitHub Actions workflow in `.github/workflows/ci.yml` that runs on all pull requests and pushes to `main`.
+    *   **Verification**: Automatically sets up Go `1.24` and executes formatting checks (`gofmt`), static analysis (`go vet`), unit tests (`go test`), and builds the binary targets for client and daemon on Linux.
 
 ---
 
