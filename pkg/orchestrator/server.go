@@ -248,6 +248,17 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Idempotent submission: if a task already exists for this key, return it.
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if existing, ok := findByIdempotencyKey(s.db, idempotencyKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"task_id": existing.ID,
+			"status":  existing.Status,
+		})
+		return
+	}
+
 	// Read codebase archive
 	codebaseFile, _, err := r.FormFile("codebase")
 	if err != nil {
@@ -281,14 +292,15 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	tunnel.GlobalRegistry.Register(taskID)
 
 	state := &TaskState{
-		ID:          taskID,
-		Task:        task,
-		FilePath:    file,
-		TestCmd:     testCmd,
-		Status:      "RUNNING",
-		CreatedAt:   time.Now(),
-		SandboxPath: tempSandbox,
-		Cost:        0.05,
+		ID:             taskID,
+		Task:           task,
+		FilePath:       file,
+		TestCmd:        testCmd,
+		Status:         "RUNNING",
+		CreatedAt:      time.Now(),
+		SandboxPath:    tempSandbox,
+		Cost:           0.05,
+		IdempotencyKey: idempotencyKey,
 	}
 
 	if err := s.db.Create(state).Error; err != nil {
