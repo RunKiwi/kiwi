@@ -1,0 +1,10 @@
+# Binaries
+kiwi
+
+# Task state logs
+task_state.json
+secrets.json
+
+# Go workspaces/debug files
+*.out
+*.test
