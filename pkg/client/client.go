@@ -13,9 +13,10 @@ import (
 
 // Client talks to the kiwid daemon HTTP API.
 type Client struct {
-	ServerURL string
-	Token     string
-	HTTP      *http.Client
+	ServerURL      string
+	Token          string
+	IdempotencyKey string
+	HTTP           *http.Client
 }
 
 // TaskStatus is the subset of the daemon's task row the client consumes.
@@ -70,6 +71,9 @@ func (c *Client) SubmitTask(ctx context.Context, task, file, testCmd string, cod
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if c.IdempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", c.IdempotencyKey)
+	}
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
