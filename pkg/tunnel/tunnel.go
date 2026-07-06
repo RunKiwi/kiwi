@@ -18,7 +18,9 @@ type Tunnel struct {
 	Connected bool
 	Mutex     sync.Mutex // Protects Connected
 
-	reqMu sync.Mutex // Serializes GetSecret requests to prevent response mismatch
+	reqMu   sync.Mutex        // Serializes GetSecret requests to prevent response mismatch
+	Cache   map[string]string // Cache resolved secrets to allow disconnected cloud executions
+	CacheMu sync.Mutex        // Protects Cache
 }
 
 // TunnelRegistry is a thread-safe map of TaskID -> *Tunnel.
@@ -54,6 +56,7 @@ func (r *TunnelRegistry) Register(taskID string) *Tunnel {
 	t := &Tunnel{
 		Requests:  make(chan string),
 		Responses: make(chan string),
+		Cache:     make(map[string]string),
 	}
 	r.tunnels[taskID] = t
 	return t
@@ -62,8 +65,24 @@ func (r *TunnelRegistry) Register(taskID string) *Tunnel {
 // GetSecret requests a secret through the tunnel. It blocks until the secret is
 // returned, the context is canceled, or a timeout occurs.
 func (t *Tunnel) GetSecret(ctx context.Context, key string) (string, error) {
+	// 1. Check cache first to avoid tunnel request if secret is already resolved
+	t.CacheMu.Lock()
+	if val, exists := t.Cache[key]; exists {
+		t.CacheMu.Unlock()
+		return val, nil
+	}
+	t.CacheMu.Unlock()
+
 	t.reqMu.Lock()
 	defer t.reqMu.Unlock()
+
+	// Double check cache under lock in case it was resolved concurrently
+	t.CacheMu.Lock()
+	if val, exists := t.Cache[key]; exists {
+		t.CacheMu.Unlock()
+		return val, nil
+	}
+	t.CacheMu.Unlock()
 
 	t.Mutex.Lock()
 	connected := t.Connected
@@ -87,6 +106,9 @@ func (t *Tunnel) GetSecret(ctx context.Context, key string) (string, error) {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case val := <-t.Responses:
+		t.CacheMu.Lock()
+		t.Cache[key] = val
+		t.CacheMu.Unlock()
 		return val, nil
 	case <-time.After(10 * time.Second):
 		return "", fmt.Errorf("tunnel timeout: no response received")

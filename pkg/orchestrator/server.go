@@ -166,6 +166,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	taskID := generateTaskID()
+	// Pre-register tunnel in registry so it exists before background run starts
+	tunnel.GlobalRegistry.Register(taskID)
+
 	state := &TaskState{
 		ID:          taskID,
 		Task:        task,

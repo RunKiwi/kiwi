@@ -50,15 +50,14 @@ func (e *Engine) resolveEnv(ctx context.Context, taskID string, reqKeys []string
 	var envs []string
 	for _, key := range reqKeys {
 		for {
-			t.Mutex.Lock()
-			connected := t.Connected
-			t.Mutex.Unlock()
-
-			if connected {
+			// Query secret (will read from cache instantly if resolved previously)
+			val, err := t.GetSecret(ctx, key)
+			if err == nil {
+				envs = append(envs, fmt.Sprintf("%s=%s", key, val))
 				break
 			}
 
-			// Tunnel is down. Pause task state.
+			// Secret is not in cache and tunnel is disconnected. Pause task state.
 			e.log("[Orchestrator] Reverse tunnel disconnected. Pausing execution... (waiting for client to reconnect)\n")
 			if e.StateCallback != nil {
 				e.StateCallback("PAUSED")
@@ -71,19 +70,10 @@ func (e *Engine) resolveEnv(ctx context.Context, taskID string, reqKeys []string
 			}
 		}
 
-		// Reconnected, restore state
+		// Reconnected or read from cache, restore state to RUNNING if it was paused
 		if e.StateCallback != nil {
 			e.StateCallback("RUNNING")
 		}
-
-		e.log("[Orchestrator] Fetching credential '%s' over reverse tunnel...\n", key)
-		val, err := t.GetSecret(ctx, key)
-		if err != nil {
-			e.log("[Orchestrator Warning] Tunnel request failed: %v. Retrying...\n", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		envs = append(envs, fmt.Sprintf("%s=%s", key, val))
 	}
 	return envs, nil
 }
