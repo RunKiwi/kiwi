@@ -101,13 +101,18 @@ kiwi/
     *   **Decoupled Frontend**: Moved the dashboard UI out of the Go daemon into a dedicated `/web/` directory containing static HTML, CSS, and JS.
     *   **CORS Preflight Middleware**: Added CORS handling to `kiwid` daemon task endpoints to permit cross-origin requests from the standalone browser page.
     *   **Token Authorization Settings Panel**: Added a configuration gear widget in the UI to save daemon URLs and Bearer Tokens inside browser `localStorage`.
+*   **Phase 7 (Completed)**: Live Anthropic LLM Actor–Critic:
+    *   **Live Claude Provider**: `pkg/provider/llm.go` adds `AnthropicProvider` (model `claude-opus-4-8`, adaptive thinking) implementing both the Actor (`GetCodeEdit`) and a new `Critic` (`ReviewEdit`) interface. Selected via `KIWI_LLM_PROVIDER=anthropic`; the rule-based mock remains the default for offline/test runs.
+    *   **Real Critic Gate**: The engine now runs Actor → Critic → (apply on approval) → tests. The Critic reviews each diff before it is applied and can reject it, feeding its reasons back to the Actor; tests remain the final gate. Actor↔Critic retries are bounded by the existing budget/step/duplicate-output limits.
+    *   **Tunnel-Resolved API Key**: `ANTHROPIC_API_KEY` is resolved through the reverse credential tunnel (in-memory cached), falling back to the daemon env var, and pauses statefully if neither is available. The key is never persisted or logged.
+    *   **Token-Based Cost & Config**: Cost is computed from real token usage (Opus 4.8 pricing) and drives the existing budget gate. Task timeout (`KIWI_TASK_TIMEOUT`, default 10m) and budget (`KIWI_MAX_BUDGET`, default $1.00) are configurable.
 
 ---
 
 ## 4. Current Limitations & TODOs
 
 ### Active Limitations
-1.  **Mock AI Provider**: The LLM interface (`pkg/provider/mock.go`) uses rule-based simulations. Real integrations with Anthropic/OpenAI APIs are not yet wired up.
+1.  **Single Live Provider**: The live LLM path (`pkg/provider/llm.go`) integrates Anthropic (Claude) only. OpenAI and dynamic per-role model swapping (different model for Actor vs Critic) are not yet wired up. The rule-based mock (`pkg/provider/mock.go`) remains the default (`KIWI_LLM_PROVIDER` unset).
 2.  **Local Secrets Store**: The CLI client reads local secrets from an unencrypted `secrets.json` file in the workspace or defaults to standard environment variables.
 3.  **Local Host Mounted Sandboxes**: The Docker sandbox mode mounts directories from the host server (`/var/folders/...`) directly into the container. In multi-tenant systems, this leaks file descriptors and permissions, requiring independent Virtual Machine sandboxing.
 4.  **In-Memory Tunnel Cache**: The credentials cache on the server is kept inside the local daemon's memory. If the daemon restarts, cached credentials for running tasks are lost, prompting a stateful pause until the developer reconnects.
@@ -115,9 +120,9 @@ kiwi/
 ### Remaining Work / TODOs
 
 #### 1. Integration of Live LLM Providers (`pkg/provider/llm.go`)
-*   `[ ]` Add OpenAI and Anthropic Go SDK clients.
-*   `[ ]` Create prompt templates for the **Actor** (focused on resolving compiler errors and writing functional code edits) and the **Critic** (reviews diffs for performance, safety, and correctness).
-*   `[ ]` Support dynamic model swapping (e.g., GPT-4o for Actor, Claude 3.5 Sonnet for Critic).
+*   `[x]` Add Anthropic Go SDK client (`claude-opus-4-8`, adaptive thinking). *(OpenAI still pending.)*
+*   `[x]` Create prompt templates for the **Actor** (resolves compiler/test failures with minimal edits) and the **Critic** (reviews diffs for correctness and safety before apply).
+*   `[ ]` Support dynamic model swapping (e.g., a cheaper model for Actor, a stronger one for Critic).
 
 #### 2. PKCE-based OAuth 2.0 Auth Flow
 *   `[ ]` Implement a `kiwi login` command in the CLI. Spawns a temporary local HTTP server, opens the browser to authenticate via Auth0/Okta, and obtains JWT tokens.
