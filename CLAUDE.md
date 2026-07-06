@@ -72,7 +72,14 @@ kiwi/
 │   │   ├── exec.go          # Sandbox executor (local execution or isolated Docker container execution)
 │   │   └── sync.go          # Workspace zip/unzip package with Zip Slip protection and database filtering
 │   ├── provider/
-│   │   └── mock.go          # Offline simulated LLM Actor-Critic rules
+│   │   ├── mock.go          # Offline simulated LLM Actor-Critic rules (default)
+│   │   ├── llm.go           # Live Anthropic provider (Actor + Critic, claude-opus-4-8)
+│   │   ├── critic.go        # Critic/Verdict/UsageReporter interfaces + MockCritic
+│   │   └── parse.go         # Fenced-code extraction, verdict JSON parsing, token pricing
+│   ├── client/
+│   │   ├── client.go        # HTTP client: SubmitTask / GetStatus / DownloadResult (Bearer auth)
+│   │   ├── secrets.go       # SecretLookup: secrets.json then env var, for the tunnel hook
+│   │   └── logs.go          # Incremental log-delta helper for live streaming
 │   ├── tunnel/
 │   │   └── tunnel.go        # Reverse credential tunnel multiplexer with memory caching
 │   └── dashboard/
@@ -106,6 +113,11 @@ kiwi/
     *   **Real Critic Gate**: The engine now runs Actor → Critic → (apply on approval) → tests. The Critic reviews each diff before it is applied and can reject it, feeding its reasons back to the Actor; tests remain the final gate. Actor↔Critic retries are bounded by the existing budget/step/duplicate-output limits.
     *   **Tunnel-Resolved API Key**: `ANTHROPIC_API_KEY` is resolved through the reverse credential tunnel (in-memory cached), falling back to the daemon env var, and pauses statefully if neither is available. The key is never persisted or logged.
     *   **Token-Based Cost & Config**: Cost is computed from real token usage (Opus 4.8 pricing) and drives the existing budget gate. Task timeout (`KIWI_TASK_TIMEOUT`, default 10m) and budget (`KIWI_MAX_BUDGET`, default $1.00) are configurable.
+*   **Phase 8 (Completed)**: `kiwi` CLI Client (`cmd/kiwi`, `pkg/client`):
+    *   **Task Submission**: Packages the working directory via `sandbox.ZipDir` (skips `.git`, binaries, `secrets.json`) and uploads it to `POST /tasks` with Bearer auth.
+    *   **Reverse Tunnel Serving**: Drives `tunnel.ConnectAndListen`, answering the daemon's on-demand secret requests via `SecretLookup` (`secrets.json` first, then environment). Secrets never leave the machine except transiently.
+    *   **Live Log Streaming**: Polls `GET /tasks/{id}` and prints incremental log deltas until a terminal state.
+    *   **Non-Destructive Result Download**: On success, downloads the fixed codebase to `kiwi-fix-<task-id>.zip` — local files are never overwritten. Supports `-resume -task-id` to reconnect to a paused task.
 
 ---
 

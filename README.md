@@ -88,12 +88,16 @@ sequenceDiagram
 3.  **Deploy a Task**:
     Set up a local `secrets.json` file in your workspace directory (or export env vars) and execute:
     ```bash
-    # Create secrets
+    # Create secrets (looked up secrets.json first, then environment variables)
     echo '{"GITHUB_TOKEN": "real-token-value-here"}' > secrets.json
 
     # Run loop
     ./kiwi -token "production-secure-token-9999" -task "Fix division by zero in Divide()" -file demo_project/math_utils.go -test-cmd "go test ./demo_project/..."
     ```
+
+    The client packages the working directory (skipping `.git`, binaries, and `secrets.json`), submits the task, serves the reverse tunnel so the daemon can pull secrets on demand, streams live logs, and — on success — downloads the fixed codebase to **`kiwi-fix-<task-id>.zip`** without ever overwriting your local files.
+
+    **Client flags:** `-server` (daemon URL, default `http://localhost:8080`), `-token`, `-task`, `-file` (relative to `-dir`), `-test-cmd`, `-dir` (dir to zip, default `.`), `-secrets` (default `secrets.json`), `-interval` (poll cadence, default `2s`), and `-resume -task-id <id>` to reconnect to a paused task.
 
 4.  **Access the Dashboard**:
     The dashboard frontend is fully decoupled into the `/web/` directory. You can serve it using a local static file server or open it directly in a browser:
