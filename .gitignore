@@ -1,6 +1,6 @@
-# Binaries
-kiwi
-kiwid
+# Binaries (repo-root only; do not match cmd/kiwi, cmd/kiwid source dirs)
+/kiwi
+/kiwid
 
 # Task state logs
 task_state.json

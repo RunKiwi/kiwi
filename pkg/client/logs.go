@@ -11,3 +11,6 @@ func logDelta(prev, curr string) string {
 	}
 	return curr
 }
+
+// LogDelta is the exported wrapper around logDelta for CLI use.
+func LogDelta(prev, curr string) string { return logDelta(prev, curr) }
