@@ -24,15 +24,16 @@ import (
 
 // TaskState represents the status and progress of a cloud task
 type TaskState struct {
-	ID          string    `json:"id" gorm:"primaryKey"`
-	Task        string    `json:"task"`
-	FilePath    string    `json:"file_path"`
-	TestCmd     string    `json:"test_cmd"`
-	Status      string    `json:"status"` // "RUNNING", "SUCCESS", "FAILED", "PAUSED"
-	Logs        string    `json:"logs"`
-	CreatedAt   time.Time `json:"created_at"`
-	SandboxPath string    `json:"-"`
-	Cost        float64   `json:"cost"`
+	ID             string    `json:"id" gorm:"primaryKey"`
+	Task           string    `json:"task"`
+	FilePath       string    `json:"file_path"`
+	TestCmd        string    `json:"test_cmd"`
+	Status         string    `json:"status"` // "RUNNING", "SUCCESS", "FAILED", "PAUSED"
+	Logs           string    `json:"logs"`
+	CreatedAt      time.Time `json:"created_at"`
+	SandboxPath    string    `json:"-"`
+	Cost           float64   `json:"cost"`
+	IdempotencyKey string    `json:"-" gorm:"index"`
 }
 
 type Server struct {
