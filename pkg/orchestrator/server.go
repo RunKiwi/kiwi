@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,27 @@ func NewServer(db *gorm.DB) *Server {
 }
 
 // GenerateTaskID generates a short unique hex ID
+// taskTimeout returns the per-task context timeout from KIWI_TASK_TIMEOUT
+// (Go duration string), defaulting to 10 minutes.
+func taskTimeout() time.Duration {
+	if v := os.Getenv("KIWI_TASK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 10 * time.Minute
+}
+
+// maxBudget returns the per-task USD budget from KIWI_MAX_BUDGET, defaulting to $1.00.
+func maxBudget() float64 {
+	if v := os.Getenv("KIWI_MAX_BUDGET"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return 1.00
+}
+
 func generateTaskID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
@@ -203,8 +225,16 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	// Launch loop orchestration in the background
 	go func() {
 		logBuf := new(bytes.Buffer)
-		p := provider.NewMockProvider()
-		engine := NewEngine(p, 5)
+		var engine *Engine
+		if os.Getenv("KIWI_LLM_PROVIDER") == "anthropic" {
+			engine = NewEngine(nil, 5) // provider built lazily after key resolution
+			engine.LLMMode = "anthropic"
+		} else {
+			engine = NewEngine(provider.NewMockProvider(), 5)
+			engine.Critic = provider.NewMockCritic()
+			engine.LLMMode = "mock"
+		}
+		engine.MaxBudget = maxBudget()
 		engine.LogOut = logBuf // Capture logs to task buffer
 		engine.StateCallback = func(newStatus string) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("status", newStatus)
@@ -213,7 +243,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("cost", gorm.Expr("cost + ?", amount))
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), taskTimeout())
 		defer cancel()
 
 		// Periodic background log synchronizer to SQLite row (every 500ms)
