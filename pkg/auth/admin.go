@@ -55,11 +55,14 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "provider":
 			orgID := parts[0]
-			if r.Method != http.MethodPut {
+			switch r.Method {
+			case http.MethodPut:
+				handleSaveProviderConfig(db, w, r, orgID)
+			case http.MethodGet:
+				handleGetProviderConfig(db, w, r, orgID)
+			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-				return
 			}
-			handleSaveProviderConfig(db, w, r, orgID)
 
 		case len(parts) == 2 && parts[1] == "users":
 			orgID := parts[0]
@@ -404,6 +407,30 @@ func handleSaveProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Reques
 		if err := db.Create(&config).Error; err != nil {
 			http.Error(w, "Failed to create provider config", http.StatusInternalServerError)
 			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+func handleGetProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	// Verify org exists
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	config, err := GetProviderConfig(db, orgID)
+	if err != nil {
+		http.Error(w, "Failed to load provider config", http.StatusInternalServerError)
+		return
+	}
+	if config == nil {
+		config = &OrgProviderConfig{
+			OrgID:        orgID,
+			ProviderName: "anthropic",
 		}
 	}
 

@@ -32,10 +32,29 @@
                     <input type="text" id="search-input" placeholder="Filter by ID or path..." oninput="applyFilter()">
                 </div>
 
+                <!-- Admin Button -->
+                <button class="settings-toggle-btn" id="admin-toggle-btn" style="display:none" onclick="toggleAdminPanel(true)" title="Admin Console">
+                    <svg style="width:20px;height:20px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                </button>
+
                 <!-- Settings Gear Icon -->
-                <button class="settings-toggle-btn" id="settings-toggle" onclick="toggleSettingsPanel()">
+                <button class="settings-toggle-btn" id="settings-toggle" onclick="toggleSettingsPanel()" title="Settings">
                     <svg style="width:20px;height:20px;fill:currentColor" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
                 </button>
+
+                <!-- User Badge / Logout -->
+                <div class="user-badge-container" id="user-badge-container" style="display:none">
+                    <div class="user-avatar" id="user-avatar-initials" onclick="toggleUserDropdown()">U</div>
+                    <div class="user-dropdown" id="user-dropdown">
+                        <div class="user-dropdown-info">
+                            <div style="font-weight:600" id="user-display-name">User Name</div>
+                            <div style="font-size:0.75rem;color:var(--text-secondary)" id="user-display-email">user@email.com</div>
+                            <div style="font-size:0.7rem;color:var(--accent-teal);margin-top:0.25rem" id="user-display-org">Org: N/A</div>
+                        </div>
+                        <div class="user-dropdown-divider"></div>
+                        <button class="user-dropdown-item" onclick="logout()">Logout</button>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
@@ -57,6 +76,34 @@
     </div>
 
     <main>
+        <!-- Tenant Usage and Costs Statistics Bar -->
+        <div class="usage-bar" id="tenant-usage-bar" style="display:none">
+            <div class="usage-bar-section">
+                <span class="usage-bar-label">Org ID:</span>
+                <span class="usage-bar-val" id="usage-org-name" style="font-weight:600">Loading...</span>
+            </div>
+            <div class="usage-bar-section">
+                <span class="usage-bar-label">Tasks:</span>
+                <span class="usage-bar-val" id="usage-task-stats">0 total</span>
+            </div>
+            <div class="usage-bar-section">
+                <span class="usage-bar-label">Success Rate:</span>
+                <span class="usage-bar-val" id="usage-success-rate">0%</span>
+            </div>
+            <div class="usage-bar-section">
+                <span class="usage-bar-label">This Month:</span>
+                <span class="usage-bar-val" id="usage-month-spent" style="color:var(--accent-teal)">$0.00</span>
+            </div>
+            <div class="usage-bar-section" style="flex-grow: 1; min-width: 150px;">
+                <div class="usage-progress-container">
+                    <div class="usage-progress-bar" id="usage-progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+            <div class="usage-bar-section">
+                <span class="usage-bar-label" id="usage-budget-limits" style="font-weight:600">Limit: $0.00</span>
+            </div>
+        </div>
+
         <div class="kanban-grid">
             <!-- Backlog -->
             <div class="kanban-column" id="col-backlog">
@@ -123,6 +170,155 @@
                     <span id="terminal-status">STATUS: IDLE</span>
                 </div>
                 <div id="terminal-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal Overlay (blocks app if unauthenticated) -->
+    <div class="login-overlay active" id="login-overlay">
+        <div class="login-container">
+            <div class="login-header">
+                <h2>Welcome to Kiwi</h2>
+                <p>Secure Agentic Control Plane Dashboard</p>
+            </div>
+            <div class="login-form">
+                <div class="settings-group">
+                    <label for="login-server-url">Kiwi Daemon API Server URL</label>
+                    <input type="text" id="login-server-url" value="http://localhost:8080" placeholder="http://localhost:8080">
+                </div>
+                <div class="settings-group">
+                    <label for="login-api-key">API Access Key</label>
+                    <input type="password" id="login-api-key" placeholder="Enter your Kiwi API Key...">
+                </div>
+                <div id="login-error-msg" class="login-error" style="display:none"></div>
+                <button class="settings-save-btn" style="width:100%" onclick="login()">Authenticate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel Overlay -->
+    <div class="modal-overlay" id="admin-modal" onclick="toggleAdminPanel(false)">
+        <div class="admin-container" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title-area">
+                    <h3>Kiwi Administration Console</h3>
+                    <p>Manage Organizations, Users, API Keys, and Custom LLM Configurations</p>
+                </div>
+                <button class="modal-close-btn" onclick="toggleAdminPanel(false)">
+                    <svg style="width:20px;height:20px" viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+
+            <div class="admin-body">
+                <!-- Admin Tabs -->
+                <div class="admin-tabs">
+                    <button class="admin-tab active" id="tab-orgs" onclick="switchAdminTab('orgs')">Organizations</button>
+                    <button class="admin-tab" id="tab-users" onclick="switchAdminTab('users')">Users</button>
+                    <button class="admin-tab" id="tab-providers" onclick="switchAdminTab('providers')">LLM Settings</button>
+                </div>
+
+                <!-- Admin Tab Content -->
+                <div class="admin-tab-content active" id="content-orgs">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                        <h4>Registered Organizations</h4>
+                        <div class="admin-action-row">
+                            <input type="text" id="new-org-name" placeholder="Org Name...">
+                            <button class="admin-action-btn" onclick="adminCreateOrg()">Create Organization</button>
+                        </div>
+                    </div>
+                    <div class="admin-table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Created At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-orgs-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="admin-tab-content" id="content-users">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:1rem">
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <span>Select Org:</span>
+                            <select id="admin-users-org-select" onchange="adminLoadUsers()"></select>
+                        </div>
+                        <div class="admin-action-row">
+                            <input type="text" id="new-user-name" placeholder="User Name...">
+                            <input type="email" id="new-user-email" placeholder="User Email...">
+                            <select id="new-user-role">
+                                <option value="member">Member</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                            <button class="admin-action-btn" onclick="adminCreateUser()">Create User</button>
+                        </div>
+                    </div>
+                    <div class="admin-table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>API Keys</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-list"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Nested Key Management modal section -->
+                    <div id="admin-keys-section" style="display:none;margin-top:2rem;border-top:1px solid var(--border-color);padding-top:1.5rem">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                            <h4 id="admin-keys-title">API Keys for User</h4>
+                            <button class="admin-action-btn" onclick="adminCreateKey()">Generate New API Key</button>
+                        </div>
+                        <div class="admin-table-container">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Key Preview (Plaintext shown only once on creation)</th>
+                                        <th>Created At</th>
+                                        <th>Expires At</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-keys-list"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="admin-tab-content" id="content-providers">
+                    <div style="margin-bottom:1.5rem;display:flex;align-items:center;gap:0.5rem">
+                        <span>Organization:</span>
+                        <select id="admin-providers-org-select" onchange="adminLoadProviderConfig()"></select>
+                    </div>
+                    <div class="admin-form-container">
+                        <div class="settings-group">
+                            <label for="provider-api-key">Anthropic API Key</label>
+                            <input type="password" id="provider-api-key" placeholder="Enter custom Anthropic API key to encrypt...">
+                        </div>
+                        <div style="display:flex;gap:1rem;margin-bottom:1.5rem">
+                            <div class="settings-group" style="flex:1">
+                                <label for="provider-actor-model">Actor Model Override</label>
+                                <input type="text" id="provider-actor-model" placeholder="e.g. claude-3-5-sonnet">
+                            </div>
+                            <div class="settings-group" style="flex:1">
+                                <label for="provider-critic-model">Critic Model Override</label>
+                                <input type="text" id="provider-critic-model" placeholder="e.g. claude-opus-4-8">
+                            </div>
+                        </div>
+                        <button class="settings-save-btn" onclick="adminSaveProviderConfig()">Encrypt and Save Provider Config</button>
+                        <div id="provider-success-msg" style="display:none;color:var(--accent-green);font-size:0.875rem;margin-top:1rem"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
