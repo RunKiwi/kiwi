@@ -127,6 +127,16 @@ kiwi/
     *   **Injectable `launchTask`**: The task-run goroutine was extracted from `handleTasks` into `Server.launchTask` (behind an injectable `launchFn` for testing), so both submission and recovery share one code path. It seeds its log buffer from the existing row so recovered tasks keep prior logs.
     *   **Boot Recovery (`RecoverTasks`)**: On startup (called from `cmd/kiwid` before `Start`), the daemon scans `RUNNING`/`PAUSED` rows. If the task's sandbox still exists on disk it re-registers the tunnel and re-launches the loop; otherwise it marks the task `FAILED` with an "interrupted by restart" note. Eliminates zombie tasks.
     *   **Idempotent Submission**: `POST /tasks` reads an optional `Idempotency-Key` header; if a task with that key exists it returns the original `{task_id,status}` with no new sandbox/run. Client exposes `-idempotency-key`. (Single-daemon: dedupe is SELECT-then-create; the rare concurrent double-submit race is accepted.)
+*   **Phase 11 (Completed)**: Identity, Access Control, and Multi-Tenancy (`pkg/auth/`, `server.go`, `idempotency.go`, `db.go`):
+    *   **Organization, User, & API Key Models**: Introduced multi-tenant database schemas with SHA-256 hashed API keys.
+    *   **Auth Middleware**: Added `AuthMiddleware` and context claims injection, replacing static server tokens with tenant-scoped API keys (with a bootstrap env fallback).
+    *   **Owner Scoping & Filtering**: Scoped all task REST endpoints by tenant. Non-admins only see tasks created in their organization. Idempotency checks are partitioned per org.
+*   **Phase 12 (Completed)**: Reverse Tunnel & Secrets Isolation (`pkg/tunnel/`, `server.go`, `recovery.go`):
+    *   **Task/Tunnel Org Ownership**: Embedded tenant metadata in reverse tunnels. Connect/response endpoints verify caller identity against task ownership. Tunnels are automatically deregistered on task completion.
+*   **Phase 13 (Completed)**: Per-Tenant Resource Limits & Sandbox Isolation (`pkg/auth/limits.go`, `server.go`, `engine.go`, `exec.go`):
+    *   **OrgLimits Model & Checks**: Introduced `OrgLimits` database table for tracking max concurrent tasks, budget caps, timeout constraints, sandbox disk size, and tenant-specific Docker images. Enforced concurrency checks and monthly budget aggregates during task submission.
+    *   **Configurable Sandbox Constraints**: Refactored the command execution sandbox to support context-based configuration retrieval. Tasks now run with custom CPU, memory limits, and complete network isolation (`--network=none`), preventing malicious external connectivity.
+    *   **Disk Quotas & Sandbox Partitioning**: Implemented unzipped directory size validation, rejecting submissions exceeding the configured size limit with 413. Prefixed sandbox paths with tenant IDs to ensure filesystem segregation.
 
 ---
 

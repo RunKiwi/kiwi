@@ -7,23 +7,43 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
 
 func TestTunnelRoundtrip(t *testing.T) {
 	taskID := "test-task-123"
 
+	// Mock claims injection middleware
+	mockAuth := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			claims := &auth.UserClaims{
+				UserID: "test-user",
+				Email:  "test@example.com",
+				Name:   "Test User",
+				OrgID:  "test-org",
+				Role:   "member",
+			}
+			r = r.WithContext(auth.ContextWithClaims(r.Context(), claims))
+			next(w, r)
+		}
+	}
+
 	// Create a multiplexer to route requests to handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tunnel/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/response") {
-			HandleTunnelResponse(w, r)
+			mockAuth(HandleTunnelResponse)(w, r)
 		} else {
-			HandleTunnelConn(w, r)
+			mockAuth(HandleTunnelConn)(w, r)
 		}
 	})
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
+
+	// Pre-register tunnel in global registry with correct tenant ID matching mock claims
+	GlobalRegistry.Register(taskID, "test-user", "test-org")
 
 	// Define our mock getSecret hook
 	secrets := map[string]string{
@@ -41,7 +61,7 @@ func TestTunnelRoundtrip(t *testing.T) {
 
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- ConnectAndListen(ctx, server.URL, taskID, "", getSecretHook)
+		errChan <- ConnectAndListen(ctx, server.URL, taskID, "dummy-token", getSecretHook)
 	}()
 
 	// Wait for the client to connect and mark tunnel as Connected
@@ -127,7 +147,7 @@ func TestTunnelRoundtrip(t *testing.T) {
 
 func TestTunnelNotConnectedError(t *testing.T) {
 	taskID := "disconnected-task"
-	tunnel := GlobalRegistry.Register(taskID)
+	tunnel := GlobalRegistry.Register(taskID, "user1", "org1")
 
 	// Tunnel is not connected initially
 	_, err := tunnel.GetSecret(context.Background(), "SOME_KEY")

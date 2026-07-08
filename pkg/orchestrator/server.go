@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
@@ -34,6 +35,9 @@ type TaskState struct {
 	SandboxPath    string    `json:"-"`
 	Cost           float64   `json:"cost"`
 	IdempotencyKey string    `json:"-" gorm:"index"`
+	UserID         string    `json:"user_id" gorm:"index"`
+	OrgID          string    `json:"org_id" gorm:"index"`
+	UserEmail      string    `json:"user_email"`
 }
 
 type Server struct {
@@ -59,6 +63,12 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			logBuf.WriteString(existing.Logs)
 		}
 
+		limits, err := auth.GetOrgLimits(s.db, existing.OrgID)
+		if err != nil {
+			fmt.Fprintf(logBuf, "[Orchestrator] Error resolving organization limits: %v. Using default limit configurations.\n", err)
+			limits = auth.DefaultLimits(existing.OrgID)
+		}
+
 		var engine *Engine
 		if os.Getenv("KIWI_LLM_PROVIDER") == "anthropic" {
 			engine = NewEngine(nil, 5) // provider built lazily after key resolution
@@ -68,7 +78,7 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			engine.Critic = provider.NewMockCritic()
 			engine.LLMMode = "mock"
 		}
-		engine.MaxBudget = maxBudget()
+		engine.MaxBudget = limits.MaxBudgetPerTask
 		engine.LogOut = logBuf
 		engine.StateCallback = func(newStatus string) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("status", newStatus)
@@ -77,7 +87,17 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("cost", gorm.Expr("cost + ?", amount))
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), taskTimeout())
+		// Setup sandbox parameters for execution isolation and constraints
+		engine.SandboxConfig = &sandbox.SandboxConfig{
+			UseDocker:   os.Getenv("USE_DOCKER") == "true",
+			DockerImage: limits.DockerImage,
+			MemoryLimit: "512m", // default resource limits
+			CPULimit:    "1.0",
+			NetworkNone: true, // default network isolation
+		}
+
+		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
+		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
 		defer cancel()
 
 		// Periodic background log synchronizer to SQLite row (every 500ms)
@@ -98,7 +118,7 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		absFilePath := filepath.Join(sandboxPath, file)
 		fmt.Fprintf(logBuf, "[Orchestrator] Running task in sandbox: %s\n", sandboxPath)
 
-		err := engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
+		err = engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
 
 		finalStatus := "SUCCESS"
 		if err != nil {
@@ -116,6 +136,7 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			"status": finalStatus,
 			"logs":   logBuf.String(),
 		})
+		tunnel.GlobalRegistry.Deregister(taskID)
 	}()
 }
 
@@ -147,27 +168,23 @@ func generateTaskID() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *Server) validateAuth(w http.ResponseWriter, r *http.Request) bool {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "Unauthorized: missing Authorization header", http.StatusUnauthorized)
-		return false
+// authenticate extracts and validates user identity from the request,
+// returning claims on success or writing an HTTP error on failure.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) *auth.UserClaims {
+	claims, err := auth.AuthFunc(s.db, r)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return nil
 	}
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		http.Error(w, "Unauthorized: invalid Authorization header format", http.StatusUnauthorized)
-		return false
+	return claims
+}
+
+// authorizeTask verifies the caller owns the task (same org) or is a system admin.
+func (s *Server) authorizeTask(claims *auth.UserClaims, task *TaskState) bool {
+	if claims.IsAdmin() {
+		return true
 	}
-	token := parts[1]
-	expectedToken := os.Getenv("KIWI_SERVER_TOKEN")
-	if expectedToken == "" {
-		expectedToken = "kiwi-auth-token-1234" // Default developer fallback token
-	}
-	if token != expectedToken {
-		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
-		return false
-	}
-	return true
+	return claims.OrgID == task.OrgID
 }
 
 func (s *Server) handleCORSAndPreflight(w http.ResponseWriter, r *http.Request) bool {
@@ -184,10 +201,16 @@ func (s *Server) handleCORSAndPreflight(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) Start(addr string) error {
 	mux := http.NewServeMux()
+
+	// Register admin endpoints (auth middleware applied at the mux level below).
+	auth.AdminRouter(s.db, mux)
+
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/tunnel/", func(w http.ResponseWriter, r *http.Request) {
-		if !s.validateAuth(w, r) {
+		claims := auth.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/response") {
@@ -204,20 +227,43 @@ func (s *Server) Start(addr string) error {
 		}
 	})
 
+	// Wrap the entire mux with the auth middleware so all routes get user claims
+	// injected into the request context.
+	handler := corsMiddleware(auth.AuthMiddleware(s.db, mux))
+
 	fmt.Printf("[Server] Kiwi daemon listening on %s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, handler)
+}
+
+// corsMiddleware applies CORS headers to all responses and handles OPTIONS preflight.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	if s.handleCORSAndPreflight(w, r) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if !s.validateAuth(w, r) {
-		return
-	}
+
 	if r.Method == http.MethodGet {
 		var taskList []*TaskState
-		if err := s.db.Order("created_at desc").Find(&taskList).Error; err != nil {
+		query := s.db.Order("created_at desc")
+		// Admins see all tasks; members see only their org's tasks.
+		if !claims.IsAdmin() {
+			query = query.Where("org_id = ?", claims.OrgID)
+		}
+		if err := query.Find(&taskList).Error; err != nil {
 			http.Error(w, "Failed to load tasks from database", http.StatusInternalServerError)
 			return
 		}
@@ -248,9 +294,38 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Idempotent submission: if a task already exists for this key, return it.
+	// Look up organization limits
+	limits, err := auth.GetOrgLimits(s.db, claims.OrgID)
+	if err != nil {
+		http.Error(w, "Failed to resolve organization resource limits", http.StatusInternalServerError)
+		return
+	}
+
+	// 1. Check concurrent tasks limit
+	ok, err := limits.CheckConcurrentLimit(s.db)
+	if err != nil {
+		http.Error(w, "Failed to verify concurrent task limit", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, fmt.Sprintf("Too Many Requests: Organization concurrent task limit (%d) reached", limits.MaxConcurrentTasks), http.StatusTooManyRequests)
+		return
+	}
+
+	// 2. Check monthly budget limit
+	ok, err = limits.CheckMonthlyBudget(s.db)
+	if err != nil {
+		http.Error(w, "Failed to verify monthly budget limit", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, fmt.Sprintf("Forbidden: Organization monthly budget limit ($%.2f) exceeded", limits.MaxBudgetPerMonth), http.StatusForbidden)
+		return
+	}
+
+	// Idempotent submission: scoped by org to prevent cross-tenant collisions.
 	idempotencyKey := r.Header.Get("Idempotency-Key")
-	if existing, ok := findByIdempotencyKey(s.db, idempotencyKey); ok {
+	if existing, ok := findByIdempotencyKey(s.db, idempotencyKey, claims.OrgID); ok {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"task_id": existing.ID,
@@ -273,8 +348,8 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create temporary sandbox directory
-	tempSandbox, err := os.MkdirTemp("", "kiwi-server-sandbox-*")
+	// Create temporary sandbox directory prefixed with organization ID
+	tempSandbox, err := os.MkdirTemp("", fmt.Sprintf("kiwi-server-sandbox-%s-*", claims.OrgID))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to create temporary sandbox: %v", err), http.StatusInternalServerError)
 		return
@@ -287,9 +362,22 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Enforce sandbox disk quota limit
+	diskSize, err := dirSizeMB(tempSandbox)
+	if err != nil {
+		http.Error(w, "Failed to verify sandbox disk usage", http.StatusInternalServerError)
+		os.RemoveAll(tempSandbox)
+		return
+	}
+	if diskSize > float64(limits.MaxSandboxDiskMB) {
+		http.Error(w, fmt.Sprintf("Payload Too Large: Sandbox workspace size (%.2f MB) exceeds limit (%d MB)", diskSize, limits.MaxSandboxDiskMB), http.StatusRequestEntityTooLarge)
+		os.RemoveAll(tempSandbox)
+		return
+	}
+
 	taskID := generateTaskID()
 	// Pre-register tunnel in registry so it exists before background run starts
-	tunnel.GlobalRegistry.Register(taskID)
+	tunnel.GlobalRegistry.Register(taskID, claims.UserID, claims.OrgID)
 
 	state := &TaskState{
 		ID:             taskID,
@@ -301,6 +389,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		SandboxPath:    tempSandbox,
 		Cost:           0.05,
 		IdempotencyKey: idempotencyKey,
+		UserID:         claims.UserID,
+		OrgID:          claims.OrgID,
+		UserEmail:      claims.Email,
 	}
 
 	if err := s.db.Create(state).Error; err != nil {
@@ -319,10 +410,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
-	if s.handleCORSAndPreflight(w, r) {
-		return
-	}
-	if !s.validateAuth(w, r) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -335,6 +425,12 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 	var state TaskState
 	if err := s.db.First(&state, "id = ?", taskID).Error; err != nil {
 		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify the caller owns this task (same org) or is admin.
+	if !s.authorizeTask(claims, &state) {
+		http.Error(w, "Forbidden: you do not have access to this task", http.StatusForbidden)
 		return
 	}
 
@@ -358,4 +454,22 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(state)
+}
+
+// dirSizeMB calculates the total size of all files in a directory in MB.
+func dirSizeMB(dir string) (float64, error) {
+	var size int64
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return float64(size) / (1024 * 1024), nil
 }

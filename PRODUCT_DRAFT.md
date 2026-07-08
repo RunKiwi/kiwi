@@ -69,4 +69,9 @@ These are the critical design issues we must resolve to establish Product-Market
 *   *Problem:* Will enterprise network security teams block local reverse tunnels, and how do we provide a clean, non-intrusive alternative for sharing local credentials?
 *   *Resolved:* We implemented memory-based credential caching inside `pkg/tunnel/tunnel.go`. The reverse tunnel is only accessed briefly during startup to resolve and cache environment keys. Once cached, the tunnel connection is dropped and the local dependency ends, permitting the laptop to close without stopping loop execution.
 
+### Q4: Multi-Tenant Isolation
+*   *Problem:* How do we securely isolate multiple users and organizations sharing a single Kiwi deployment?
+*   *Resolved:* We implemented an organization-scoped multi-tenant architecture. User API keys are validated using SHA-256 hashes via the GORM DB backend. Database tasks are partitioned by `OrgID`, restricting non-admins to their respective workspaces. Reverse credential tunnels inherit task ownership and verify client credentials before multiplexing secret resolution.
+
+
 

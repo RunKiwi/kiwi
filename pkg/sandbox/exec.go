@@ -15,22 +15,66 @@ type Result struct {
 	GitDiff string
 }
 
+type contextKey int
+
+const SandboxConfigKey contextKey = 0
+
+// SandboxConfig holds tenant-specific container sandbox limits.
+type SandboxConfig struct {
+	UseDocker   bool
+	DockerImage string
+	MemoryLimit string // e.g. "512m"
+	CPULimit    string // e.g. "1.0"
+	NetworkNone bool   // e.g. --network=none
+}
+
 // RunCommand runs a test or compiler command in a shell inside the target directory.
 // If the environment variable USE_DOCKER=true is set, it isolates execution inside a Docker container.
+// It retrieves tenant-specific resource constraints from the context if present.
 func RunCommand(ctx context.Context, dir string, cmdStr string, env []string) (*Result, error) {
 	var cmd *exec.Cmd
 
-	if os.Getenv("USE_DOCKER") == "true" {
+	var useDocker bool
+	var dockerImage = "golang:1.21-alpine"
+	var memoryLimit string
+	var cpuLimit string
+	var networkNone bool
+
+	if cfg, ok := ctx.Value(SandboxConfigKey).(*SandboxConfig); ok && cfg != nil {
+		useDocker = cfg.UseDocker
+		if cfg.DockerImage != "" {
+			dockerImage = cfg.DockerImage
+		}
+		memoryLimit = cfg.MemoryLimit
+		cpuLimit = cfg.CPULimit
+		networkNone = cfg.NetworkNone
+	} else {
+		useDocker = os.Getenv("USE_DOCKER") == "true"
+	}
+
+	if useDocker {
 		// Run isolated command inside Docker container
 		args := []string{"run", "--rm", "-i"}
 		// Mount target directory to container workspace
 		args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
+
+		// Apply resource limits
+		if memoryLimit != "" {
+			args = append(args, "--memory", memoryLimit)
+		}
+		if cpuLimit != "" {
+			args = append(args, "--cpus", cpuLimit)
+		}
+		if networkNone {
+			args = append(args, "--network", "none")
+		}
+
 		// Inject environment variables (resolved secrets)
 		for _, eVal := range env {
 			args = append(args, "-e", eVal)
 		}
-		// Use official Golang alpine image and execute command
-		args = append(args, "golang:1.21-alpine", "sh", "-c", cmdStr)
+		// Use configurable Docker image and execute command
+		args = append(args, dockerImage, "sh", "-c", cmdStr)
 
 		cmd = exec.CommandContext(ctx, "docker", args...)
 	} else {
