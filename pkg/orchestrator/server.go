@@ -118,7 +118,7 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		absFilePath := filepath.Join(sandboxPath, file)
 		fmt.Fprintf(logBuf, "[Orchestrator] Running task in sandbox: %s\n", sandboxPath)
 
-		err := engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
+		err = engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
 
 		finalStatus := "SUCCESS"
 		if err != nil {
