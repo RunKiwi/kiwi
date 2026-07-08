@@ -137,6 +137,10 @@ kiwi/
     *   **OrgLimits Model & Checks**: Introduced `OrgLimits` database table for tracking max concurrent tasks, budget caps, timeout constraints, sandbox disk size, and tenant-specific Docker images. Enforced concurrency checks and monthly budget aggregates during task submission.
     *   **Configurable Sandbox Constraints**: Refactored the command execution sandbox to support context-based configuration retrieval. Tasks now run with custom CPU, memory limits, and complete network isolation (`--network=none`), preventing malicious external connectivity.
     *   **Disk Quotas & Sandbox Partitioning**: Implemented unzipped directory size validation, rejecting submissions exceeding the configured size limit with 413. Prefixed sandbox paths with tenant IDs to ensure filesystem segregation.
+*   **Phase 14 (Completed)**: Per-Tenant Cost Tracking & Billing (`pkg/billing/billing.go`, `server.go`, `admin.go`, `parse.go`):
+    *   **Usage Aggregation Service**: Created `pkg/billing/` package to aggregate metrics (total cost, task counts, success/failure ratios, and top spenders list) dynamically over Unix timestamps or RFC3339 date ranges.
+    *   **Org & Admin Billing Endpoints**: Added a tenant-scoped `/usage` API and an admin-only `/admin/orgs/{orgID}/usage` API endpoint.
+    *   **Model-Based Pricing**: Refactored cost calculation to look up rates from a model pricing map (supporting custom token prices for Claude Opus, Sonnet, and Haiku).
 
 ---
 

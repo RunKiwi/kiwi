@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
@@ -207,6 +208,7 @@ func (s *Server) Start(addr string) error {
 
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
+	mux.HandleFunc("/usage", s.handleUsage)
 	mux.HandleFunc("/tunnel/", func(w http.ResponseWriter, r *http.Request) {
 		claims := auth.ClaimsFromContext(r.Context())
 		if claims == nil {
@@ -472,4 +474,32 @@ func dirSizeMB(dir string) (float64, error) {
 		return 0, err
 	}
 	return float64(size) / (1024 * 1024), nil
+}
+
+// handleUsage returns the organization-scoped task execution costs and metrics.
+func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	from, to, err := billing.ParseDateParams(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	usage, err := billing.GetOrgUsage(s.db, claims.OrgID, from, to)
+	if err != nil {
+		http.Error(w, "Failed to aggregate usage statistics: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(usage)
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +45,14 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		parts := strings.Split(path, "/")
 
 		switch {
+		case len(parts) == 2 && parts[1] == "usage":
+			orgID := parts[0]
+			if r.Method != http.MethodGet {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleOrgUsageAdmin(db, w, r, orgID)
+
 		case len(parts) == 2 && parts[1] == "users":
 			orgID := parts[0]
 			switch r.Method {
@@ -302,4 +311,28 @@ func generateHexID(byteLen int) (string, error) {
 		return "", fmt.Errorf("failed to generate ID: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func handleOrgUsageAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	// Verify org exists
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	from, to, err := billing.ParseDateParams(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	usage, err := billing.GetOrgUsage(db, orgID, from, to)
+	if err != nil {
+		http.Error(w, "Failed to aggregate usage statistics: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(usage)
 }
