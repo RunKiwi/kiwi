@@ -53,6 +53,14 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 			handleOrgUsageAdmin(db, w, r, orgID)
 
+		case len(parts) == 2 && parts[1] == "provider":
+			orgID := parts[0]
+			if r.Method != http.MethodPut {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleSaveProviderConfig(db, w, r, orgID)
+
 		case len(parts) == 2 && parts[1] == "users":
 			orgID := parts[0]
 			switch r.Method {
@@ -335,4 +343,70 @@ func handleOrgUsageAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request, or
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(usage)
+}
+
+func handleSaveProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	// Verify org exists
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		ProviderName string `json:"provider_name"`
+		APIKey       string `json:"api_key"`
+		ActorModel   string `json:"actor_model"`
+		CriticModel  string `json:"critic_model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if body.ProviderName == "" {
+		body.ProviderName = "anthropic"
+	}
+
+	// Encrypt the API key if provided
+	var encryptedKey string
+	if body.APIKey != "" {
+		enc, err := EncryptKey(body.APIKey)
+		if err != nil {
+			http.Error(w, "Failed to encrypt API key", http.StatusInternalServerError)
+			return
+		}
+		encryptedKey = enc
+	}
+
+	// Create or update OrgProviderConfig
+	config := OrgProviderConfig{
+		OrgID:        orgID,
+		ProviderName: body.ProviderName,
+		ActorModel:   body.ActorModel,
+		CriticModel:  body.CriticModel,
+	}
+
+	// Fetch existing config to preserve encrypted key if no new key is sent
+	var existing OrgProviderConfig
+	if err := db.First(&existing, "org_id = ?", orgID).Error; err == nil {
+		if encryptedKey != "" {
+			config.EncryptedAPIKey = encryptedKey
+		} else {
+			config.EncryptedAPIKey = existing.EncryptedAPIKey
+		}
+		if err := db.Model(&existing).Updates(&config).Error; err != nil {
+			http.Error(w, "Failed to update provider config", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		config.EncryptedAPIKey = encryptedKey
+		if err := db.Create(&config).Error; err != nil {
+			http.Error(w, "Failed to create provider config", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
 }
