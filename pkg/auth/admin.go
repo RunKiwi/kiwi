@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"gorm.io/gorm"
 )
@@ -52,6 +53,14 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 				return
 			}
 			handleOrgUsageAdmin(db, w, r, orgID)
+
+		case len(parts) == 2 && parts[1] == "audit":
+			orgID := parts[0]
+			if r.Method != http.MethodGet {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleOrgAuditLogsAdmin(db, w, r, orgID)
 
 		case len(parts) == 2 && parts[1] == "provider":
 			orgID := parts[0]
@@ -159,6 +168,8 @@ func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_ = audit.LogEvent(db, r, "CREATE", "ORG", org.ID, fmt.Sprintf("Created organization %q", org.Name))
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(org)
@@ -222,6 +233,8 @@ func handleCreateUser(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID
 		return
 	}
 
+	_ = audit.LogEvent(db, r, "CREATE", "USER", user.ID, fmt.Sprintf("Registered user %q (%s) with role %q", user.Name, user.Email, user.Role))
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(user)
@@ -279,6 +292,8 @@ func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
+	_ = audit.LogEvent(db, r, "CREATE", "API_KEY", apiKey.ID, fmt.Sprintf("Generated API Key %q for user ID %s", apiKey.Label, apiKey.UserID))
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -312,6 +327,9 @@ func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, key
 		http.Error(w, "Key not found or already revoked", http.StatusNotFound)
 		return
 	}
+
+	_ = audit.LogEvent(db, r, "REVOKE", "API_KEY", keyID, "Revoked API Key")
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -410,6 +428,8 @@ func handleSaveProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	_ = audit.LogEvent(db, r, "UPDATE", "PROVIDER", config.OrgID, fmt.Sprintf("Updated LLM provider configuration (actor: %s, critic: %s)", config.ActorModel, config.CriticModel))
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)
 }
@@ -436,4 +456,22 @@ func handleGetProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)
+}
+
+func handleOrgAuditLogsAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	// Verify org exists
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	logs, err := audit.GetOrgAuditLogs(db, orgID)
+	if err != nil {
+		http.Error(w, "Failed to load audit logs", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
 }

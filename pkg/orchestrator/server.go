@@ -13,8 +13,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
@@ -63,6 +65,8 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		if err := s.db.First(&existing, "id = ?", taskID).Error; err == nil {
 			logBuf.WriteString(existing.Logs)
 		}
+
+		_ = audit.LogEventDirect(s.db, existing.OrgID, existing.UserID, existing.UserEmail, "EXECUTE", "TASK", taskID, fmt.Sprintf("Started background loop execution in %s", sandboxPath), "")
 
 		limits, err := auth.GetOrgLimits(s.db, existing.OrgID)
 		if err != nil {
@@ -163,6 +167,9 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			"status": finalStatus,
 			"logs":   logBuf.String(),
 		})
+
+		_ = audit.LogEventDirect(s.db, existing.OrgID, existing.UserID, existing.UserEmail, "EXECUTE", "TASK", taskID, fmt.Sprintf("Finished execution with status: %s", finalStatus), "")
+
 		tunnel.GlobalRegistry.Deregister(taskID)
 	}()
 }
@@ -215,9 +222,27 @@ func (s *Server) authorizeTask(claims *auth.UserClaims, task *TaskState) bool {
 }
 
 func (s *Server) handleCORSAndPreflight(w http.ResponseWriter, r *http.Request) bool {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	allowed := os.Getenv("KIWI_CORS_ALLOWED_ORIGINS")
+	origin := r.Header.Get("Origin")
+
+	if allowed == "" || allowed == "*" {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	} else {
+		origins := strings.Split(allowed, ",")
+		matched := false
+		for _, o := range origins {
+			if strings.TrimSpace(o) == origin {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+	}
+
 	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -256,8 +281,8 @@ func (s *Server) Start(addr string) error {
 	})
 
 	// Wrap the entire mux with the auth middleware so all routes get user claims
-	// injected into the request context.
-	handler := corsMiddleware(auth.AuthMiddleware(s.db, mux))
+	// injected into the request context, and apply rate limiting.
+	handler := corsMiddleware(s.rateLimitMiddleware(auth.AuthMiddleware(s.db, mux)))
 
 	fmt.Printf("[Server] Kiwi daemon listening on %s\n", addr)
 	return http.ListenAndServe(addr, handler)
@@ -266,7 +291,25 @@ func (s *Server) Start(addr string) error {
 // corsMiddleware applies CORS headers to all responses and handles OPTIONS preflight.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		allowed := os.Getenv("KIWI_CORS_ALLOWED_ORIGINS")
+		origin := r.Header.Get("Origin")
+
+		if allowed == "" || allowed == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			origins := strings.Split(allowed, ",")
+			matched := false
+			for _, o := range origins {
+				if strings.TrimSpace(o) == origin {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		}
+
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -427,6 +470,8 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_ = audit.LogEvent(s.db, r, "CREATE", "TASK", taskID, fmt.Sprintf("Submitted task %q for file %q", task, file))
+
 	// Launch loop orchestration in the background (injectable for tests).
 	s.launchFn(taskID, tempSandbox, task, file, testCmd)
 
@@ -528,4 +573,76 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(usage)
+}
+
+type limiterEntry struct {
+	tokens float64
+	last   time.Time
+}
+
+type RateLimiter struct {
+	mu     sync.Mutex
+	rate   float64 // tokens per second
+	burst  float64
+	limits map[string]*limiterEntry
+}
+
+func NewRateLimiter(rate float64, burst int) *RateLimiter {
+	return &RateLimiter{
+		rate:   rate,
+		burst:  float64(burst),
+		limits: make(map[string]*limiterEntry),
+	}
+}
+
+func (rl *RateLimiter) Allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	lim, exists := rl.limits[key]
+	now := time.Now()
+	if !exists {
+		rl.limits[key] = &limiterEntry{
+			tokens: rl.burst - 1.0,
+			last:   now,
+		}
+		return true
+	}
+
+	elapsed := now.Sub(lim.last).Seconds()
+	lim.last = now
+	newTokens := lim.tokens + elapsed*rl.rate
+	if newTokens > rl.burst {
+		newTokens = rl.burst
+	}
+
+	if newTokens >= 1.0 {
+		lim.tokens = newTokens - 1.0
+		return true
+	}
+
+	return false
+}
+
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	// 10 requests per second rate limit per client, burst 30 requests.
+	rl := NewRateLimiter(10.0, 30)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bypass limit check for OPTIONS preflights
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		key := r.RemoteAddr
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			key = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+
+		if !rl.Allow(key) {
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

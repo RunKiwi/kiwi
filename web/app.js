@@ -468,6 +468,8 @@ function switchAdminTab(tabName) {
         adminLoadOrgsSelect('admin-users-org-select').then(() => adminLoadUsers());
     } else if (tabName === 'providers') {
         adminLoadOrgsSelect('admin-providers-org-select').then(() => adminLoadProviderConfig());
+    } else if (tabName === 'audit') {
+        adminLoadOrgsSelect('admin-audit-org-select').then(() => adminLoadAuditLogs());
     }
 }
 
@@ -779,5 +781,41 @@ async function adminSaveProviderConfig() {
         setTimeout(() => { successEl.style.display = 'none'; }, 4000);
     } catch (err) {
         alert("Failed to save provider configuration");
+    }
+}
+
+async function adminLoadAuditLogs() {
+    const orgSelect = document.getElementById('admin-audit-org-select');
+    const orgID = orgSelect.value;
+    if (!orgID) return;
+
+    try {
+        const response = await fetch(`${serverUrl}/admin/orgs/${orgID}/audit`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!response.ok) throw new Error();
+        const logs = await response.json();
+        const listEl = document.getElementById('admin-audit-list');
+        listEl.innerHTML = '';
+
+        if (!logs || logs.length === 0) {
+            listEl.innerHTML = '<tr><td colspan="6" style="text-align:center">No audit logs recorded for this organization.</td></tr>';
+            return;
+        }
+
+        logs.forEach(log => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><code>${new Date(log.created_at).toLocaleString()}</code></td>
+                <td><code>${escapeHtml(log.client_ip || 'N/A')}</code></td>
+                <td>${escapeHtml(log.user_email || 'System')}</td>
+                <td><span class="status-badge" style="background:rgba(255,255,255,0.05);color:var(--text-primary)">${log.action}</span></td>
+                <td><span style="color:var(--accent-blue)">${log.resource}</span> (ID: <code>${log.resource_id}</code>)</td>
+                <td>${escapeHtml(log.details)}</td>
+            `;
+            listEl.appendChild(row);
+        });
+    } catch (err) {
+        console.error("Failed to load audit logs:", err);
     }
 }
