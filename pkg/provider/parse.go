@@ -13,7 +13,7 @@ type Pricing struct {
 
 // PricingMap stores token pricing for common models.
 var PricingMap = map[string]Pricing{
-	"claude-opus-4-8":   {InputCostPerM: 15.00, OutputCostPerM: 75.00},
+	"claude-opus-4-8":   {InputCostPerM: 5.00, OutputCostPerM: 25.00},
 	"claude-3-5-sonnet": {InputCostPerM: 3.00, OutputCostPerM: 15.00},
 	"claude-3-5-haiku":  {InputCostPerM: 0.80, OutputCostPerM: 4.00},
 }
