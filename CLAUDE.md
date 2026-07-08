@@ -145,6 +145,10 @@ kiwi/
     *   **OrgProviderConfig Model & Encrypted Storage**: Created database schema for storing org-specific LLM provider name and API key. Encrypted keys using AES-256-GCM with a master secret environment override.
     *   **Admin Provider Configuration Endpoint**: Added `PUT /admin/orgs/{orgID}/provider` to set and encrypt the LLM provider configuration.
     *   **Dynamic Engine Model Customization**: Updated `AnthropicProvider` to allow customizing `actorModel` and `criticModel` separately. The engine resolves org provider configs and falls back to standard developer tunnel resolution.
+*   **Phase 16 (Completed)**: Dashboard Multi-Tenancy (`web/index.html`, `web/app.js`, `web/style.css`, `pkg/auth/admin.go`):
+    *   **Login Overlay & Credential Check**: Replaced the settings popover with a fullscreen login form overlay. The dashboard validates credentials against `/auth/validate` to verify identity and scopes tasks.
+    *   **Monthly Budget Progress Bar**: Integrated real-time monthly cost totals and progress bars utilizing the `/usage` endpoint.
+    *   **Interactive Admin Console**: Added tabbed administration interface for listing/creating organizations, managing organization users, generating/revoking API keys, and setting custom encrypted Anthropic LLM provider configurations.
 
 ---
 
