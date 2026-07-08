@@ -149,6 +149,10 @@ kiwi/
     *   **Login Overlay & Credential Check**: Replaced the settings popover with a fullscreen login form overlay. The dashboard validates credentials against `/auth/validate` to verify identity and scopes tasks.
     *   **Monthly Budget Progress Bar**: Integrated real-time monthly cost totals and progress bars utilizing the `/usage` endpoint.
     *   **Interactive Admin Console**: Added tabbed administration interface for listing/creating organizations, managing organization users, generating/revoking API keys, and setting custom encrypted Anthropic LLM provider configurations.
+*   **Phase 17 (Completed)**: Audit Logging & Security Hardening (`pkg/audit/audit.go`, `server.go`, `admin.go`, `db.go`):
+    *   **Audit Logger Service**: Introduced `AuditLog` model schema and a thread-safe `audit` logging API with client IP, action, resource, and organization tracking.
+    *   **Endpoint Instrumentation**: Added audit logs for task submissions, background executions, organization changes, user registrations, and API key updates.
+    *   **Rate Limiting & CORS Hardening**: Built a thread-safe token bucket rate limiter middleware to mitigate DDoS/brute-force attacks. Tightened CORS by supporting custom origin filters via `KIWI_CORS_ALLOWED_ORIGINS` and adding preflight method authorization.
 
 ---
 

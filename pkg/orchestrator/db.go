@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/glebarez/sqlite"
+	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -24,8 +25,8 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to migrate auth schema: %w", err)
 	}
 
-	// Migrate TaskState schema
-	if err := db.AutoMigrate(&TaskState{}); err != nil {
+	// Migrate TaskState and AuditLog schema
+	if err := db.AutoMigrate(&TaskState{}, &audit.AuditLog{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate task schema: %w", err)
 	}
 
