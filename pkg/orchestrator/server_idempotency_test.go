@@ -3,12 +3,14 @@ package orchestrator
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
+
+	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
 
 func multipartTask(t *testing.T) (*bytes.Buffer, string) {
@@ -30,15 +32,28 @@ func multipartTask(t *testing.T) (*bytes.Buffer, string) {
 	return &buf, mw.FormDataContentType()
 }
 
+// testClaims returns a UserClaims context for use in tests.
+func testClaims() context.Context {
+	claims := &auth.UserClaims{
+		UserID: "test-user",
+		Email:  "test@example.com",
+		Name:   "Test User",
+		OrgID:  "test-org",
+		Role:   "member",
+	}
+	return auth.ContextWithClaims(context.Background(), claims)
+}
+
 func postTask(t *testing.T, s *Server, key string) map[string]string {
 	t.Helper()
 	body, ctype := multipartTask(t)
 	req := httptest.NewRequest(http.MethodPost, "/tasks", body)
 	req.Header.Set("Content-Type", ctype)
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("KIWI_SERVER_TOKEN"))
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
+	// Inject auth claims into the request context.
+	req = req.WithContext(testClaims())
 	rw := httptest.NewRecorder()
 	s.handleTasks(rw, req)
 	if rw.Code != http.StatusOK {
@@ -50,7 +65,6 @@ func postTask(t *testing.T, s *Server, key string) map[string]string {
 }
 
 func TestIdempotentSubmit(t *testing.T) {
-	t.Setenv("KIWI_SERVER_TOKEN", "test-token")
 	db := newTestDB(t)
 	s := &Server{db: db}
 	s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {} // no engine

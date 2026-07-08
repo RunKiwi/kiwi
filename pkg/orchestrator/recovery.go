@@ -27,7 +27,7 @@ func (s *Server) RecoverTasks() {
 	}
 	for _, t := range tasks {
 		if recoverAction(t.SandboxPath) == "relaunch" {
-			tunnel.GlobalRegistry.Register(t.ID)
+			tunnel.GlobalRegistry.Register(t.ID, t.UserID, t.OrgID)
 			s.db.Model(&TaskState{}).Where("id = ?", t.ID).
 				Update("logs", t.Logs+"\n[Recovery] Re-launched after daemon restart.\n")
 			s.launchFn(t.ID, t.SandboxPath, t.Task, t.FilePath, t.TestCmd)

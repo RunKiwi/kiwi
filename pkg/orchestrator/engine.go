@@ -23,6 +23,7 @@ type Engine struct {
 	CostCallback  func(float64)
 	MaxBudget     float64
 	LLMMode       string // "mock" (default) or "anthropic"
+	SandboxConfig *sandbox.SandboxConfig
 }
 
 // NewEngine creates a new Loop Orchestrator engine
@@ -136,6 +137,10 @@ func (e *Engine) resolveAPIKey(ctx context.Context, taskID string) (string, erro
 
 // RunTask starts the feedback loop to align the codebase to the desired state.
 func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task string, filePath string, testCmd string) error {
+	if e.SandboxConfig != nil {
+		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, e.SandboxConfig)
+	}
+
 	e.log("[Orchestrator] Desired State: %s\n", task)
 	e.log("[Orchestrator] Running initial test command: %s\n", testCmd)
 

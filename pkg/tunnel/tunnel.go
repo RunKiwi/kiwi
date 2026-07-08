@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
 
 // Tunnel represents a reverse credential tunnel for a specific task.
@@ -21,6 +23,8 @@ type Tunnel struct {
 	reqMu   sync.Mutex        // Serializes GetSecret requests to prevent response mismatch
 	Cache   map[string]string // Cache resolved secrets to allow disconnected cloud executions
 	CacheMu sync.Mutex        // Protects Cache
+	UserID  string
+	OrgID   string
 }
 
 // TunnelRegistry is a thread-safe map of TaskID -> *Tunnel.
@@ -47,7 +51,7 @@ func (r *TunnelRegistry) Get(taskID string) *Tunnel {
 }
 
 // Register retrieves a Tunnel for the given taskID, creating it if it does not exist.
-func (r *TunnelRegistry) Register(taskID string) *Tunnel {
+func (r *TunnelRegistry) Register(taskID, userID, orgID string) *Tunnel {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if t, exists := r.tunnels[taskID]; exists {
@@ -57,9 +61,18 @@ func (r *TunnelRegistry) Register(taskID string) *Tunnel {
 		Requests:  make(chan string),
 		Responses: make(chan string),
 		Cache:     make(map[string]string),
+		UserID:    userID,
+		OrgID:     orgID,
 	}
 	r.tunnels[taskID] = t
 	return t
+}
+
+// Deregister removes the tunnel for the given taskID to free resources.
+func (r *TunnelRegistry) Deregister(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tunnels, taskID)
 }
 
 // GetSecret requests a secret through the tunnel. It blocks until the secret is
@@ -123,6 +136,12 @@ func HandleTunnelConn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Parse taskID from URL path "/tunnel/{taskID}"
 	path := strings.TrimPrefix(r.URL.Path, "/tunnel/")
 	if path == "" || strings.Contains(path, "/") {
@@ -131,7 +150,17 @@ func HandleTunnelConn(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := path
 
-	tunnel := GlobalRegistry.Register(taskID)
+	tunnel := GlobalRegistry.Get(taskID)
+	if tunnel == nil {
+		http.Error(w, "Tunnel not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify the caller belongs to the task's organization or is admin
+	if !claims.IsAdmin() && claims.OrgID != tunnel.OrgID {
+		http.Error(w, "Forbidden: access to this tunnel is denied", http.StatusForbidden)
+		return
+	}
 
 	tunnel.Mutex.Lock()
 	tunnel.Connected = true
@@ -179,6 +208,12 @@ func HandleTunnelResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Parse taskID from URL path "/tunnel/{taskID}/response"
 	path := strings.TrimPrefix(r.URL.Path, "/tunnel/")
 	parts := strings.Split(path, "/")
@@ -191,6 +226,12 @@ func HandleTunnelResponse(w http.ResponseWriter, r *http.Request) {
 	tunnel := GlobalRegistry.Get(taskID)
 	if tunnel == nil {
 		http.Error(w, "Tunnel not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify the caller belongs to the task's organization or is admin
+	if !claims.IsAdmin() && claims.OrgID != tunnel.OrgID {
+		http.Error(w, "Forbidden: access to this tunnel is denied", http.StatusForbidden)
 		return
 	}
 
