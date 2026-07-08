@@ -19,6 +19,12 @@ type UsageReporter interface {
 	LastCostUSD() float64
 }
 
+// TokenReporter is implemented by providers that can report the input/output
+// token counts of their most recent API call, for observability.
+type TokenReporter interface {
+	LastUsage() (inputTokens, outputTokens int64)
+}
+
 // MockCritic auto-approves every edit, for offline/test runs.
 type MockCritic struct{}
 

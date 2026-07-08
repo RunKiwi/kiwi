@@ -12,9 +12,11 @@ import (
 
 // AnthropicProvider is a live Claude-backed Actor and Critic.
 type AnthropicProvider struct {
-	client   anthropic.Client
-	model    anthropic.Model
-	lastCost float64
+	client     anthropic.Client
+	model      anthropic.Model
+	lastCost   float64
+	lastInput  int64
+	lastOutput int64
 }
 
 // NewAnthropicProvider builds a provider using the given API key.
@@ -28,8 +30,13 @@ func NewAnthropicProvider(apiKey string) *AnthropicProvider {
 // LastCostUSD reports the USD cost of the most recent API call.
 func (p *AnthropicProvider) LastCostUSD() float64 { return p.lastCost }
 
+// LastUsage reports the input/output token counts of the most recent API call.
+func (p *AnthropicProvider) LastUsage() (int64, int64) { return p.lastInput, p.lastOutput }
+
 func (p *AnthropicProvider) recordCost(u anthropic.Usage) {
 	p.lastCost = costUSD(u.InputTokens, u.OutputTokens)
+	p.lastInput = u.InputTokens
+	p.lastOutput = u.OutputTokens
 }
 
 func collectText(resp *anthropic.Message) string {
