@@ -5,10 +5,35 @@ import (
 	"strings"
 )
 
-const (
-	inputCostPerMTok  = 5.00
-	outputCostPerMTok = 25.00
-)
+// Pricing defines input and output token rates per million tokens.
+type Pricing struct {
+	InputCostPerM  float64
+	OutputCostPerM float64
+}
+
+// PricingMap stores token pricing for common models.
+var PricingMap = map[string]Pricing{
+	"claude-opus-4-8":   {InputCostPerM: 15.00, OutputCostPerM: 75.00},
+	"claude-3-5-sonnet": {InputCostPerM: 3.00, OutputCostPerM: 15.00},
+	"claude-3-5-haiku":  {InputCostPerM: 0.80, OutputCostPerM: 4.00},
+}
+
+// ModelCostUSD computes the cost of a call given token usage and model pricing.
+func ModelCostUSD(model string, inputTokens, outputTokens int64) float64 {
+	// Clean model prefix if any (e.g. from SDK types)
+	cleaned := strings.TrimPrefix(model, "Model")
+	p, ok := PricingMap[cleaned]
+	if !ok {
+		// Fallback to default Opus pricing
+		p = PricingMap["claude-opus-4-8"]
+	}
+	return float64(inputTokens)/1e6*p.InputCostPerM + float64(outputTokens)/1e6*p.OutputCostPerM
+}
+
+// costUSD computes the cost of a call given token usage at default Opus 4.8 pricing.
+func costUSD(inputTokens, outputTokens int64) float64 {
+	return ModelCostUSD("claude-opus-4-8", inputTokens, outputTokens)
+}
 
 // extractCode returns the contents of the first fenced code block in s.
 // If there is no fence, it returns the whole string trimmed.
@@ -41,9 +66,4 @@ func parseVerdict(s string) Verdict {
 		return Verdict{Approved: false, Reasons: "could not parse critic verdict: " + err.Error()}
 	}
 	return v
-}
-
-// costUSD computes the cost of a call given token usage at Opus 4.8 pricing.
-func costUSD(inputTokens, outputTokens int64) float64 {
-	return float64(inputTokens)/1e6*inputCostPerMTok + float64(outputTokens)/1e6*outputCostPerMTok
 }
