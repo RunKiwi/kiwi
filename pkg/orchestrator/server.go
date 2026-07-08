@@ -70,10 +70,36 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			limits = auth.DefaultLimits(existing.OrgID)
 		}
 
+		var apiKey string
+		var actorModel = "claude-opus-4-8"
+		var criticModel = "claude-opus-4-8"
+
+		provConfig, err := auth.GetProviderConfig(s.db, existing.OrgID)
+		if err == nil && provConfig != nil {
+			if provConfig.ActorModel != "" {
+				actorModel = provConfig.ActorModel
+			}
+			if provConfig.CriticModel != "" {
+				criticModel = provConfig.CriticModel
+			}
+			if decKey, err := provConfig.DecryptKey(); err == nil && decKey != "" {
+				apiKey = decKey
+			}
+		}
+
 		var engine *Engine
 		if os.Getenv("KIWI_LLM_PROVIDER") == "anthropic" {
-			engine = NewEngine(nil, 5) // provider built lazily after key resolution
-			engine.LLMMode = "anthropic"
+			if apiKey != "" {
+				ap := provider.NewAnthropicProviderWithModels(apiKey, actorModel, criticModel)
+				engine = NewEngine(ap, 5)
+				engine.Critic = ap
+				engine.LLMMode = "anthropic"
+			} else {
+				engine = NewEngine(nil, 5) // provider built lazily after key resolution
+				engine.LLMMode = "anthropic"
+			}
+			engine.ActorModel = actorModel
+			engine.CriticModel = criticModel
 		} else {
 			engine = NewEngine(provider.NewMockProvider(), 5)
 			engine.Critic = provider.NewMockCritic()

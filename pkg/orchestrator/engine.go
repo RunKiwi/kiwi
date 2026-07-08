@@ -24,6 +24,8 @@ type Engine struct {
 	MaxBudget     float64
 	LLMMode       string // "mock" (default) or "anthropic"
 	SandboxConfig *sandbox.SandboxConfig
+	ActorModel    string
+	CriticModel   string
 }
 
 // NewEngine creates a new Loop Orchestrator engine
@@ -153,7 +155,7 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		if err != nil {
 			return fmt.Errorf("failed to resolve ANTHROPIC_API_KEY: %w", err)
 		}
-		ap := provider.NewAnthropicProvider(key)
+		ap := provider.NewAnthropicProviderWithModels(key, e.ActorModel, e.CriticModel)
 		e.Provider = ap
 		e.Critic = ap
 	}

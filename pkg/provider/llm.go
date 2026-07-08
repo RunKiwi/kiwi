@@ -12,24 +12,37 @@ import (
 
 // AnthropicProvider is a live Claude-backed Actor and Critic.
 type AnthropicProvider struct {
-	client   anthropic.Client
-	model    anthropic.Model
-	lastCost float64
+	client      anthropic.Client
+	actorModel  string
+	criticModel string
+	lastCost    float64
 }
 
-// NewAnthropicProvider builds a provider using the given API key.
+// NewAnthropicProvider builds a provider using the given API key and default Opus models.
 func NewAnthropicProvider(apiKey string) *AnthropicProvider {
+	return NewAnthropicProviderWithModels(apiKey, "claude-opus-4-8", "claude-opus-4-8")
+}
+
+// NewAnthropicProviderWithModels builds a provider with customized Actor and Critic models.
+func NewAnthropicProviderWithModels(apiKey, actorModel, criticModel string) *AnthropicProvider {
+	if actorModel == "" {
+		actorModel = "claude-opus-4-8"
+	}
+	if criticModel == "" {
+		criticModel = "claude-opus-4-8"
+	}
 	return &AnthropicProvider{
-		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
-		model:  anthropic.ModelClaudeOpus4_8,
+		client:      anthropic.NewClient(option.WithAPIKey(apiKey)),
+		actorModel:  actorModel,
+		criticModel: criticModel,
 	}
 }
 
 // LastCostUSD reports the USD cost of the most recent API call.
 func (p *AnthropicProvider) LastCostUSD() float64 { return p.lastCost }
 
-func (p *AnthropicProvider) recordCost(u anthropic.Usage) {
-	p.lastCost = costUSD(u.InputTokens, u.OutputTokens)
+func (p *AnthropicProvider) recordCost(u anthropic.Usage, model string) {
+	p.lastCost = ModelCostUSD(model, u.InputTokens, u.OutputTokens)
 }
 
 func collectText(resp *anthropic.Message) string {
@@ -53,7 +66,7 @@ func (p *AnthropicProvider) GetCodeEdit(ctx context.Context, task, fileName, cod
 
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     p.model,
+		Model:     anthropic.F(anthropic.Model(p.actorModel)),
 		MaxTokens: 16000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
@@ -64,7 +77,7 @@ func (p *AnthropicProvider) GetCodeEdit(ctx context.Context, task, fileName, cod
 	if err != nil {
 		return "", fmt.Errorf("anthropic actor request failed: %w", err)
 	}
-	p.recordCost(resp.Usage)
+	p.recordCost(resp.Usage, p.actorModel)
 	if resp.StopReason == anthropic.StopReasonRefusal {
 		return "", errors.New("actor request refused by safety classifier")
 	}
@@ -82,7 +95,7 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     p.model,
+		Model:     anthropic.F(anthropic.Model(p.criticModel)),
 		MaxTokens: 2000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
@@ -93,7 +106,7 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 	if err != nil {
 		return Verdict{}, fmt.Errorf("anthropic critic request failed: %w", err)
 	}
-	p.recordCost(resp.Usage)
+	p.recordCost(resp.Usage, p.criticModel)
 	if resp.StopReason == anthropic.StopReasonRefusal {
 		return Verdict{Approved: false, Reasons: "critic refused to review (safety classifier)"}, nil
 	}
