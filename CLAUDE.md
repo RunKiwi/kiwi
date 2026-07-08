@@ -69,6 +69,7 @@ kiwi/
 │   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth, CORS, launchTask)
 │   │   ├── recovery.go      # Boot recovery: re-launch or fail tasks interrupted by a restart
 │   │   ├── idempotency.go   # Idempotency-Key lookup for deduping task submissions
+│   │   ├── events.go        # TaskEvent model + per-phase loop telemetry (summarize helper)
 │   │   └── db.go            # SQLite GORM persistence helper
 │   ├── sandbox/
 │   │   ├── exec.go          # Sandbox executor (local execution or isolated Docker container execution)
@@ -137,8 +138,10 @@ kiwi/
     *   **OrgLimits Model & Checks**: Introduced `OrgLimits` database table for tracking max concurrent tasks, budget caps, timeout constraints, sandbox disk size, and tenant-specific Docker images. Enforced concurrency checks and monthly budget aggregates during task submission.
     *   **Configurable Sandbox Constraints**: Refactored the command execution sandbox to support context-based configuration retrieval. Tasks now run with custom CPU, memory limits, and complete network isolation (`--network=none`), preventing malicious external connectivity.
     *   **Disk Quotas & Sandbox Partitioning**: Implemented unzipped directory size validation, rejecting submissions exceeding the configured size limit with 413. Prefixed sandbox paths with tenant IDs to ensure filesystem segregation.
-
----
+*   **Phase 14 (Completed)**: Actor–Critic Loop Observability (`events.go`, `engine.go`, `server.go`, `pkg/provider`):
+    *   **Structured Per-Phase Telemetry**: Each loop phase (`initial_test`, `actor`, `critic`, `test`) emits a `TaskEvent` via an additive `Engine.EventCallback` — capturing step, duration, outcome, a truncated detail, and (Anthropic mode) input/output tokens + USD cost. Emission is best-effort and never alters loop behavior; the freeform `logs` transcript is retained.
+    *   **Token Reporting**: Added `provider.TokenReporter` (`LastUsage`) implemented by `AnthropicProvider`, so cost/token attribution is per-call.
+    *   **Persistence & API**: Events persist to a new `task_events` table (stamped with `OrgID`) and are served at `GET /tasks/{id}/events`, authorized via the parent task (same-org or admin) exactly like task status.
 
 ## 4. Current Limitations & TODOs
 
