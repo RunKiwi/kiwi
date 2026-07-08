@@ -215,6 +215,7 @@
                     <button class="admin-tab active" id="tab-orgs" onclick="switchAdminTab('orgs')">Organizations</button>
                     <button class="admin-tab" id="tab-users" onclick="switchAdminTab('users')">Users</button>
                     <button class="admin-tab" id="tab-providers" onclick="switchAdminTab('providers')">LLM Settings</button>
+                    <button class="admin-tab" id="tab-audit" onclick="switchAdminTab('audit')">Audit Logs</button>
                 </div>
 
                 <!-- Admin Tab Content -->
@@ -317,6 +318,28 @@
                         </div>
                         <button class="settings-save-btn" onclick="adminSaveProviderConfig()">Encrypt and Save Provider Config</button>
                         <div id="provider-success-msg" style="display:none;color:var(--accent-green);font-size:0.875rem;margin-top:1rem"></div>
+                    </div>
+                </div>
+
+                <div class="admin-tab-content" id="content-audit">
+                    <div style="margin-bottom:1.5rem;display:flex;align-items:center;gap:0.5rem">
+                        <span>Organization:</span>
+                        <select id="admin-audit-org-select" onchange="adminLoadAuditLogs()"></select>
+                    </div>
+                    <div class="admin-table-container" style="flex:1;overflow-y:auto;max-height:400px">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>IP</th>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                    <th>Resource</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-audit-list"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
