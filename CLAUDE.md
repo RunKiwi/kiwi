@@ -141,6 +141,10 @@ kiwi/
     *   **Usage Aggregation Service**: Created `pkg/billing/` package to aggregate metrics (total cost, task counts, success/failure ratios, and top spenders list) dynamically over Unix timestamps or RFC3339 date ranges.
     *   **Org & Admin Billing Endpoints**: Added a tenant-scoped `/usage` API and an admin-only `/admin/orgs/{orgID}/usage` API endpoint.
     *   **Model-Based Pricing**: Refactored cost calculation to look up rates from a model pricing map (supporting custom token prices for Claude Opus, Sonnet, and Haiku).
+*   **Phase 15 (Completed)**: Per-Tenant LLM Provider & API Key Management (`pkg/auth/provider_config.go`, `server.go`, `admin.go`, `llm.go`):
+    *   **OrgProviderConfig Model & Encrypted Storage**: Created database schema for storing org-specific LLM provider name and API key. Encrypted keys using AES-256-GCM with a master secret environment override.
+    *   **Admin Provider Configuration Endpoint**: Added `PUT /admin/orgs/{orgID}/provider` to set and encrypt the LLM provider configuration.
+    *   **Dynamic Engine Model Customization**: Updated `AnthropicProvider` to allow customizing `actorModel` and `criticModel` separately. The engine resolves org provider configs and falls back to standard developer tunnel resolution.
 
 ---
 
