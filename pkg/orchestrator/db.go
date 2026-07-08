@@ -24,8 +24,8 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to migrate auth schema: %w", err)
 	}
 
-	// Migrate TaskState schema
-	if err := db.AutoMigrate(&TaskState{}); err != nil {
+	// Migrate TaskState + TaskEvent schema
+	if err := db.AutoMigrate(&TaskState{}, &TaskEvent{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate task schema: %w", err)
 	}
 
