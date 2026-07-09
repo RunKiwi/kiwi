@@ -117,6 +117,12 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		engine.CostCallback = func(amount float64) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("cost", gorm.Expr("cost + ?", amount))
 		}
+		orgID := existing.OrgID
+		engine.EventCallback = func(ev TaskEvent) {
+			ev.TaskID = taskID
+			ev.OrgID = orgID
+			_ = s.db.Create(&ev).Error // best-effort telemetry; never fail the task
+		}
 
 		// Setup sandbox parameters for execution isolation and constraints
 		engine.SandboxConfig = &sandbox.SandboxConfig{
@@ -470,7 +476,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = audit.LogEvent(s.db, r, "CREATE", "TASK", taskID, fmt.Sprintf("Submitted task %q for file %q", task, file))
+	_ = auth.LogAuditEvent(s.db, r, "CREATE", "TASK", taskID, fmt.Sprintf("Submitted task %q for file %q", task, file))
 
 	// Launch loop orchestration in the background (injectable for tests).
 	s.launchFn(taskID, tempSandbox, task, file, testCmd)
@@ -490,6 +496,12 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Events sub-resource: GET /tasks/{id}/events
+	if strings.HasSuffix(r.URL.Path, "/events") {
+		s.handleTaskEvents(w, r, claims)
 		return
 	}
 
@@ -527,6 +539,32 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(state)
+}
+
+// handleTaskEvents serves the structured telemetry timeline for a task,
+// authorized identically to the task status endpoint (same org or admin).
+func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request, claims *auth.UserClaims) {
+	// path is /tasks/{id}/events → id is the segment before "/events"
+	trimmed := strings.TrimSuffix(r.URL.Path, "/events")
+	taskID := filepath.Base(trimmed)
+
+	var state TaskState
+	if err := s.db.First(&state, "id = ?", taskID).Error; err != nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	if !s.authorizeTask(claims, &state) {
+		http.Error(w, "Forbidden: you do not have access to this task", http.StatusForbidden)
+		return
+	}
+
+	var events []TaskEvent
+	if err := s.db.Where("task_id = ?", taskID).Order("id asc").Find(&events).Error; err != nil {
+		http.Error(w, "Failed to load task events", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(events)
 }
 
 // dirSizeMB calculates the total size of all files in a directory in MB.

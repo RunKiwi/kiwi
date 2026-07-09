@@ -26,6 +26,7 @@ type Engine struct {
 	SandboxConfig *sandbox.SandboxConfig
 	ActorModel    string
 	CriticModel   string
+	EventCallback func(TaskEvent)
 }
 
 // NewEngine creates a new Loop Orchestrator engine
@@ -108,6 +109,28 @@ func (e *Engine) charge(acc *float64, caller interface{}, fallback float64) {
 	}
 }
 
+// emit records a structured telemetry event for one loop phase. Best-effort:
+// a nil callback is a no-op. Token/cost come from the caller when it reports them.
+func (e *Engine) emit(step int, phase, outcome, detail string, dur time.Duration, caller interface{}) {
+	if e.EventCallback == nil {
+		return
+	}
+	ev := TaskEvent{
+		Step:       step,
+		Phase:      phase,
+		Outcome:    outcome,
+		Detail:     detail,
+		DurationMs: dur.Milliseconds(),
+	}
+	if r, ok := caller.(provider.UsageReporter); ok {
+		ev.CostUSD = r.LastCostUSD()
+	}
+	if tr, ok := caller.(provider.TokenReporter); ok {
+		ev.InputTokens, ev.OutputTokens = tr.LastUsage()
+	}
+	e.EventCallback(ev)
+}
+
 // resolveAPIKey resolves ANTHROPIC_API_KEY through the reverse tunnel (cache
 // first), falling back to the daemon environment. If neither is available it
 // pauses statefully until the client reconnects.
@@ -166,6 +189,7 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		return fmt.Errorf("failed to resolve tunnel environment: %w", err)
 	}
 
+	initStart := time.Now()
 	res, err := sandbox.RunCommand(ctx, dir, testCmd, env)
 	if err != nil {
 		return fmt.Errorf("sandbox failed to run command: %w", err)
@@ -177,9 +201,11 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 	}
 
 	if res.Success {
+		e.emit(0, "initial_test", "pass", summarize(res.Output, 500), time.Since(initStart), nil)
 		e.log("[Orchestrator] Current state matches desired state. Tests already pass!\n")
 		return nil
 	}
+	e.emit(0, "initial_test", "fail", summarize(res.Output, 500), time.Since(initStart), nil)
 
 	e.log("[Orchestrator] Tests failed. Entering correction loop...\n")
 	e.log("[Sandbox Output]:\n%s\n", res.Output)
@@ -206,21 +232,31 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 
 		// Actor proposes an edit (not yet written).
 		e.log("[Actor] Proposing edit...\n")
+		actorStart := time.Now()
 		proposed, err := e.Provider.GetCodeEdit(ctx, task, filePath, string(content), composeActorInput(lastBuildOutput, criticReasons))
 		if err != nil {
+			e.emit(step, "actor", "error", err.Error(), time.Since(actorStart), e.Provider)
 			return fmt.Errorf("failed to get code edit: %w", err)
 		}
 		e.charge(&accumulatedCost, e.Provider, 0.05)
+		e.emit(step, "actor", "proposed", "", time.Since(actorStart), e.Provider)
 		criticReasons = ""
 
 		// Critic reviews before applying.
 		verdict := provider.Verdict{Approved: true, Reasons: "no critic configured"}
 		if e.Critic != nil {
+			criticStart := time.Now()
 			verdict, err = e.Critic.ReviewEdit(ctx, task, filePath, string(content), proposed, lastBuildOutput)
 			if err != nil {
+				e.emit(step, "critic", "error", err.Error(), time.Since(criticStart), e.Critic)
 				return fmt.Errorf("critic review failed: %w", err)
 			}
 			e.charge(&accumulatedCost, e.Critic, 0.02)
+			outcome := "approved"
+			if !verdict.Approved {
+				outcome = "rejected"
+			}
+			e.emit(step, "critic", outcome, verdict.Reasons, time.Since(criticStart), e.Critic)
 		}
 
 		if !verdict.Approved {
@@ -242,16 +278,19 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		if err != nil {
 			return fmt.Errorf("failed to resolve tunnel environment: %w", err)
 		}
+		testStart := time.Now()
 		res, err = sandbox.RunCommand(ctx, dir, testCmd, env)
 		if err != nil {
 			return fmt.Errorf("sandbox run failed: %w", err)
 		}
 
 		if res.Success {
+			e.emit(step, "test", "pass", summarize(res.Output, 500), time.Since(testStart), nil)
 			e.log("[Gate] Success: tests passed.\n")
 			return nil
 		}
 
+		e.emit(step, "test", "fail", summarize(res.Output, 500), time.Since(testStart), nil)
 		e.log("[Gate] Fail: target state still diverging.\n")
 		e.log("[Sandbox Output]:\n%s\n", res.Output)
 		lastBuildOutput = res.Output

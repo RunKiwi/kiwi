@@ -1,12 +1,9 @@
 package audit
 
 import (
-	"context"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/glebarez/sqlite"
-	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"gorm.io/gorm"
 )
 
@@ -26,46 +23,28 @@ func TestLogEventAndRetrieve(t *testing.T) {
 	db := setupAuditTestDB(t)
 
 	// 1. Log direct event
-	err := LogEventDirect(db, "org-alpha", "user-1", "user@test.com", "CREATE", "TASK", "task-100", "Created test task", "127.0.0.1")
-	if err != nil {
+	if err := LogEventDirect(db, "org-alpha", "user-1", "user@test.com", "CREATE", "TASK", "task-100", "Created test task", "127.0.0.1"); err != nil {
 		t.Fatalf("LogEventDirect error: %v", err)
 	}
 
-	// 2. Log request event with context claims
-	req := httptest.NewRequest("POST", "/tasks", nil)
-	claims := &auth.UserClaims{
-		UserID:    "user-2",
-		Email:     "admin@test.com",
-		UserEmail: "admin@test.com",
-		OrgID:     "org-alpha",
-		Role:      "admin",
-	}
-	ctx := auth.ContextWithClaims(context.Background(), claims)
-	req = req.WithContext(ctx)
-	req.RemoteAddr = "10.0.0.1"
-
-	err = LogEvent(db, req, "REVOKE", "API_KEY", "key-200", "Revoked API key for user-2")
-	if err != nil {
-		t.Fatalf("LogEvent error: %v", err)
+	// 2. A second org-alpha event (the request/claims wrapper is tested in pkg/auth)
+	if err := LogEventDirect(db, "org-alpha", "user-2", "admin@test.com", "REVOKE", "API_KEY", "key-200", "Revoked API key for user-2", "10.0.0.1"); err != nil {
+		t.Fatalf("LogEventDirect (revoke) error: %v", err)
 	}
 
 	// 3. Log event from foreign org
-	err = LogEventDirect(db, "org-beta", "user-3", "beta@test.com", "CREATE", "TASK", "task-300", "Foreign task", "127.0.0.1")
-	if err != nil {
+	if err := LogEventDirect(db, "org-beta", "user-3", "beta@test.com", "CREATE", "TASK", "task-300", "Foreign task", "127.0.0.1"); err != nil {
 		t.Fatalf("LogEventDirect org-beta error: %v", err)
 	}
 
-	// 4. Retrieve org-alpha logs and verify
+	// 4. Retrieve org-alpha logs and verify (org isolation + DESC order)
 	logs, err := GetOrgAuditLogs(db, "org-alpha")
 	if err != nil {
 		t.Fatalf("GetOrgAuditLogs error: %v", err)
 	}
-
 	if len(logs) != 2 {
 		t.Errorf("expected 2 audit logs for org-alpha, got %d", len(logs))
 	}
-
-	// Verify order is DESC (newest first)
 	if logs[0].Action != "REVOKE" || logs[0].ResourceID != "key-200" || logs[0].ClientIP != "10.0.0.1" {
 		t.Errorf("unexpected first log record details: %+v", logs[0])
 	}

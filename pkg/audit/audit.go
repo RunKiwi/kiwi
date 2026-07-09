@@ -1,10 +1,8 @@
 package audit
 
 import (
-	"net/http"
 	"time"
 
-	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"gorm.io/gorm"
 )
 
@@ -24,46 +22,6 @@ type AuditLog struct {
 
 // TableName overrides the default GORM table name.
 func (AuditLog) TableName() string { return "audit_logs" }
-
-// LogEvent logs a security audit event.
-func LogEvent(db *gorm.DB, r *http.Request, action, resource, resourceID, details string) error {
-	var orgID string
-	var userID string
-	var userEmail string
-	var clientIP string
-
-	if r != nil {
-		clientIP = r.RemoteAddr
-		claims := auth.ClaimsFromContext(r.Context())
-		if claims != nil {
-			orgID = claims.OrgID
-			userID = claims.UserID
-			userEmail = claims.UserEmail
-		}
-	}
-
-	// For background system operations without claims, default to "system"
-	if orgID == "" {
-		orgID = "system"
-	}
-	if userID == "" {
-		userID = "system"
-	}
-
-	log := AuditLog{
-		OrgID:      orgID,
-		UserID:     userID,
-		UserEmail:  userEmail,
-		Action:     action,
-		Resource:   resource,
-		ResourceID: resourceID,
-		Details:    details,
-		ClientIP:   clientIP,
-		CreatedAt:  time.Now(),
-	}
-
-	return db.Create(&log).Error
-}
 
 // GetOrgAuditLogs retrieves audit logs for an organization.
 func GetOrgAuditLogs(db *gorm.DB, orgID string) ([]AuditLog, error) {

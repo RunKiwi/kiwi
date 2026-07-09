@@ -52,6 +52,18 @@ open web/index.html
 CGO_ENABLED=0 go test -v ./pkg/...
 ```
 
+### Mandatory Pre-Commit Checks (run EVERY time, before every commit/PR)
+CI (`.github/workflows/ci.yml`) enforces these on every PR and push to `main`. Run them locally **before every commit** so the build never lands red — this is exactly how stacked semantic-merge breakage (import cycles, removed SDK helpers, renamed fields) has snuck onto `main` before:
+
+```bash
+gofmt -l cmd/ pkg/                 # MUST print nothing (formatting). Fix with: gofmt -w cmd/ pkg/
+CGO_ENABLED=0 go vet ./...         # MUST be clean (catches import cycles, bad struct fields, etc.)
+CGO_ENABLED=0 go test ./pkg/...    # MUST pass
+CGO_ENABLED=0 go build ./...       # MUST build all packages and both binaries
+```
+
+Treat any non-empty `gofmt` output, `go vet` finding, test failure, or build error as a hard blocker — do not commit until all four are green. When resolving a merge against `main`, run all four on the merged tree before pushing (a clean per-PR CI does not guarantee the merged result compiles).
+
 ---
 
 ## 2. Codebase Overview
@@ -69,6 +81,7 @@ kiwi/
 │   │   ├── server.go        # HTTP tasks execution controller (/tasks, /tunnel, auth, CORS, launchTask)
 │   │   ├── recovery.go      # Boot recovery: re-launch or fail tasks interrupted by a restart
 │   │   ├── idempotency.go   # Idempotency-Key lookup for deduping task submissions
+│   │   ├── events.go        # TaskEvent model + per-phase loop telemetry (summarize helper)
 │   │   └── db.go            # SQLite GORM persistence helper
 │   ├── sandbox/
 │   │   ├── exec.go          # Sandbox executor (local execution or isolated Docker container execution)
@@ -153,6 +166,10 @@ kiwi/
     *   **Audit Logger Service**: Introduced `AuditLog` model schema and a thread-safe `audit` logging API with client IP, action, resource, and organization tracking.
     *   **Endpoint Instrumentation**: Added audit logs for task submissions, background executions, organization changes, user registrations, and API key updates.
     *   **Rate Limiting & CORS Hardening**: Built a thread-safe token bucket rate limiter middleware to mitigate DDoS/brute-force attacks. Tightened CORS by supporting custom origin filters via `KIWI_CORS_ALLOWED_ORIGINS` and adding preflight method authorization.
+*   **Phase 18 (Completed)**: Actor–Critic Loop Observability (`events.go`, `engine.go`, `server.go`, `pkg/provider`):
+    *   **Structured Per-Phase Telemetry**: Each loop phase (`initial_test`, `actor`, `critic`, `test`) emits a `TaskEvent` via an additive `Engine.EventCallback` — capturing step, duration, outcome, a truncated detail, and (Anthropic mode) input/output tokens + USD cost. Emission is best-effort and never alters loop behavior; the freeform `logs` transcript is retained.
+    *   **Token Reporting**: Added `provider.TokenReporter` (`LastUsage`) implemented by `AnthropicProvider`, so cost/token attribution is per-call.
+    *   **Persistence & API**: Events persist to a new `task_events` table (stamped with `OrgID`) and are served at `GET /tasks/{id}/events`, authorized via the parent task (same-org or admin) exactly like task status.
 
 ---
 
