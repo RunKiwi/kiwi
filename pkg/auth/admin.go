@@ -168,7 +168,7 @@ func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = audit.LogEvent(db, r, "CREATE", "ORG", org.ID, fmt.Sprintf("Created organization %q", org.Name))
+	_ = LogAuditEvent(db, r, "CREATE", "ORG", org.ID, fmt.Sprintf("Created organization %q", org.Name))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -233,7 +233,7 @@ func handleCreateUser(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID
 		return
 	}
 
-	_ = audit.LogEvent(db, r, "CREATE", "USER", user.ID, fmt.Sprintf("Registered user %q (%s) with role %q", user.Name, user.Email, user.Role))
+	_ = LogAuditEvent(db, r, "CREATE", "USER", user.ID, fmt.Sprintf("Registered user %q (%s) with role %q", user.Name, user.Email, user.Role))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -292,7 +292,7 @@ func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
-	_ = audit.LogEvent(db, r, "CREATE", "API_KEY", apiKey.ID, fmt.Sprintf("Generated API Key %q for user ID %s", apiKey.Label, apiKey.UserID))
+	_ = LogAuditEvent(db, r, "CREATE", "API_KEY", apiKey.ID, fmt.Sprintf("Generated API Key %q for user ID %s", apiKey.Label, apiKey.UserID))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -328,7 +328,7 @@ func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, key
 		return
 	}
 
-	_ = audit.LogEvent(db, r, "REVOKE", "API_KEY", keyID, "Revoked API Key")
+	_ = LogAuditEvent(db, r, "REVOKE", "API_KEY", keyID, "Revoked API Key")
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -428,7 +428,7 @@ func handleSaveProviderConfig(db *gorm.DB, w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	_ = audit.LogEvent(db, r, "UPDATE", "PROVIDER", config.OrgID, fmt.Sprintf("Updated LLM provider configuration (actor: %s, critic: %s)", config.ActorModel, config.CriticModel))
+	_ = LogAuditEvent(db, r, "UPDATE", "PROVIDER", config.OrgID, fmt.Sprintf("Updated LLM provider configuration (actor: %s, critic: %s)", config.ActorModel, config.CriticModel))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)

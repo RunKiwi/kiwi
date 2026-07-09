@@ -16,6 +16,8 @@ type AnthropicProvider struct {
 	actorModel  string
 	criticModel string
 	lastCost    float64
+	lastInput   int64
+	lastOutput  int64
 }
 
 // NewAnthropicProvider builds a provider using the given API key and default Opus models.
@@ -41,8 +43,13 @@ func NewAnthropicProviderWithModels(apiKey, actorModel, criticModel string) *Ant
 // LastCostUSD reports the USD cost of the most recent API call.
 func (p *AnthropicProvider) LastCostUSD() float64 { return p.lastCost }
 
+// LastUsage reports the input/output token counts of the most recent API call.
+func (p *AnthropicProvider) LastUsage() (int64, int64) { return p.lastInput, p.lastOutput }
+
 func (p *AnthropicProvider) recordCost(u anthropic.Usage, model string) {
 	p.lastCost = ModelCostUSD(model, u.InputTokens, u.OutputTokens)
+	p.lastInput = u.InputTokens
+	p.lastOutput = u.OutputTokens
 }
 
 func collectText(resp *anthropic.Message) string {
@@ -66,7 +73,7 @@ func (p *AnthropicProvider) GetCodeEdit(ctx context.Context, task, fileName, cod
 
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.F(anthropic.Model(p.actorModel)),
+		Model:     anthropic.Model(p.actorModel),
 		MaxTokens: 16000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
@@ -95,7 +102,7 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.F(anthropic.Model(p.criticModel)),
+		Model:     anthropic.Model(p.criticModel),
 		MaxTokens: 2000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
