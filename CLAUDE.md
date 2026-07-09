@@ -52,6 +52,18 @@ open web/index.html
 CGO_ENABLED=0 go test -v ./pkg/...
 ```
 
+### Mandatory Pre-Commit Checks (run EVERY time, before every commit/PR)
+CI (`.github/workflows/ci.yml`) enforces these on every PR and push to `main`. Run them locally **before every commit** so the build never lands red — this is exactly how stacked semantic-merge breakage (import cycles, removed SDK helpers, renamed fields) has snuck onto `main` before:
+
+```bash
+gofmt -l cmd/ pkg/                 # MUST print nothing (formatting). Fix with: gofmt -w cmd/ pkg/
+CGO_ENABLED=0 go vet ./...         # MUST be clean (catches import cycles, bad struct fields, etc.)
+CGO_ENABLED=0 go test ./pkg/...    # MUST pass
+CGO_ENABLED=0 go build ./...       # MUST build all packages and both binaries
+```
+
+Treat any non-empty `gofmt` output, `go vet` finding, test failure, or build error as a hard blocker — do not commit until all four are green. When resolving a merge against `main`, run all four on the merged tree before pushing (a clean per-PR CI does not guarantee the merged result compiles).
+
 ---
 
 ## 2. Codebase Overview
@@ -138,10 +150,28 @@ kiwi/
     *   **OrgLimits Model & Checks**: Introduced `OrgLimits` database table for tracking max concurrent tasks, budget caps, timeout constraints, sandbox disk size, and tenant-specific Docker images. Enforced concurrency checks and monthly budget aggregates during task submission.
     *   **Configurable Sandbox Constraints**: Refactored the command execution sandbox to support context-based configuration retrieval. Tasks now run with custom CPU, memory limits, and complete network isolation (`--network=none`), preventing malicious external connectivity.
     *   **Disk Quotas & Sandbox Partitioning**: Implemented unzipped directory size validation, rejecting submissions exceeding the configured size limit with 413. Prefixed sandbox paths with tenant IDs to ensure filesystem segregation.
-*   **Phase 14 (Completed)**: Actor–Critic Loop Observability (`events.go`, `engine.go`, `server.go`, `pkg/provider`):
+*   **Phase 14 (Completed)**: Per-Tenant Cost Tracking & Billing (`pkg/billing/billing.go`, `server.go`, `admin.go`, `parse.go`):
+    *   **Usage Aggregation Service**: Created `pkg/billing/` package to aggregate metrics (total cost, task counts, success/failure ratios, and top spenders list) dynamically over Unix timestamps or RFC3339 date ranges.
+    *   **Org & Admin Billing Endpoints**: Added a tenant-scoped `/usage` API and an admin-only `/admin/orgs/{orgID}/usage` API endpoint.
+    *   **Model-Based Pricing**: Refactored cost calculation to look up rates from a model pricing map (supporting custom token prices for Claude Opus, Sonnet, and Haiku).
+*   **Phase 15 (Completed)**: Per-Tenant LLM Provider & API Key Management (`pkg/auth/provider_config.go`, `server.go`, `admin.go`, `llm.go`):
+    *   **OrgProviderConfig Model & Encrypted Storage**: Created database schema for storing org-specific LLM provider name and API key. Encrypted keys using AES-256-GCM with a master secret environment override.
+    *   **Admin Provider Configuration Endpoint**: Added `PUT /admin/orgs/{orgID}/provider` to set and encrypt the LLM provider configuration.
+    *   **Dynamic Engine Model Customization**: Updated `AnthropicProvider` to allow customizing `actorModel` and `criticModel` separately. The engine resolves org provider configs and falls back to standard developer tunnel resolution.
+*   **Phase 16 (Completed)**: Dashboard Multi-Tenancy (`web/index.html`, `web/app.js`, `web/style.css`, `pkg/auth/admin.go`):
+    *   **Login Overlay & Credential Check**: Replaced the settings popover with a fullscreen login form overlay. The dashboard validates credentials against `/auth/validate` to verify identity and scopes tasks.
+    *   **Monthly Budget Progress Bar**: Integrated real-time monthly cost totals and progress bars utilizing the `/usage` endpoint.
+    *   **Interactive Admin Console**: Added tabbed administration interface for listing/creating organizations, managing organization users, generating/revoking API keys, and setting custom encrypted Anthropic LLM provider configurations.
+*   **Phase 17 (Completed)**: Audit Logging & Security Hardening (`pkg/audit/audit.go`, `server.go`, `admin.go`, `db.go`):
+    *   **Audit Logger Service**: Introduced `AuditLog` model schema and a thread-safe `audit` logging API with client IP, action, resource, and organization tracking.
+    *   **Endpoint Instrumentation**: Added audit logs for task submissions, background executions, organization changes, user registrations, and API key updates.
+    *   **Rate Limiting & CORS Hardening**: Built a thread-safe token bucket rate limiter middleware to mitigate DDoS/brute-force attacks. Tightened CORS by supporting custom origin filters via `KIWI_CORS_ALLOWED_ORIGINS` and adding preflight method authorization.
+*   **Phase 18 (Completed)**: Actor–Critic Loop Observability (`events.go`, `engine.go`, `server.go`, `pkg/provider`):
     *   **Structured Per-Phase Telemetry**: Each loop phase (`initial_test`, `actor`, `critic`, `test`) emits a `TaskEvent` via an additive `Engine.EventCallback` — capturing step, duration, outcome, a truncated detail, and (Anthropic mode) input/output tokens + USD cost. Emission is best-effort and never alters loop behavior; the freeform `logs` transcript is retained.
     *   **Token Reporting**: Added `provider.TokenReporter` (`LastUsage`) implemented by `AnthropicProvider`, so cost/token attribution is per-call.
     *   **Persistence & API**: Events persist to a new `task_events` table (stamped with `OrgID`) and are served at `GET /tasks/{id}/events`, authorized via the parent task (same-org or admin) exactly like task status.
+
+---
 
 ## 4. Current Limitations & TODOs
 
