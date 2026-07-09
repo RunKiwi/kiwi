@@ -1,41 +1,43 @@
 # Kiwi: Product Vision & Core Concept
 
 **Codename:** kiwi  
-**One-Sentence Pitch:** The Secure Agentic Control Plane for Enterprise Engineering.
+**One-Sentence Pitch:** The Universal Control Plane and Orchestration Layer for Enterprise AI Agents.
 
 ---
 
 ## 1. Executive Summary
 
-Kiwi bridges the gap between **developer productivity** and **enterprise compliance**. 
+Kiwi bridges the gap between **agentic productivity** and **enterprise compliance**. 
 
-It allows software developers to use autonomous coding agents (like Cline, Aider, or custom scripts) under secure, policy-enforced guardrails. Instead of running heavy, expensive, and insecure loops on local developer machines, Kiwi provides an **Agent-Agnostic LLM Proxy** connected to a **Cloud-First Loop Orchestrator**. 
+Rather than competing with existing developer tools, Kiwi is designed to seamlessly integrate with and empower the current ecosystem of AI agents (like Aider, Devin, OpenCode, and Claude). It serves as an **Agent-Agnostic Orchestration Layer** that handles secure sandboxing, multi-agent coordination, and credential injection. 
 
-Developers can launch tasks, share context, and safely **close their laptops** while the loop executes, builds, and verifies code inside a secure cloud sandbox.
+Developers can launch complex workflows that span beyond simple vibe coding—such as data analysis, visualization, and reinforcement learning—safely delegating work to dynamically spawned agent personas while relying on Kiwi's pluggable sandbox architecture and enterprise security guardrails.
 
 ---
 
 ## 2. The Core Pillars
 
-### I. Security & Compliance (For the CISO)
-*   **Zero-Trust Secrets**: Raw API keys and cloud credentials stay in the enterprise Vault. The cloud sandbox accesses them ephemerally via OIDC federation or a read-only local reverse tunnel.
-*   **DLP Guardrails**: Real-time Data Loss Prevention filters out PII, secrets, and private databases before prompts reach public LLM models.
-*   **Auditable Trajectories**: Complete execution logs—every code change, prompt, compile error, and command execution—are stored in a centralized dashboard.
+### I. Universal Agent Orchestration (For the AI Engineer & Developer)
+*   **Ecosystem Integration**: Works transparently as the orchestration backend for market-leading tools like Aider, Devin, OpenCode, and Claude. Kiwi increases their enterprise adoption by providing the secure compute and compliance they need.
+*   **Multi-Agent Orchestration**: Goes beyond a rigid Actor-Critic algorithm. Kiwi dynamically spawns subagents with specific personas (e.g., Researcher, Data Analyst, Reviewer) based on the task, enabling context sharing and collaboration for complex workflows.
+*   **Pluggable Sandboxes**: While providing a robust built-in sandbox, Kiwi also allows customers to bring their own sandbox environments (like E2B or custom Kubernetes clusters) to support heavy data analysis, visual computing, and diverse workloads.
 
-### II. Unified Budget & Loop Safety (For the VP of Engineering)
-*   **Single Cost Pool**: Consolidated billing. Admins allocate a single budget (e.g., $5,000 for the team) dynamically distributed across OpenAI, Anthropic, Bedrock, etc.
-*   **Loop Protection**: Real-time semantic checking blocks runaway agents from falling into infinite error loops and racking up bills.
-*   **Actor-Critic Separation**: A primary "Actor" writes code, while a secondary, cost-efficient "Critic" evaluates tests and security vulnerabilities before changes are accepted.
-
-### III. Headless Workflow & Dashboard (For the Developer)
+### II. Headless Workflow & Dashboard (For the Developer)
 *   **Interactive Kanban Dashboard**: A central web UI showing tasks in a project management board:
     *   *Backlog/Todo*: Tasks queued or scheduled.
     *   *In Progress*: Active agent loops showing live states (e.g., "Editing", "Testing", "Critic Review").
     *   *Done*: Completed tasks with green test suites and merged git branches.
-    *   *Paused/Failed*: Tasks halted due to budget, stuck loops, or waiting for local credential tunnels.
-*   **Close-Laptop Autonomy**: The developer kicks off a task via the CLI. Workspace changes sync to a cloud sandbox, which runs the loop headless. The developer can shut down their machine.
-*   **Agent Agnostic**: Works transparently with existing IDE extensions, command-line interfaces, and custom Python agent frameworks.
-*   **Auto-Resume**: If the laptop is reopened, the local CLI automatically reconnects to the cloud dashboard and streams live progress.
+    *   *Paused/Failed*: Tasks halted due to budget limits, stuck loops, or pending manual review.
+*   **Continuous Visibility**: The loop runs entirely autonomously in the cloud. If the developer closes their laptop and reopens it later, the CLI simply reconnects to stream the live progress of the ongoing or completed task.
+
+### III. Unified Budget & Execution Safety (For the VP of Engineering)
+*   **Single Cost Pool**: Consolidated billing. Admins allocate a single budget (e.g., $5,000 for the team) dynamically distributed across OpenAI, Anthropic, Bedrock, etc.
+*   **Loop Protection**: Real-time semantic checking blocks runaway agents from falling into infinite error loops and racking up bills.
+*   **Auditable Trajectories**: Complete execution logs—every code change, prompt, compile error, and command execution—are stored in a centralized dashboard.
+
+### IV. Security & Compliance (For the CISO)
+*   **Zero-Trust Secrets**: Raw API keys and cloud credentials stay in the enterprise Vault (e.g., HashiCorp, AWS Secrets Manager). Kiwi securely injects them directly into the sandbox environment just-in-time, bypassing the need for brittle reverse tunneling from local laptops.
+*   **DLP Guardrails**: Real-time Data Loss Prevention filters out PII, secrets, and private databases before prompts reach public LLM models.
 
 ---
 
@@ -43,11 +45,11 @@ Developers can launch tasks, share context, and safely **close their laptops** w
 
 1.  **Initiation**: Dev runs `kiwi run --task "Fix bug Y"` on their machine, or assigns a ticket on the **Interactive Kanban Dashboard**.
 2.  **Context Sync**: The CLI packages the git status and environment configs and uploads them to an ephemeral Cloud Sandbox.
-3.  **Tunneling**: A secure, temporary reverse tunnel is opened to relay local credentials or local validation commands.
-4.  **The Loop**: 
-    *   **Actor** proposes code edits.
-    *   **Sandbox** compiles and runs tests.
-    *   **Critic** checks security and convergence.
+3.  **Secrets Injection**: Kiwi integrates with the Enterprise Vault to securely mount necessary credentials directly into the sandbox just-in-time.
+4.  **Multi-Agent Loop**: 
+    *   **Orchestrator** spawns necessary agent personas based on the workload (Data analysis, coding, RL, etc).
+    *   **Agents** collaborate, sharing context, while tools like Aider or Claude drive the reasoning.
+    *   **Sandbox (Built-in or E2B)** compiles, visualizes, and runs tests.
     *   *Dashboard* updates the task card status in real-time, showing the step-by-step trace.
 5.  **Completion**: Once tests pass and the Critic approves, the changes are committed to a git branch, the task card moves to "Done" on the board, and the developer is notified to pull the updates.
 
@@ -57,17 +59,17 @@ Developers can launch tasks, share context, and safely **close their laptops** w
 
 These are the critical design issues we must resolve to establish Product-Market Fit (PMF):
 
-### Q1: Local Dependencies in the Cloud
-*   *Problem:* How do we compile and test code in the cloud sandbox when projects rely on complex local dependencies (e.g., local Postgres databases, proprietary internal services, or macOS-specific toolchains)?
-*   *Resolved:* We implemented containerized Docker execution in `pkg/sandbox/exec.go` mounting the task directory inside a standard `golang:1.21-alpine` container. For enterprise production, base images are customized with required project toolchains.
+### Q1: Advanced & Heavy Workloads in the Sandbox
+*   *Problem:* How do we support complex use cases like Data Analysis, Visualization, and Reinforcement Learning which require heavy GPU compute or customized runtimes?
+*   *Direction:* Shift from a hardcoded Docker approach to a **Pluggable Sandbox Abstraction**. Kiwi will integrate natively with third-party sandbox providers like E2B, Daytona, or custom enterprise Kubernetes clusters, allowing customers to bring their own secure compute environments.
 
 ### Q2: Stuck Loops vs. Slow Progress
 *   *Problem:* How do we distinguish between an agent stuck in a repetitive loop (e.g., fixing a compile error with the same failed approach) and an agent making slow, incremental progress on a difficult refactoring task?
 *   *Resolved:* We implemented a semantic duplicate-error circuit breaker in `pkg/orchestrator/engine.go` that hashes stdout compiler errors and halts execution if the exact same error is encountered 3 times.
 
-### Q3: Reverse Tunnel Security Concerns
-*   *Problem:* Will enterprise network security teams block local reverse tunnels, and how do we provide a clean, non-intrusive alternative for sharing local credentials?
-*   *Resolved:* We implemented memory-based credential caching inside `pkg/tunnel/tunnel.go`. The reverse tunnel is only accessed briefly during startup to resolve and cache environment keys. Once cached, the tunnel connection is dropped and the local dependency ends, permitting the laptop to close without stopping loop execution.
+### Q3: Credential Injection vs. Reverse Tunnels
+*   *Problem:* The current reverse tunnel approach for fetching local secrets is brittle and relies on the developer's laptop remaining online, conflicting with true headless autonomy.
+*   *Direction:* Deprecate reverse tunneling in favor of native Enterprise Vault integration. Secrets will be fetched securely server-side and injected directly into the pluggable sandbox via temporary environment variables or mounted volumes, enforcing true zero-trust without local dependencies.
 
 ### Q4: Multi-Tenant Isolation
 *   *Problem:* How do we securely isolate multiple users and organizations sharing a single Kiwi deployment?

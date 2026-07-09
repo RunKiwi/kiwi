@@ -29,6 +29,9 @@ export KIWI_SERVER_TOKEN="my-secret-token-1234"
 # Execute a TDD auto-fixing task using Bearer Token authorization
 ./kiwi -token "my-secret-token-1234" -task "Fix division by zero in Divide()" -file demo_project/math_utils.go -test-cmd "go test ./demo_project/..."
 
+# Execute a task based on an existing Jira, GitHub, or Linear ticket
+./kiwi -token "my-secret-token-1234" --ticket "github:ibreakthecloud/kiwi#42"
+
 # Resume a paused cloud task (waiting for credentials tunnel reconnect)
 ./kiwi -token "my-secret-token-1234" -resume -task-id <task_id>
 ```
@@ -181,30 +184,27 @@ kiwi/
 3.  **Local Host Mounted Sandboxes**: The Docker sandbox mode mounts directories from the host server (`/var/folders/...`) directly into the container. In multi-tenant systems, this leaks file descriptors and permissions, requiring independent Virtual Machine sandboxing.
 4.  **In-Memory Tunnel Cache**: The credentials cache on the server is kept inside the local daemon's memory. If the daemon restarts, cached credentials are lost — but as of Phase 9 the *task itself* is recovered: on boot the daemon re-launches interrupted tasks whose sandbox survived, and the re-launched loop statefully pauses until the developer reconnects the tunnel (re-populating the cache). Only the cache is ephemeral, not the task.
 
-### Remaining Work / TODOs
+### Remaining Work / TODOs (Universal Orchestration Rollout)
 
-#### 1. Integration of Live LLM Providers (`pkg/provider/llm.go`)
-*   `[x]` Add Anthropic Go SDK client (`claude-opus-4-8`, adaptive thinking). *(OpenAI still pending.)*
-*   `[x]` Create prompt templates for the **Actor** (resolves compiler/test failures with minimal edits) and the **Critic** (reviews diffs for correctness and safety before apply).
-*   `[ ]` Support dynamic model swapping (e.g., a cheaper model for Actor, a stronger one for Critic).
+#### Phase 1: Ecosystem Integration & Ticket-Based Invocation
+*   `[ ]` **Ticket Integration**: Enhance the CLI `kiwi run` command to accept `--ticket github:<id>`, `--ticket jira:<id>`, or `--ticket linear:<id>`. Fetch issue context automatically.
+*   `[ ]` **Ecosystem Adapters**: Create an integration layer (`pkg/ecosystem`) that allows tools like Aider, Devin, or Claude to interface with Kiwi's secure sandbox as an orchestration backend.
 
-#### 2. PKCE-based OAuth 2.0 Auth Flow
-*   `[ ]` Implement a `kiwi login` command in the CLI. Spawns a temporary local HTTP server, opens the browser to authenticate via Auth0/Okta, and obtains JWT tokens.
-*   `[ ]` Secure JWT storage on the developer's client machine using platform-specific keychains (e.g., `keyring` in Linux, Keychain in macOS).
-*   `[ ]` Integrate JWT signature verification middleware on the server to replace the static token checks.
+#### Phase 2: Multi-Agent Orchestration
+*   `[ ]` **Persona Definitions**: Move beyond the rigid Actor-Critic loop by defining agent personas (e.g., Researcher, Coder, Data Analyst, Reviewer).
+*   `[ ]` **Context Sharing**: Implement a shared memory/message bus in `pkg/orchestrator` to allow subagents to share context and collaborate on complex workloads like Data Analysis or RL.
 
-#### 3. Interactive Web Dashboard Controls (`web/app.js`)
-*   `[ ]` Expose task cancellation (`POST /tasks/{id}/cancel`) and manual pausing (`POST /tasks/{id}/pause`) HTTP endpoints.
-*   `[ ]` Update the Kanban UI with buttons to:
-    *   Pause/Resume execution loops.
-    *   Trigger new task submissions via a modal.
-    *   Interact with human-in-the-loop checks (e.g., prompt for permission to apply a critical code fix).
+#### Phase 3: Pluggable Sandbox Abstraction
+*   `[ ]` **Sandbox Interface**: Refactor `pkg/sandbox/exec.go` to use a `SandboxProvider` interface rather than hardcoding Docker local execution.
+*   `[ ]` **Third-Party Integration**: Implement the `E2BProvider` (and potentially Daytona) to support heavy GPU workloads and custom data-science runtimes.
+*   `[ ]` **Custom Execution Images**: Support custom execution base images mapped per programming language (Go, Python, Node.js, Jupyter).
 
-#### 4. Sandbox Virtualization & Isolation Manager
-*   `[ ]` Move from simple Docker mounts to a dedicated MicroVM orchestration layer (e.g. **Firecracker** or **gVisor**).
-*   `[ ]` Implement a Sandbox Manager service that dynamically provisions clean kernel-isolated sandboxes in <100ms.
-*   `[ ]` Support custom execution base images mapped per programming language (Go, Python, Node.js).
+#### Phase 4: Enterprise Vault Integration & Tunnel Deprecation
+*   `[ ]` **Vault Providers**: Implement native integrations for HashiCorp Vault and AWS Secrets Manager.
+*   `[ ]` **Direct Injection**: Inject secrets securely into the pluggable sandbox environment via environment variables, avoiding local laptop reliance.
+*   `[ ]` **Deprecation**: Remove the `pkg/tunnel` reverse tunneling logic to ensure true zero-trust headless autonomy.
 
-#### 5. High-Performance Log Streaming
-*   `[ ]` Move live streaming logs from SQLite/GORM updates to **Redis Streams** or WebSocket events.
-*   `[ ]` Save archived logs to an object store (e.g. AWS S3, Google Cloud Storage) upon task completion to keep the relational database clean and scalable.
+#### Phase 5: Additional Technical Debt
+*   `[ ]` **PKCE-based OAuth 2.0 Auth Flow**: Implement `kiwi login` in the CLI for SSO auth (Auth0/Okta) and secure local JWT keychain storage.
+*   `[ ]` **Interactive Web Dashboard Controls**: Expose task cancellation and pause/resume buttons in the React dashboard.
+*   `[ ]` **High-Performance Log Streaming**: Move live streaming logs from SQLite/GORM updates to Redis Streams or WebSocket events.
