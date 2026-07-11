@@ -20,7 +20,7 @@ Agent workflows are long-running, non-deterministic, side-effecting, and expensi
 - **G1 — Isolation:** every job runs in a sandbox with no lateral access to the control plane, other tenants, or undeclared network egress.
 - **G2 — Resiliency:** idempotent submission and per-step execution; deterministic checkpoint/rollback; automatic recovery of interrupted runs.
 - **G3 — Observability:** end-to-end distributed tracing from CLI → control plane → sandbox → individual agent steps; live streaming + durable history.
-- **G4 — Extensibility:** pluggable **Infrastructure** providers (Docker → gVisor/Firecracker/E2B/K8s) and **LLM** providers (Anthropic/OpenAI/…); manifests producible by defaults, user templates, or 3rd-party plugins.
+- **G4 — Extensibility & Bring-Your-Own-LLM:** pluggable **Infrastructure** providers (Docker → gVisor/Firecracker/E2B/K8s) and **LLM** providers — **Anthropic, Codex, Google Gemini, or any compatible endpoint** — with per-org **bring-your-own-key** and per-role model selection; manifests producible by defaults, user templates, or 3rd-party plugins.
 - **G5 — Governance:** strong per-tenant quotas (concurrency, budget, disk, timeout) and cost accounting.
 
 ### 1.4 Non-Goals (v1)
@@ -130,6 +130,23 @@ graph TB
 3. **Lifecycle management** — track sandbox health, enforce timeouts/budgets, handle pause/resume (e.g., awaiting a JIT secret), and finalize state/cost on completion.
 4. **Provider abstraction** — never hard-codes Docker or Anthropic; calls the Infrastructure and LLM driver interfaces.
 - **Leadership:** LLMO runs as a horizontally-scaled consumer pool; a single work item is owned by one consumer via queue lease. Singleton duties (recovery sweep, timers) run under a leader elected via DB advisory lock / lease.
+
+#### 3.3.1 LLM Provider Layer — Bring Your Own LLM (multi-provider)
+
+Kiwi is **provider-agnostic**: the Actor and Critic run against whichever model the tenant chooses, through a single pluggable `LLMProvider` driver (see Appendix A). The platform ships drivers for:
+
+- **Anthropic (Claude)**
+- **Codex** (GPT-family coding models)
+- **Google (Gemini)**
+- **Any compatible HTTP endpoint** — Azure, Amazon Bedrock, OpenRouter, or a self-hosted/local model (e.g., Ollama, vLLM) — via a base-URL + key, so tenants aren't limited to the built-in set.
+
+**Bring Your Own Key (BYOK).** Tenants supply their own provider API key; keys are stored **per-org, encrypted at rest (AES-256-GCM)** under a master secret, never returned in API responses, never written to the sandbox, and decrypted only at call time. A tenant can run entirely on their own account and quota. (Where a tenant has no key, an optional platform-managed key can back the run, metered through billing.)
+
+**Per-role model selection.** The manifest can assign **different providers/models to the Actor vs the Critic** — e.g., a cheaper/faster model for the Actor and a stronger model for the Critic review, or two different vendors entirely. Actor and Critic model choices are independent.
+
+**Reproducibility & cost.** The chosen `provider` + `model` (+ params) are pinned into the **immutable manifest**, so a replay uses the exact model. Cost accounting normalizes each provider's token pricing into a single USD figure per run for the budget gate and billing.
+
+**Routing & fallback (optional).** The driver layer supports declarative failover — if the primary provider errors or is rate-limited, the LLMO can retry on a configured secondary provider/model without failing the run.
 
 ### 3.4 Manifest & Template Registry
 **Responsibilities:** store versioned **workflows/templates** (defaults + user-authored via CLI) and the **generated manifests** (immutable, content-addressed, JSON-Schema-validated, optionally signed). Supports 3rd-party producers (Claude/Codex plugins) that emit manifest JSON validated against the schema before acceptance. Enables **replay** (a job can be re-run from its exact manifest) and **audit** (who ran what, with which models/tools/egress).
@@ -306,13 +323,15 @@ CREATE TABLE audit_logs (
 ```json
 {
   "schema_version": "1.0",
-  "master":  { "model": "claude-opus-4-8", "instructions_ref": "s3://…/AGENT.md" },
-  "workers": [ { "model": "claude-sonnet-4-6", "count": 3, "tools": ["bash","edit","grep"] } ],
+  "master":  { "provider": "anthropic", "model": "claude-opus-4-8", "instructions_ref": "s3://…/AGENT.md" },
+  "workers": [ { "provider": "codex", "model": "gpt-5-codex", "count": 3, "tools": ["bash","edit","grep"] } ],
+  "critic":  { "provider": "google", "model": "gemini-2.5-pro" },
   "limits":  { "cpu": "1.0", "memory_mb": 512, "disk_mb": 2048, "timeout_s": 1800 },
   "network": { "policy": "deny", "allowed_hosts": ["api.github.com"] },
-  "secrets": [ "GITHUB_TOKEN", "ANTHROPIC_API_KEY" ]
+  "secrets": [ "GITHUB_TOKEN" ]
 }
 ```
+> `provider` ∈ `anthropic | codex | google | compatible` (BYO base-URL + key). Actor/worker and Critic can each pin a different provider+model; provider API keys are resolved per-org (encrypted at rest) or via the JIT secret broker — never embedded in the manifest.
 
 ---
 
