@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 func multipartTask(t *testing.T) (*bytes.Buffer, string) {
@@ -69,7 +70,7 @@ func TestIdempotentSubmit(t *testing.T) {
 	db := newTestDB(t)
 	st := store.NewPostgresStore(db)
 	s := &Server{db: db, storage: st}
-	s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {} // no engine
+	s.launchFn = func(taskID, sandboxPath string, manifest *store.Manifest) {} // no engine
 
 	first := postTask(t, s, "dup-key")
 	second := postTask(t, s, "dup-key")

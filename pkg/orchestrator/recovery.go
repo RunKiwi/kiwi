@@ -36,7 +36,19 @@ func (s *Server) RecoverTasks() {
 			task, _ := j.Inputs["task"].(string)
 			file, _ := j.Inputs["file"].(string)
 			testCmd, _ := j.Inputs["test_cmd"].(string)
-			s.launchFn(j.ID, *j.SandboxRef, task, file, testCmd)
+
+			// Generate manifest for the recovered job (similar to how consumer does it)
+			// Wait, the job might already have a ManifestID in V2, but for simplicity
+			// we can just reconstruct a synthetic manifest from inputs for recovery.
+			m := &store.Manifest{
+				Content: map[string]interface{}{
+					"task":     task,
+					"file":     file,
+					"test_cmd": testCmd,
+				},
+			}
+			
+			s.launchFn(j.ID, *j.SandboxRef, m)
 		} else {
 			s.db.Model(&store.Job{}).Where("id = ?", j.ID).Update("status", "FAILED")
 			s.db.Model(&TaskState{}).Where("id = ?", j.ID).Updates(map[string]interface{}{

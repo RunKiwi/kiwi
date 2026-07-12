@@ -20,6 +20,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
+	"github.com/ibreakthecloud/kiwi/pkg/infra"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -47,7 +48,7 @@ type TaskState struct {
 type Server struct {
 	db       *gorm.DB
 	storage  store.Store
-	launchFn func(taskID, sandboxPath, task, file, testCmd string)
+	launchFn func(taskID, sandboxPath string, manifest *store.Manifest)
 }
 
 func NewServer(storage store.Store, role string) *Server {
@@ -67,7 +68,7 @@ func NewServer(storage store.Store, role string) *Server {
 // already-persisted task whose sandbox is populated on disk. Used by both
 // submission and boot recovery. It seeds the log buffer from the existing row so
 // recovered tasks keep their prior logs.
-func (s *Server) LaunchTask(taskID, sandboxPath, task, file, testCmd string) {
+func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest) {
 	go func() {
 		logBuf := new(bytes.Buffer)
 		var existing TaskState
@@ -133,14 +134,10 @@ func (s *Server) LaunchTask(taskID, sandboxPath, task, file, testCmd string) {
 			_ = s.db.Create(&ev).Error // best-effort telemetry; never fail the task
 		}
 
-		// Setup sandbox parameters for execution isolation and constraints
-		engine.SandboxConfig = &sandbox.SandboxConfig{
-			UseDocker:   os.Getenv("USE_DOCKER") == "true",
-			DockerImage: limits.DockerImage,
-			MemoryLimit: "512m", // default resource limits
-			CPULimit:    "1.0",
-			NetworkNone: true, // default network isolation
-		}
+		// Infra dependency injection
+		// We'll create the infra driver directly here for now. 
+		// (Normally it would be initialized once in NewServer)
+		engine.Infra = infra.NewDockerInfra(os.TempDir())
 
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
@@ -161,10 +158,9 @@ func (s *Server) LaunchTask(taskID, sandboxPath, task, file, testCmd string) {
 			}
 		}()
 
-		absFilePath := filepath.Join(sandboxPath, file)
 		fmt.Fprintf(logBuf, "[Orchestrator] Running task in sandbox: %s\n", sandboxPath)
 
-		err = engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
+		err = engine.RunTask(ctx, taskID, sandboxPath, manifest)
 
 		finalStatus := "SUCCESS"
 		if err != nil {
