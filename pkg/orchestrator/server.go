@@ -53,7 +53,7 @@ type Server struct {
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 }
 
-func NewServer(storage store.Store) *Server {
+func NewServer(storage store.Store, role string) *Server {
 	root := os.Getenv("KIWI_SNAPSHOT_DIR")
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "kiwi-snapshots")
@@ -63,7 +63,11 @@ func NewServer(storage store.Store) *Server {
 		storage:      storage,
 		snapshotRoot: root,
 	}
-	s.launchFn = s.launchTask
+	if role == "all" || role == "orchestrator" {
+		s.launchFn = s.launchTask
+	} else {
+		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
+	}
 	return s
 }
 
@@ -395,6 +399,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.launchFn == nil {
+		http.Error(w, "Service Unavailable: distributed queuing not implemented in api mode", http.StatusServiceUnavailable)
 		return
 	}
 
