@@ -2,10 +2,17 @@ package checkpoint
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"gorm.io/gorm"
 )
+
+// maxSeqAttempts bounds the optimistic retry when two writers race for the same
+// per-job seq.
+const maxSeqAttempts = 8
 
 // Service owns the append-only event log and durable checkpoints for a job.
 // It is backed by the control-plane Store (Postgres/SQLite) for the ordered
@@ -20,20 +27,48 @@ func NewService(s store.Store, snap Snapshotter) *Service {
 }
 
 // AppendEvent writes the next event for a job with a per-job monotonic seq.
-// The store's UNIQUE(job_id, seq) index is the backstop against gaps/dupes.
+//
+// seq is derived from MAX(seq)+1, so two writers racing on the same job can
+// compute the same next value. The store's UNIQUE(job_id, seq) index rejects
+// the loser with a duplicate-key error; we treat that as a signal to recompute
+// and retry rather than an error, giving correct monotonic seqs without a
+// per-job lock. Non-uniqueness errors are returned immediately.
 func (s *Service) AppendEvent(ctx context.Context, jobID, phase string, payload map[string]interface{}) (*store.Event, error) {
-	next, err := s.nextSeq(ctx, jobID)
-	if err != nil {
-		return nil, err
-	}
 	if payload == nil {
 		payload = map[string]interface{}{}
 	}
-	ev := &store.Event{JobID: jobID, Seq: next, Phase: phase, Payload: payload}
-	if err := s.store.AppendEvent(ctx, ev); err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < maxSeqAttempts; attempt++ {
+		next, err := s.nextSeq(ctx, jobID)
+		if err != nil {
+			return nil, err
+		}
+		ev := &store.Event{JobID: jobID, Seq: next, Phase: phase, Payload: payload}
+		err = s.store.AppendEvent(ctx, ev)
+		if err == nil {
+			return ev, nil
+		}
+		if !isUniqueViolation(err) {
+			return nil, err
+		}
+		lastErr = err // another writer took this seq; recompute and retry
 	}
-	return ev, nil
+	return nil, fmt.Errorf("append event for job %s: exhausted %d seq retries: %w", jobID, maxSeqAttempts, lastErr)
+}
+
+// isUniqueViolation reports whether err is a unique/duplicate-key constraint
+// failure, across the drivers we run (Postgres in prod, SQLite in tests).
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || // sqlite: "UNIQUE constraint failed"
+		strings.Contains(msg, "duplicate key") || // postgres text
+		strings.Contains(msg, "23505") // postgres SQLSTATE unique_violation
 }
 
 // Events returns the full ordered event log for a job (for replay).

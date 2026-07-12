@@ -57,17 +57,25 @@ func (l *Ledger) Commit(ctx context.Context, jobID string, seq int64, signature,
 	return l.store.RecordSideEffect(ctx, eff)
 }
 
-// Do runs fn exactly once per (jobID, seq, signature). On the first call it
-// executes fn and records the effect; on any replay it returns the cached
-// result without invoking fn again. This is the primitive the resume path
-// relies on to guarantee "replay never double-fires an effect".
-func (l *Ledger) Do(ctx context.Context, jobID string, seq int64, signature, effectType string, fn func() (string, error)) (string, error) {
+// Do executes a side effect at most once as observed by the control plane: on
+// the first call it runs fn and records the effect; once that record is
+// committed, every replay returns the cached result without calling fn again.
+//
+// Semantics — at-least-once until commit, not strict exactly-once. There is a
+// failure window: if the process dies AFTER fn() runs but BEFORE Commit()
+// persists, the effect is unrecorded, so a resume calls fn again. To make the
+// external effect itself safe across that window, fn receives the stable
+// idempotencyKey (== effectID(jobID, seq, signature)); the caller MUST forward
+// it to the remote system (e.g. an `Idempotency-Key` HTTP header) so the server
+// dedupes the retry. Local/deterministic effects can ignore the argument.
+func (l *Ledger) Do(ctx context.Context, jobID string, seq int64, signature, effectType string, fn func(idempotencyKey string) (string, error)) (string, error) {
+	key := effectID(jobID, seq, signature)
 	if uri, committed, err := l.Check(ctx, jobID, seq, signature); err != nil {
 		return "", err
 	} else if committed {
 		return uri, nil
 	}
-	resultURI, err := fn()
+	resultURI, err := fn(key)
 	if err != nil {
 		return "", err
 	}
