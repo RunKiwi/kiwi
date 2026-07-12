@@ -13,6 +13,15 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+type JetStreamPublisher struct {
+	js jetstream.JetStream
+}
+
+func (p *JetStreamPublisher) Publish(ctx context.Context, topic string, payload []byte, msgID string) error {
+	_, err := p.js.Publish(ctx, topic, payload, jetstream.WithMsgID(msgID))
+	return err
+}
+
 func main() {
 	addr := flag.String("addr", ":8080", "The address the Kiwi cloud daemon listens on")
 	dsn := flag.String("dsn", "host=localhost user=postgres password=postgres dbname=kiwi port=5432 sslmode=disable", "The Postgres DSN")
@@ -31,23 +40,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	nc, err := nats.Connect(*natsURL)
-	if err != nil {
-		fmt.Printf("Error connecting to NATS: %v\n", err)
-		os.Exit(1)
-	}
-	defer nc.Close()
+	var js jetstream.JetStream
+	var nc *nats.Conn
+	var errNats error
 
-	js, err := jetstream.New(nc)
-	if err != nil {
-		fmt.Printf("Error creating JetStream context: %v\n", err)
-		os.Exit(1)
-	}
-
+	nc, errNats = nats.Connect(*natsURL)
 	ctx := context.Background()
-	if err := queue.SetupStream(ctx, js); err != nil {
-		fmt.Printf("Error setting up JetStream stream: %v\n", err)
-		os.Exit(1)
+
+	if errNats != nil {
+		fmt.Printf("[Warning] Error connecting to NATS: %v. Running without NATS...\n", errNats)
+	} else {
+		defer nc.Close()
+		js, errNats = jetstream.New(nc)
+		if errNats != nil {
+			fmt.Printf("[Warning] Error creating JetStream context: %v\n", errNats)
+		} else {
+			if err := queue.SetupStream(ctx, js); err != nil {
+				fmt.Printf("[Warning] Error setting up JetStream stream: %v\n", err)
+			}
+		}
 	}
 
 	storage := store.NewPostgresStore(db)
@@ -57,18 +68,26 @@ func main() {
 		// Recover tasks interrupted by a previous restart before accepting new work.
 		server.RecoverTasks()
 
-		consumer := queue.NewConsumer(js, storage, server.LaunchTask)
-		if err := consumer.Start(ctx); err != nil {
-			fmt.Printf("Error starting consumer: %v\n", err)
-			os.Exit(1)
+		if js != nil {
+			consumer := queue.NewConsumer(js, storage, server.LaunchTask)
+			if err := consumer.Start(ctx); err != nil {
+				fmt.Printf("Error starting consumer: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("[Orchestrator] Job Consumer started")
+		} else {
+			fmt.Println("[Orchestrator] JetStream not available; Job Consumer NOT started")
 		}
-		fmt.Println("[Orchestrator] Job Consumer started")
 	}
 
 	if *role == "all" || *role == "api" {
-		relay := queue.NewRelay(db, js)
-		go relay.Start(ctx)
-		fmt.Println("[API] Outbox Relay started")
+		if js != nil {
+			relay := queue.NewRelay(storage, &JetStreamPublisher{js: js})
+			go relay.Start(ctx)
+			fmt.Println("[API] Outbox Relay started")
+		} else {
+			fmt.Println("[API] JetStream not available; Outbox Relay NOT started")
+		}
 
 		err = server.Start(*addr)
 		if err != nil {

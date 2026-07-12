@@ -3,45 +3,64 @@ package queue
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
-	"github.com/nats-io/nats.go/jetstream"
 	"gorm.io/gorm"
 )
 
-type Relay struct {
-	db *gorm.DB
-	js jetstream.JetStream
+type Publisher interface {
+	Publish(ctx context.Context, topic string, payload []byte, msgID string) error
 }
 
-func NewRelay(db *gorm.DB, js jetstream.JetStream) *Relay {
-	return &Relay{db: db, js: js}
+type Relay struct {
+	store store.Store
+	pub   Publisher
+}
+
+func NewRelay(s store.Store, pub Publisher) *Relay {
+	return &Relay{store: s, pub: pub}
 }
 
 func (r *Relay) Start(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+
+	backoff := 1 * time.Second
+	maxBackoff := 30 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.processBatch(ctx)
+			processed, err := r.processBatch(ctx)
+			if err != nil {
+				log.Printf("[Relay] Error processing batch: %v\n", err)
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				ticker.Reset(backoff)
+			} else {
+				backoff = 1 * time.Second
+				ticker.Reset(backoff)
+			}
+			_ = processed
 		}
 	}
 }
 
-func (r *Relay) processBatch(ctx context.Context) {
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+func (r *Relay) processBatch(ctx context.Context) (int, error) {
+	var processed int
+	err := r.store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var outboxes []store.Outbox
-		if err := tx.Raw(`
-			SELECT * FROM outboxes
-			WHERE published_at IS NULL
-			ORDER BY created_at ASC
-			LIMIT 50
-			FOR UPDATE SKIP LOCKED
-		`).Scan(&outboxes).Error; err != nil {
+		query := `SELECT * FROM outbox WHERE published_at IS NULL ORDER BY created_at ASC LIMIT 50`
+		if tx.Dialector.Name() == "postgres" {
+			query += " FOR UPDATE SKIP LOCKED"
+		}
+		if err := tx.Raw(query).Scan(&outboxes).Error; err != nil {
 			return err
 		}
 
@@ -52,16 +71,18 @@ func (r *Relay) processBatch(ctx context.Context) {
 		for i := range outboxes {
 			ob := &outboxes[i]
 
-			// We will publish JSON like `{"job_id": "..."}`
 			jobID, ok := ob.Payload["job_id"].(string)
 			if !ok {
-				return fmt.Errorf("missing job_id in outbox payload")
+				log.Printf("[Relay] skipping malformed outbox %d: missing job_id", ob.ID)
+				now := time.Now()
+				ob.PublishedAt = &now
+				tx.Model(ob).Select("published_at").Updates(ob)
+				continue
 			}
 
-			// We will publish JSON like `{"job_id": "..."}`
 			msgPayload := []byte(fmt.Sprintf(`{"job_id":"%s"}`, jobID))
 
-			_, errPublish := r.js.Publish(ctx, ob.Topic, msgPayload, jetstream.WithMsgID(fmt.Sprintf("outbox-%d", ob.ID)))
+			errPublish := r.pub.Publish(ctx, ob.Topic, msgPayload, fmt.Sprintf("outbox-%d", ob.ID))
 			if errPublish != nil {
 				return fmt.Errorf("failed to publish outbox %d: %w", ob.ID, errPublish)
 			}
@@ -71,11 +92,10 @@ func (r *Relay) processBatch(ctx context.Context) {
 			if err := tx.Model(ob).Select("published_at").Updates(ob).Error; err != nil {
 				return err
 			}
+			processed++
 		}
 		return nil
 	})
 
-	if err != nil {
-		fmt.Printf("[Relay] Error processing batch: %v\n", err)
-	}
+	return processed, err
 }

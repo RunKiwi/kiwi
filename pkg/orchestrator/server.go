@@ -505,18 +505,13 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(state).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(job).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(outbox).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	// Reuse store method as per P1.2 review
+	if err := s.db.Create(state).Error; err != nil {
+		http.Error(w, fmt.Sprintf("failed to create task state: %v", err), http.StatusInternalServerError)
+		os.RemoveAll(tempSandbox)
+		return
+	}
+	err = s.storage.CreateJobWithOutbox(r.Context(), job, outbox)
 
 	if err != nil {
 		http.Error(w, "failed to register task in database", http.StatusInternalServerError)
