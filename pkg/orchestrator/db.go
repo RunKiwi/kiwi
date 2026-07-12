@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agentapi"
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -38,6 +39,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.Job{}, &store.Outbox{},
 		&store.Event{}, &store.Checkpoint{}, &store.SideEffect{}, &store.Agent{},
+		&agentapi.JobToken{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
 	}
