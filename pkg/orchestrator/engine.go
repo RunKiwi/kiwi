@@ -2,14 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/infra"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
-	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
 )
 
@@ -23,7 +26,7 @@ type Engine struct {
 	CostCallback  func(float64)
 	MaxBudget     float64
 	LLMMode       string // "mock" (default) or "anthropic"
-	SandboxConfig *sandbox.SandboxConfig
+	Infra         infra.Infra
 	ActorModel    string
 	CriticModel   string
 	EventCallback func(TaskEvent)
@@ -161,10 +164,11 @@ func (e *Engine) resolveAPIKey(ctx context.Context, taskID string) (string, erro
 }
 
 // RunTask starts the feedback loop to align the codebase to the desired state.
-func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task string, filePath string, testCmd string) error {
-	if e.SandboxConfig != nil {
-		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, e.SandboxConfig)
-	}
+func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, manifest *store.Manifest) error {
+	task, _ := manifest.Content["task"].(string)
+	file, _ := manifest.Content["file"].(string)
+	testCmd, _ := manifest.Content["test_cmd"].(string)
+	filePath := filepath.Join(dir, file)
 
 	e.log("[Orchestrator] Desired State: %s\n", task)
 	e.log("[Orchestrator] Running initial test command: %s\n", testCmd)
@@ -190,9 +194,20 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 	}
 
 	initStart := time.Now()
-	res, err := sandbox.RunCommand(ctx, dir, testCmd, env)
+
+	// Provision execution environment
+	handle, err := e.Infra.Provision(ctx, dir, manifest)
 	if err != nil {
-		return fmt.Errorf("sandbox failed to run command: %w", err)
+		return fmt.Errorf("infra failed to provision: %w", err)
+	}
+	defer e.Infra.Terminate(context.Background(), handle)
+
+	// Inject GITHUB_TOKEN environment variable into command via export
+	// We pass env directly to the command
+	output, runErr := handle.RunCommand(ctx, testCmd, env)
+	if runErr != nil && !errors.Is(runErr, infra.ErrTestFailed) {
+		e.log("[Sandbox Error]: %v\n", runErr)
+		return fmt.Errorf("infra error during initial test: %w", runErr)
 	}
 
 	accumulatedCost += 0.02
@@ -200,19 +215,19 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		e.CostCallback(0.02)
 	}
 
-	if res.Success {
-		e.emit(0, "initial_test", "pass", summarize(res.Output, 500), time.Since(initStart), nil)
+	if runErr == nil {
+		e.emit(0, "initial_test", "pass", summarize(output, 500), time.Since(initStart), nil)
 		e.log("[Orchestrator] Current state matches desired state. Tests already pass!\n")
 		return nil
 	}
-	e.emit(0, "initial_test", "fail", summarize(res.Output, 500), time.Since(initStart), nil)
+	e.emit(0, "initial_test", "fail", summarize(output, 500), time.Since(initStart), nil)
 
 	e.log("[Orchestrator] Tests failed. Entering correction loop...\n")
-	e.log("[Sandbox Output]:\n%s\n", res.Output)
+	e.log("[Sandbox Output]:\n%s\n", output)
 
-	outputCounts[res.Output]++
+	outputCounts[output]++
 
-	lastBuildOutput := res.Output
+	lastBuildOutput := output
 	criticReasons := ""
 
 	for step := 1; step <= e.MaxSteps; step++ {
@@ -227,6 +242,7 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		// Read current source code
 		content, err := os.ReadFile(filePath)
 		if err != nil {
+			fmt.Printf("ERROR reading file %s: %v\n", filePath, err)
 			return fmt.Errorf("failed to read target file: %w", err)
 		}
 
@@ -278,26 +294,29 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		if err != nil {
 			return fmt.Errorf("failed to resolve tunnel environment: %w", err)
 		}
+
 		testStart := time.Now()
-		res, err = sandbox.RunCommand(ctx, dir, testCmd, env)
-		if err != nil {
-			return fmt.Errorf("sandbox run failed: %w", err)
+		output, runErr = handle.RunCommand(ctx, testCmd, env)
+
+		if runErr != nil && !errors.Is(runErr, infra.ErrTestFailed) {
+			e.log("[Sandbox Error]: %v\n", runErr)
+			return fmt.Errorf("infra error during test execution: %w", runErr)
 		}
 
-		if res.Success {
-			e.emit(step, "test", "pass", summarize(res.Output, 500), time.Since(testStart), nil)
+		if runErr == nil {
+			e.emit(step, "test", "pass", summarize(output, 500), time.Since(testStart), nil)
 			e.log("[Gate] Success: tests passed.\n")
 			return nil
 		}
 
-		e.emit(step, "test", "fail", summarize(res.Output, 500), time.Since(testStart), nil)
+		e.emit(step, "test", "fail", summarize(output, 500), time.Since(testStart), nil)
 		e.log("[Gate] Fail: target state still diverging.\n")
-		e.log("[Sandbox Output]:\n%s\n", res.Output)
-		lastBuildOutput = res.Output
+		e.log("[Sandbox Output]:\n%s\n", output)
+		lastBuildOutput = output
 
 		// Check duplicate output count for loop safety
-		outputCounts[res.Output]++
-		if outputCounts[res.Output] >= 3 {
+		outputCounts[output]++
+		if outputCounts[output] >= 3 {
 			e.log("[Orchestrator Halt] Loop safety cut-off: recursive loop detected (compiler error repeated 3 times).\n")
 			return fmt.Errorf("loop safety halt: recursive loop detected (compiler error repeated 3 times)")
 		}

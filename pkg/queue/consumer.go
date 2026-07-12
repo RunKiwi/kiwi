@@ -14,10 +14,10 @@ import (
 type Consumer struct {
 	js       jetstream.JetStream
 	db       store.Store
-	launchFn func(taskID, sandboxPath, task, file, testCmd string)
+	launchFn func(taskID, sandboxPath string, manifest *store.Manifest)
 }
 
-func NewConsumer(js jetstream.JetStream, db store.Store, launchFn func(taskID, sandboxPath, task, file, testCmd string)) *Consumer {
+func NewConsumer(js jetstream.JetStream, db store.Store, launchFn func(taskID, sandboxPath string, manifest *store.Manifest)) *Consumer {
 	return &Consumer{
 		js:       js,
 		db:       db,
@@ -113,10 +113,6 @@ func (c *Consumer) handleMsg(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	task, _ := job.Inputs["task"].(string)
-	file, _ := job.Inputs["file"].(string)
-	testCmd, _ := job.Inputs["test_cmd"].(string)
-
 	ok, errUpdate := c.db.UpdateJobStatus(ctx, job.ID, "PENDING", "SCHEDULING")
 	if errUpdate != nil {
 		fmt.Printf("[Consumer] Failed to update job status %s: %v\n", jobID, errUpdate)
@@ -130,7 +126,7 @@ func (c *Consumer) handleMsg(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	fmt.Printf("[Consumer] Launching job %s\n", jobID)
-	c.launchFn(job.ID, *job.SandboxRef, task, file, testCmd)
+	c.launchFn(job.ID, *job.SandboxRef, m)
 
 	// The orchestrator has accepted it into background processing
 	msg.Ack()

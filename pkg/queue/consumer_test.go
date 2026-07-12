@@ -53,7 +53,7 @@ func (m *mockMsg) Term() error  { return nil }
 func TestConsumerRedeliveryIdempotency(t *testing.T) {
 	db := &mockStore{}
 	launchCount := 0
-	launchFn := func(taskID, sandboxPath, task, file, testCmd string) {
+	launchFn := func(taskID, sandboxPath string, m *store.Manifest) {
 		launchCount++
 	}
 

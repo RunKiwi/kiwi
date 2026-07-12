@@ -36,7 +36,27 @@ func (s *Server) RecoverTasks() {
 			task, _ := j.Inputs["task"].(string)
 			file, _ := j.Inputs["file"].(string)
 			testCmd, _ := j.Inputs["test_cmd"].(string)
-			s.launchFn(j.ID, *j.SandboxRef, task, file, testCmd)
+
+			var m *store.Manifest
+			if j.ManifestID != nil {
+				var manifest store.Manifest
+				if err := s.db.Where("id = ?", *j.ManifestID).First(&manifest).Error; err == nil {
+					m = &manifest
+				}
+			}
+
+			// Fallback for V1 jobs without a manifest
+			if m == nil {
+				m = &store.Manifest{
+					Content: map[string]interface{}{
+						"task":     task,
+						"file":     file,
+						"test_cmd": testCmd,
+					},
+				}
+			}
+
+			s.launchFn(j.ID, *j.SandboxRef, m)
 		} else {
 			s.db.Model(&store.Job{}).Where("id = ?", j.ID).Update("status", "FAILED")
 			s.db.Model(&TaskState{}).Where("id = ?", j.ID).Updates(map[string]interface{}{

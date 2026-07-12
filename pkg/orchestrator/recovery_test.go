@@ -40,7 +40,7 @@ func TestRecoverTasks(t *testing.T) {
 
 	var launched []string
 	s := &Server{db: db}
-	s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {
+	s.launchFn = func(taskID, sandboxPath string, manifest *store.Manifest) {
 		launched = append(launched, taskID)
 	}
 
