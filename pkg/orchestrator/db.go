@@ -3,17 +3,17 @@ package orchestrator
 import (
 	"fmt"
 
-	"github.com/glebarez/sqlite"
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-// InitDB initializes GORM with pure-Go SQLite and runs migrations for all
+// InitDB initializes GORM with Postgres and runs migrations for all
 // models including auth tables (Organization, User, APIKey) and TaskState.
-func InitDB(dbPath string) (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+func InitDB(dsn string) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {

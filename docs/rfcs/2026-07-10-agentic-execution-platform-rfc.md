@@ -412,7 +412,27 @@ This gives crash-safety (control-plane restart re-attaches or restores running j
 
 ---
 
-## 10. Phased Delivery (build order, greenfield)
+## 10. Deployment Strategy & Bring-Your-Own-Cloud (BYOC)
+
+### 10.1 Local Development (Developer Experience)
+To maintain the frictionless experience of the original monolith, local development relies on **Docker Compose**. A single `docker-compose.yml` provisions the entire Control Plane (PostgreSQL, NATS JetStream, MinIO for S3, API Server, and LLMO). Developers can spin up the full distributed system locally with `docker-compose up` without manually installing infrastructure dependencies.
+
+### 10.2 Production SaaS & The "Kiwi Runner Daemon" (BYOC)
+For enterprise production, the platform uses a **Control Plane / Data Plane Split** (the "Self-Hosted Runner" model) to support Bring-Your-Own-Cloud (BYOC).
+
+1. **SaaS Control Plane:** We host the API Servers, PostgreSQL, NATS, and the LLM Orchestrator. Customer code and secrets never persist here.
+2. **Customer Data Plane (BYOC):** Customers install a lightweight, outbound-only **Kiwi Runner Daemon** inside their own VPC (AWS, GCP, Kubernetes, or on-prem). 
+
+**How the Runner works:**
+- **Outbound Polling:** The Runner makes a secure, outbound-only connection (gRPC/WebSocket) to the SaaS Event Bus. It does not require the customer to open inbound firewall ports.
+- **Native Secrets (OIDC):** Because the Runner executes in the customer's cloud, the sandboxes can natively assume cloud IAM roles (e.g., AWS IAM, GCP Service Accounts). The Runner directly fetches secrets from the customer's native Cloud Secret Manager/Vault without funneling credentials through our SaaS.
+- **Data Privacy:** Code modification and workspace snapshots happen locally within the customer's VPC. Checkpoints can be configured to store in a customer-owned S3 bucket, meaning proprietary IP never crosses into the SaaS control plane.
+
+This approach guarantees high adoption by enterprise security teams by ensuring the customer retains absolute control over their network, compute infrastructure, and IAM permissions.
+
+---
+
+## 11. Phased Delivery (build order, greenfield)
 
 1. **P1 — Core control loop:** API server (auth, validate, idempotent submit, outbox) + Postgres + queue + LLMO + manifest generation + Docker Infrastructure driver + single-agent sandbox. Job runs end-to-end; strong-consistency invariants in place.
 2. **P2 — Master/Worker + checkpoints:** master/worker topology, event log, checkpoint/rollback with object-store snapshots, side-effect ledger, boot recovery.
@@ -422,7 +442,7 @@ This gives crash-safety (control-plane restart re-attaches or restores running j
 
 ---
 
-## 11. Open Questions / Future Work
+## 12. Open Questions / Future Work
 - Multi-region CP (distributed SQL vs. regional sharding) when latency/DR demands it.
 - Dynamic mid-run worker autoscaling (master-requested fan-out) and its budget interaction.
 - Deterministic replay limits with inherently non-deterministic tools (network, time) — how far to push snapshotting vs. accepting "resume, not bit-exact replay."

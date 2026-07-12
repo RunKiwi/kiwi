@@ -229,6 +229,22 @@ Each phase produces working, demoable software. Do not start a phase until the p
 
 ---
 
+## Phase P6 — Deployment Strategy & BYOC Runner
+
+**Objective:** Implement the local developer experience (Docker Compose) and the enterprise SaaS Bring-Your-Own-Cloud (BYOC) deployment model.
+
+*Note: This phase has its own detailed implementation plan. See [2026-07-11-deployment-runner-plan.md](file:///Users/karn/Desktop/workspace/steelwing/docs/plans/2026-07-11-deployment-runner-plan.md) for the full breakdown of workstreams.*
+
+### Workstreams Overview
+- **D1 Local Compose Stack:** Single-command local provisioning (`postgres`, `nats`, `minio`, `kiwi-api`, `kiwi-llmo`).
+- **D2 Kiwi Runner Daemon:** The outbound-polling customer binary (`cmd/kiwi-runner`) that executes sandboxes inside the customer's VPC.
+- **D3 SaaS Runner Orchestration:** The control-plane routing logic to dispatch jobs to remote runners.
+- **D4 Native Cloud Secrets:** Runner-side integration with AWS/GCP Secret Managers via OIDC.
+
+**P6 exit (milestone M6 — "Deployable SaaS & BYOC"):** A developer can spin up the full stack locally with one command; a remote runner can securely claim and execute a job from a SaaS control plane.
+
+---
+
 ## Cross-cutting: testing & CI strategy
 
 - **Unit (default):** pure logic + interface stubs (mock provider, in-memory queue/store, fake Infra). No network. This is the CI gate (`go test ./...`).
@@ -248,6 +264,7 @@ Each phase produces working, demoable software. Do not start a phase until the p
 | M3 Safe multi-tenant | P3 | JIT secrets, scoped tokens, egress allowlist, microVM option, manifest integrity |
 | M4 Observable & scalable | P4 | OTel tracing + live SSE + metrics; meets SLOs under load |
 | M5 GA control plane | P5 | Bring-your-own-LLM (Anthropic/Codex/Gemini/compatible), governance, plugins |
+| M6 Deployable SaaS & BYOC | P6 | Docker Compose local stack + remote BYOC Runner Daemon |
 
 ## Risks & sequencing notes
 - **SQLite→Postgres is load-bearing for P1**; do it first — every later guarantee depends on transactional outbox + conditional updates.

@@ -22,6 +22,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
 	"gorm.io/gorm"
 )
@@ -45,11 +46,15 @@ type TaskState struct {
 
 type Server struct {
 	db       *gorm.DB
+	storage  store.Store
 	launchFn func(taskID, sandboxPath, task, file, testCmd string)
 }
 
-func NewServer(db *gorm.DB) *Server {
-	s := &Server{db: db}
+func NewServer(storage store.Store) *Server {
+	s := &Server{
+		db:      storage.DB(),
+		storage: storage,
+	}
 	s.launchFn = s.launchTask
 	return s
 }
