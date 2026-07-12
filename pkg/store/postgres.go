@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // PostgresStore implements the Store interface using a PostgreSQL GORM connection.
@@ -41,6 +42,18 @@ func (s *PostgresStore) ListOrganizations(ctx context.Context) ([]Organization, 
 
 func (s *PostgresStore) DB() *gorm.DB {
 	return s.db
+}
+
+func (s *PostgresStore) CreateManifest(ctx context.Context, m *Manifest) error {
+	// Use clauses.OnConflict to ignore if it already exists (immutable)
+	// Since ID is sha256, it's deterministic.
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		DoNothing: true,
+	}).Create(m).Error
+}
+
+func (s *PostgresStore) UpdateJobManifest(ctx context.Context, jobID, manifestID string) error {
+	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Update("manifest_id", manifestID).Error
 }
 
 func (s *PostgresStore) CreateJobWithOutbox(ctx context.Context, job *Job, outbox *Outbox) error {
