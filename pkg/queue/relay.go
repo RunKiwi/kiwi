@@ -51,7 +51,7 @@ func (r *Relay) processBatch(ctx context.Context) {
 
 		for i := range outboxes {
 			ob := &outboxes[i]
-			
+
 			// We will publish JSON like `{"job_id": "..."}`
 			jobID, ok := ob.Payload["job_id"].(string)
 			if !ok {
@@ -65,7 +65,7 @@ func (r *Relay) processBatch(ctx context.Context) {
 			if errPublish != nil {
 				return fmt.Errorf("failed to publish outbox %d: %w", ob.ID, errPublish)
 			}
-			
+
 			now := time.Now()
 			ob.PublishedAt = &now
 			if err := tx.Model(ob).Select("published_at").Updates(ob).Error; err != nil {
