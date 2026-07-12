@@ -50,12 +50,19 @@ type Server struct {
 	launchFn func(taskID, sandboxPath, task, file, testCmd string)
 }
 
-func NewServer(storage store.Store) *Server {
+func NewServer(storage store.Store, role string) *Server {
 	s := &Server{
 		db:      storage.DB(),
 		storage: storage,
 	}
-	s.launchFn = s.launchTask
+	if role == "all" || role == "orchestrator" {
+		s.launchFn = s.launchTask
+	} else {
+		s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {
+			// No-op for 'api' role until P1.2 (queue) is implemented
+			fmt.Printf("[API] Task %s queued (waiting for orchestrator to pick up)\n", taskID)
+		}
+	}
 	return s
 }
 
