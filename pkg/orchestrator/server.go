@@ -21,6 +21,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
+	"github.com/ibreakthecloud/kiwi/pkg/infra"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -49,7 +50,8 @@ type TaskState struct {
 type Server struct {
 	db           *gorm.DB
 	storage      store.Store
-	launchFn     func(taskID, sandboxPath, task, file, testCmd string)
+	launchFn     func(taskID, sandboxPath string, manifest *store.Manifest)
+	infra        infra.Infra
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 }
 
@@ -61,21 +63,22 @@ func NewServer(storage store.Store, role string) *Server {
 	s := &Server{
 		db:           storage.DB(),
 		storage:      storage,
+		infra:        infra.NewDockerInfra(os.TempDir()),
 		snapshotRoot: root,
 	}
 	if role == "all" || role == "orchestrator" {
-		s.launchFn = s.launchTask
+		s.launchFn = s.LaunchTask
 	} else {
 		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
 	}
 	return s
 }
 
-// launchTask runs the orchestration loop in the background for an
+// LaunchTask runs the orchestration loop in the background for an
 // already-persisted task whose sandbox is populated on disk. Used by both
 // submission and boot recovery. It seeds the log buffer from the existing row so
 // recovered tasks keep their prior logs.
-func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
+func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest) {
 	go func() {
 		logBuf := new(bytes.Buffer)
 		var existing TaskState
@@ -141,14 +144,9 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			_ = s.db.Create(&ev).Error // best-effort telemetry; never fail the task
 		}
 
-		// Setup sandbox parameters for execution isolation and constraints
-		engine.SandboxConfig = &sandbox.SandboxConfig{
-			UseDocker:   os.Getenv("USE_DOCKER") == "true",
-			DockerImage: limits.DockerImage,
-			MemoryLimit: "512m", // default resource limits
-			CPULimit:    "1.0",
-			NetworkNone: true, // default network isolation
-		}
+		// Infra dependency injection
+		// Initialized once in NewServer
+		engine.Infra = s.infra
 
 		// Durability: event log + workspace checkpoints + side-effect ledger.
 		// taskID is used as the V2 jobID. Snapshots live under snapshotRoot so
@@ -161,12 +159,16 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		// Ensure a V2 Job row exists (idempotent across submission + recovery).
 		jobStatus := "RUNNING"
 		sref := sandboxPath
+		inputs := map[string]interface{}{}
+		if manifest != nil {
+			inputs = manifest.Content
+		}
 		job := &store.Job{
 			ID:         taskID,
 			OrgID:      existing.OrgID,
 			UserID:     existing.UserID,
 			Status:     jobStatus,
-			Inputs:     map[string]interface{}{"task": task, "file": file, "test_cmd": testCmd},
+			Inputs:     inputs,
 			SandboxRef: &sref,
 		}
 		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
@@ -176,6 +178,14 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
 		defer cancel()
+
+		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+			UseDocker:   os.Getenv("USE_DOCKER") == "true",
+			DockerImage: limits.DockerImage,
+			MemoryLimit: fmt.Sprintf("%dm", limits.MaxSandboxMemoryMB),
+			CPULimit:    fmt.Sprintf("%.1f", limits.MaxSandboxCPU),
+			NetworkNone: true,
+		})
 
 		// Periodic background log synchronizer to SQLite row (every 500ms)
 		go func() {
@@ -192,10 +202,9 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			}
 		}()
 
-		absFilePath := filepath.Join(sandboxPath, file)
 		fmt.Fprintf(logBuf, "[Orchestrator] Running task in sandbox: %s\n", sandboxPath)
 
-		err = engine.RunTask(ctx, taskID, sandboxPath, task, absFilePath, testCmd)
+		err = engine.RunTask(ctx, taskID, sandboxPath, manifest)
 
 		finalStatus := "SUCCESS"
 		if err != nil {
@@ -402,11 +411,6 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.launchFn == nil {
-		http.Error(w, "Service Unavailable: distributed queuing not implemented in api mode", http.StatusServiceUnavailable)
-		return
-	}
-
 	// Parse multipart form
 	err := r.ParseMultipartForm(50 * 1024 * 1024) // 50MB max in memory
 	if err != nil {
@@ -513,7 +517,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		Task:           task,
 		FilePath:       file,
 		TestCmd:        testCmd,
-		Status:         "RUNNING",
+		Status:         "PENDING",
 		CreatedAt:      time.Now(),
 		SandboxPath:    tempSandbox,
 		Cost:           0.05,
@@ -523,20 +527,50 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		UserEmail:      claims.Email,
 	}
 
+	job := &store.Job{
+		ID:             taskID,
+		OrgID:          claims.OrgID,
+		UserID:         claims.UserID,
+		Status:         "PENDING",
+		IdempotencyKey: &idempotencyKey,
+		Inputs: map[string]interface{}{
+			"task":     task,
+			"file":     file,
+			"test_cmd": testCmd,
+		},
+		SandboxRef: &tempSandbox,
+	}
+	if idempotencyKey == "" {
+		job.IdempotencyKey = nil
+	}
+
+	outbox := &store.Outbox{
+		JobID: taskID,
+		Topic: "jobs.submitted",
+		Payload: map[string]interface{}{
+			"job_id": taskID,
+		},
+	}
+
+	// Reuse store method as per P1.2 review
 	if err := s.db.Create(state).Error; err != nil {
+		http.Error(w, fmt.Sprintf("failed to create task state: %v", err), http.StatusInternalServerError)
+		os.RemoveAll(tempSandbox)
+		return
+	}
+	err = s.storage.CreateJobWithOutbox(r.Context(), job, outbox)
+
+	if err != nil {
 		http.Error(w, "failed to register task in database", http.StatusInternalServerError)
 		return
 	}
 
 	_ = auth.LogAuditEvent(s.db, r, "CREATE", "TASK", taskID, fmt.Sprintf("Submitted task %q for file %q", task, file))
 
-	// Launch loop orchestration in the background (injectable for tests).
-	s.launchFn(taskID, tempSandbox, task, file, testCmd)
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"task_id": taskID,
-		"status":  "RUNNING",
+		"status":  "PENDING",
 	})
 }
 

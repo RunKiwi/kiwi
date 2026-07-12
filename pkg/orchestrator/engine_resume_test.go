@@ -9,6 +9,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
+	"github.com/ibreakthecloud/kiwi/pkg/infra"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
@@ -58,11 +59,15 @@ func TestEngineResumeFromCheckpoint(t *testing.T) {
 	// Passes once target.txt has >= 2 bytes.
 	testCmd := `test "$(wc -c < target.txt | tr -d ' ')" -ge 2`
 	const taskID = "task-1"
+	manifest := &store.Manifest{Content: map[string]interface{}{
+		"task": "make it pass", "file": "target.txt", "test_cmd": testCmd,
+	}}
 
 	newEngine := func(actor *fakeActor, maxSteps int) *Engine {
 		e := NewEngine(actor, maxSteps)
 		e.Critic = okCritic{}
 		e.LogOut = io.Discard
+		e.Infra = infra.NewDockerInfra(t.TempDir())
 		e.Checkpoints = checkpoint.NewService(st, checkpoint.NewLocalSnapshotter(snapRoot))
 		e.Ledger = checkpoint.NewLedger(st)
 		return e
@@ -71,7 +76,7 @@ func TestEngineResumeFromCheckpoint(t *testing.T) {
 	// Run 1: capped at 1 iteration → fails, leaving a checkpoint at step 1.
 	a1 := &fakeActor{}
 	e1 := newEngine(a1, 1)
-	if err := e1.RunTask(context.Background(), taskID, sandboxDir, "make it pass", target, testCmd); err == nil {
+	if err := e1.RunTask(context.Background(), taskID, sandboxDir, manifest); err == nil {
 		t.Fatal("run 1 should not converge in a single step")
 	}
 	if a1.calls != 1 {
@@ -91,17 +96,16 @@ func TestEngineResumeFromCheckpoint(t *testing.T) {
 	// Run 2: fresh engine + fresh actor, same taskID/store/snapshot root.
 	a2 := &fakeActor{}
 	e2 := newEngine(a2, 5)
-	if err := e2.RunTask(context.Background(), taskID, sandboxDir, "make it pass", target, testCmd); err != nil {
+	if err := e2.RunTask(context.Background(), taskID, sandboxDir, manifest); err != nil {
 		t.Fatalf("run 2 (resume) should converge: %v", err)
 	}
 	// The headline guarantee: step 1 was restored, not re-run — so the resumed
-	// actor is invoked exactly once (for step 2).
+	// actor is invoked exactly once (for step 2). Convergence here (RunTask
+	// returned nil) is only possible if the workspace was restored: a non-resumed
+	// run would find target.txt missing and error. The final workspace content is
+	// not asserted directly because Infra.Terminate wipes the sandbox on return.
 	if a2.calls != 1 {
-		t.Errorf("run2 actor calls = %d, want 1 (resumed at step 2)", a2.calls)
-	}
-	got, err := os.ReadFile(target)
-	if err != nil || string(got) != "xx" {
-		t.Fatalf("target = %q err=%v, want \"xx\" (restored \"x\" + one resumed edit)", got, err)
+		t.Fatalf("run2 actor calls = %d, want 1 (resumed at step 2, step 1 not re-run)", a2.calls)
 	}
 
 	// The event log spans both runs with a single monotonic sequence.

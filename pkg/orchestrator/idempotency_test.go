@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -17,7 +19,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := auth.InitAuthDB(db); err != nil {
 		t.Fatalf("migrate auth: %v", err)
 	}
-	if err := db.AutoMigrate(&TaskState{}, &TaskEvent{}); err != nil {
+	if err := db.AutoMigrate(&TaskState{}, &TaskEvent{}, &audit.AuditLog{}, &store.Job{}, &store.Outbox{}, &store.Workflow{}, &store.Manifest{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	// clean slate for the shared in-memory db
