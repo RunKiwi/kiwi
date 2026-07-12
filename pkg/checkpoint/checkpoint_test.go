@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -16,6 +17,11 @@ func newStore(t *testing.T) store.Store {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
+	}
+	// In-memory SQLite (shared cache) serializes best on a single connection;
+	// concurrent writers otherwise hit "database is locked" (SQLITE_BUSY).
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.Job{}, &store.Outbox{},
@@ -67,6 +73,72 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if hash != hash2 {
 		t.Errorf("hash drift after restore: %s != %s", hash, hash2)
+	}
+}
+
+// Empty directories must survive the snapshot/restore round-trip — the archive
+// records directory entries, not just regular files.
+func TestSnapshotPreservesEmptyDirs(t *testing.T) {
+	snap := NewLocalSnapshotter(t.TempDir())
+	dir := t.TempDir()
+	writeFile(t, dir, "keep.txt", "x")
+	if err := os.MkdirAll(filepath.Join(dir, "empty", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	uri, _, err := snap.Snapshot(dir)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if err := snap.Restore(uri, dir); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	for _, p := range []string{"empty", filepath.Join("empty", "nested")} {
+		fi, err := os.Stat(filepath.Join(dir, p))
+		if err != nil || !fi.IsDir() {
+			t.Errorf("empty dir %q not restored: err=%v", p, err)
+		}
+	}
+}
+
+// Concurrent AppendEvent callers on the same job must each get a distinct
+// monotonic seq — the retry loop resolves the MAX(seq)+1 race rather than
+// failing or duplicating.
+func TestAppendEventConcurrent(t *testing.T) {
+	svc := NewService(newStore(t), NewLocalSnapshotter(t.TempDir()))
+	ctx := context.Background()
+	const n = 12
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	seqs := map[int64]int{}
+	errs := 0
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ev, err := svc.AppendEvent(ctx, "j1", "phase", nil)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs++
+				return
+			}
+			seqs[ev.Seq]++
+		}()
+	}
+	wg.Wait()
+
+	if errs != 0 {
+		t.Fatalf("%d appends errored under contention", errs)
+	}
+	if len(seqs) != n {
+		t.Fatalf("got %d distinct seqs, want %d (duplicates: %v)", len(seqs), n, seqs)
+	}
+	for s := int64(1); s <= n; s++ {
+		if seqs[s] != 1 {
+			t.Errorf("seq %d appeared %d times, want exactly 1", s, seqs[s])
+		}
 	}
 }
 
@@ -125,13 +197,19 @@ func TestCheckpointWriteLatestRestore(t *testing.T) {
 	}
 }
 
-// The ledger fires an effect exactly once; a second Do with the same key
-// returns the cached result without re-invoking fn.
+// Once an effect is committed, a replay short-circuits fn and returns the cached
+// result. fn also receives the stable idempotency key so callers can dedupe the
+// remote call across the pre-commit crash window.
 func TestLedgerDoOnce(t *testing.T) {
 	ledger := NewLedger(newStore(t))
 	ctx := context.Background()
 	calls := 0
-	fn := func() (string, error) { calls++; return "result://x", nil }
+	var gotKey string
+	fn := func(idempotencyKey string) (string, error) {
+		calls++
+		gotKey = idempotencyKey
+		return "result://x", nil
+	}
 
 	uri1, err := ledger.Do(ctx, "j1", 5, "push@sha", "git-push", fn)
 	if err != nil || uri1 != "result://x" {
@@ -143,6 +221,10 @@ func TestLedgerDoOnce(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("fn called %d times, want 1 (replay must short-circuit)", calls)
+	}
+	// The injected key must be the stable effect ID the ledger keys on.
+	if want := effectID("j1", 5, "push@sha"); gotKey != want {
+		t.Errorf("idempotency key = %q, want %q", gotKey, want)
 	}
 }
 
@@ -174,7 +256,7 @@ func TestResumeNoDoubleFire(t *testing.T) {
 			writeFile(t, dir, name+".txt", name)
 			// External side effect — ledger-guarded, must fire once.
 			if external[name] {
-				if _, err := ledger.Do(ctx, jobID, seq, name, "external", func() (string, error) {
+				if _, err := ledger.Do(ctx, jobID, seq, name, "external", func(string) (string, error) {
 					fired[name]++
 					return "ok://" + name, nil
 				}); err != nil {
