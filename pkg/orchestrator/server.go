@@ -19,12 +19,14 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
+	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // TaskState represents the status and progress of a cloud task
@@ -45,15 +47,21 @@ type TaskState struct {
 }
 
 type Server struct {
-	db       *gorm.DB
-	storage  store.Store
-	launchFn func(taskID, sandboxPath, task, file, testCmd string)
+	db           *gorm.DB
+	storage      store.Store
+	launchFn     func(taskID, sandboxPath, task, file, testCmd string)
+	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 }
 
 func NewServer(storage store.Store) *Server {
+	root := os.Getenv("KIWI_SNAPSHOT_DIR")
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "kiwi-snapshots")
+	}
 	s := &Server{
-		db:      storage.DB(),
-		storage: storage,
+		db:           storage.DB(),
+		storage:      storage,
+		snapshotRoot: root,
 	}
 	s.launchFn = s.launchTask
 	return s
@@ -138,6 +146,29 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			NetworkNone: true, // default network isolation
 		}
 
+		// Durability: event log + workspace checkpoints + side-effect ledger.
+		// taskID is used as the V2 jobID. Snapshots live under snapshotRoot so
+		// they survive sandbox cleanup and daemon restarts; on relaunch the
+		// engine restores the latest checkpoint and replays the loop tail.
+		snap := checkpoint.NewLocalSnapshotter(s.snapshotRoot)
+		engine.Checkpoints = checkpoint.NewService(s.storage, snap)
+		engine.Ledger = checkpoint.NewLedger(s.storage)
+
+		// Ensure a V2 Job row exists (idempotent across submission + recovery).
+		jobStatus := "RUNNING"
+		sref := sandboxPath
+		job := &store.Job{
+			ID:         taskID,
+			OrgID:      existing.OrgID,
+			UserID:     existing.UserID,
+			Status:     jobStatus,
+			Inputs:     map[string]interface{}{"task": task, "file": file, "test_cmd": testCmd},
+			SandboxRef: &sref,
+		}
+		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
+			fmt.Fprintf(logBuf, "[Orchestrator] Warning: could not persist V2 job row: %v\n", err)
+		}
+
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
 		defer cancel()
@@ -178,6 +209,13 @@ func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
 			"status": finalStatus,
 			"logs":   logBuf.String(),
 		})
+
+		// Mirror the terminal state into the V2 job (SUCCESS->SUCCEEDED).
+		v2Status := "SUCCEEDED"
+		if finalStatus == "FAILED" {
+			v2Status = "FAILED"
+		}
+		s.db.Model(&store.Job{}).Where("id = ?", taskID).Update("status", v2Status)
 
 		_ = audit.LogEventDirect(s.db, existing.OrgID, existing.UserID, existing.UserEmail, "EXECUTE", "TASK", taskID, fmt.Sprintf("Finished execution with status: %s", finalStatus), "")
 

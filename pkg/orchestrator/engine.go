@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
@@ -27,6 +28,14 @@ type Engine struct {
 	ActorModel    string
 	CriticModel   string
 	EventCallback func(TaskEvent)
+
+	// Durability (optional; nil = disabled, loop behaves as before).
+	// Checkpoints records the V2 event log + workspace snapshots so a killed
+	// run resumes from its last checkpoint; Ledger guards external side effects
+	// so replay never double-fires them (RFC §7.3). taskID doubles as the jobID.
+	Checkpoints     *checkpoint.Service
+	Ledger          *checkpoint.Ledger
+	CheckpointEvery int // snapshot cadence in loop iterations; <=0 means every iteration
 }
 
 // NewEngine creates a new Loop Orchestrator engine
@@ -131,6 +140,66 @@ func (e *Engine) emit(step int, phase, outcome, detail string, dur time.Duration
 	e.EventCallback(ev)
 }
 
+// appendEvent records a phase into the durable V2 event log. Best-effort: a nil
+// Checkpoints service or an append error never affects loop behavior.
+func (e *Engine) appendEvent(ctx context.Context, jobID, phase, outcome string) {
+	if e.Checkpoints == nil {
+		return
+	}
+	if _, err := e.Checkpoints.AppendEvent(ctx, jobID, phase, map[string]interface{}{"outcome": outcome}); err != nil {
+		e.log("[Checkpoint] append event %s/%s failed: %v\n", phase, outcome, err)
+	}
+}
+
+// writeCheckpoint snapshots the workspace and anchors it at the current event
+// head, recording enough state to resume the loop. Best-effort.
+func (e *Engine) writeCheckpoint(ctx context.Context, jobID, dir string, step int, cost float64, lastOutput string) {
+	if e.Checkpoints == nil {
+		return
+	}
+	every := e.CheckpointEvery
+	if every <= 0 {
+		every = 1
+	}
+	if step%every != 0 {
+		return
+	}
+	state := map[string]interface{}{
+		"step":        step,
+		"cost":        cost,
+		"last_output": lastOutput,
+	}
+	if _, err := e.Checkpoints.Write(ctx, jobID, dir, state); err != nil {
+		e.log("[Checkpoint] write at step %d failed: %v\n", step, err)
+	}
+}
+
+// resumeFromCheckpoint restores the workspace from the latest checkpoint (if
+// any) and returns the loop cursor to continue from. When no checkpoint exists
+// (or checkpoints are disabled) it returns resumed=false and the caller runs the
+// normal initial-test path from step 1.
+func (e *Engine) resumeFromCheckpoint(ctx context.Context, jobID, dir string) (startStep int, cost float64, lastOutput string, resumed bool) {
+	if e.Checkpoints == nil {
+		return 1, 0, "", false
+	}
+	cp, err := e.Checkpoints.Restore(ctx, jobID, dir)
+	if err != nil {
+		return 1, 0, "", false // no checkpoint yet → fresh run
+	}
+	step := 1
+	if v, ok := cp.State["step"].(float64); ok { // JSON numbers decode as float64
+		step = int(v)
+	}
+	if v, ok := cp.State["cost"].(float64); ok {
+		cost = v
+	}
+	if v, ok := cp.State["last_output"].(string); ok {
+		lastOutput = v
+	}
+	e.log("[Orchestrator] Resumed from checkpoint at step %d (cost $%.2f); replaying loop tail.\n", step, cost)
+	return step + 1, cost, lastOutput, true
+}
+
 // resolveAPIKey resolves ANTHROPIC_API_KEY through the reverse tunnel (cache
 // first), falling back to the daemon environment. If neither is available it
 // pauses statefully until the client reconnects.
@@ -169,7 +238,6 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 	e.log("[Orchestrator] Desired State: %s\n", task)
 	e.log("[Orchestrator] Running initial test command: %s\n", testCmd)
 
-	accumulatedCost := 0.0
 	outputCounts := make(map[string]int)
 
 	// Build the live provider on demand (key resolved via tunnel / env).
@@ -183,39 +251,46 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		e.Critic = ap
 	}
 
-	// Resolve target credentials over the tunnel if required
-	env, err := e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
-	if err != nil {
-		return fmt.Errorf("failed to resolve tunnel environment: %w", err)
-	}
-
-	initStart := time.Now()
-	res, err := sandbox.RunCommand(ctx, dir, testCmd, env)
-	if err != nil {
-		return fmt.Errorf("sandbox failed to run command: %w", err)
-	}
-
-	accumulatedCost += 0.02
-	if e.CostCallback != nil {
-		e.CostCallback(0.02)
-	}
-
-	if res.Success {
-		e.emit(0, "initial_test", "pass", summarize(res.Output, 500), time.Since(initStart), nil)
-		e.log("[Orchestrator] Current state matches desired state. Tests already pass!\n")
-		return nil
-	}
-	e.emit(0, "initial_test", "fail", summarize(res.Output, 500), time.Since(initStart), nil)
-
-	e.log("[Orchestrator] Tests failed. Entering correction loop...\n")
-	e.log("[Sandbox Output]:\n%s\n", res.Output)
-
-	outputCounts[res.Output]++
-
-	lastBuildOutput := res.Output
+	// If a durable checkpoint exists, restore the workspace and continue the
+	// loop tail rather than re-running from the uploaded zip.
+	startStep, accumulatedCost, lastBuildOutput, resumed := e.resumeFromCheckpoint(ctx, taskID, dir)
 	criticReasons := ""
 
-	for step := 1; step <= e.MaxSteps; step++ {
+	if !resumed {
+		// Resolve target credentials over the tunnel if required
+		env, err := e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
+		if err != nil {
+			return fmt.Errorf("failed to resolve tunnel environment: %w", err)
+		}
+
+		initStart := time.Now()
+		res, err := sandbox.RunCommand(ctx, dir, testCmd, env)
+		if err != nil {
+			return fmt.Errorf("sandbox failed to run command: %w", err)
+		}
+
+		accumulatedCost += 0.02
+		if e.CostCallback != nil {
+			e.CostCallback(0.02)
+		}
+
+		if res.Success {
+			e.emit(0, "initial_test", "pass", summarize(res.Output, 500), time.Since(initStart), nil)
+			e.appendEvent(ctx, taskID, "initial_test", "pass")
+			e.log("[Orchestrator] Current state matches desired state. Tests already pass!\n")
+			return nil
+		}
+		e.emit(0, "initial_test", "fail", summarize(res.Output, 500), time.Since(initStart), nil)
+		e.appendEvent(ctx, taskID, "initial_test", "fail")
+
+		e.log("[Orchestrator] Tests failed. Entering correction loop...\n")
+		e.log("[Sandbox Output]:\n%s\n", res.Output)
+
+		outputCounts[res.Output]++
+		lastBuildOutput = res.Output
+	}
+
+	for step := startStep; step <= e.MaxSteps; step++ {
 		e.log("\n=== Loop Iteration %d / %d ===\n", step, e.MaxSteps)
 
 		// Check budget
@@ -240,6 +315,7 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 		}
 		e.charge(&accumulatedCost, e.Provider, 0.05)
 		e.emit(step, "actor", "proposed", "", time.Since(actorStart), e.Provider)
+		e.appendEvent(ctx, taskID, "actor", "proposed")
 		criticReasons = ""
 
 		// Critic reviews before applying.
@@ -257,6 +333,7 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 				outcome = "rejected"
 			}
 			e.emit(step, "critic", outcome, verdict.Reasons, time.Since(criticStart), e.Critic)
+			e.appendEvent(ctx, taskID, "critic", outcome)
 		}
 
 		if !verdict.Approved {
@@ -274,26 +351,38 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, task st
 
 		// Final gate: run the tests.
 		e.log("[Sandbox] Re-running build/tests...\n")
-		env, err = e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
+		env, err := e.resolveEnv(ctx, taskID, []string{"GITHUB_TOKEN"})
 		if err != nil {
 			return fmt.Errorf("failed to resolve tunnel environment: %w", err)
 		}
 		testStart := time.Now()
-		res, err = sandbox.RunCommand(ctx, dir, testCmd, env)
+		res, err := sandbox.RunCommand(ctx, dir, testCmd, env)
 		if err != nil {
 			return fmt.Errorf("sandbox run failed: %w", err)
 		}
 
 		if res.Success {
 			e.emit(step, "test", "pass", summarize(res.Output, 500), time.Since(testStart), nil)
+			e.appendEvent(ctx, taskID, "test", "pass")
+			// Terminal side effect (e.g. open a PR) goes through the ledger so a
+			// crash-and-resume never fires it twice. Local no-op seam for now.
+			if e.Ledger != nil {
+				_, _ = e.Ledger.Do(ctx, taskID, int64(step), "final-result", "report",
+					func(idempotencyKey string) (string, error) { return "", nil })
+			}
 			e.log("[Gate] Success: tests passed.\n")
 			return nil
 		}
 
 		e.emit(step, "test", "fail", summarize(res.Output, 500), time.Since(testStart), nil)
+		e.appendEvent(ctx, taskID, "test", "fail")
 		e.log("[Gate] Fail: target state still diverging.\n")
 		e.log("[Sandbox Output]:\n%s\n", res.Output)
 		lastBuildOutput = res.Output
+
+		// Durable checkpoint at the agent-turn boundary: the (failed) edit is now
+		// on disk, so a restart restores exactly here and replays the tail.
+		e.writeCheckpoint(ctx, taskID, dir, step, accumulatedCost, lastBuildOutput)
 
 		// Check duplicate output count for loop safety
 		outputCounts[res.Output]++
