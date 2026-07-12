@@ -32,7 +32,7 @@ func (s *Server) RecoverTasks() {
 			tunnel.GlobalRegistry.Register(j.ID, j.UserID, j.OrgID)
 			s.db.Model(&TaskState{}).Where("id = ?", j.ID).
 				Update("logs", gorm.Expr("logs || ?", "\n[Recovery] Re-launched after daemon restart.\n"))
-			
+
 			task, _ := j.Inputs["task"].(string)
 			file, _ := j.Inputs["file"].(string)
 			testCmd, _ := j.Inputs["test_cmd"].(string)

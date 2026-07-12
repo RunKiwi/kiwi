@@ -17,11 +17,14 @@ func Generate(job *store.Job, wf *store.Workflow) (*store.Manifest, error) {
 	}
 
 	content := make(map[string]interface{})
-	
+
 	// Default to copying all inputs
 	for k, v := range job.Inputs {
 		content[k] = v
 	}
+
+	// TODO(P1.5): Pin provider/model/limits/egress/secrets once available in the Job model.
+	// Currently serves as a single-agent stub.
 
 	var workflowID *string
 	if wf != nil {
@@ -48,7 +51,7 @@ func Generate(job *store.Job, wf *store.Workflow) (*store.Manifest, error) {
 		WorkflowID:    workflowID,
 		SchemaVersion: "1.0",
 		Content:       content,
-		Producer:      "kiwi-llmo",
+		Producer:      "default",
 		CreatedAt:     time.Now(),
 	}, nil
 }

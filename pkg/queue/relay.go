@@ -71,7 +71,6 @@ func (r *Relay) processBatch(ctx context.Context) (int, error) {
 
 		for i := range outboxes {
 			ob := &outboxes[i]
-
 			if _, ok := ob.Payload["job_id"].(string); !ok {
 				log.Printf("[Relay] skipping malformed outbox %d: missing job_id", ob.ID)
 				now := time.Now()
