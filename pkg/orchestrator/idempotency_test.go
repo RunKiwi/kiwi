@@ -18,7 +18,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := auth.InitAuthDB(db); err != nil {
 		t.Fatalf("migrate auth: %v", err)
 	}
-	if err := db.AutoMigrate(&TaskState{}, &TaskEvent{}, &store.Job{}, &store.Outbox{}); err != nil {
+	if err := db.AutoMigrate(&TaskState{}, &TaskEvent{}, &store.Job{}, &store.Outbox{}, &store.Workflow{}, &store.Manifest{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	// clean slate for the shared in-memory db

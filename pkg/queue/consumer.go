@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/manifest"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -62,6 +63,28 @@ func (c *Consumer) Start(ctx context.Context) error {
 		if job.SandboxRef == nil || *job.SandboxRef == "" {
 			fmt.Printf("[Consumer] Job %s missing sandbox_ref\n", jobID)
 			msg.Term()
+			return
+		}
+
+		// Generate immutable manifest
+		m, err := manifest.Generate(job, nil) // wf is nil for now (fallback to inputs)
+		if err != nil {
+			fmt.Printf("[Consumer] Failed to generate manifest for job %s: %v\n", jobID, err)
+			msg.Nak()
+			return
+		}
+
+		// Persist manifest
+		if err := c.db.CreateManifest(ctx, m); err != nil {
+			fmt.Printf("[Consumer] Failed to persist manifest for job %s: %v\n", jobID, err)
+			msg.Nak()
+			return
+		}
+
+		// Pin manifest to job
+		if err := c.db.UpdateJobManifest(ctx, job.ID, m.ID); err != nil {
+			fmt.Printf("[Consumer] Failed to pin manifest to job %s: %v\n", jobID, err)
+			msg.Nak()
 			return
 		}
 
