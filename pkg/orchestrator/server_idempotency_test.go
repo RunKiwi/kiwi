@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +67,8 @@ func postTask(t *testing.T, s *Server, key string) map[string]string {
 
 func TestIdempotentSubmit(t *testing.T) {
 	db := newTestDB(t)
-	s := &Server{db: db}
+	st := store.NewPostgresStore(db)
+	s := &Server{db: db, storage: st}
 	s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {} // no engine
 
 	first := postTask(t, s, "dup-key")

@@ -129,6 +129,10 @@ type Outbox struct {
 	CreatedAt   time.Time              `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 
+func (Outbox) TableName() string {
+	return "outbox"
+}
+
 // Event represents an append-only execution trace event.
 type Event struct {
 	ID      int64   `gorm:"primaryKey;autoIncrement" json:"id"`
