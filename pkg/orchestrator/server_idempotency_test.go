@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
-	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 func multipartTask(t *testing.T) (*bytes.Buffer, string) {
