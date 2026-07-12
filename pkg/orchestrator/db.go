@@ -31,5 +31,16 @@ func InitDB(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to migrate task schema: %w", err)
 	}
 
+	// Migrate the V2 control-plane schema (jobs, event log, checkpoints,
+	// side-effect ledger, agents). This is the quick-validation path so the
+	// tables exist without running migrations/0001 by hand; migrations/0001
+	// remains the production source of truth (incl. FK constraints).
+	if err := db.AutoMigrate(
+		&store.Organization{}, &store.OrgLimits{}, &store.Job{}, &store.Outbox{},
+		&store.Event{}, &store.Checkpoint{}, &store.SideEffect{}, &store.Agent{},
+	); err != nil {
+		return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
+	}
+
 	return db, nil
 }
