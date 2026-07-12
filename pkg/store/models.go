@@ -58,14 +58,14 @@ func (k *APIKey) IsRevoked() bool {
 
 // OrgProviderConfig holds org-specific configuration for LLM providers.
 type OrgProviderConfig struct {
-	OrgID            string    `json:"org_id" gorm:"primaryKey"`
-	AnthropicAPIKey  string    `json:"anthropic_api_key,omitempty"` // plain text temporarily (should encrypt at rest)
-	OpenAIAPIKey     string    `json:"openai_api_key,omitempty"`
-	GoogleAPIKey     string    `json:"google_api_key,omitempty"`
-	DefaultActor     string    `json:"default_actor" gorm:"default:anthropic"`
-	DefaultCritic    string    `json:"default_critic" gorm:"default:anthropic"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	OrgID           string    `json:"org_id" gorm:"primaryKey"`
+	AnthropicAPIKey string    `json:"anthropic_api_key,omitempty"` // plain text temporarily (should encrypt at rest)
+	OpenAIAPIKey    string    `json:"openai_api_key,omitempty"`
+	GoogleAPIKey    string    `json:"google_api_key,omitempty"`
+	DefaultActor    string    `json:"default_actor" gorm:"default:anthropic"`
+	DefaultCritic   string    `json:"default_critic" gorm:"default:anthropic"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Workflow represents a versioned workflow/template definition.

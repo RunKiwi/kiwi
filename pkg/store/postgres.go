@@ -95,7 +95,6 @@ func (s *PostgresStore) RecordSideEffect(ctx context.Context, effect *SideEffect
 	return s.db.WithContext(ctx).Create(effect).Error
 }
 
-
 func (s *PostgresStore) UpdateTaskLogs(ctx context.Context, id string, logs string) error {
 	// Fallback implementation, normally handled on a different model
 	return nil
