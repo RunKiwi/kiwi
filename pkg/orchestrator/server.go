@@ -50,12 +50,16 @@ type Server struct {
 	launchFn func(taskID, sandboxPath, task, file, testCmd string)
 }
 
-func NewServer(storage store.Store) *Server {
+func NewServer(storage store.Store, role string) *Server {
 	s := &Server{
 		db:      storage.DB(),
 		storage: storage,
 	}
-	s.launchFn = s.launchTask
+	if role == "all" || role == "orchestrator" {
+		s.launchFn = s.launchTask
+	} else {
+		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
+	}
 	return s
 }
 
@@ -357,6 +361,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.launchFn == nil {
+		http.Error(w, "Service Unavailable: distributed queuing not implemented in api mode", http.StatusServiceUnavailable)
 		return
 	}
 
