@@ -27,7 +27,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 	}
 
 	// Migrate TaskState, AuditLog, and TaskEvent schema
-	if err := db.AutoMigrate(&TaskState{}, &audit.AuditLog{}, &TaskEvent{}, &store.Job{}, &store.Outbox{}); err != nil {
+	if err := db.AutoMigrate(&TaskState{}, &audit.AuditLog{}, &TaskEvent{}, &store.Job{}, &store.Outbox{}, &store.Workflow{}, &store.Manifest{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate task schema: %w", err)
 	}
 

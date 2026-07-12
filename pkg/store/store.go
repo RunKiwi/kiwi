@@ -18,6 +18,8 @@ type Store interface {
 	GetJob(ctx context.Context, id string) (*Job, error)
 	UpdateJobStatus(ctx context.Context, id string, expectedStatus string, newStatus string) (bool, error)
 	UpdateJobCost(ctx context.Context, id string, additionalCost float64) error
+	CreateManifest(ctx context.Context, m *Manifest) error
+	UpdateJobManifest(ctx context.Context, jobID, manifestID string) error
 
 	// Events & Checkpoints
 	AppendEvent(ctx context.Context, event *Event) error
