@@ -21,7 +21,6 @@ type Store interface {
 	CreateManifest(ctx context.Context, m *Manifest) error
 	UpdateJobManifest(ctx context.Context, jobID, manifestID string) error
 
-
 	// Events & Checkpoints
 	AppendEvent(ctx context.Context, event *Event) error
 	SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) error
