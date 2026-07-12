@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ibreakthecloud/kiwi/pkg/orchestrator"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 func main() {
@@ -24,7 +25,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := orchestrator.NewServer(db)
+	storage := store.NewSQLiteStore(db)
+	server := orchestrator.NewServer(storage)
 
 	// Recover tasks interrupted by a previous restart before accepting new work.
 	server.RecoverTasks()
