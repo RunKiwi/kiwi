@@ -71,9 +71,9 @@ type OrgProviderConfig struct {
 // Workflow represents a versioned workflow/template definition.
 type Workflow struct {
 	ID        string                 `gorm:"primaryKey" json:"id"`
-	OrgID     *string                `gorm:"index" json:"org_id"`
-	Name      string                 `gorm:"not null" json:"name"`
-	Version   int                    `gorm:"not null" json:"version"`
+	OrgID     *string                `gorm:"index;uniqueIndex:idx_wf_org_name_ver,priority:1" json:"org_id"`
+	Name      string                 `gorm:"not null;uniqueIndex:idx_wf_org_name_ver,priority:2" json:"name"`
+	Version   int                    `gorm:"not null;uniqueIndex:idx_wf_org_name_ver,priority:3" json:"version"`
 	Spec      map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"spec"`
 	CreatedAt time.Time              `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
@@ -92,13 +92,15 @@ type Manifest struct {
 
 // Job represents a submitted job/task. This is the central source of truth for scheduling.
 type Job struct {
-	ID             string                 `gorm:"primaryKey" json:"id"`
-	OrgID          string                 `gorm:"index;not null" json:"org_id"`
-	UserID         string                 `gorm:"not null" json:"user_id"`
-	WorkflowID     *string                `json:"workflow_id"`
-	ManifestID     *string                `json:"manifest_id"`
-	Status         string                 `gorm:"index;not null" json:"status"` // PENDING|SCHEDULING|RUNNING|PAUSED|SUCCEEDED|FAILED|CANCELED
-	IdempotencyKey *string                `gorm:"uniqueIndex:idx_org_idempotency" json:"idempotency_key"`
+	ID         string  `gorm:"primaryKey" json:"id"`
+	OrgID      string  `gorm:"not null;index;uniqueIndex:idx_org_idempotency,priority:1" json:"org_id"`
+	UserID     string  `gorm:"not null" json:"user_id"`
+	WorkflowID *string `json:"workflow_id"`
+	ManifestID *string `json:"manifest_id"`
+	Status     string  `gorm:"index;not null" json:"status"` // PENDING|SCHEDULING|RUNNING|PAUSED|SUCCEEDED|FAILED|CANCELED
+	// Dedupe is scoped per-org (org_id, idempotency_key) to match migration 0001;
+	// a single-column unique here would leak/collide keys across tenants.
+	IdempotencyKey *string                `gorm:"uniqueIndex:idx_org_idempotency,priority:2" json:"idempotency_key"`
 	Inputs         map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"inputs"`
 	SandboxRef     *string                `json:"sandbox_ref"`
 	CostUSD        float64                `gorm:"not null;default:0" json:"cost_usd"`
@@ -129,10 +131,12 @@ type Outbox struct {
 
 // Event represents an append-only execution trace event.
 type Event struct {
-	ID        int64                  `gorm:"primaryKey;autoIncrement" json:"id"`
-	JobID     string                 `gorm:"index;not null" json:"job_id"`
-	AgentID   *string                `json:"agent_id"`
-	Seq       int64                  `gorm:"not null;uniqueIndex:idx_job_seq" json:"seq"`
+	ID      int64   `gorm:"primaryKey;autoIncrement" json:"id"`
+	JobID   string  `gorm:"index;not null;uniqueIndex:idx_job_seq,priority:1" json:"job_id"`
+	AgentID *string `json:"agent_id"`
+	// seq is monotonic PER JOB — the unique index is composite (job_id, seq),
+	// matching migration 0001; a bare unique on seq would be global.
+	Seq       int64                  `gorm:"not null;uniqueIndex:idx_job_seq,priority:2" json:"seq"`
 	Phase     string                 `gorm:"not null" json:"phase"`
 	Payload   map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"payload"`
 	TraceID   *string                `json:"trace_id"`
@@ -143,9 +147,9 @@ type Event struct {
 // Checkpoint represents a durable snapshot of the workspace and execution state.
 type Checkpoint struct {
 	ID           string                 `gorm:"primaryKey" json:"id"`
-	JobID        string                 `gorm:"index;not null" json:"job_id"`
+	JobID        string                 `gorm:"index;not null;uniqueIndex:idx_job_eventseq,priority:1" json:"job_id"`
 	AgentID      *string                `json:"agent_id"`
-	EventSeq     int64                  `gorm:"not null;uniqueIndex:idx_job_eventseq" json:"event_seq"`
+	EventSeq     int64                  `gorm:"not null;uniqueIndex:idx_job_eventseq,priority:2" json:"event_seq"`
 	SnapshotURI  *string                `json:"snapshot_uri"`
 	SnapshotHash *string                `json:"snapshot_hash"`
 	State        map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"state"`
