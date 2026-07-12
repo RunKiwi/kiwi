@@ -14,6 +14,8 @@ type OrgLimits struct {
 	MaxBudgetPerTask   float64 `json:"max_budget_per_task"`
 	MaxBudgetPerMonth  float64 `json:"max_budget_per_month"`
 	MaxSandboxDiskMB   int     `json:"max_sandbox_disk_mb"`
+	MaxSandboxMemoryMB int     `json:"max_sandbox_memory_mb"`
+	MaxSandboxCPU      float64 `json:"max_sandbox_cpu"`
 	DockerImage        string  `json:"docker_image"`
 	TaskTimeoutMinutes int     `json:"task_timeout_minutes"`
 }
@@ -29,6 +31,8 @@ func DefaultLimits(orgID string) *OrgLimits {
 		MaxBudgetPerTask:   1.00,
 		MaxBudgetPerMonth:  50.00,
 		MaxSandboxDiskMB:   200,
+		MaxSandboxMemoryMB: 512,
+		MaxSandboxCPU:      1.0,
 		DockerImage:        "golang:1.21-alpine",
 		TaskTimeoutMinutes: 10,
 	}
@@ -56,6 +60,12 @@ func GetOrgLimits(db *gorm.DB, orgID string) (*OrgLimits, error) {
 	}
 	if limits.MaxSandboxDiskMB <= 0 {
 		limits.MaxSandboxDiskMB = 200
+	}
+	if limits.MaxSandboxMemoryMB <= 0 {
+		limits.MaxSandboxMemoryMB = 512
+	}
+	if limits.MaxSandboxCPU <= 0 {
+		limits.MaxSandboxCPU = 1.0
 	}
 	if limits.DockerImage == "" {
 		limits.DockerImage = "golang:1.21-alpine"
