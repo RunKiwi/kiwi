@@ -23,7 +23,7 @@ func newStore(t *testing.T) store.Store {
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return store.NewSQLiteStore(db)
+	return store.NewPostgresStore(db)
 }
 
 func writeFile(t *testing.T, dir, name, content string) {

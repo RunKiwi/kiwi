@@ -10,7 +10,7 @@ import (
 
 // newTestStore spins up an isolated in-memory SQLite Store with the V2 schema
 // migrated, so store behavior can be verified without a real Postgres/network.
-func newTestStore(t *testing.T) *SQLiteStore {
+func newTestStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -22,7 +22,7 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return NewSQLiteStore(db)
+	return NewPostgresStore(db)
 }
 
 func newJob(id, org string, key *string) *Job {
