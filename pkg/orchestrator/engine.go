@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -202,20 +203,11 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, manifes
 	defer e.Infra.Terminate(context.Background(), handle)
 
 	// Inject GITHUB_TOKEN environment variable into command via export
-	var envVars []string
-	if len(env) > 0 {
-		envVars = append(envVars, env...)
-	}
-	// We prepend env vars directly to the command string for simple execution in docker
-	// In production, Handle.RunCommand could accept environment explicitly
-	envPrefix := strings.Join(envVars, " ")
-	if envPrefix != "" {
-		testCmd = envPrefix + " " + testCmd
-	}
-
-	output, runErr := handle.RunCommand(ctx, testCmd)
-	if runErr != nil {
+	// We pass env directly to the command
+	output, runErr := handle.RunCommand(ctx, testCmd, env)
+	if runErr != nil && !errors.Is(runErr, infra.ErrTestFailed) {
 		e.log("[Sandbox Error]: %v\n", runErr)
+		return fmt.Errorf("infra error during initial test: %w", runErr)
 	}
 
 	accumulatedCost += 0.02
@@ -302,19 +294,15 @@ func (e *Engine) RunTask(ctx context.Context, taskID string, dir string, manifes
 		if err != nil {
 			return fmt.Errorf("failed to resolve tunnel environment: %w", err)
 		}
-		
-		envVars = nil
-		if len(env) > 0 {
-			envVars = append(envVars, env...)
-		}
-		testCmdFinal := testCmd
-		envPrefix = strings.Join(envVars, " ")
-		if envPrefix != "" {
-			testCmdFinal = envPrefix + " " + testCmd
-		}
 
 		testStart := time.Now()
-		output, runErr = handle.RunCommand(ctx, testCmdFinal)
+		output, runErr = handle.RunCommand(ctx, testCmd, env)
+
+		if runErr != nil && !errors.Is(runErr, infra.ErrTestFailed) {
+			e.log("[Sandbox Error]: %v\n", runErr)
+			return fmt.Errorf("infra error during test execution: %w", runErr)
+		}
+
 		if runErr == nil {
 			e.emit(step, "test", "pass", summarize(output, 500), time.Since(testStart), nil)
 			e.log("[Gate] Success: tests passed.\n")

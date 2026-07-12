@@ -49,12 +49,14 @@ type Server struct {
 	db       *gorm.DB
 	storage  store.Store
 	launchFn func(taskID, sandboxPath string, manifest *store.Manifest)
+	infra    infra.Infra
 }
 
 func NewServer(storage store.Store, role string) *Server {
 	s := &Server{
 		db:      storage.DB(),
 		storage: storage,
+		infra:   infra.NewDockerInfra(os.TempDir()),
 	}
 	if role == "all" || role == "orchestrator" {
 		s.launchFn = s.LaunchTask
@@ -135,13 +137,20 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 		}
 
 		// Infra dependency injection
-		// We'll create the infra driver directly here for now. 
-		// (Normally it would be initialized once in NewServer)
-		engine.Infra = infra.NewDockerInfra(os.TempDir())
+		// Initialized once in NewServer
+		engine.Infra = s.infra
 
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
 		defer cancel()
+
+		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+			UseDocker:   os.Getenv("USE_DOCKER") == "true",
+			DockerImage: limits.DockerImage,
+			MemoryLimit: fmt.Sprintf("%dm", limits.MaxSandboxMemoryMB),
+			CPULimit:    fmt.Sprintf("%.1f", limits.MaxSandboxCPU),
+			NetworkNone: true,
+		})
 
 		// Periodic background log synchronizer to SQLite row (every 500ms)
 		go func() {

@@ -2,9 +2,11 @@ package infra
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -19,7 +21,7 @@ func TestDockerInfraLifecycle(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	
+
 	ctx := context.Background()
 	handle, err := d.Provision(ctx, tempDir, m)
 	if err != nil {
@@ -38,7 +40,7 @@ func TestDockerInfraLifecycle(t *testing.T) {
 		t.Errorf("expected RUNNING status, got %s", status)
 	}
 
-	output, err := handle.RunCommand(ctx, "echo hello")
+	output, err := handle.RunCommand(ctx, "echo hello", nil)
 	if err != nil {
 		t.Fatalf("RunCommand failed: %v", err)
 	}
@@ -49,5 +51,43 @@ func TestDockerInfraLifecycle(t *testing.T) {
 	err = d.Terminate(ctx, handle)
 	if err != nil {
 		t.Fatalf("Terminate failed: %v", err)
+	}
+}
+
+func TestDockerInfraLimitsApplied(t *testing.T) {
+	if os.Getenv("USE_DOCKER") != "true" {
+		t.Skip("skipping docker-gated test since USE_DOCKER is not true")
+	}
+
+	d := NewDockerInfra(t.TempDir())
+
+	m := &store.Manifest{
+		OrgID: "test-org",
+		Content: map[string]interface{}{
+			"docker_image": "alpine:latest",
+		},
+	}
+
+	tempDir := t.TempDir()
+
+	cfg := &sandbox.SandboxConfig{
+		UseDocker:   true,
+		DockerImage: "alpine:latest",
+		MemoryLimit: "256m",
+		CPULimit:    "0.5",
+		NetworkNone: true,
+	}
+	ctx := context.WithValue(context.Background(), sandbox.SandboxConfigKey, cfg)
+
+	handle, err := d.Provision(ctx, tempDir, m)
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+	defer d.Terminate(ctx, handle)
+
+	// Network should be disabled
+	_, err = handle.RunCommand(ctx, "ping -c 1 8.8.8.8", nil)
+	if err == nil {
+		t.Errorf("expected network to be disabled (ping should fail)")
 	}
 }

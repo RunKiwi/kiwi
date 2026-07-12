@@ -6,6 +6,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// SnapshotRef points to a durable snapshot of the workspace.
+type SnapshotRef struct {
+	URI  string
+	Hash string
+}
+
 // Store defines the data access interface for the control plane.
 // It abstracts away the underlying database (e.g. Postgres or SQLite)
 // and provides a unified interface for all subsystems.
