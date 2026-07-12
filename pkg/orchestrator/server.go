@@ -58,10 +58,7 @@ func NewServer(storage store.Store, role string) *Server {
 	if role == "all" || role == "orchestrator" {
 		s.launchFn = s.launchTask
 	} else {
-		s.launchFn = func(taskID, sandboxPath, task, file, testCmd string) {
-			// No-op for 'api' role until P1.2 (queue) is implemented
-			fmt.Printf("[API] Task %s queued (waiting for orchestrator to pick up)\n", taskID)
-		}
+		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
 	}
 	return s
 }
@@ -364,6 +361,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.launchFn == nil {
+		http.Error(w, "Service Unavailable: distributed queuing not implemented in api mode", http.StatusServiceUnavailable)
 		return
 	}
 
