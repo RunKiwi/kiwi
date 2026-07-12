@@ -56,18 +56,18 @@ func NewServer(storage store.Store, role string) *Server {
 		storage: storage,
 	}
 	if role == "all" || role == "orchestrator" {
-		s.launchFn = s.launchTask
+		s.launchFn = s.LaunchTask
 	} else {
 		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
 	}
 	return s
 }
 
-// launchTask runs the orchestration loop in the background for an
+// LaunchTask runs the orchestration loop in the background for an
 // already-persisted task whose sandbox is populated on disk. Used by both
 // submission and boot recovery. It seeds the log buffer from the existing row so
 // recovered tasks keep their prior logs.
-func (s *Server) launchTask(taskID, sandboxPath, task, file, testCmd string) {
+func (s *Server) LaunchTask(taskID, sandboxPath, task, file, testCmd string) {
 	go func() {
 		logBuf := new(bytes.Buffer)
 		var existing TaskState
@@ -364,11 +364,6 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.launchFn == nil {
-		http.Error(w, "Service Unavailable: distributed queuing not implemented in api mode", http.StatusServiceUnavailable)
-		return
-	}
-
 	// Parse multipart form
 	err := r.ParseMultipartForm(50 * 1024 * 1024) // 50MB max in memory
 	if err != nil {
@@ -475,7 +470,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		Task:           task,
 		FilePath:       file,
 		TestCmd:        testCmd,
-		Status:         "RUNNING",
+		Status:         "PENDING",
 		CreatedAt:      time.Now(),
 		SandboxPath:    tempSandbox,
 		Cost:           0.05,
@@ -485,20 +480,50 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		UserEmail:      claims.Email,
 	}
 
+	job := &store.Job{
+		ID:             taskID,
+		OrgID:          claims.OrgID,
+		UserID:         claims.UserID,
+		Status:         "PENDING",
+		IdempotencyKey: &idempotencyKey,
+		Inputs: map[string]interface{}{
+			"task":     task,
+			"file":     file,
+			"test_cmd": testCmd,
+		},
+		SandboxRef: &tempSandbox,
+	}
+	if idempotencyKey == "" {
+		job.IdempotencyKey = nil
+	}
+
+	outbox := &store.Outbox{
+		JobID: taskID,
+		Topic: "jobs.submitted",
+		Payload: map[string]interface{}{
+			"job_id": taskID,
+		},
+	}
+
+	// Reuse store method as per P1.2 review
 	if err := s.db.Create(state).Error; err != nil {
+		http.Error(w, fmt.Sprintf("failed to create task state: %v", err), http.StatusInternalServerError)
+		os.RemoveAll(tempSandbox)
+		return
+	}
+	err = s.storage.CreateJobWithOutbox(r.Context(), job, outbox)
+
+	if err != nil {
 		http.Error(w, "failed to register task in database", http.StatusInternalServerError)
 		return
 	}
 
 	_ = auth.LogAuditEvent(s.db, r, "CREATE", "TASK", taskID, fmt.Sprintf("Submitted task %q for file %q", task, file))
 
-	// Launch loop orchestration in the background (injectable for tests).
-	s.launchFn(taskID, tempSandbox, task, file, testCmd)
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"task_id": taskID,
-		"status":  "RUNNING",
+		"status":  "PENDING",
 	})
 }
 

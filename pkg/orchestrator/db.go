@@ -5,6 +5,7 @@ import (
 
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -26,7 +27,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 	}
 
 	// Migrate TaskState, AuditLog, and TaskEvent schema
-	if err := db.AutoMigrate(&TaskState{}, &audit.AuditLog{}, &TaskEvent{}); err != nil {
+	if err := db.AutoMigrate(&TaskState{}, &audit.AuditLog{}, &TaskEvent{}, &store.Job{}, &store.Outbox{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate task schema: %w", err)
 	}
 
