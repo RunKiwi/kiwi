@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -71,8 +72,7 @@ func (r *Relay) processBatch(ctx context.Context) (int, error) {
 		for i := range outboxes {
 			ob := &outboxes[i]
 
-			jobID, ok := ob.Payload["job_id"].(string)
-			if !ok {
+			if _, ok := ob.Payload["job_id"].(string); !ok {
 				log.Printf("[Relay] skipping malformed outbox %d: missing job_id", ob.ID)
 				now := time.Now()
 				ob.PublishedAt = &now
@@ -80,7 +80,10 @@ func (r *Relay) processBatch(ctx context.Context) (int, error) {
 				continue
 			}
 
-			msgPayload := []byte(fmt.Sprintf(`{"job_id":"%s"}`, jobID))
+			msgPayload, errMarshal := json.Marshal(ob.Payload)
+			if errMarshal != nil {
+				return fmt.Errorf("failed to marshal outbox payload %d: %w", ob.ID, errMarshal)
+			}
 
 			errPublish := r.pub.Publish(ctx, ob.Topic, msgPayload, fmt.Sprintf("outbox-%d", ob.ID))
 			if errPublish != nil {
