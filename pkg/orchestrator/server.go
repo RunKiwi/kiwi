@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agentapi"
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
@@ -53,6 +54,7 @@ type Server struct {
 	launchFn     func(taskID, sandboxPath string, manifest *store.Manifest)
 	infra        infra.Infra
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
+	agentAPI     *agentapi.Server
 }
 
 func NewServer(storage store.Store, role string) *Server {
@@ -66,12 +68,31 @@ func NewServer(storage store.Store, role string) *Server {
 		infra:        infra.NewDockerInfra(os.TempDir()),
 		snapshotRoot: root,
 	}
+	// Sandbox-facing Agent API: scoped-token authorized, secrets bridged to the
+	// reverse tunnel, events into the durable log (issue #34).
+	s.agentAPI = agentapi.NewServer(agentapi.Deps{
+		Store:   storage,
+		Events:  checkpoint.NewService(storage, checkpoint.NewLocalSnapshotter(root)),
+		Secrets: tunnelSecrets{},
+	})
 	if role == "all" || role == "orchestrator" {
 		s.launchFn = s.LaunchTask
 	} else {
 		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
 	}
 	return s
+}
+
+// tunnelSecrets bridges the Agent API's FetchSecret to the reverse credential
+// tunnel keyed by job/task id.
+type tunnelSecrets struct{}
+
+func (tunnelSecrets) Resolve(ctx context.Context, jobID, key string) (string, error) {
+	t := tunnel.GlobalRegistry.Get(jobID)
+	if t == nil {
+		return "", fmt.Errorf("no credential tunnel registered for job %s", jobID)
+	}
+	return t.GetSecret(ctx, key)
 }
 
 // LaunchTask runs the orchestration loop in the background for an
@@ -173,6 +194,15 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 		}
 		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
 			fmt.Fprintf(logBuf, "[Orchestrator] Warning: could not persist V2 job row: %v\n", err)
+		}
+
+		// Mint a short-lived scoped token so the in-sandbox agent can reach the
+		// control plane through the Agent API for this job only (issue #34). The
+		// plaintext is available here to inject into the sandbox env; only its
+		// hash is persisted. TTL tracks the task timeout with headroom.
+		jobTokenTTL := time.Duration(limits.TaskTimeoutMinutes)*time.Minute + 5*time.Minute
+		if _, err := agentapi.MintJobToken(s.db, taskID, existing.OrgID, jobTokenTTL); err != nil {
+			fmt.Fprintf(logBuf, "[Orchestrator] Warning: could not mint job token: %v\n", err)
 		}
 
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
@@ -342,9 +372,17 @@ func (s *Server) Start(addr string) error {
 		}
 	})
 
-	// Wrap the entire mux with the auth middleware so all routes get user claims
-	// injected into the request context, and apply rate limiting.
-	handler := corsMiddleware(s.rateLimitMiddleware(auth.AuthMiddleware(s.db, mux)))
+	// The org-authenticated surface (org API keys) is everything except the
+	// sandbox Agent API, which authenticates with a per-job scoped token and is
+	// mounted separately so it bypasses AuthMiddleware.
+	root := http.NewServeMux()
+	if s.agentAPI != nil {
+		root.Handle("/agent/", s.agentAPI.Handler())
+	}
+	root.Handle("/", auth.AuthMiddleware(s.db, mux))
+
+	// CORS + rate limiting apply to the whole surface.
+	handler := corsMiddleware(s.rateLimitMiddleware(root))
 
 	fmt.Printf("[Server] Kiwi daemon listening on %s\n", addr)
 	return http.ListenAndServe(addr, handler)
