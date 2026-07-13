@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
@@ -92,6 +94,75 @@ func TestMasterCoordinatesWorkers(t *testing.T) {
 		}
 	}
 }
+
+// SpecsFromManifest expands each worker block by its count (RFC §5).
+func TestSpecsFromManifestCount(t *testing.T) {
+	manifest := &store.Manifest{Content: map[string]interface{}{
+		"workers": []interface{}{
+			map[string]interface{}{"model": "m1", "task": "a", "file": "a.go", "count": float64(3)},
+			map[string]interface{}{"model": "m2", "task": "b", "file": "b.go"}, // no count => 1
+		},
+	}}
+	specs := SpecsFromManifest("job-1", manifest)
+	if len(specs) != 4 {
+		t.Fatalf("specs = %d, want 4 (3 + 1)", len(specs))
+	}
+	ids := map[string]bool{}
+	for _, s := range specs {
+		if ids[s.ID] {
+			t.Errorf("duplicate worker ID %s", s.ID)
+		}
+		ids[s.ID] = true
+	}
+	if specs[0].Model != "m1" || specs[3].Model != "m2" {
+		t.Errorf("models = %q..%q, want m1..m2", specs[0].Model, specs[3].Model)
+	}
+}
+
+// MaxConcurrency bounds how many workers run simultaneously.
+func TestMasterBoundedConcurrency(t *testing.T) {
+	const jobID = "job-3"
+	rep, _ := newReporter(t, jobID)
+
+	var mu sync.Mutex
+	var inFlight, peak int
+	prov := blockingProvider{onStart: func() {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+		time.Sleep(15 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+	}}
+
+	m := &Master{JobID: jobID, Model: "m", Provider: prov, Reporter: rep, MaxConcurrency: 2}
+	specs := make([]WorkerSpec, 6)
+	for i := range specs {
+		specs[i] = WorkerSpec{ID: jobID + "-w" + itoa(i), Task: "ok", File: "f.go"}
+	}
+	res, err := m.Run(context.Background(), specs)
+	if err != nil || res.Succeeded != 6 {
+		t.Fatalf("run = %+v err=%v, want 6 succeeded", res, err)
+	}
+	if peak > 2 {
+		t.Errorf("peak concurrency = %d, want <= 2", peak)
+	}
+}
+
+type blockingProvider struct{ onStart func() }
+
+func (b blockingProvider) GetCodeEdit(ctx context.Context, task, fileName, codeContent, buildOutput string) (string, error) {
+	if b.onStart != nil {
+		b.onStart()
+	}
+	return "ok", nil
+}
+
+func itoa(n int) string { return string(rune('0' + n)) }
 
 // A worker crash (panic) or error is contained; the master still completes and
 // reports PARTIAL, recording the failed worker.

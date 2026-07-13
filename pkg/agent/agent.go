@@ -76,6 +76,31 @@ type Worker struct {
 	Provider provider.Provider
 	Reporter Reporter
 	JobID    string
+	// Logf, if set, surfaces reporter failures (e.g. a network error when the
+	// reporter is backed by the HTTP Agent API) instead of silently dropping
+	// them. Optional; nil is a no-op.
+	Logf func(format string, args ...interface{})
+}
+
+func (w *Worker) logf(format string, args ...interface{}) {
+	if w.Logf != nil {
+		w.Logf(format, args...)
+	}
+}
+
+// event/finish wrap the reporter so a recording failure is surfaced, not
+// swallowed — a dropped terminal status would leave the control plane blind to
+// this worker's outcome.
+func (w *Worker) event(ctx context.Context, phase, outcome string) {
+	if err := w.Reporter.Event(ctx, w.Spec.ID, phase, outcome); err != nil {
+		w.logf("worker %s: event %s/%s not recorded: %v", w.Spec.ID, phase, outcome, err)
+	}
+}
+
+func (w *Worker) finish(ctx context.Context, status string) {
+	if err := w.Reporter.FinishAgent(ctx, w.Spec.ID, status); err != nil {
+		w.logf("worker %s: terminal status %q not recorded: %v", w.Spec.ID, status, err)
+	}
 }
 
 // Run executes the worker's subtask. A panic in the provider is recovered so one
@@ -85,28 +110,35 @@ func (w *Worker) Run(ctx context.Context) (res WorkerResult) {
 	defer func() {
 		if p := recover(); p != nil {
 			res.Err = fmt.Errorf("worker %s panicked: %v", w.Spec.ID, p)
-			_ = w.Reporter.Event(ctx, w.Spec.ID, "worker_done", "panic")
-			_ = w.Reporter.FinishAgent(ctx, w.Spec.ID, "FAILED")
+			w.event(ctx, "worker_done", "panic")
+			w.finish(ctx, "FAILED")
 		}
 	}()
 
-	_ = w.Reporter.StartAgent(ctx, &store.Agent{
+	if err := w.Reporter.StartAgent(ctx, &store.Agent{
 		ID: w.Spec.ID, JobID: w.JobID, Role: "worker", Model: w.Spec.Model, Status: "RUNNING",
-	})
-	_ = w.Reporter.Event(ctx, w.Spec.ID, "worker_start", "started")
+	}); err != nil {
+		w.logf("worker %s: StartAgent not recorded: %v", w.Spec.ID, err)
+	}
+	w.event(ctx, "worker_start", "started")
 
 	out, err := w.Provider.GetCodeEdit(ctx, w.Spec.Task, w.Spec.File, "", "")
 	if err != nil {
 		res.Err = err
-		_ = w.Reporter.Event(ctx, w.Spec.ID, "worker_done", "error")
-		_ = w.Reporter.FinishAgent(ctx, w.Spec.ID, "FAILED")
+		w.event(ctx, "worker_done", "error")
+		w.finish(ctx, "FAILED")
 		return res
 	}
 	res.Output = out
-	_ = w.Reporter.Event(ctx, w.Spec.ID, "worker_done", "success")
-	_ = w.Reporter.FinishAgent(ctx, w.Spec.ID, "SUCCEEDED")
+	w.event(ctx, "worker_done", "success")
+	w.finish(ctx, "SUCCEEDED")
 	return res
 }
+
+// defaultMaxConcurrency bounds simultaneously-running workers when the master
+// does not specify a limit, so a large worker set does not blast the provider
+// into rate limits.
+const defaultMaxConcurrency = 4
 
 // Master coordinates a set of workers for one job.
 type Master struct {
@@ -114,6 +146,16 @@ type Master struct {
 	Model    string
 	Provider provider.Provider
 	Reporter Reporter
+	// MaxConcurrency caps workers running at once; <=0 uses defaultMaxConcurrency.
+	MaxConcurrency int
+	// Logf, if set, surfaces reporter failures. Propagated to workers. Optional.
+	Logf func(format string, args ...interface{})
+}
+
+func (m *Master) logf(format string, args ...interface{}) {
+	if m.Logf != nil {
+		m.Logf(format, args...)
+	}
 }
 
 // MasterResult aggregates the run.
@@ -136,15 +178,25 @@ func (m *Master) Run(ctx context.Context, specs []WorkerSpec) (MasterResult, err
 	}); err != nil {
 		return MasterResult{}, fmt.Errorf("start master agent: %w", err)
 	}
-	_ = m.Reporter.Event(ctx, masterID, "master_start", fmt.Sprintf("decomposed into %d workers", len(specs)))
+	if err := m.Reporter.Event(ctx, masterID, "master_start", fmt.Sprintf("decomposed into %d workers", len(specs))); err != nil {
+		m.logf("master %s: start event not recorded: %v", masterID, err)
+	}
 
+	// Bound concurrency so a large worker set respects provider rate limits.
+	limit := m.MaxConcurrency
+	if limit <= 0 {
+		limit = defaultMaxConcurrency
+	}
+	sem := make(chan struct{}, limit)
 	results := make([]WorkerResult, len(specs))
 	var wg sync.WaitGroup
 	for i := range specs {
 		wg.Add(1)
+		sem <- struct{}{} // acquire a slot (blocks once `limit` workers are in flight)
 		go func(i int) {
 			defer wg.Done()
-			w := &Worker{Spec: specs[i], Provider: m.Provider, Reporter: m.Reporter, JobID: m.JobID}
+			defer func() { <-sem }()
+			w := &Worker{Spec: specs[i], Provider: m.Provider, Reporter: m.Reporter, JobID: m.JobID, Logf: m.Logf}
 			results[i] = w.Run(ctx)
 		}(i)
 	}
@@ -166,28 +218,42 @@ func (m *Master) Run(ctx context.Context, specs []WorkerSpec) (MasterResult, err
 	default:
 		out.Status = "PARTIAL"
 	}
-	_ = m.Reporter.Event(ctx, masterID, "master_done", out.Status)
-	_ = m.Reporter.FinishAgent(ctx, masterID, out.Status)
+	if err := m.Reporter.Event(ctx, masterID, "master_done", out.Status); err != nil {
+		m.logf("master %s: done event not recorded: %v", masterID, err)
+	}
+	if err := m.Reporter.FinishAgent(ctx, masterID, out.Status); err != nil {
+		m.logf("master %s: terminal status not recorded: %v", masterID, err)
+	}
 	return out, nil
 }
 
 // SpecsFromManifest builds the static worker set for a job from its manifest
-// (manifest v1). It reads Content["workers"] as a list of {model,task,file};
-// absent that, it derives a single worker from the top-level task/file.
+// (manifest v1). It reads Content["workers"] as a list of blocks
+// {provider,model,task,file,count}; each block with count N expands to N
+// workers (RFC §5). Absent a workers list, it derives a single worker from the
+// top-level task/file.
 func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 	if manifest == nil {
 		return nil
 	}
 	if raw, ok := manifest.Content["workers"].([]interface{}); ok && len(raw) > 0 {
-		specs := make([]WorkerSpec, 0, len(raw))
-		for i, item := range raw {
+		var specs []WorkerSpec
+		idx := 0
+		for _, item := range raw {
 			m, _ := item.(map[string]interface{})
-			specs = append(specs, WorkerSpec{
-				ID:    fmt.Sprintf("%s-w%d", jobID, i),
-				Model: str(m["model"]),
-				Task:  str(m["task"]),
-				File:  str(m["file"]),
-			})
+			count := 1
+			if c, ok := toInt(m["count"]); ok && c > 0 {
+				count = c
+			}
+			for k := 0; k < count; k++ {
+				specs = append(specs, WorkerSpec{
+					ID:    fmt.Sprintf("%s-w%d", jobID, idx),
+					Model: str(m["model"]),
+					Task:  str(m["task"]),
+					File:  str(m["file"]),
+				})
+				idx++
+			}
 		}
 		return specs
 	}
@@ -202,4 +268,17 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 func str(v interface{}) string {
 	s, _ := v.(string)
 	return s
+}
+
+// toInt coerces a JSON-decoded number (float64) or Go integer to int.
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	}
+	return 0, false
 }
