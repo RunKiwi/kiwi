@@ -1,19 +1,26 @@
-# Standalone UI Dashboard Architecture
+# Standalone UI Dashboard Architecture (2026 UX Vision)
 
 The current dashboard is an embedded Go string that lacks modern features, robust authentication, and separation of concerns. This plan outlines the transition to a premium, standalone frontend service that mirrors and expands upon the CLI's capabilities.
 
+## 2026 Design Language & Philosophy
+
+Based on design trends from modern, top-tier SaaS startups, the dashboard will adopt a **"Human-Crafted Tactility"** mixed with **"Calm Design."**
+*   **Calm Design & Progressive Disclosure:** The interface will hide complex filters and raw JSON logs by default, revealing them only when the user explicitly requests deeper context (e.g., investigating a failed Critic loop).
+*   **Tactile & Human-Centric:** We will avoid sterile, flat AI-generated looks. Instead, we will use subtle grain overlays, tactile micro-animations, and high-contrast dark modes to create an interface that feels responsive and grounded.
+*   **Liquid Glass & Motion:** Responsive "Liquid Glass" components that blur and react to scrolling, combined with bold typography (e.g., *Inter* or *Outfit*) to create a premium, kinetic identity.
+*   **Machine Experience (MX):** Deep semantic HTML structuring to ensure the dashboard is easily parsable by other agentic AI extensions.
+
 ## Proposed Tech Stack
 
-*   **Framework:** **Vite + React + TypeScript**. A lightweight, extremely fast SPA framework.
-*   **Styling:** **Vanilla CSS**. We will avoid generic utility frameworks and instead build a highly customized, premium design system. This will include glassmorphism, subtle micro-animations, vibrant gradients, and modern typography (e.g., Inter or Outfit) to ensure an absolute "wow" factor upon first load.
-*   **State Management:** Context API or Zustand for lightweight global state (auth, active tasks).
-*   **Real-time Communication:** Server-Sent Events (SSE) to consume logs from `kiwi-api`.
+*   **Framework:** **Next.js (App Router) + React + TypeScript**. Next.js provides robust routing, SEO capabilities, and built-in API routes that drastically simplify OAuth/OIDC integration for a production SaaS.
+*   **Styling:** **Vanilla CSS with CSS Modules**. This guarantees absolute control over complex animations (like Liquid Glass and grain overlays) while keeping styles scoped and maintainable, adhering strictly to our design philosophy.
+*   **State Management:** **Zustand**. A modern, lightweight alternative to Redux that excels at managing highly dynamic, real-time states (like streaming agent logs).
+*   **Real-time Communication:** Server-Sent Events (SSE) natively consumed via custom React Hooks to stream the agent's live Actor-Critic loop.
 
 ## Authentication & Identity
 
-*   **OAuth / SSO:** We will implement **GitHub SSO (OIDC)** as the primary login mechanism.
-*   **Token Flow:** The `kiwi-api` will act as the OAuth Relying Party. Upon successful GitHub login, the API will generate a scoped JWT and return it to the frontend.
-*   **Multi-tenant Support:** Users will belong to Organizations, mirroring our backend GORM models, allowing for team-based budgeting and task viewing.
+*   **OAuth / SSO:** **GitHub SSO (OIDC)** acting as the primary identity provider, managed via NextAuth.js (or custom Next.js API routes) exchanging tokens with the `kiwi-api`.
+*   **Multi-tenant Support:** Org-level isolation mirroring the backend GORM models, allowing for team-based budgeting and task viewing.
 
 ## Core Features (Replacing the CLI)
 
