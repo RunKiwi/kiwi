@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kiwid ./cmd/kiwid
 
 # Final stage
-FROM alpine:latest
+FROM golang:1.25-alpine
 
 WORKDIR /app
 

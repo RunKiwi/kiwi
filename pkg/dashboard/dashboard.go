@@ -554,10 +554,9 @@ const DashboardHTML = `<!DOCTYPE html>
         let filterText = "";
         let selectedTaskId = null;
 
-        // Fetch tasks from server
         async function fetchTasks() {
             try {
-                const token = localStorage.getItem('kiwi_auth_token') || 'kiwi-auth-token-1234';
+                const token = localStorage.getItem('kiwi_auth_token') || 'development-token';
                 const response = await fetch('/tasks', {
                     headers: {
                         'Authorization': 'Bearer ' + token
