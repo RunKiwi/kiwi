@@ -201,8 +201,16 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 		// plaintext is available here to inject into the sandbox env; only its
 		// hash is persisted. TTL tracks the task timeout with headroom.
 		jobTokenTTL := time.Duration(limits.TaskTimeoutMinutes)*time.Minute + 5*time.Minute
-		if _, err := agentapi.MintJobToken(s.db, taskID, existing.OrgID, jobTokenTTL); err != nil {
+		jobToken, err := agentapi.MintJobToken(s.db, taskID, existing.OrgID, jobTokenTTL)
+		if err != nil {
 			fmt.Fprintf(logBuf, "[Orchestrator] Warning: could not mint job token: %v\n", err)
+		} else {
+			// TODO(#35): plumb jobToken to the sandbox (inject as KIWI_JOB_TOKEN via
+			// Infra) so the in-sandbox kiwi-agent can call the Agent API. For now
+			// only the hash is persisted; the plaintext is not yet delivered to the
+			// sandbox, so it is intentionally not used here.
+			_ = jobToken
+			fmt.Fprintln(logBuf, "[Orchestrator] Minted scoped Agent-API token for this job.")
 		}
 
 		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute

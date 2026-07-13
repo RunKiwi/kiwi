@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -128,6 +129,50 @@ func TestAgentAPIScopedToJob(t *testing.T) {
 	rec = do(t, h, "/agent/jobA/events", "", appendEventReq{Phase: "actor"})
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("no token: got %d, want 401", rec.Code)
+	}
+}
+
+// The client retries transient (network/5xx) failures with backoff, but never
+// retries a 4xx (an invalid token or bad body will never succeed).
+func TestClientRetriesTransient(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n < 3 { // fail the first two, succeed on the third
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"seq": 1})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok", "jobA")
+	if _, err := c.AppendEvent(context.Background(), "actor", nil); err != nil {
+		t.Fatalf("expected success after retries, got %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (2 retries + success)", calls)
+	}
+
+	// A 4xx is returned immediately, without retrying.
+	var badCalls int
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		badCalls++
+		mu.Unlock()
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer bad.Close()
+	c2 := NewClient(bad.URL, "tok", "jobA")
+	if _, err := c2.AppendEvent(context.Background(), "actor", nil); err == nil {
+		t.Fatal("expected error on 400")
+	}
+	if badCalls != 1 {
+		t.Errorf("4xx calls = %d, want 1 (no retry)", badCalls)
 	}
 }
 
