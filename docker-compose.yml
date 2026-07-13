@@ -45,14 +45,17 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
-      interval: 5s
-      timeout: 5s
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 10s
       retries: 5
 
   kiwi-api:
     build: .
-    command: ["-role", "api", "-dsn", "host=postgres user=kiwi password=kiwipassword dbname=kiwi port=5432 sslmode=disable"]
+    restart: on-failure
+    command: ["-role", "api", "-dsn", "host=postgres user=kiwi password=kiwipassword dbname=kiwi port=5432 sslmode=disable", "-nats", "nats://nats:4222"]
+    environment:
+      - KIWI_SERVER_TOKEN=development-token
     ports:
       - "8080:8080"
     depends_on:
@@ -62,10 +65,13 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    volumes:
+      - sandbox_data:/tmp
 
   kiwi-llmo:
     build: .
-    command: ["-role", "orchestrator", "-dsn", "host=postgres user=kiwi password=kiwipassword dbname=kiwi port=5432 sslmode=disable"]
+    restart: on-failure
+    command: ["-role", "orchestrator", "-dsn", "host=postgres user=kiwi password=kiwipassword dbname=kiwi port=5432 sslmode=disable", "-nats", "nats://nats:4222"]
     environment:
       - KIWI_LLM_PROVIDER=${KIWI_LLM_PROVIDER:-mock}
     depends_on:
@@ -75,8 +81,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    volumes:
+      - sandbox_data:/tmp
 
 volumes:
   postgres_data:
   nats_data:
   minio_data:
+  sandbox_data:
