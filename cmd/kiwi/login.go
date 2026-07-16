@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/term"
 )
 
 type Config struct {
@@ -37,7 +39,12 @@ func runLogin(args []string) error {
 	t := *token
 	if t == "" {
 		fmt.Print("Enter Kiwi API Token: ")
-		fmt.Scanln(&t)
+		tBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		fmt.Println()
+		t = string(tBytes)
 	}
 
 	if t == "" {
