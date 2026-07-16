@@ -69,15 +69,12 @@ export default function ModelsPage() {
                 </div>
               </div>
               
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2 relative w-64">
-                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                  <input 
-                    type="password"
-                    placeholder={provider.isConfigured ? "sk-..." : "Enter API Key"}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-white/30 transition-colors"
-                  />
-                </div>
+              <div className="flex items-center">
+                {provider.isConfigured && (
+                  <button className="text-sm font-medium text-zinc-400 hover:text-white px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 transition-colors">
+                    Disconnect
+                  </button>
+                )}
               </div>
             </div>
 
