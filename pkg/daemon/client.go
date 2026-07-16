@@ -28,8 +28,8 @@ func NewClient(baseURL string) *Client {
 }
 
 // Heartbeat polls the Control Plane for new tasks.
-// Returns a slice of WorkerSpecs if available, nil if no content, or an error.
-func (c *Client) Heartbeat(ctx context.Context, req HeartbeatReq) ([]*HeartbeatRes, error) {
+// Returns a WorkerSpec payload if available, nil if no content, or an error.
+func (c *Client) Heartbeat(ctx context.Context, req HeartbeatReq) (*HeartbeatRes, error) {
 	buf, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal heartbeat request: %w", err)
@@ -64,5 +64,5 @@ func (c *Client) Heartbeat(ctx context.Context, req HeartbeatReq) ([]*HeartbeatR
 		return nil, fmt.Errorf("decode heartbeat response: %w", err)
 	}
 
-	return []*HeartbeatRes{&res}, nil
+	return &res, nil
 }
