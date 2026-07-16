@@ -7,12 +7,20 @@ export interface Node {
   lastSeen: Date;
 }
 
-export interface Task {
+export interface SubAgent {
   id: string;
   nodeId: string;
+  role: 'master' | 'worker';
+  phase: 'planning' | 'executing' | 'completed' | 'failed';
+  title: string;
+}
+
+export interface Task {
+  id: string;
   phase: 'planning' | 'executing' | 'completed' | 'failed';
   title: string;
   startedAt: Date;
+  subAgents: SubAgent[];
 }
 
 interface FleetState {
@@ -31,13 +39,41 @@ export const useFleetStore = create<FleetState>((set) => ({
     { id: 'gcp-node-01', provider: 'GCP', status: 'polling', lastSeen: new Date() },
     { id: 'gcp-node-02', provider: 'GCP', status: 'disconnected', lastSeen: new Date() },
   ],
-  tasks: Array.from({ length: 24 }).map((_, i) => ({
-    id: `task-${1000 + i}`,
-    nodeId: i % 3 === 0 ? 'aws-node-01' : i % 3 === 1 ? 'aws-node-02' : 'gcp-node-01',
-    phase: i < 5 ? 'completed' : i < 15 ? 'executing' : i < 22 ? 'planning' : 'failed',
-    title: `Sub-task ${i + 1}: ${['Refactor Auth', 'Setup DB', 'Fix CSS', 'Write Tests', 'Deploy CI'][i % 5]}`,
-    startedAt: new Date(Date.now() - Math.random() * 1000000)
-  })),
+  tasks: Array.from({ length: 8 }).map((_, i) => {
+    const isCompleted = i < 2;
+    const isPlanning = i > 5;
+    const phase = isCompleted ? 'completed' : isPlanning ? 'planning' : 'executing';
+    
+    return {
+      id: `task-${1000 + i}`,
+      phase,
+      title: `Goal: ${['Deploy Microservices', 'Run Security Audit', 'Provision EKS Cluster', 'Migrate Database', 'Run CI/CD Pipeline', 'Backup Vault', 'Scale Up Workers', 'Update Certificates'][i]}`,
+      startedAt: new Date(Date.now() - Math.random() * 1000000),
+      subAgents: [
+        {
+          id: `agent-${i}-master`,
+          nodeId: 'aws-node-01',
+          role: 'master',
+          phase: phase === 'planning' ? 'executing' : 'completed',
+          title: 'Fable Planner'
+        },
+        {
+          id: `agent-${i}-w1`,
+          nodeId: 'aws-node-02',
+          role: 'worker',
+          phase: phase === 'completed' ? 'completed' : phase === 'planning' ? 'planning' : 'executing',
+          title: 'Execution Worker 1'
+        },
+        {
+          id: `agent-${i}-w2`,
+          nodeId: 'gcp-node-01',
+          role: 'worker',
+          phase: phase === 'completed' ? 'completed' : 'planning',
+          title: 'Execution Worker 2'
+        }
+      ]
+    };
+  }),
   
   addNode: (node) => set((state) => ({ nodes: [...state.nodes, node] })),
   updateNodeStatus: (id, status) => set((state) => ({
