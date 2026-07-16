@@ -21,6 +21,8 @@ func main() {
 		err = runLogin(args)
 	case "submit":
 		err = runSubmit(args)
+	case "claude":
+		err = runClaude(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", cmd)
 		os.Exit(1)
