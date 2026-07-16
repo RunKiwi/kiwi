@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
 )
@@ -15,6 +16,7 @@ import (
 func main() {
 	var apiURL string
 	var keyPath string
+	var pollInterval time.Duration
 	var cacheDir string
 
 	home, err := os.UserHomeDir()
@@ -25,13 +27,15 @@ func main() {
 
 	flag.StringVar(&apiURL, "api-url", "https://api.runkiwi.com", "The URL of the Kiwi Control Plane API")
 	flag.StringVar(&keyPath, "key-path", defaultKeyPath, "Path to load/save the X25519 private key.")
+	flag.DurationVar(&pollInterval, "poll-interval", 5*time.Second, "Base interval between Control Plane heartbeats (jitter and backoff are applied automatically).")
 	flag.StringVar(&cacheDir, "cache-dir", "/tmp/kiwi-cache", "Path to store bare git repositories and worktrees.")
 	flag.Parse()
 
 	cfg := daemon.Config{
-		APIURL:   apiURL,
-		KeyPath:  keyPath,
-		CacheDir: cacheDir,
+		APIURL:       apiURL,
+		KeyPath:      keyPath,
+		PollInterval: pollInterval,
+		CacheDir:     cacheDir,
 	}
 
 	d, err := daemon.New(cfg)

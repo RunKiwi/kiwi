@@ -50,7 +50,7 @@ func TestDaemon_pollCP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	success := d.pollCP(ctx, HeartbeatReq{PubKey: "test"})
+	success := d.pollCP(ctx)
 	if !success {
 		t.Fatalf("pollCP returned false")
 	}
