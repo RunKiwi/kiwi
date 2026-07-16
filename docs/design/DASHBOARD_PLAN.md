@@ -31,3 +31,9 @@ When a user clicks on an active task from the God View:
     *   *Left:* Live SSE streaming logs of the Agent's thought process and bash commands.
     *   *Right:* A real-time unified Git Diff rendering what code the Sandbox is currently modifying.
 *   **Manual Eject Button:** A button providing the exact `kiwi pull` CLI command if the user wants to eject the cloud sandbox to their local machine.
+
+### Phase 4: The Interactive Topology Canvas
+Because the Swarm Planner breaks large issues down into a Directed Acyclic Graph (DAG) of smaller tasks, the dashboard will include a visual topology map.
+*   **Canvas Library:** Use a library like `React Flow` to render an interactive node-based canvas.
+*   **Visualizing the Swarm:** Users can pan and zoom to see the entire dependency tree of an issue. Each node represents a Sandbox agent. Nodes glow green when executing, red on failure, and grey when waiting for dependencies.
+*   **Deep Linking:** Clicking a node on the canvas instantly slides open the Deep-Dive Execution Viewer for that specific sub-task.
