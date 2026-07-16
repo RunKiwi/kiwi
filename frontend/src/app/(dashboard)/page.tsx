@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot, Sparkles, GitBranch, Plus, ChevronDown, Mic, ArrowUp } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot, Sparkles, GitBranch, ChevronDown, Send } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
@@ -67,20 +67,17 @@ export default function GodView() {
       </div>
 
       {/* Command Bar */}
-      <div className="bg-[#141414] rounded-2xl mb-8 flex flex-col relative z-20 shadow-2xl border border-white/5 overflow-hidden">
+      <div className="bg-black/60 backdrop-blur-xl rounded-2xl mb-8 flex flex-col relative z-20 shadow-[0_0_40px_rgba(0,0,0,0.5)] border border-white/10 overflow-hidden group/cmd">
+        <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
         <textarea 
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Implement a feature..."
-          className="w-full bg-transparent p-6 pb-2 text-white placeholder-zinc-600 focus:outline-none transition-all resize-none min-h-[100px] text-lg font-light"
+          placeholder="What would you like the Swarm to build?"
+          className="w-full bg-transparent p-6 pb-4 text-white placeholder-zinc-500 focus:outline-none transition-all resize-none min-h-[120px] text-lg font-light relative z-10"
         />
         
-        <div className="flex items-center justify-between px-6 pb-4 pt-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button className="w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-500 transition-colors">
-              <Plus className="w-5 h-5" />
-            </button>
-
+        <div className="flex items-center justify-between px-6 pb-5 pt-0 relative z-10">
+          <div className="flex items-center gap-3 flex-wrap">
             {/* Repos Select Custom Dropdown */}
             <div className="relative">
               <button 
@@ -88,16 +85,16 @@ export default function GodView() {
                   setIsRepoDropdownOpen(!isRepoDropdownOpen);
                   setIsModelDropdownOpen(false);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1c1c1c] hover:bg-[#252525] border border-white/5 transition-colors text-sm text-zinc-300 shadow-sm"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 transition-all text-sm text-zinc-300 group-focus-within/cmd:border-purple-500/30"
               >
-                <GitBranch className="w-4 h-4 text-zinc-400" />
-                <span>{repositories.find(r => r.id === selectedRepos[0])?.name || 'Repo'}</span>
-                <ChevronDown className="w-4 h-4 text-zinc-500 ml-1" />
+                <GitBranch className="w-4 h-4 text-purple-400" />
+                <span className="font-medium">{repositories.find(r => r.id === selectedRepos[0])?.name || 'Repository'}</span>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-500 ml-1" />
               </button>
               
               {isRepoDropdownOpen && (
-                <div className="absolute top-full mt-2 left-0 w-64 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2">
-                  <div className="px-3 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Select Repository</div>
+                <div className="absolute top-full mt-2 left-0 w-64 bg-zinc-950 border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2">
+                  <div className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Target Repository</div>
                   {repositories.map(r => (
                     <button
                       key={r.id}
@@ -122,17 +119,20 @@ export default function GodView() {
                   setIsModelDropdownOpen(!isModelDropdownOpen);
                   setIsRepoDropdownOpen(false);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1c1c1c] hover:bg-[#252525] border border-white/5 transition-colors text-sm text-zinc-300 shadow-sm"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 transition-all text-sm text-zinc-300 group-focus-within/cmd:border-blue-500/30"
               >
-                <span>{availableModels.find(m => m.id === selectedOrchestrator)?.name || 'Opus 4.8'} + {availableModels.find(m => m.id === selectedWorker)?.name || 'GPT 5.5'}</span>
-                <ChevronDown className="w-4 h-4 text-zinc-500 ml-1" />
+                <Bot className="w-4 h-4 text-blue-400" />
+                <span className="font-medium">
+                  {availableModels.find(m => m.id === selectedOrchestrator)?.name.split(' ')[1] || 'Orchestrator'} + {availableModels.find(m => m.id === selectedWorker)?.name.split(' ')[0] || 'Worker'}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-500 ml-1" />
               </button>
 
               {isModelDropdownOpen && (
-                <div className="absolute top-full mt-2 left-0 w-80 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 flex flex-col">
+                <div className="absolute top-full mt-2 left-0 w-80 bg-zinc-950 border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 flex flex-col">
                   
                   <div className="px-4 py-3 border-b border-white/5">
-                    <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Orchestrator Model</div>
+                    <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Orchestrator Intelligence</div>
                     <div className="space-y-1">
                       {availableModels.map(m => (
                         <button
@@ -141,14 +141,14 @@ export default function GodView() {
                           className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between ${selectedOrchestrator === m.id ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-300 hover:bg-white/5 hover:text-white'}`}
                         >
                           <span>{m.name}</span>
-                          <span className="text-xs opacity-50">{m.providerName}</span>
+                          <span className="text-[10px] opacity-50 uppercase tracking-wider">{m.providerName}</span>
                         </button>
                       ))}
                     </div>
                   </div>
 
                   <div className="px-4 py-3">
-                    <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Worker Model</div>
+                    <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Worker Fleet</div>
                     <div className="space-y-1">
                       {availableModels.map(m => (
                         <button
@@ -157,7 +157,7 @@ export default function GodView() {
                           className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between ${selectedWorker === m.id ? 'bg-purple-500/10 text-purple-400' : 'text-zinc-300 hover:bg-white/5 hover:text-white'}`}
                         >
                           <span>{m.name}</span>
-                          <span className="text-xs opacity-50">{m.providerName}</span>
+                          <span className="text-[10px] opacity-50 uppercase tracking-wider">{m.providerName}</span>
                         </button>
                       ))}
                     </div>
@@ -168,20 +168,10 @@ export default function GodView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button className="w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-500 transition-colors">
-              <Mic className="w-4 h-4" />
-            </button>
-            
-            <div className="flex items-center bg-black/40 rounded-full p-1 border border-white/5">
-              <button className="px-3 py-1 text-xs font-medium text-zinc-400 rounded-full hover:text-white transition-colors">Plan</button>
-              <button className="px-3 py-1 text-xs font-medium text-white bg-white/10 rounded-full shadow-sm">Build</button>
-            </div>
-
-            <button className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white transition-colors shadow-[0_0_15px_rgba(79,70,229,0.4)] shrink-0 ml-1">
-              <ArrowUp className="w-4 h-4" />
-            </button>
-          </div>
+          <button className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black px-5 py-2 rounded-xl font-semibold transition-all shadow-[0_0_20px_rgba(255,255,255,0.15)] shrink-0">
+            Dispatch
+            <Send className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
