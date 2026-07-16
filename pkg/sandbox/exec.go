@@ -69,10 +69,22 @@ func RunCommand(ctx context.Context, dir string, cmdStr string, env []string) (*
 			args = append(args, "--network", "none")
 		}
 
-		// Inject environment variables (resolved secrets)
-		for _, eVal := range env {
-			args = append(args, "-e", eVal)
+		// Inject environment variables using --env-file to avoid leaking secrets in ps output
+		if len(env) > 0 {
+			envFile, err := os.CreateTemp("", "kiwi-env-*.env")
+			if err != nil {
+				return nil, fmt.Errorf("failed to create temp env file: %w", err)
+			}
+			defer os.Remove(envFile.Name())
+
+			for _, eVal := range env {
+				envFile.WriteString(eVal + "\n")
+			}
+			envFile.Close()
+
+			args = append(args, "--env-file", envFile.Name())
 		}
+
 		// Use configurable Docker image and execute command
 		args = append(args, dockerImage, "sh", "-c", cmdStr)
 

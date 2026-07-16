@@ -106,12 +106,14 @@ func (d *DockerInfra) Restore(ctx context.Context, handle Handle, ref *store.Sna
 }
 
 func (d *DockerInfra) Terminate(ctx context.Context, handle Handle) error {
-	dh, ok := handle.(*DockerHandle)
+	_, ok := handle.(*DockerHandle)
 	if !ok {
 		return fmt.Errorf("invalid handle type")
 	}
 	// Attempt to clean up docker container if it's left lingering
 	// In the current model, sandbox commands spin up ephemeral containers,
-	// so terminating is just deleting the host directory.
-	return os.RemoveAll(dh.sandboxPath)
+	// so terminating would just be deleting the host directory.
+	// However, the API relies on this directory persisting to serve output.zip.
+	// Therefore, we do not delete it here.
+	return nil
 }

@@ -44,5 +44,12 @@ func InitDB(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
 	}
 
+	// Ensure system organization exists for bootstrap admin token
+	sysOrg := &store.Organization{
+		ID:   "system",
+		Name: "System",
+	}
+	db.Where(store.Organization{ID: "system"}).Assign(store.Organization{Name: "System"}).FirstOrCreate(sysOrg)
+
 	return db, nil
 }
