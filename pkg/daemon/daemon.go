@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -18,14 +19,20 @@ import (
 type Config struct {
 	APIURL  string
 	KeyPath string
+	// PollInterval is the base interval between heartbeats. Defaults to 5s when zero.
+	PollInterval time.Duration
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
 type Daemon struct {
 	config Config
+	// X25519 keypair — used to receive credentials sealed to the daemon.
 	pubKey *ecdh.PublicKey
 	priKey *ecdh.PrivateKey
-	client *Client
+	// Ed25519 keypair — the daemon's signing identity for authenticating heartbeats.
+	signPubKey  ed25519.PublicKey
+	signPrivKey ed25519.PrivateKey
+	client      *Client
 }
 
 // New creates a new Daemon instance.
@@ -36,16 +43,23 @@ func New(cfg Config) *Daemon {
 	}
 }
 
-// Start boots up the daemon, generating or loading the X25519 keypair.
+// Start boots up the daemon, generating or loading its keypairs.
 func (d *Daemon) Start() error {
 	log.Println("Starting KiwiDaemon boot sequence...")
 
 	if err := d.initCrypto(); err != nil {
 		return fmt.Errorf("failed to initialize crypto: %w", err)
 	}
+	if err := d.initSigningCrypto(); err != nil {
+		return fmt.Errorf("failed to initialize signing crypto: %w", err)
+	}
 
 	pubPEM, _ := crypto.EncodePublicKeyToPEM(d.pubKey)
-	log.Printf("Daemon initialized with Public Key:\n%s\n", pubPEM)
+	log.Printf("Daemon initialized with Encryption Public Key (X25519):\n%s\n", pubPEM)
+	log.Printf("Daemon signing identity (Ed25519 pubkey): %s\n", base64.StdEncoding.EncodeToString(d.signPubKey))
+
+	// Hand the signing key to the client so every heartbeat is authenticated.
+	d.client.SetSigner(d.signPrivKey)
 
 	return nil
 }
@@ -53,22 +67,24 @@ func (d *Daemon) Start() error {
 // Run starts the daemon's heartbeat polling engine.
 // It blocks until the context is canceled.
 func (d *Daemon) Run(ctx context.Context) error {
-	pubKeyBase64 := base64.StdEncoding.EncodeToString(d.pubKey.Bytes())
-	req := HeartbeatReq{PubKey: pubKeyBase64}
-
 	log.Printf("Starting polling engine (URL: %s)...", d.config.APIURL)
 
-	baseInterval := 5 * time.Second
+	baseInterval := d.config.PollInterval
+	if baseInterval <= 0 {
+		baseInterval = 5 * time.Second
+	}
 	maxInterval := 60 * time.Second
+	if maxInterval < baseInterval {
+		maxInterval = baseInterval
+	}
 	currentInterval := baseInterval
 
-	// Immediate poll
-	success := d.pollCP(ctx, req)
-	if !success {
-		currentInterval *= 2
+	// Immediate poll so a freshly-booted daemon picks up work without waiting.
+	if !d.pollCP(ctx) {
+		currentInterval = backoff(currentInterval, maxInterval)
 	}
 
-	timer := time.NewTimer(currentInterval)
+	timer := time.NewTimer(withJitter(currentInterval))
 	defer timer.Stop()
 
 	for {
@@ -77,29 +93,41 @@ func (d *Daemon) Run(ctx context.Context) error {
 			log.Println("Shutting down daemon polling engine...")
 			return ctx.Err()
 		case <-timer.C:
-			success := d.pollCP(ctx, req)
-			if success {
+			if d.pollCP(ctx) {
 				currentInterval = baseInterval
 			} else {
-				currentInterval *= 2
-				if currentInterval > maxInterval {
-					currentInterval = maxInterval
-				}
+				currentInterval = backoff(currentInterval, maxInterval)
 			}
-
-			// Add jitter (e.g. +/- 10%)
-			jitterRange := int64(currentInterval) / 5
-			if jitterRange <= 0 {
-				jitterRange = 1
-			}
-			jitter := time.Duration(rand.Int63n(jitterRange)) - (currentInterval / 10)
-			timer.Reset(currentInterval + jitter)
+			timer.Reset(withJitter(currentInterval))
 		}
 	}
 }
 
-func (d *Daemon) pollCP(ctx context.Context, req HeartbeatReq) bool {
-	// log.Println("Heartbeating Control Plane...") // Commented out to avoid spam
+// backoff doubles the interval up to max (exponential backoff on failure).
+func backoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		next = max
+	}
+	return next
+}
+
+// withJitter returns d perturbed by +/-10% to de-synchronize a fleet of daemons.
+func withJitter(d time.Duration) time.Duration {
+	delta := int64(d) / 10
+	if delta <= 0 {
+		return d
+	}
+	return d + time.Duration(rand.Int63n(2*delta+1)-delta)
+}
+
+func (d *Daemon) pollCP(ctx context.Context) bool {
+	req := HeartbeatReq{
+		PubKey:     base64.StdEncoding.EncodeToString(d.pubKey.Bytes()),
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		Timestamp:  time.Now().Unix(),
+	}
+
 	res, err := d.client.Heartbeat(ctx, req)
 	if err != nil {
 		log.Printf("Heartbeat failed: %v", err)
@@ -107,7 +135,7 @@ func (d *Daemon) pollCP(ctx context.Context, req HeartbeatReq) bool {
 	}
 
 	if res == nil {
-		// No content
+		// No content — no tasks available.
 		return true
 	}
 
@@ -159,6 +187,59 @@ func (d *Daemon) initCrypto() error {
 			return fmt.Errorf("mkdir for key path: %w", err)
 		}
 		if err := os.WriteFile(d.config.KeyPath, pemBytes, 0600); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// initSigningCrypto loads or generates the Ed25519 signing identity. It is
+// persisted alongside the X25519 key (KeyPath + ".sign") so the daemon keeps a
+// stable identity across restarts.
+func (d *Daemon) initSigningCrypto() error {
+	signKeyPath := ""
+	if d.config.KeyPath != "" {
+		signKeyPath = d.config.KeyPath + ".sign"
+	}
+
+	if signKeyPath != "" {
+		if _, err := os.Stat(signKeyPath); err == nil {
+			log.Printf("Loading existing Ed25519 signing key from %s\n", signKeyPath)
+			keyBytes, err := os.ReadFile(signKeyPath)
+			if err != nil {
+				return err
+			}
+			priv, err := crypto.DecodeSigningPrivateKeyFromPEM(keyBytes)
+			if err != nil {
+				return err
+			}
+			d.signPrivKey = priv
+			d.signPubKey = priv.Public().(ed25519.PublicKey)
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat signing key path %s: %w", signKeyPath, err)
+		}
+	}
+
+	log.Println("Generating new Ed25519 signing key...")
+	pub, priv, err := crypto.GenerateSigningKeyPair()
+	if err != nil {
+		return err
+	}
+	d.signPubKey = pub
+	d.signPrivKey = priv
+
+	if signKeyPath != "" {
+		log.Printf("Saving signing key to %s\n", signKeyPath)
+		pemBytes, err := crypto.EncodeSigningPrivateKeyToPEM(priv)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(signKeyPath), 0o700); err != nil {
+			return fmt.Errorf("mkdir for signing key path: %w", err)
+		}
+		if err := os.WriteFile(signKeyPath, pemBytes, 0600); err != nil {
 			return err
 		}
 	}

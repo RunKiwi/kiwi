@@ -3,18 +3,23 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 )
 
 // Client handles communication with the Kiwi Control Plane.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL  string
+	http     *http.Client
+	signPriv ed25519.PrivateKey
 }
 
 // NewClient creates a new daemon API client.
@@ -25,6 +30,14 @@ func NewClient(baseURL string) *Client {
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// SetSigner installs the Ed25519 private key used to authenticate requests.
+// Once set, every request body is signed and the signature is sent in the
+// X-Kiwi-Signature header so the Control Plane can verify it against the
+// daemon's registered public key.
+func (c *Client) SetSigner(priv ed25519.PrivateKey) {
+	c.signPriv = priv
 }
 
 // Heartbeat polls the Control Plane for new tasks.
@@ -42,6 +55,13 @@ func (c *Client) Heartbeat(ctx context.Context, req HeartbeatReq) (*HeartbeatRes
 		return nil, fmt.Errorf("create heartbeat request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Authenticate the request by signing the exact body bytes with the
+	// daemon's Ed25519 identity key.
+	if c.signPriv != nil {
+		sig := crypto.Sign(c.signPriv, buf)
+		httpReq.Header.Set("X-Kiwi-Signature", base64.StdEncoding.EncodeToString(sig))
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {

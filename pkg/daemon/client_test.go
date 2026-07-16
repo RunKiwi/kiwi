@@ -2,12 +2,15 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 )
 
 func TestClient_Heartbeat_OK(t *testing.T) {
@@ -95,6 +98,58 @@ func TestClient_Heartbeat_Error(t *testing.T) {
 	_, err := client.Heartbeat(ctx, HeartbeatReq{PubKey: "mock"})
 	if err == nil {
 		t.Fatal("expected error on 500 response, got nil")
+	}
+}
+
+func TestClient_Heartbeat_SignsRequest(t *testing.T) {
+	pub, priv, err := crypto.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate signing key: %v", err)
+	}
+
+	var gotBody []byte
+	var gotSig string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		gotSig = r.Header.Get("X-Kiwi-Signature")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.SetSigner(priv)
+
+	_, err = client.Heartbeat(context.Background(), HeartbeatReq{PubKey: "k", SignPubKey: "s", Timestamp: 123})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotSig == "" {
+		t.Fatal("expected X-Kiwi-Signature header, got none")
+	}
+	sig, err := base64.StdEncoding.DecodeString(gotSig)
+	if err != nil {
+		t.Fatalf("failed to decode signature: %v", err)
+	}
+	if !crypto.Verify(pub, gotBody, sig) {
+		t.Error("signature did not verify against the request body")
+	}
+}
+
+func TestClient_Heartbeat_UnsignedWhenNoSigner(t *testing.T) {
+	var gotSig string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Kiwi-Signature")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.Heartbeat(context.Background(), HeartbeatReq{PubKey: "k"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotSig != "" {
+		t.Errorf("expected no signature header without a signer, got %q", gotSig)
 	}
 }
 
