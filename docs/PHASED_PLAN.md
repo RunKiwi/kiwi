@@ -7,7 +7,7 @@ This document details the engineering phases required to pivot the Kiwi architec
 ### Phase 1: The Data Plane Foundation (`kiwidaemon`)
 **Goal:** Build the daemon that will run in the customer's AWS/GCP account to orchestrate sandboxes.
 1.  **Daemon Scaffold:** Create the `cmd/kiwidaemon` Go binary.
-2.  **Zero-Knowledge Cryptography:** Implement Ed25519 keypair generation on boot and the registration handshake payload.
+2.  **Zero-Knowledge Cryptography:** Implement dual-keypair generation on boot — X25519 for sealing credentials to the daemon, Ed25519 for signing heartbeats — and the registration handshake payload.
 3.  **Heartbeat Polling:** Implement the HTTPS polling mechanism to pull `worker-spec.json` from the Control Plane.
 4.  **LFU Repo Cache:** Implement the `git worktree` isolation logic to create instant, zero-footprint repository clones for tasks.
 5.  **Sandbox Spawning:** Integrate the existing `pkg/infra/docker.go` logic to mount the worktree into a secure Docker container upon receiving a spec.

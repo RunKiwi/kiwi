@@ -76,9 +76,9 @@ sequenceDiagram
 ## 3. Deep Dives
 
 ### Zero-Knowledge Credential Sharing
-The SaaS database only stores ciphertext.
-1. `KiwiDaemon` boots and generates an Ed25519 keypair. The Private Key stays on the VM disk. The Public Key is sent to the Control Plane.
-2. When the user configures API keys or Git tokens in the Kiwi UI, the browser encrypts them using the KD's Public Key before transmission.
+For customer-provided credentials, the SaaS database only stores ciphertext.
+1. `KiwiDaemon` boots and generates an **X25519** encryption keypair (for receiving sealed credentials) and an **Ed25519** signing keypair (its identity for authenticating heartbeats). The private keys stay on the VM disk; both public keys are sent to the Control Plane.
+2. When the user configures API keys or Git tokens, they are sealed to the KD's **X25519** public key before storage (X25519/ECDH is encryption-capable; Ed25519 is a signature key and cannot encrypt).
 3. During the daemon heartbeat, the Control Plane sends the ciphertext. The daemon decrypts it in-memory.
 
 ### Lightning-Fast Sandbox Provisioning
