@@ -50,37 +50,43 @@ export const useFleetStore = create<FleetState>((set) => ({
     const isPlanning = i > 5;
     const phase = isCompleted ? 'completed' : isPlanning ? 'planning' : 'executing';
     
+    const subAgents: SubAgent[] = [
+      {
+        id: `agent-${i}-master`,
+        nodeId: 'aws-node-01',
+        role: 'master',
+        phase: phase === 'planning' ? 'executing' : 'completed',
+        title: 'Fable Planner'
+      },
+      {
+        id: `agent-${i}-w1`,
+        nodeId: 'aws-node-02',
+        role: 'worker',
+        phase: phase === 'completed' ? 'completed' : phase === 'planning' ? 'planning' : 'executing',
+        title: 'Execution Worker 1'
+      },
+      {
+        id: `agent-${i}-w2`,
+        nodeId: 'gcp-node-01',
+        role: 'worker',
+        phase: phase === 'completed' ? 'completed' : 'planning',
+        title: 'Execution Worker 2'
+      }
+    ];
+
+    let prs: { id: string, status: 'open' | 'merged' }[] = [];
+    if (i === 1) prs = [{ id: `pr-1a`, status: 'merged' }, { id: `pr-1b`, status: 'merged' }]; // Multiple closed
+    else if (i === 3) prs = [{ id: `pr-3a`, status: 'open' }, { id: `pr-3b`, status: 'open' }, { id: `pr-3c`, status: 'open' }]; // Multiple open
+    else if (i === 5) prs = [{ id: `pr-5a`, status: 'merged' }, { id: `pr-5b`, status: 'open' }]; // Mixed
+    else if (i === 7) prs = [{ id: `pr-7`, status: 'open' }]; // Single open
+
     return {
       id: `task-${1000 + i}`,
       phase,
       title: `Goal: ${['Deploy Microservices', 'Run Security Audit', 'Provision EKS Cluster', 'Migrate Database', 'Run CI/CD Pipeline', 'Backup Vault', 'Scale Up Workers', 'Update Certificates'][i]}`,
       startedAt: new Date(Date.now() - Math.random() * 1000000),
-      subAgents: [
-        {
-          id: `agent-${i}-master`,
-          nodeId: 'aws-node-01',
-          role: 'master',
-          phase: phase === 'planning' ? 'executing' : 'completed',
-          title: 'Fable Planner'
-        },
-        {
-          id: `agent-${i}-w1`,
-          nodeId: 'aws-node-02',
-          role: 'worker',
-          phase: phase === 'completed' ? 'completed' : phase === 'planning' ? 'planning' : 'executing',
-          title: 'Execution Worker 1'
-        },
-        {
-          id: `agent-${i}-w2`,
-          nodeId: 'gcp-node-01',
-          role: 'worker',
-          phase: phase === 'completed' ? 'completed' : 'planning',
-          title: 'Execution Worker 2'
-        }
-      ],
-      pullRequests: i % 2 === 0 ? [] : [
-        { id: `pr-${i}`, status: isCompleted ? 'merged' : 'open' }
-      ]
+      subAgents,
+      pullRequests: prs
     };
   }),
   
