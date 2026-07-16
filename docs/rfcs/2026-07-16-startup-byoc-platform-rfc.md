@@ -24,13 +24,13 @@ graph TD
     subgraph SaaS[Kiwi SaaS - Control Plane]
         UI[SDK / CLI / Webhooks]
         API[API Gateway & Auth]
-        DB[(SaaS Database<br>Zero-Knowledge)]
+        DB[(SaaS Database<br>Encrypted Secrets)]
         Q[(Event Queue)]
+        Planner[Orchestrator<br>Planner Agent]
     end
 
     subgraph BYOC[Customer VPC - Data Plane]
         KD[KiwiDaemon<br>VM / Kubernetes]
-        Planner[Orchestrator<br>Planner Agent]
         Cache[(LFU Git Worktree Cache)]
         SB1[Docker Sandbox 1<br>Execution Agent]
         SB2[Docker Sandbox N<br>Execution Agent]
@@ -44,20 +44,22 @@ graph TD
 
     %% SaaS Internal
     UI --> API
+    API --> Planner
     API --> DB
-    API --> Q
+    Planner --> Q
+    
+    %% SaaS to External
+    Planner <-->|Plan generation| LLM_P
     
     %% Data Plane Internal
-    KD --> Planner
     KD --> Cache
     KD --> SB1
     KD --> SB2
     
     %% Data Plane to SaaS
-    KD <-->|HTTPS Polling / Heartbeat| API
+    KD <-->|Network Pull Model<br>HTTPS Polling| API
     
     %% Data Plane to External
-    Planner <-->|Plan generation| LLM_P
     SB1 <-->|Execute code| LLM_W
     SB2 <-->|Execute code| LLM_W
     Cache <-->|git fetch| VCS
@@ -71,6 +73,7 @@ sequenceDiagram
     participant U as User (SDK/CLI/UI)
     box rgba(61, 91, 255, 0.1) Control Plane (Kiwi SaaS)
     participant API as API Gateway & Auth
+    participant CP as Orchestrator (Go)
     participant Q as Event Queue
     end
     box rgba(200, 200, 200, 0.1) Data Plane (Customer BYOC)
@@ -80,38 +83,39 @@ sequenceDiagram
     participant LLM as LLM Provider (Fable/Sonnet)
 
     Note over U, API: 1. Setup & Registration
-    U->>API: Add Provider Key (Encrypted in Browser via KD PubKey)
+    U->>API: Add Provider Key (Stored in SaaS DB)
     U->>KD: Run `terraform apply` in AWS/GCP
-    KD->>API: Boot & Self-Register (Sends PubKey)
+    KD->>API: Boot & Self-Register (Sends KD Public Key)
     
-    Note over U, Q: 2. Task Submission
+    Note over U, Q: 2. Task Planning (The Swarm)
     U->>API: `kiwi submit "Fix issue #50"`
-    API->>Q: Enqueue Raw Task Request
+    API->>CP: Route Task
+    CP->>LLM: Planner Agent (Fable) generates `worker-spec.json`
+    LLM-->>CP: Returns chunked DAG of tasks, AGENT.md, deps
+    CP->>CP: Encrypt API Keys using KD Public Key
+    CP->>Q: Enqueue `worker-spec.json` (with encrypted keys)
     
-    Note over KD, SB: 3. Planning & Execution (Zero-Knowledge)
-    KD->>API: HTTPS Heartbeat (Polling)
+    Note over KD, SB: 3. Execution (Pull Model)
+    KD->>API: HTTPS Heartbeat (Network Pull)
     API->>Q: Pop task
-    API-->>KD: Send Raw Task (Includes Encrypted Keys)
-    KD->>KD: Decrypt Keys in memory using Private Key
-    
-    KD->>LLM: Planner Agent (Fable) analyzes task
-    LLM-->>KD: Returns `worker-spec.json` (DAG of tasks, deps)
-    
+    API-->>KD: Send `worker-spec.json`
+    KD->>KD: Decrypt Keys in memory using KD Private Key
     KD->>KD: `git fetch` & `git worktree add /tmp/task-123`
     KD->>SB: Mount worktree into Docker Sandbox
     SB->>LLM: Execution Loop (Sonnet) writes code & tests
     SB-->>KD: Tests Pass -> PR Created
     KD->>KD: Unmount & `git worktree remove`
+    KD->>API: Report Success
 ```
 
 ## 4. Technical Deep Dives
 
-### 4.1 Zero-Knowledge Credential Management
-To ensure the Control Plane never stores plaintext API keys or Git tokens:
+### 4.1 Secure Credential Management (Asymmetric Encryption)
+To securely transmit credentials (LLM keys, Git tokens) to the customer's VPC without exposing them in transit:
 * `KiwiDaemon` boots on a VM and generates an Ed25519 keypair, registering its Public Key with the CP.
-* When a user inputs API keys into the SaaS UI, the browser encrypts them using the KD's Public Key.
-* The CP stores and transmits ciphertext only.
-* KD decrypts the payload in-memory during execution.
+* The SaaS Control Plane holds the API keys securely in its database and uses them to communicate with the Frontier Model for planning.
+* When enqueueing a task for execution, the SaaS encrypts the plaintext API keys using the `KiwiDaemon`'s Public Key.
+* KD pulls the payload via HTTPS polling (Pull Model) and decrypts the credentials in-memory during execution.
 
 ### 4.2 LFU Repository Caching (`git worktree`)
 To avoid expensive network clones for parallel agents:
