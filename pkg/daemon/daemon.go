@@ -9,10 +9,13 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/gitcache"
+	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 )
 
 // Config holds the configuration for the KiwiDaemon.
@@ -108,7 +111,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) pollCP(ctx context.Context, req HeartbeatReq) bool {
-	// log.Println("Heartbeating Control Plane...") // Commented out to avoid spam
 	res, err := d.client.Heartbeat(ctx, req)
 	if err != nil {
 		log.Printf("Heartbeat failed: %v", err)
@@ -116,16 +118,69 @@ func (d *Daemon) pollCP(ctx context.Context, req HeartbeatReq) bool {
 	}
 
 	if res == nil {
-		// No content
 		return true
 	}
 
 	log.Printf("Received worker specs from Control Plane! (Tasks: %d)", len(res.Specs))
 	for _, spec := range res.Specs {
-		log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
+		func(spec agent.WorkerSpec) {
+			log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
+
+			// 0. Sanitize spec.ID to prevent path traversal
+			if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
+				log.Printf("Invalid task ID format: %s", spec.ID)
+				return
+			}
+
+			// 1. Generate worktree path
+			worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
+
+			// 2. Clone worktree
+			if spec.RepoURL != "" && spec.Ref != "" {
+				log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
+				if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
+					log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
+					return
+				}
+
+				// Defer cleanup of worktree
+				defer func(url, path string) {
+					log.Printf("Cleaning up worktree: %s", path)
+					if err := d.gitCache.RemoveWorktree(context.Background(), url, path); err != nil {
+						log.Printf("Failed to remove worktree: %v", err)
+					}
+				}(spec.RepoURL, worktreePath)
+			} else {
+				// Fallback if no repo is provided, just use a temp dir for sandbox
+				worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
+				if err := os.MkdirAll(worktreePath, 0755); err != nil {
+					log.Printf("Failed to create fallback sandbox dir: %v", err)
+					return
+				}
+			}
+
+			// 3. Inject Sandbox config
+			sandboxCtx := context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+				UseDocker:   true,
+				MemoryLimit: "512m",
+				CPULimit:    "1.0",
+				NetworkNone: true,
+			})
+
+			// 4. Execute placeholder command inside sandbox
+			log.Printf("Spawning Docker sandbox for task %s...", spec.ID)
+			cmdStr := "echo 'Processing task' > sandbox.log && ls -la"
+			env := []string{"TASK=" + spec.Task}
+
+			result, err := sandbox.RunCommand(sandboxCtx, worktreePath, cmdStr, env)
+			if err != nil {
+				log.Printf("Sandbox execution failed for task %s: %v", spec.ID, err)
+			} else {
+				log.Printf("Sandbox execution complete. Success: %v\nOutput:\n%s", result.Success, result.Output)
+			}
+		}(spec)
 	}
 
-	// Issue #81: Integrate Sandbox Spawning here
 	return true
 }
 

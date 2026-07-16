@@ -57,10 +57,12 @@ func (r *StoreReporter) Event(ctx context.Context, agentID, phase, outcome strin
 
 // WorkerSpec is a single worker's scoped subtask (per-worker model/tools).
 type WorkerSpec struct {
-	ID    string
-	Model string
-	Task  string
-	File  string
+	ID      string
+	Model   string
+	Task    string
+	File    string
+	RepoURL string
+	Ref     string
 }
 
 // WorkerResult is the outcome of one worker.
@@ -247,10 +249,12 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 			}
 			for k := 0; k < count; k++ {
 				specs = append(specs, WorkerSpec{
-					ID:    fmt.Sprintf("%s-w%d", jobID, idx),
-					Model: str(m["model"]),
-					Task:  str(m["task"]),
-					File:  str(m["file"]),
+					ID:      fmt.Sprintf("%s-w%d", jobID, idx),
+					Model:   str(m["model"]),
+					Task:    str(m["task"]),
+					File:    str(m["file"]),
+					RepoURL: str(m["repo_url"]),
+					Ref:     str(m["ref"]),
 				})
 				idx++
 			}
@@ -258,10 +262,12 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 		return specs
 	}
 	return []WorkerSpec{{
-		ID:    jobID + "-w0",
-		Model: str(manifest.Content["model"]),
-		Task:  str(manifest.Content["task"]),
-		File:  str(manifest.Content["file"]),
+		ID:      jobID + "-w0",
+		Model:   str(manifest.Content["model"]),
+		Task:    str(manifest.Content["task"]),
+		File:    str(manifest.Content["file"]),
+		RepoURL: str(manifest.Content["repo_url"]),
+		Ref:     str(manifest.Content["ref"]),
 	}}
 }
 
