@@ -63,6 +63,9 @@ type WorkerSpec struct {
 	File    string
 	RepoURL string
 	Ref     string
+	// DependsOn lists the IDs of workers that must complete before this one
+	// (the plan DAG produced by the planner).
+	DependsOn []string
 }
 
 // WorkerResult is the outcome of one worker.
@@ -249,12 +252,13 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 			}
 			for k := 0; k < count; k++ {
 				specs = append(specs, WorkerSpec{
-					ID:      fmt.Sprintf("%s-w%d", jobID, idx),
-					Model:   str(m["model"]),
-					Task:    str(m["task"]),
-					File:    str(m["file"]),
-					RepoURL: str(m["repo_url"]),
-					Ref:     str(m["ref"]),
+					ID:        fmt.Sprintf("%s-w%d", jobID, idx),
+					Model:     str(m["model"]),
+					Task:      str(m["task"]),
+					File:      str(m["file"]),
+					RepoURL:   str(m["repo_url"]),
+					Ref:       str(m["ref"]),
+					DependsOn: strSlice(m["depends_on"]),
 				})
 				idx++
 			}
@@ -274,6 +278,27 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 func str(v interface{}) string {
 	s, _ := v.(string)
 	return s
+}
+
+// strSlice coerces a JSON-decoded []interface{} of strings (or a []string) to
+// []string, ignoring non-string elements.
+func strSlice(v interface{}) []string {
+	switch xs := v.(type) {
+	case []string:
+		return xs
+	case []interface{}:
+		out := make([]string, 0, len(xs))
+		for _, e := range xs {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
 }
 
 // toInt coerces a JSON-decoded number (float64) or Go integer to int.
