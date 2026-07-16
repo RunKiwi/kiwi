@@ -31,9 +31,32 @@ export interface Task {
   pullRequests: PullRequest[];
 }
 
+export interface ModelConfig {
+  id: string;
+  provider: 'OpenAI' | 'Anthropic' | 'Google' | 'Cohere' | 'Meta';
+  name: string;
+  isConfigured: boolean;
+}
+
+export interface Integration {
+  id: string;
+  name: 'GitHub' | 'Jira' | 'Linear' | 'Slack' | 'Discord';
+  status: 'connected' | 'disconnected';
+  workspace?: string;
+}
+
+export interface Repository {
+  id: string;
+  name: string;
+  url: string;
+}
+
 interface FleetState {
   nodes: Node[];
   tasks: Task[];
+  models: ModelConfig[];
+  integrations: Integration[];
+  repositories: Repository[];
   addNode: (node: Node) => void;
   updateNodeStatus: (id: string, status: Node['status']) => void;
   addTask: (task: Task) => void;
@@ -91,6 +114,25 @@ export const useFleetStore = create<FleetState>((set) => ({
       pullRequests: prs
     };
   }),
+  models: [
+    { id: 'm-1', provider: 'Anthropic', name: 'Claude 3.5 Sonnet', isConfigured: true },
+    { id: 'm-2', provider: 'Anthropic', name: 'Claude 3 Haiku', isConfigured: true },
+    { id: 'm-3', provider: 'OpenAI', name: 'GPT-4o', isConfigured: true },
+    { id: 'm-4', provider: 'OpenAI', name: 'GPT-4o-mini', isConfigured: false },
+    { id: 'm-5', provider: 'Google', name: 'Gemini 1.5 Pro', isConfigured: false },
+  ],
+  integrations: [
+    { id: 'i-1', name: 'GitHub', status: 'connected', workspace: 'RunKiwi' },
+    { id: 'i-2', name: 'Slack', status: 'connected', workspace: 'KiwiTeam' },
+    { id: 'i-3', name: 'Jira', status: 'disconnected' },
+    { id: 'i-4', name: 'Linear', status: 'connected', workspace: 'KiwiHQ' },
+    { id: 'i-5', name: 'Discord', status: 'disconnected' },
+  ],
+  repositories: [
+    { id: 'r-1', name: 'RunKiwi/kiwi', url: 'https://github.com/RunKiwi/kiwi' },
+    { id: 'r-2', name: 'RunKiwi/steelwing', url: 'https://github.com/RunKiwi/steelwing' },
+    { id: 'r-3', name: 'RunKiwi/docs', url: 'https://github.com/RunKiwi/docs' },
+  ],
   
   addNode: (node) => set((state) => ({ nodes: [...state.nodes, node] })),
   updateNodeStatus: (id, status) => set((state) => ({

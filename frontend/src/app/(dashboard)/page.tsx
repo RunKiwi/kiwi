@@ -2,13 +2,19 @@
 
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot, Sparkles, GitBranch } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
-  const { nodes, tasks } = useFleetStore();
+  const { tasks, models, repositories } = useFleetStore();
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
   const [activeDropdownTaskId, setActiveDropdownTaskId] = useState<string | null>(null);
+  
+  // Task Creation State
+  const [prompt, setPrompt] = useState("");
+  const [selectedOrchestrator, setSelectedOrchestrator] = useState<string>("m-1"); // Sonnet
+  const [selectedWorker, setSelectedWorker] = useState<string>("m-4"); // GPT-4o-mini
+  const [selectedRepos, setSelectedRepos] = useState<string[]>(["r-1"]); // kiwi
 
   const getPhaseIcon = (phase: string) => {
     switch (phase) {
@@ -24,8 +30,8 @@ export default function GodView() {
     switch (phase) {
       case 'executing': return 'bg-blue-500/10 border-blue-500/30 text-blue-300';
       case 'planning': return 'bg-purple-500/10 border-purple-500/30 text-purple-300';
-      case 'completed': return 'bg-green-500/10 border-green-500/30 text-green-300';
-      case 'failed': return 'bg-red-500/10 border-red-500/30 text-red-300';
+      case 'completed': return 'bg-green-500/10 border-green-500/20 text-green-300';
+      case 'failed': return 'bg-red-500/10 border-red-500/20 text-red-300';
       default: return 'bg-white/5 border-white/10 text-white';
     }
   };
@@ -47,19 +53,78 @@ export default function GodView() {
   };
 
   return (
-    <div 
-      className="p-8 max-w-7xl mx-auto h-full flex flex-col relative"
-      onClick={() => setActiveDropdownTaskId(null)}
-    >
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight text-white mb-2">The Swarm God View</h1>
-          <p className="text-zinc-400">Monitoring {tasks.length} high-level goals across {nodes.length} nodes.</p>
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col" onClick={() => setActiveDropdownTaskId(null)}>
+      <div className="mb-8">
+        <h1 className="text-3xl font-light tracking-tight text-white mb-2">Command Center</h1>
+        <p className="text-zinc-400">Command your agents and monitor high-level goals across the Swarm.</p>
+      </div>
+
+      {/* Command Bar */}
+      <div className="glass-panel p-4 mb-8 flex flex-col gap-4 relative z-20 shadow-xl border-white/20">
+        <div className="relative">
+          <Sparkles className="absolute left-4 top-4 w-5 h-5 text-purple-400" />
+          <textarea 
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="E.g. Debug @JIRA-123 and raise a PR to @RunKiwi/kiwi, then notify @slack-eng-channel..."
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-12 pr-4 py-4 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 transition-all resize-none min-h-[80px]"
+          />
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* Orchestrator Select */}
+            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Orchestrator</span>
+              <select 
+                value={selectedOrchestrator}
+                onChange={(e) => setSelectedOrchestrator(e.target.value)}
+                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                {models.filter(m => m.isConfigured).map(m => (
+                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Worker Select */}
+            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Workers</span>
+              <select 
+                value={selectedWorker}
+                onChange={(e) => setSelectedWorker(e.target.value)}
+                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                {models.filter(m => m.isConfigured).map(m => (
+                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Repos Select */}
+            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+              <GitBranch className="w-3.5 h-3.5 text-zinc-400" />
+              <select 
+                value={selectedRepos[0]}
+                onChange={(e) => setSelectedRepos([e.target.value])}
+                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                {repositories.map(r => (
+                  <option key={r.id} value={r.id} className="bg-zinc-900">{r.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <button className="flex items-center gap-2 bg-white text-black px-6 py-2 rounded-lg font-medium hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)]">
+            Dispatch Swarm
+            <Sparkles className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
       {/* Grid of Tasks */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-32">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-32 relative z-10">
         {tasks.map(task => (
           <button 
             key={task.id} 

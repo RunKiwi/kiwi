@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, Server } from "lucide-react";
+import { LayoutDashboard, Network, Settings, Server, Cpu, Link2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
@@ -15,9 +15,11 @@ export default function DashboardLayout({
   const [isCollapsed, setIsCollapsed] = useState(true);
 
   const navItems = [
-    { name: "God View", href: "/", icon: LayoutDashboard },
+    { name: "Command Center", href: "/", icon: LayoutDashboard },
     { name: "Topology", href: "/topology", icon: Network },
     { name: "Fleet", href: "/fleet", icon: Server },
+    { name: "Models", href: "/models", icon: Cpu },
+    { name: "Integrations", href: "/integrations", icon: Link2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 
