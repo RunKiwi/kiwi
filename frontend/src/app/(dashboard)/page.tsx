@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import Link from "next/link";
-import { Activity, Clock, Server, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Activity, Clock, Users, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
   const { nodes, tasks } = useFleetStore();
+  const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
 
   const getPhaseIcon = (phase: string) => {
     switch (phase) {
@@ -28,28 +30,21 @@ export default function GodView() {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col relative">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-light tracking-tight text-white mb-2">The Swarm God View</h1>
-          <p className="text-zinc-400">Monitoring {tasks.length} tasks executing across {nodes.length} nodes.</p>
-        </div>
-        
-        <div className="flex gap-4">
-          <div className="glass px-4 py-2 flex items-center gap-2">
-            <Server className="w-4 h-4 text-zinc-400" />
-            <span className="text-sm text-white font-medium">{nodes.filter(n => n.status === 'executing').length} Active Nodes</span>
-          </div>
+          <p className="text-zinc-400">Monitoring {tasks.length} high-level goals across {nodes.length} nodes.</p>
         </div>
       </div>
 
       {/* Grid of Tasks */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-32">
         {tasks.map(task => (
-          <Link 
+          <button 
             key={task.id} 
-            href={`/task/${task.id}`}
-            className="glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full"
+            onClick={() => setActiveDrawerTaskId(task.id)}
+            className="text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full"
           >
             <div className="flex items-start justify-between mb-3">
               <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{task.id}</span>
@@ -59,23 +54,28 @@ export default function GodView() {
               </div>
             </div>
             
-            <h3 className="text-sm font-medium text-white mb-4 line-clamp-2 leading-snug flex-1">
+            <h3 className="text-sm font-medium text-white mb-6 line-clamp-2 leading-snug flex-1">
               {task.title}
             </h3>
 
             <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between text-xs text-zinc-400">
               <div className="flex items-center gap-1.5">
-                <Server className="w-3 h-3" />
-                <span className="font-mono">{task.nodeId.split('-')[0]}</span>
+                <Users className="w-3 h-3 text-zinc-500" />
+                <span className="font-mono text-zinc-300">{task.subAgents.length} Agents</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Clock className="w-3 h-3" />
+                <Clock className="w-3 h-3 text-zinc-500" />
                 <span>2m ago</span>
               </div>
             </div>
-          </Link>
+          </button>
         ))}
       </div>
+
+      <TaskDrawer 
+        taskId={activeDrawerTaskId} 
+        onClose={() => setActiveDrawerTaskId(null)} 
+      />
     </div>
   );
 }
