@@ -13,7 +13,11 @@ import (
 )
 
 // Cache manages local bare repositories and isolated git worktrees.
-// TODO: Implement true LFU eviction (frequency counter + evict via worktree prune + remove bare dir under a bound).
+//
+// NOTE: this cache is currently unbounded — bare repositories are cloned on
+// demand and never evicted. A bounded, least-frequently-used (LFU) eviction
+// policy (frequency counter + evict via worktree prune + remove bare dir under
+// a size/count bound) is tracked as a follow-up issue.
 type Cache struct {
 	baseDir string
 	locks   sync.Map

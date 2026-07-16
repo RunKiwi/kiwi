@@ -31,7 +31,7 @@ graph TD
 
     subgraph BYOC[Customer VPC - Data Plane]
         KD[KiwiDaemon<br>VM / Kubernetes]
-        Cache[(LFU Git Worktree Cache)]
+        Cache[(Git Worktree Cache)]
         SB1[Docker Sandbox 1<br>Execution Agent]
         SB2[Docker Sandbox N<br>Execution Agent]
     end
@@ -117,8 +117,10 @@ To securely transmit credentials (LLM keys, Git tokens) to the customer's VPC wi
 * **Customer-provided credentials** (e.g., Worker LLM keys, Git tokens) are stored in the SaaS database only in zero-knowledge encrypted form using the `KiwiDaemon`'s Public Key. The SaaS never has plaintext access to them.
 * KD pulls the payload via HTTPS polling (Pull Model) and decrypts the customer credentials in-memory during execution.
 
-### 4.2 LFU Repository Caching (`git worktree`)
+### 4.2 Git Worktree Caching (`git worktree`)
 To avoid expensive network clones for parallel agents:
+> Note: a bounded, least-frequently-used (LFU) eviction policy over cached bare
+> repositories is planned as a follow-up; the current cache is unbounded.
 * KD maintains a base `bare` clone of the repository.
 * When a task arrives, KD runs `git worktree add /tmp/task-123 main` (milliseconds latency, zero extra disk space).
 * The Docker Sandbox mounts `-v /tmp/task-123:/workspace`.

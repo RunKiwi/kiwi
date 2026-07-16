@@ -5,7 +5,7 @@ This document outlines the architectural blueprint for the Kiwi AI Execution Eng
 ## Core Tenets
 1.  **Decoupled Control & Data Planes:** Kiwi SaaS handles orchestration (planning); customer clouds handle execution (building).
 2.  **Zero-Knowledge Credentials:** API Keys and Git tokens are encrypted at the edge and never stored in plaintext by the SaaS.
-3.  **LFU Repo Caching:** Utilize `git worktree` for instant, zero-footprint repository cloning inside the Data Plane.
+3.  **Git Worktree Caching:** Utilize `git worktree` for instant repository cloning inside the Data Plane (bounded LFU eviction is a planned follow-up).
 4.  **CLI & SDK Native:** Emphasize programmatic integration over heavy UI dashboards.
 
 ---
