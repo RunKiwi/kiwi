@@ -123,21 +123,42 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 }
 
 // RequeueExpiredLeases returns any LEASED task whose lease has lapsed back to
-// QUEUED, clearing its lease fields so another daemon can claim it. It returns
-// the number of tasks recovered. Run this periodically as a sweeper.
+// QUEUED (clearing its lease fields so another daemon can claim it) and returns
+// the number of tasks recovered. Tasks already leased MaxLeaseAttempts times are
+// instead dead-lettered to FAILED — a poison-pill guard so a spec that reliably
+// crashes its daemon isn't requeued forever. Run this periodically as a sweeper.
 func (s *PostgresStore) RequeueExpiredLeases(ctx context.Context) (int, error) {
 	now := time.Now()
-	res := s.db.WithContext(ctx).Model(&QueuedTask{}).
-		Where("status = ? AND lease_expires_at < ?", TaskLeased, now).
-		Updates(map[string]interface{}{
-			"status":           TaskQueued,
-			"leased_by":        nil,
-			"lease_id":         nil,
-			"lease_expires_at": nil,
-			"updated_at":       now,
-		})
-	if res.Error != nil {
-		return 0, res.Error
+
+	var requeued int
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Dead-letter poison tasks first so the requeue below skips them.
+		if err := tx.Model(&QueuedTask{}).
+			Where("status = ? AND lease_expires_at < ? AND attempts >= ?", TaskLeased, now, MaxLeaseAttempts).
+			Updates(map[string]interface{}{
+				"status":     TaskFailed,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+
+		res := tx.Model(&QueuedTask{}).
+			Where("status = ? AND lease_expires_at < ? AND attempts < ?", TaskLeased, now, MaxLeaseAttempts).
+			Updates(map[string]interface{}{
+				"status":           TaskQueued,
+				"leased_by":        nil,
+				"lease_id":         nil,
+				"lease_expires_at": nil,
+				"updated_at":       now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		requeued = int(res.RowsAffected)
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	return int(res.RowsAffected), nil
+	return requeued, nil
 }

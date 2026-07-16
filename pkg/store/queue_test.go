@@ -205,3 +205,44 @@ func TestRequeueExpiredLeasesAndRefencing(t *testing.T) {
 		t.Error("stale daemon must not complete a reassigned task (fencing after requeue)")
 	}
 }
+
+func TestRequeueDeadLettersPoisonPill(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	enqueue(t, s, "poison", "o1")
+
+	// Simulate a task leased up to the limit whose lease has expired again.
+	past := time.Now().Add(-time.Minute)
+	if err := s.DB().Model(&QueuedTask{}).Where("id = ?", "poison").
+		Updates(map[string]interface{}{
+			"status":           TaskLeased,
+			"attempts":         MaxLeaseAttempts,
+			"lease_expires_at": past,
+			"lease_id":         "old",
+		}).Error; err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	requeued, err := s.RequeueExpiredLeases(ctx)
+	if err != nil {
+		t.Fatalf("RequeueExpiredLeases: %v", err)
+	}
+	if requeued != 0 {
+		t.Errorf("poison task must not be requeued, got requeued=%d", requeued)
+	}
+
+	var got QueuedTask
+	s.DB().First(&got, "id = ?", "poison")
+	if got.Status != TaskFailed {
+		t.Errorf("poison task should be dead-lettered to FAILED, got %s", got.Status)
+	}
+
+	// A task still under the attempt limit is requeued normally.
+	enqueue(t, s, "ok", "o1")
+	s.DB().Model(&QueuedTask{}).Where("id = ?", "ok").
+		Updates(map[string]interface{}{"status": TaskLeased, "attempts": 1, "lease_expires_at": past, "lease_id": "l"})
+	requeued, _ = s.RequeueExpiredLeases(ctx)
+	if requeued != 1 {
+		t.Errorf("under-limit task should be requeued, got requeued=%d", requeued)
+	}
+}

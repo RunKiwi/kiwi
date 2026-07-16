@@ -6,15 +6,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
-	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // SaveCredential upserts an org-scoped secret, encrypting the plaintext value at
-// rest (AES-256-GCM). The plaintext is never persisted.
+// rest (AES-256-GCM). The plaintext is never persisted. The write is an atomic
+// upsert (ON CONFLICT over the unique (org_id, name) index) so concurrent saves
+// of the same credential cannot race into a unique-constraint violation.
 func (s *PostgresStore) SaveCredential(ctx context.Context, orgID, name, kind, plaintext string) error {
 	enc, err := crypto.EncryptAtRest(plaintext)
 	if err != nil {
@@ -22,26 +23,12 @@ func (s *PostgresStore) SaveCredential(ctx context.Context, orgID, name, kind, p
 	}
 	now := time.Now()
 
-	var existing Credential
-	err = s.db.WithContext(ctx).Where("org_id = ? AND name = ?", orgID, name).First(&existing).Error
-	if err == nil {
-		return s.db.WithContext(ctx).Model(&Credential{}).
-			Where("id = ?", existing.ID).
-			Updates(map[string]interface{}{
-				"kind":            kind,
-				"encrypted_value": enc,
-				"updated_at":      now,
-			}).Error
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-
 	idBytes := make([]byte, 8)
 	if _, err := rand.Read(idBytes); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Create(&Credential{
+
+	cred := &Credential{
 		ID:             "cred_" + hex.EncodeToString(idBytes),
 		OrgID:          orgID,
 		Name:           name,
@@ -49,7 +36,15 @@ func (s *PostgresStore) SaveCredential(ctx context.Context, orgID, name, kind, p
 		EncryptedValue: enc,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-	}).Error
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "org_id"}, {Name: "name"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"kind":            kind,
+			"encrypted_value": enc,
+			"updated_at":      now,
+		}),
+	}).Create(cred).Error
 }
 
 // ListCredentials returns an org's credentials (metadata only; values stay
