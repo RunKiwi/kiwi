@@ -31,11 +31,11 @@ export interface Task {
   pullRequests: PullRequest[];
 }
 
-export interface ModelConfig {
+export interface ProviderConfig {
   id: string;
-  provider: 'OpenAI' | 'Anthropic' | 'Google' | 'Cohere' | 'Meta';
-  name: string;
+  name: 'OpenAI' | 'Anthropic' | 'Google' | 'Cohere' | 'Meta';
   isConfigured: boolean;
+  availableModels: { id: string; name: string; }[];
 }
 
 export interface Integration {
@@ -54,7 +54,7 @@ export interface Repository {
 interface FleetState {
   nodes: Node[];
   tasks: Task[];
-  models: ModelConfig[];
+  providers: ProviderConfig[];
   integrations: Integration[];
   repositories: Repository[];
   addNode: (node: Node) => void;
@@ -114,12 +114,34 @@ export const useFleetStore = create<FleetState>((set) => ({
       pullRequests: prs
     };
   }),
-  models: [
-    { id: 'm-1', provider: 'Anthropic', name: 'Claude 3.5 Sonnet', isConfigured: true },
-    { id: 'm-2', provider: 'Anthropic', name: 'Claude 3 Haiku', isConfigured: true },
-    { id: 'm-3', provider: 'OpenAI', name: 'GPT-4o', isConfigured: true },
-    { id: 'm-4', provider: 'OpenAI', name: 'GPT-4o-mini', isConfigured: false },
-    { id: 'm-5', provider: 'Google', name: 'Gemini 1.5 Pro', isConfigured: false },
+  providers: [
+    { 
+      id: 'p-1', 
+      name: 'Anthropic', 
+      isConfigured: true,
+      availableModels: [
+        { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' },
+        { id: 'claude-3-haiku', name: 'Claude 3 Haiku' }
+      ]
+    },
+    { 
+      id: 'p-2', 
+      name: 'OpenAI', 
+      isConfigured: true,
+      availableModels: [
+        { id: 'gpt-4o', name: 'GPT-4o' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o-mini' }
+      ]
+    },
+    { 
+      id: 'p-3', 
+      name: 'Google', 
+      isConfigured: false,
+      availableModels: [
+        { id: 'gemini-1-5-pro', name: 'Gemini 1.5 Pro' },
+        { id: 'gemini-1-5-flash', name: 'Gemini 1.5 Flash' }
+      ]
+    },
   ],
   integrations: [
     { id: 'i-1', name: 'GitHub', status: 'connected', workspace: 'RunKiwi' },

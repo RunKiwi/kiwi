@@ -6,15 +6,20 @@ import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMer
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
-  const { tasks, models, repositories } = useFleetStore();
+  const { tasks, providers, repositories } = useFleetStore();
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
   const [activeDropdownTaskId, setActiveDropdownTaskId] = useState<string | null>(null);
   
   // Task Creation State
   const [prompt, setPrompt] = useState("");
-  const [selectedOrchestrator, setSelectedOrchestrator] = useState<string>("m-1"); // Sonnet
-  const [selectedWorker, setSelectedWorker] = useState<string>("m-4"); // GPT-4o-mini
+  const [selectedOrchestrator, setSelectedOrchestrator] = useState<string>("claude-3-5-sonnet");
+  const [selectedWorker, setSelectedWorker] = useState<string>("gpt-4o-mini");
   const [selectedRepos, setSelectedRepos] = useState<string[]>(["r-1"]); // kiwi
+
+  // Flatten all available models from configured providers
+  const availableModels = providers
+    .filter(p => p.isConfigured)
+    .flatMap(p => p.availableModels.map(m => ({ ...m, providerName: p.name })));
 
   const getPhaseIcon = (phase: string) => {
     switch (phase) {
@@ -81,8 +86,8 @@ export default function GodView() {
                 onChange={(e) => setSelectedOrchestrator(e.target.value)}
                 className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
               >
-                {models.filter(m => m.isConfigured).map(m => (
-                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name}</option>
+                {availableModels.map(m => (
+                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
                 ))}
               </select>
             </div>
@@ -95,8 +100,8 @@ export default function GodView() {
                 onChange={(e) => setSelectedWorker(e.target.value)}
                 className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
               >
-                {models.filter(m => m.isConfigured).map(m => (
-                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name}</option>
+                {availableModels.map(m => (
+                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
                 ))}
               </select>
             </div>
