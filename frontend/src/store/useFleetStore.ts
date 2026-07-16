@@ -15,12 +15,18 @@ export interface SubAgent {
   title: string;
 }
 
+export interface PullRequest {
+  id: string;
+  status: 'open' | 'merged';
+}
+
 export interface Task {
   id: string;
   phase: 'planning' | 'executing' | 'completed' | 'failed';
   title: string;
   startedAt: Date;
   subAgents: SubAgent[];
+  pullRequests: PullRequest[];
 }
 
 interface FleetState {
@@ -71,6 +77,9 @@ export const useFleetStore = create<FleetState>((set) => ({
           phase: phase === 'completed' ? 'completed' : 'planning',
           title: 'Execution Worker 2'
         }
+      ],
+      pullRequests: i % 2 === 0 ? [] : [
+        { id: `pr-${i}`, status: isCompleted ? 'merged' : 'open' }
       ]
     };
   }),
