@@ -12,7 +12,14 @@ interface TaskDrawerProps {
 
 export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const { tasks } = useFleetStore();
-  const task = tasks.find(t => t.id === taskId);
+  const currentTask = tasks.find(t => t.id === taskId);
+  
+  // Keep a ref/state of the last known task so the drawer doesn't go blank while animating out
+  const [task, setTask] = useState(currentTask);
+  
+  useEffect(() => {
+    if (currentTask) setTask(currentTask);
+  }, [currentTask]);
   
   const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -35,7 +42,9 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     return () => clearInterval(interval);
   }, [activeSubAgentId]);
 
-  if (!task) return null;
+  if (!task) return (
+    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#050505]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
+  );
 
   const fakeDiff = `diff --git a/src/main.go b/src/main.go
 index 832f91a..d4b9c2a 100644
