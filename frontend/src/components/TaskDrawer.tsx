@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { X, Terminal, GitCommit, Users, Server, CheckCircle2, Activity, Loader2 } from "lucide-react";
+import { X, Terminal, GitCommit, Users, Server, CheckCircle2, Activity, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed } from "lucide-react";
 
 interface TaskDrawerProps {
   taskId: string | null;
@@ -120,6 +120,42 @@ index 832f91a..d4b9c2a 100644
               </button>
             ))}
           </div>
+
+          {/* Pull Requests Section (Only show if there are PRs) */}
+          {task.pullRequests && task.pullRequests.length > 0 && (
+            <div className="flex flex-col border-t border-white/5 bg-black/30">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 text-xs font-medium text-zinc-300 uppercase tracking-wider">
+                <div className="flex items-center gap-2">
+                  <GitPullRequest className="w-4 h-4 text-zinc-400" />
+                  Pull Requests
+                </div>
+                <span className="bg-white/10 text-zinc-300 py-0.5 px-2 rounded-full text-[10px]">{task.pullRequests.length}</span>
+              </div>
+              <div className="flex flex-col overflow-y-auto max-h-[30vh]">
+                {task.pullRequests.map(pr => (
+                  <button
+                    key={pr.id}
+                    onClick={() => window.open(`https://github.com/RunKiwi/kiwi/pull/${pr.id.split('-')[1]}`, "_blank")}
+                    className="flex items-center justify-between p-3 border-b border-white/5 hover:bg-white/10 transition-colors text-left group"
+                  >
+                    <div className="flex items-center gap-3">
+                      {pr.status === 'open' ? (
+                        <GitPullRequest className="w-4 h-4 text-green-400 shrink-0" />
+                      ) : pr.status === 'merged' ? (
+                        <GitMerge className="w-4 h-4 text-purple-400 shrink-0" />
+                      ) : (
+                        <GitPullRequestClosed className="w-4 h-4 text-red-400 shrink-0" />
+                      )}
+                      <div>
+                        <div className="text-xs font-mono text-zinc-300 group-hover:text-white transition-colors">#{pr.id.split('-')[1]}</div>
+                        <div className="text-[10px] text-zinc-500 capitalize">{pr.status}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Column 2: Logs & Diff (Stacked vertically) */}

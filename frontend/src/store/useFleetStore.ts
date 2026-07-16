@@ -17,7 +17,7 @@ export interface SubAgent {
 
 export interface PullRequest {
   id: string;
-  status: 'open' | 'merged';
+  status: 'open' | 'merged' | 'closed';
 }
 
 export interface Task {
@@ -74,11 +74,11 @@ export const useFleetStore = create<FleetState>((set) => ({
       }
     ];
 
-    let prs: { id: string, status: 'open' | 'merged' }[] = [];
+    let prs: { id: string, status: 'open' | 'merged' | 'closed' }[] = [];
     if (i === 1) prs = [{ id: `pr-1a`, status: 'merged' }, { id: `pr-1b`, status: 'merged' }]; // Multiple closed
     else if (i === 3) prs = [{ id: `pr-3a`, status: 'open' }, { id: `pr-3b`, status: 'open' }, { id: `pr-3c`, status: 'open' }]; // Multiple open
     else if (i === 5) prs = [{ id: `pr-5a`, status: 'merged' }, { id: `pr-5b`, status: 'open' }]; // Mixed
-    else if (i === 7) prs = [{ id: `pr-7`, status: 'open' }]; // Single open
+    else if (i === 7) prs = [{ id: `pr-7`, status: 'open' }, { id: `pr-8`, status: 'closed' }, { id: `pr-9`, status: 'merged' }]; // All three states
 
     return {
       id: `task-${1000 + i}`,

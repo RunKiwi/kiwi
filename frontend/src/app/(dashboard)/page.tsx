@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, Users, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge } from "lucide-react";
+import { Activity, Clock, Users, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
   const { nodes, tasks } = useFleetStore();
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
+  const [activeDropdownTaskId, setActiveDropdownTaskId] = useState<string | null>(null);
 
   const getPhaseIcon = (phase: string) => {
     switch (phase) {
@@ -30,10 +31,10 @@ export default function GodView() {
   };
 
   const getCardStyle = (phase: string) => {
-    const base = "text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ";
+    const base = "text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full relative ";
     switch (phase) {
       case 'executing': 
-        return base + "border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.1)] before:absolute before:inset-0 before:-z-10 before:bg-[linear-gradient(90deg,transparent,rgba(59,130,246,0.05),transparent)] before:bg-[length:200%_100%] before:animate-shimmer";
+        return base + "border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.1)] before:absolute before:inset-0 before:-z-10 before:rounded-2xl before:bg-[linear-gradient(90deg,transparent,rgba(59,130,246,0.05),transparent)] before:bg-[length:200%_100%] before:animate-shimmer";
       case 'planning': 
         return base + "animate-breathing";
       case 'completed': 
@@ -46,7 +47,10 @@ export default function GodView() {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col relative">
+    <div 
+      className="p-8 max-w-7xl mx-auto h-full flex flex-col relative"
+      onClick={() => setActiveDropdownTaskId(null)}
+    >
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-light tracking-tight text-white mb-2">The Swarm God View</h1>
@@ -81,20 +85,51 @@ export default function GodView() {
                   <span className="font-mono text-zinc-300">{task.subAgents.length} Agents</span>
                 </div>
                 {task.pullRequests?.length > 0 && (
-                  <div 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(`https://github.com/RunKiwi/kiwi/pull/${task.pullRequests[0].id.split('-')[1]}`, "_blank");
-                    }}
-                    className="flex items-center gap-1.5 hover:bg-white/10 p-1 -m-1 rounded transition-colors cursor-pointer"
-                    title="View Pull Requests"
-                  >
-                    {task.pullRequests.every(pr => pr.status === 'merged') ? (
-                      <GitMerge className="w-3 h-3 text-purple-400" />
-                    ) : (
-                      <GitPullRequest className="w-3 h-3 text-green-400" />
+                  <div className="relative">
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownTaskId(activeDropdownTaskId === task.id ? null : task.id);
+                      }}
+                      className="flex items-center gap-1.5 hover:bg-white/10 p-1 -m-1 rounded transition-colors cursor-pointer group/pr"
+                      title="View Pull Requests"
+                    >
+                      {task.pullRequests.every(pr => pr.status === 'merged') ? (
+                        <GitMerge className="w-3 h-3 text-purple-400" />
+                      ) : (
+                        <GitPullRequest className="w-3 h-3 text-green-400" />
+                      )}
+                      <span className="font-mono text-zinc-300 group-hover/pr:text-white transition-colors">{task.pullRequests.length}</span>
+                    </div>
+
+                    {/* PR Dropdown */}
+                    {activeDropdownTaskId === task.id && (
+                      <div 
+                        className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-[#0a0a0a] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {task.pullRequests.map(pr => (
+                          <div 
+                            key={pr.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(`https://github.com/RunKiwi/kiwi/pull/${pr.id.split('-')[1]}`, "_blank");
+                              setActiveDropdownTaskId(null);
+                            }}
+                            className="flex items-center gap-2 px-3 py-2 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
+                          >
+                            {pr.status === 'open' ? (
+                              <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                            ) : pr.status === 'merged' ? (
+                              <GitMerge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                            ) : (
+                              <GitPullRequestClosed className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                            )}
+                            <span className="font-mono text-xs text-zinc-300 truncate">#{pr.id.split('-')[1]}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
-                    <span className="font-mono text-zinc-300 group-hover/pr:text-white">{task.pullRequests.length}</span>
                   </div>
                 )}
               </div>
