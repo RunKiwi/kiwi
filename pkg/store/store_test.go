@@ -18,7 +18,7 @@ func newTestStore(t *testing.T) *PostgresStore {
 	}
 	if err := db.AutoMigrate(
 		&Organization{}, &OrgLimits{}, &Job{}, &Outbox{},
-		&Event{}, &Checkpoint{}, &SideEffect{},
+		&Event{}, &Checkpoint{}, &SideEffect{}, &QueuedTask{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

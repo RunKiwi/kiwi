@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -34,6 +35,14 @@ type Store interface {
 	// Side Effects (Idempotency)
 	GetSideEffect(ctx context.Context, id string) (*SideEffect, error)
 	RecordSideEffect(ctx context.Context, effect *SideEffect) error
+
+	// Lease-based work queue (BYOC daemon handoff). Tasks are leased, not
+	// destructively popped, so a crashed daemon's work returns to the queue.
+	EnqueueTask(ctx context.Context, task *QueuedTask) error
+	LeaseNextTask(ctx context.Context, orgID, leasedBy string, ttl time.Duration) (*QueuedTask, error)
+	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
+	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus string) (bool, error)
+	RequeueExpiredLeases(ctx context.Context) (int, error)
 
 	// Legacy orchestrator tasks mapping (temp for V1-V2 transition)
 	UpdateTaskLogs(ctx context.Context, id string, logs string) error
