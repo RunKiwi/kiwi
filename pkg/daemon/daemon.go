@@ -86,7 +86,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 					currentInterval = maxInterval
 				}
 			}
-			
+
 			// Add jitter (e.g. +/- 10%)
 			jitterRange := int64(currentInterval) / 5
 			if jitterRange <= 0 {
