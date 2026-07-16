@@ -123,7 +123,7 @@ export default function GodView() {
                       {/* PR Dropdown */}
                       {activeDropdownTaskId === task.id && (
                         <div 
-                          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 glass-panel border border-white/10 rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.5)] z-50 overflow-hidden"
+                          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 glass-panel bg-zinc-950/95 border border-white/10 rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.5)] z-50 overflow-hidden"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {task.pullRequests.map(pr => (
