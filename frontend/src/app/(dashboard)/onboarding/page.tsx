@@ -1,12 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { Copy, Check } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Copy, Check, RefreshCw } from "lucide-react";
 
 export default function OnboardingPage() {
   const [provider, setProvider] = useState<'AWS' | 'GCP'>('AWS');
   const [apiKey, setApiKey] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const generateKey = () => {
+    setIsRegenerating(true);
+    // Simulate generation delay for visual feedback
+    setTimeout(() => {
+      const newKey = 'kw_live_' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      setApiKey(newKey);
+      setIsRegenerating(false);
+    }, 400);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    generateKey();
+  }, []);
 
   const tfSnippet = provider === 'AWS' ? `module "kiwi_swarm" {
   source = "runkiwi/swarm/aws"
@@ -71,13 +89,22 @@ export default function OnboardingPage() {
               Generate API Key
             </h2>
             <p className="text-sm text-zinc-400 mb-4">This key will be encrypted by the daemon&apos;s public key upon boot. It is never stored in plaintext on our servers.</p>
-            <input 
-              type="text" 
-              placeholder="kw_live_xxxxxxxxxxxx"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition-colors"
-            />
+            <div className="flex items-center gap-3">
+              <input 
+                type="text" 
+                readOnly
+                value={apiKey}
+                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-colors font-mono"
+              />
+              <button 
+                onClick={generateKey}
+                disabled={isRegenerating}
+                className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                <span>Regenerate</span>
+              </button>
+            </div>
           </div>
 
           {/* Step 3 */}
