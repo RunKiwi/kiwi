@@ -40,3 +40,24 @@ body {
   background-image: radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%);
   background-attachment: fixed;
 }
+
+@theme {
+  --animate-shimmer: shimmer 2s linear infinite;
+  --animate-breathing: breathing 3s ease-in-out infinite;
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  @keyframes breathing {
+    0%, 100% {
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.1);
+      border-color: rgba(168, 85, 247, 0.2);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(168, 85, 247, 0.4);
+      border-color: rgba(168, 85, 247, 0.6);
+    }
+  }
+}
