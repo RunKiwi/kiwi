@@ -39,7 +39,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.Job{}, &store.Outbox{},
 		&store.Event{}, &store.Checkpoint{}, &store.SideEffect{}, &store.Agent{},
-		&store.QueuedTask{},
+		&store.QueuedTask{}, &store.Credential{},
 		&agentapi.JobToken{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
