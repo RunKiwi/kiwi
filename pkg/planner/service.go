@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"gorm.io/gorm"
 )
 
 // Service turns a high-level task into an immutable manifest and enqueues its
@@ -75,32 +76,40 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		Producer:      "planner",
 		CreatedAt:     time.Now(),
 	}
-	if err := s.store.CreateManifest(ctx, m); err != nil {
-		return nil, fmt.Errorf("persist manifest: %w", err)
-	}
-
+	// Persist the manifest and enqueue all worker tasks atomically: if any
+	// enqueue fails, the manifest is rolled back too — no partial plans.
 	jobID := "job_" + randHex(8)
 	taskIDs := make([]string, 0, len(plan.Workers))
-	for _, w := range plan.Workers {
-		taskID := jobID + "-" + w.ID
-		spec := map[string]interface{}{
-			"id":         taskID,
-			"task":       w.Task,
-			"file":       w.File,
-			"model":      w.Model,
-			"depends_on": w.DependsOn,
-			"repo_url":   req.RepoURL,
-			"ref":        req.Ref,
+	err = s.store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return fmt.Errorf("persist manifest: %w", err)
 		}
-		if err := s.store.EnqueueTask(ctx, &store.QueuedTask{
-			ID:    taskID,
-			OrgID: req.OrgID,
-			JobID: jobID,
-			Spec:  spec,
-		}); err != nil {
-			return nil, fmt.Errorf("enqueue task %s: %w", taskID, err)
+		for _, w := range plan.Workers {
+			taskID := jobID + "-" + w.ID
+			spec := map[string]interface{}{
+				"id":         taskID,
+				"task":       w.Task,
+				"file":       w.File,
+				"model":      w.Model,
+				"depends_on": w.DependsOn,
+				"repo_url":   req.RepoURL,
+				"ref":        req.Ref,
+			}
+			if err := tx.Create(&store.QueuedTask{
+				ID:     taskID,
+				OrgID:  req.OrgID,
+				JobID:  jobID,
+				Status: store.TaskQueued,
+				Spec:   spec,
+			}).Error; err != nil {
+				return fmt.Errorf("enqueue task %s: %w", taskID, err)
+			}
+			taskIDs = append(taskIDs, taskID)
 		}
-		taskIDs = append(taskIDs, taskID)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &SubmitResult{
