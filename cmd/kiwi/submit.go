@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -28,19 +29,31 @@ func runSubmit(args []string) error {
 
 	_ = fs.Parse(args)
 
-	t := *token
-	if t == "" {
-		t = os.Getenv("KIWI_SERVER_TOKEN")
-	}
-	if t == "" {
-		cfg := loadConfig()
-		t = cfg.Token
-	}
+	t := resolveToken(*token)
 
 	return submitTask(*server, t, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval)
 }
 
+func resolveToken(flagToken string) string {
+	if flagToken != "" {
+		return flagToken
+	}
+	if envToken := os.Getenv("KIWI_SERVER_TOKEN"); envToken != "" {
+		return envToken
+	}
+	cfg := loadConfig()
+	return cfg.Token
+}
+
 func submitTask(server, token, idempotencyKey, task, file, testCmd, dir, secretsPath string, resume bool, taskID string, interval time.Duration) error {
+	u, err := url.Parse(server)
+	if err != nil {
+		return fmt.Errorf("invalid server url: %w", err)
+	}
+	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		return fmt.Errorf("refusing to send token over cleartext HTTP to remote server %s. Use HTTPS", server)
+	}
+
 	c := client.New(server, token)
 	c.IdempotencyKey = idempotencyKey
 	ctx, cancel := context.WithCancel(context.Background())
