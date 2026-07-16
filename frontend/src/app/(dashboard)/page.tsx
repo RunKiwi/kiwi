@@ -29,6 +29,22 @@ export default function GodView() {
     }
   };
 
+  const getCardStyle = (phase: string) => {
+    const base = "text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ";
+    switch (phase) {
+      case 'executing': 
+        return base + "border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.1)] before:absolute before:inset-0 before:-z-10 before:bg-[linear-gradient(90deg,transparent,rgba(59,130,246,0.05),transparent)] before:bg-[length:200%_100%] before:animate-shimmer";
+      case 'planning': 
+        return base + "animate-breathing";
+      case 'completed': 
+        return base + "bg-green-950/20 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.05)]";
+      case 'failed': 
+        return base + "bg-red-950/20 border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.05)]";
+      default: 
+        return base;
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto h-full flex flex-col relative">
       <div className="flex items-center justify-between mb-8">
@@ -44,7 +60,7 @@ export default function GodView() {
           <button 
             key={task.id} 
             onClick={() => setActiveDrawerTaskId(task.id)}
-            className="text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full"
+            className={getCardStyle(task.phase)}
           >
             <div className="flex items-start justify-between mb-3">
               <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{task.id}</span>
