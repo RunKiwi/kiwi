@@ -5,6 +5,8 @@ export interface Node {
   provider: 'AWS' | 'GCP';
   status: 'polling' | 'disconnected' | 'executing';
   lastSeen: Date;
+  cpuUsage: number; // percentage
+  ramUsage: number; // percentage
 }
 
 export interface SubAgent {
@@ -40,10 +42,10 @@ interface FleetState {
 
 export const useFleetStore = create<FleetState>((set) => ({
   nodes: [
-    { id: 'aws-node-01', provider: 'AWS', status: 'executing', lastSeen: new Date() },
-    { id: 'aws-node-02', provider: 'AWS', status: 'executing', lastSeen: new Date() },
-    { id: 'gcp-node-01', provider: 'GCP', status: 'polling', lastSeen: new Date() },
-    { id: 'gcp-node-02', provider: 'GCP', status: 'disconnected', lastSeen: new Date() },
+    { id: 'aws-node-01', provider: 'AWS', status: 'executing', lastSeen: new Date(), cpuUsage: 78, ramUsage: 64 },
+    { id: 'aws-node-02', provider: 'AWS', status: 'executing', lastSeen: new Date(), cpuUsage: 45, ramUsage: 82 },
+    { id: 'gcp-node-01', provider: 'GCP', status: 'polling', lastSeen: new Date(), cpuUsage: 12, ramUsage: 18 },
+    { id: 'gcp-node-02', provider: 'GCP', status: 'disconnected', lastSeen: new Date(Date.now() - 3600000), cpuUsage: 0, ramUsage: 0 },
   ],
   tasks: Array.from({ length: 8 }).map((_, i) => {
     const isCompleted = i < 2;
