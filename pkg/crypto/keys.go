@@ -1,20 +1,24 @@
 package crypto
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 )
 
-// GenerateKeyPair generates a new Ed25519 public/private key pair.
-func GenerateKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
-	return ed25519.GenerateKey(rand.Reader)
+// GenerateKeyPair generates a new X25519 public/private key pair.
+func GenerateKeyPair() (*ecdh.PublicKey, *ecdh.PrivateKey, error) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return priv.PublicKey(), priv, nil
 }
 
-// EncodePrivateKeyToPEM encodes an Ed25519 private key to PEM format.
-func EncodePrivateKeyToPEM(priv ed25519.PrivateKey) ([]byte, error) {
+// EncodePrivateKeyToPEM encodes an X25519 private key to PEM format.
+func EncodePrivateKeyToPEM(priv *ecdh.PrivateKey) ([]byte, error) {
 	b, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return nil, err
@@ -26,8 +30,8 @@ func EncodePrivateKeyToPEM(priv ed25519.PrivateKey) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// DecodePrivateKeyFromPEM decodes an Ed25519 private key from PEM format.
-func DecodePrivateKeyFromPEM(pemBytes []byte) (ed25519.PrivateKey, error) {
+// DecodePrivateKeyFromPEM decodes an X25519 private key from PEM format.
+func DecodePrivateKeyFromPEM(pemBytes []byte) (*ecdh.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing private key")
@@ -38,16 +42,16 @@ func DecodePrivateKeyFromPEM(pemBytes []byte) (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 
-	edPriv, ok := priv.(ed25519.PrivateKey)
+	edPriv, ok := priv.(*ecdh.PrivateKey)
 	if !ok {
-		return nil, errors.New("not an Ed25519 private key")
+		return nil, errors.New("not an X25519 private key")
 	}
 
 	return edPriv, nil
 }
 
-// EncodePublicKeyToPEM encodes an Ed25519 public key to PEM format.
-func EncodePublicKeyToPEM(pub ed25519.PublicKey) ([]byte, error) {
+// EncodePublicKeyToPEM encodes an X25519 public key to PEM format.
+func EncodePublicKeyToPEM(pub *ecdh.PublicKey) ([]byte, error) {
 	b, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
 		return nil, err
@@ -59,8 +63,8 @@ func EncodePublicKeyToPEM(pub ed25519.PublicKey) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// DecodePublicKeyFromPEM decodes an Ed25519 public key from PEM format.
-func DecodePublicKeyFromPEM(pemBytes []byte) (ed25519.PublicKey, error) {
+// DecodePublicKeyFromPEM decodes an X25519 public key from PEM format.
+func DecodePublicKeyFromPEM(pemBytes []byte) (*ecdh.PublicKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing public key")
@@ -71,9 +75,9 @@ func DecodePublicKeyFromPEM(pemBytes []byte) (ed25519.PublicKey, error) {
 		return nil, err
 	}
 
-	edPub, ok := pub.(ed25519.PublicKey)
+	edPub, ok := pub.(*ecdh.PublicKey)
 	if !ok {
-		return nil, errors.New("not an Ed25519 public key")
+		return nil, errors.New("not an X25519 public key")
 	}
 
 	return edPub, nil

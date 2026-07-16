@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
 )
@@ -11,8 +13,14 @@ func main() {
 	var apiURL string
 	var keyPath string
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	defaultKeyPath := filepath.Join(home, ".kiwi", "daemon.key")
+
 	flag.StringVar(&apiURL, "api-url", "https://api.runkiwi.com", "The URL of the Kiwi Control Plane API")
-	flag.StringVar(&keyPath, "key-path", "", "Path to load/save the Ed25519 private key. If empty, uses ephemeral key.")
+	flag.StringVar(&keyPath, "key-path", defaultKeyPath, "Path to load/save the X25519 private key.")
 	flag.Parse()
 
 	cfg := daemon.Config{
