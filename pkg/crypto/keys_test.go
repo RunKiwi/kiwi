@@ -28,8 +28,8 @@ func TestGenerateAndEncodeDecodeKeys(t *testing.T) {
 		t.Fatalf("failed to decode private key: %v", err)
 	}
 
-	if !bytes.Equal(priv, decodedPriv) {
-		t.Error("decoded private key does not match original")
+	if !bytes.Equal(priv.Bytes(), decodedPriv.Bytes()) {
+		t.Errorf("decoded private key does not match original")
 	}
 
 	// 4. Encode Public Key
@@ -44,8 +44,8 @@ func TestGenerateAndEncodeDecodeKeys(t *testing.T) {
 		t.Fatalf("failed to decode public key: %v", err)
 	}
 
-	if !bytes.Equal(pub, decodedPub) {
-		t.Error("decoded public key does not match original")
+	if !bytes.Equal(pub.Bytes(), decodedPub.Bytes()) {
+		t.Errorf("decoded public key does not match original")
 	}
 }
 
