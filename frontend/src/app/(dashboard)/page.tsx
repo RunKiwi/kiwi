@@ -9,6 +9,8 @@ export default function GodView() {
   const { tasks, providers, repositories } = useFleetStore();
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
   const [activeDropdownTaskId, setActiveDropdownTaskId] = useState<string | null>(null);
+  const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   
   // Task Creation State
   const [prompt, setPrompt] = useState("");
@@ -79,39 +81,90 @@ export default function GodView() {
               <Plus className="w-5 h-5" />
             </button>
 
-            {/* Repos Select */}
-            <div className="relative group">
-              <select 
-                value={selectedRepos[0]}
-                onChange={(e) => setSelectedRepos([e.target.value])}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            {/* Repos Select Custom Dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  setIsRepoDropdownOpen(!isRepoDropdownOpen);
+                  setIsModelDropdownOpen(false);
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1c1c1c] hover:bg-[#252525] border border-white/5 transition-colors text-sm text-zinc-300 shadow-sm"
               >
-                {repositories.map(r => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 group-hover:bg-white/10 border border-white/5 transition-colors text-xs text-zinc-300">
-                <GitBranch className="w-3.5 h-3.5" />
-                <span>Repo</span>
-                <ChevronDown className="w-3.5 h-3.5 opacity-50" />
-              </div>
+                <GitBranch className="w-4 h-4 text-zinc-400" />
+                <span>{repositories.find(r => r.id === selectedRepos[0])?.name || 'Repo'}</span>
+                <ChevronDown className="w-4 h-4 text-zinc-500 ml-1" />
+              </button>
+              
+              {isRepoDropdownOpen && (
+                <div className="absolute top-full mt-2 left-0 w-64 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2">
+                  <div className="px-3 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Select Repository</div>
+                  {repositories.map(r => (
+                    <button
+                      key={r.id}
+                      onClick={() => {
+                        setSelectedRepos([r.id]);
+                        setIsRepoDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors flex items-center gap-2"
+                    >
+                      <GitBranch className="w-4 h-4 text-zinc-500" />
+                      {r.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Model Select (Combined UI) */}
-            <div className="relative group">
-              <select 
-                value={selectedOrchestrator}
-                onChange={(e) => setSelectedOrchestrator(e.target.value)}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            {/* Model Select Custom Dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  setIsModelDropdownOpen(!isModelDropdownOpen);
+                  setIsRepoDropdownOpen(false);
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1c1c1c] hover:bg-[#252525] border border-white/5 transition-colors text-sm text-zinc-300 shadow-sm"
               >
-                {availableModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 group-hover:bg-white/10 border border-white/5 transition-colors text-xs text-zinc-300">
                 <span>{availableModels.find(m => m.id === selectedOrchestrator)?.name || 'Opus 4.8'} + {availableModels.find(m => m.id === selectedWorker)?.name || 'GPT 5.5'}</span>
-                <ChevronDown className="w-3.5 h-3.5 opacity-50" />
-              </div>
+                <ChevronDown className="w-4 h-4 text-zinc-500 ml-1" />
+              </button>
+
+              {isModelDropdownOpen && (
+                <div className="absolute top-full mt-2 left-0 w-80 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 flex flex-col">
+                  
+                  <div className="px-4 py-3 border-b border-white/5">
+                    <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Orchestrator Model</div>
+                    <div className="space-y-1">
+                      {availableModels.map(m => (
+                        <button
+                          key={`orch-${m.id}`}
+                          onClick={() => setSelectedOrchestrator(m.id)}
+                          className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between ${selectedOrchestrator === m.id ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-300 hover:bg-white/5 hover:text-white'}`}
+                        >
+                          <span>{m.name}</span>
+                          <span className="text-xs opacity-50">{m.providerName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-3">
+                    <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Worker Model</div>
+                    <div className="space-y-1">
+                      {availableModels.map(m => (
+                        <button
+                          key={`work-${m.id}`}
+                          onClick={() => setSelectedWorker(m.id)}
+                          className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between ${selectedWorker === m.id ? 'bg-purple-500/10 text-purple-400' : 'text-zinc-300 hover:bg-white/5 hover:text-white'}`}
+                        >
+                          <span>{m.name}</span>
+                          <span className="text-xs opacity-50">{m.providerName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
             </div>
           </div>
 
