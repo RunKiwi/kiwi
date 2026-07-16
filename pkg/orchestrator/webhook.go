@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -42,22 +43,32 @@ func (s *Server) handleLinearWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusInternalServerError)
+	// Fail closed: without a configured secret we cannot authenticate Linear,
+	// and this endpoint spawns billable runs — reject rather than accept
+	// unauthenticated requests.
+	secret := os.Getenv("LINEAR_WEBHOOK_SECRET")
+	if secret == "" {
+		log.Println("[webhook] LINEAR_WEBHOOK_SECRET not set; rejecting webhook (fail closed)")
+		http.Error(w, "Webhook not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	secret := os.Getenv("LINEAR_WEBHOOK_SECRET")
-	if secret != "" {
-		signature := r.Header.Get("Linear-Signature")
-		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(body)
-		expectedMAC := hex.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(signature), []byte(expectedMAC)) {
-			http.Error(w, "Invalid signature", http.StatusUnauthorized)
-			return
-		}
+	// Bound the body to prevent memory-exhaustion DoS on this public endpoint.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify the HMAC-SHA256 signature over the raw body (constant-time).
+	signature := r.Header.Get("Linear-Signature")
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(signature), []byte(expectedMAC)) {
+		http.Error(w, "Invalid signature", http.StatusUnauthorized)
+		return
 	}
 
 	var payload LinearWebhookPayload
@@ -110,6 +121,16 @@ func (s *Server) handleLinearWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.storage.CreateJobWithOutbox(r.Context(), job, outbox); err != nil {
+		// A Linear retry of an already-processed delivery collides on the
+		// per-org idempotency key — that's success (idempotent), not an error,
+		// so return 200 to stop Linear's retry loop.
+		var existing store.Job
+		if qerr := s.storage.DB().WithContext(r.Context()).
+			Where("org_id = ? AND idempotency_key = ?", orgID, idempotencyKey).
+			First(&existing).Error; qerr == nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		http.Error(w, "Failed to create job", http.StatusInternalServerError)
 		return
 	}
