@@ -63,7 +63,7 @@ jobs:
           cache: true
 
       - name: Build Kiwi Client
-        run: go build -v -o kiwi cmd/kiwi/main.go
+        run: go build -v -o kiwi ./cmd/kiwi
 
       - name: Build Kiwi Daemon
-        run: go build -v -o kiwid cmd/kiwid/main.go
+        run: go build -v -o kiwid ./cmd/kiwid
