@@ -1,0 +1,18 @@
+{
+  "name": "@kiwi/sdk",
+  "version": "1.0.0",
+  "description": "Kiwi BYOC SDK for Node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests specified yet\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RunKiwi/kiwi.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.4.0",
+    "form-data": "^4.0.0"
+  }
+}
