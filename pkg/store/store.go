@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/ecdh"
 	"time"
 
 	"gorm.io/gorm"
@@ -43,6 +44,13 @@ type Store interface {
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
 	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
+
+	// Credentials: org-scoped secrets, AES-256-GCM encrypted at rest and
+	// re-sealed to a daemon's X25519 public key for delivery.
+	SaveCredential(ctx context.Context, orgID, name, kind, plaintext string) error
+	ListCredentials(ctx context.Context, orgID string) ([]Credential, error)
+	GetCredentialPlaintext(ctx context.Context, orgID, name string) (string, error)
+	SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey) (string, error)
 
 	// Legacy orchestrator tasks mapping (temp for V1-V2 transition)
 	UpdateTaskLogs(ctx context.Context, id string, logs string) error
