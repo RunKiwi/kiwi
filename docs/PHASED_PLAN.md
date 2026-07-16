@@ -15,7 +15,7 @@ This document details the engineering phases required to pivot the Kiwi architec
 ### Phase 2: The Control Plane Adaptations
 **Goal:** Update the SaaS backend to support the BYOC model and the Swarm planner.
 1.  **Queue Implementation:** Implement the Event Queue to hold `worker-spec.json` payloads waiting for Daemon heartbeats.
-2.  **Zero-Knowledge DB Updates:** Modify the `kiwi-api` database schema to store LLM/Git credentials as ciphertext, tied to a Daemon's Public Key.
+2.  **Secure DB Updates:** Modify the `kiwi-api` database schema to securely store LLM/Git credentials. CP will use these for planning, then encrypt them with the KD's Public Key before transit.
 3.  **Planner API:** Expose the endpoints necessary to trigger the Fable planner, generate the spec, and enqueue it.
 
 ### Phase 3: The Integration Layer (CLI & SDK)
