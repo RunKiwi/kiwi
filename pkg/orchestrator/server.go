@@ -393,6 +393,7 @@ func (s *Server) Start(addr string) error {
 	if s.agentAPI != nil {
 		root.Handle("/agent/", s.agentAPI.Handler())
 	}
+	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.Handle("/", auth.AuthMiddleware(s.db, mux))
 
 	// CORS + rate limiting apply to the whole surface.
