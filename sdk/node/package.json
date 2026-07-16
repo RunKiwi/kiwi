@@ -1,0 +1,12 @@
+{
+  "name": "@kiwi/sdk",
+  "version": "1.0.0",
+  "description": "Kiwi BYOC SDK for Node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "axios": "^1.4.0"
+  }
+}
