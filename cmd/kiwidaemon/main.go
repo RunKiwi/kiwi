@@ -15,6 +15,7 @@ import (
 func main() {
 	var apiURL string
 	var keyPath string
+	var cacheDir string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -24,14 +25,20 @@ func main() {
 
 	flag.StringVar(&apiURL, "api-url", "https://api.runkiwi.com", "The URL of the Kiwi Control Plane API")
 	flag.StringVar(&keyPath, "key-path", defaultKeyPath, "Path to load/save the X25519 private key.")
+	flag.StringVar(&cacheDir, "cache-dir", "/tmp/kiwi-cache", "Path to store bare git repositories and worktrees.")
 	flag.Parse()
 
 	cfg := daemon.Config{
-		APIURL:  apiURL,
-		KeyPath: keyPath,
+		APIURL:   apiURL,
+		KeyPath:  keyPath,
+		CacheDir: cacheDir,
 	}
 
-	d := daemon.New(cfg)
+	d, err := daemon.New(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize kiwidaemon: %v", err)
+	}
+
 	if err := d.Start(); err != nil {
 		log.Fatalf("Fatal error starting kiwidaemon: %v", err)
 	}

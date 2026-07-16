@@ -12,28 +12,37 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
+	"github.com/ibreakthecloud/kiwi/pkg/gitcache"
 )
 
 // Config holds the configuration for the KiwiDaemon.
 type Config struct {
-	APIURL  string
-	KeyPath string
+	APIURL   string
+	KeyPath  string
+	CacheDir string
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
 type Daemon struct {
-	config Config
-	pubKey *ecdh.PublicKey
-	priKey *ecdh.PrivateKey
-	client *Client
+	config   Config
+	pubKey   *ecdh.PublicKey
+	priKey   *ecdh.PrivateKey
+	client   *Client
+	gitCache *gitcache.Cache
 }
 
 // New creates a new Daemon instance.
-func New(cfg Config) *Daemon {
-	return &Daemon{
-		config: cfg,
-		client: NewClient(cfg.APIURL),
+func New(cfg Config) (*Daemon, error) {
+	cache, err := gitcache.New(cfg.CacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize git cache: %w", err)
 	}
+
+	return &Daemon{
+		config:   cfg,
+		client:   NewClient(cfg.APIURL),
+		gitCache: cache,
+	}, nil
 }
 
 // Start boots up the daemon, generating or loading the X25519 keypair.
