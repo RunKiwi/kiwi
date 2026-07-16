@@ -65,26 +65,26 @@ export default function GodView() {
       </div>
 
       {/* Command Bar */}
-      <div className="glass-panel p-4 mb-8 flex flex-col gap-4 relative z-20 shadow-xl border-white/20">
+      <div className="glass-panel mb-8 flex flex-col relative z-20 shadow-xl border-white/10 overflow-hidden">
         <div className="relative">
-          <Sparkles className="absolute left-4 top-4 w-5 h-5 text-purple-400" />
+          <Sparkles className="absolute left-6 top-6 w-5 h-5 text-purple-400" />
           <textarea 
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="E.g. Debug @JIRA-123 and raise a PR to @RunKiwi/kiwi, then notify @slack-eng-channel..."
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-12 pr-4 py-4 text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 transition-all resize-none min-h-[80px]"
+            className="w-full bg-transparent border-b border-white/5 pl-14 pr-6 py-6 text-white placeholder-zinc-500 focus:outline-none transition-all resize-none min-h-[100px] text-lg font-light"
           />
         </div>
         
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between flex-wrap gap-4 px-6 py-4 bg-black/20">
+          <div className="flex items-center gap-6 flex-wrap">
             {/* Orchestrator Select */}
-            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Orchestrator</span>
               <select 
                 value={selectedOrchestrator}
                 onChange={(e) => setSelectedOrchestrator(e.target.value)}
-                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
               >
                 {availableModels.map(m => (
                   <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
@@ -93,12 +93,12 @@ export default function GodView() {
             </div>
 
             {/* Worker Select */}
-            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Workers</span>
               <select 
                 value={selectedWorker}
                 onChange={(e) => setSelectedWorker(e.target.value)}
-                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
               >
                 {availableModels.map(m => (
                   <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
@@ -107,12 +107,12 @@ export default function GodView() {
             </div>
 
             {/* Repos Select */}
-            <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-lg px-3 py-2">
-              <GitBranch className="w-3.5 h-3.5 text-zinc-400" />
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-3.5 h-3.5 text-zinc-500" />
               <select 
                 value={selectedRepos[0]}
                 onChange={(e) => setSelectedRepos([e.target.value])}
-                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer appearance-none pr-4"
+                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
               >
                 {repositories.map(r => (
                   <option key={r.id} value={r.id} className="bg-zinc-900">{r.name}</option>
@@ -121,7 +121,7 @@ export default function GodView() {
             </div>
           </div>
 
-          <button className="flex items-center gap-2 bg-white text-black px-6 py-2 rounded-lg font-medium hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)]">
+          <button className="flex items-center gap-2 bg-white text-black px-6 py-2 rounded-lg font-medium hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)] shrink-0">
             Dispatch Swarm
             <Sparkles className="w-4 h-4" />
           </button>
