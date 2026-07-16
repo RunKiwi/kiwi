@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot, Sparkles, GitBranch } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge, GitPullRequestClosed, Bot, Sparkles, GitBranch, Plus, ChevronDown, Mic, ArrowUp } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
@@ -65,66 +65,70 @@ export default function GodView() {
       </div>
 
       {/* Command Bar */}
-      <div className="glass-panel mb-8 flex flex-col relative z-20 shadow-xl border-white/10 overflow-hidden">
-        <div className="relative">
-          <Sparkles className="absolute left-6 top-6 w-5 h-5 text-purple-400" />
-          <textarea 
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="E.g. Debug @JIRA-123 and raise a PR to @RunKiwi/kiwi, then notify @slack-eng-channel..."
-            className="w-full bg-transparent border-b border-white/5 pl-14 pr-6 py-6 text-white placeholder-zinc-500 focus:outline-none transition-all resize-none min-h-[100px] text-lg font-light"
-          />
-        </div>
+      <div className="bg-[#141414] rounded-2xl mb-8 flex flex-col relative z-20 shadow-2xl border border-white/5 overflow-hidden">
+        <textarea 
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Implement a feature..."
+          className="w-full bg-transparent p-6 pb-2 text-white placeholder-zinc-600 focus:outline-none transition-all resize-none min-h-[100px] text-lg font-light"
+        />
         
-        <div className="flex items-center justify-between flex-wrap gap-4 px-6 py-4 bg-black/20">
-          <div className="flex items-center gap-6 flex-wrap">
-            {/* Orchestrator Select */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Orchestrator</span>
-              <select 
-                value={selectedOrchestrator}
-                onChange={(e) => setSelectedOrchestrator(e.target.value)}
-                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
-              >
-                {availableModels.map(m => (
-                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Worker Select */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Workers</span>
-              <select 
-                value={selectedWorker}
-                onChange={(e) => setSelectedWorker(e.target.value)}
-                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
-              >
-                {availableModels.map(m => (
-                  <option key={m.id} value={m.id} className="bg-zinc-900">{m.name} ({m.providerName})</option>
-                ))}
-              </select>
-            </div>
+        <div className="flex items-center justify-between px-6 pb-4 pt-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button className="w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-500 transition-colors">
+              <Plus className="w-5 h-5" />
+            </button>
 
             {/* Repos Select */}
-            <div className="flex items-center gap-2">
-              <GitBranch className="w-3.5 h-3.5 text-zinc-500" />
+            <div className="relative group">
               <select 
                 value={selectedRepos[0]}
                 onChange={(e) => setSelectedRepos([e.target.value])}
-                className="bg-transparent text-sm text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               >
                 {repositories.map(r => (
-                  <option key={r.id} value={r.id} className="bg-zinc-900">{r.name}</option>
+                  <option key={r.id} value={r.id}>{r.name}</option>
                 ))}
               </select>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 group-hover:bg-white/10 border border-white/5 transition-colors text-xs text-zinc-300">
+                <GitBranch className="w-3.5 h-3.5" />
+                <span>Repo</span>
+                <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+              </div>
+            </div>
+
+            {/* Model Select (Combined UI) */}
+            <div className="relative group">
+              <select 
+                value={selectedOrchestrator}
+                onChange={(e) => setSelectedOrchestrator(e.target.value)}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              >
+                {availableModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 group-hover:bg-white/10 border border-white/5 transition-colors text-xs text-zinc-300">
+                <span>{availableModels.find(m => m.id === selectedOrchestrator)?.name || 'Opus 4.8'} + {availableModels.find(m => m.id === selectedWorker)?.name || 'GPT 5.5'}</span>
+                <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+              </div>
             </div>
           </div>
 
-          <button className="flex items-center gap-2 bg-white text-black px-6 py-2 rounded-lg font-medium hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)] shrink-0">
-            Dispatch Swarm
-            <Sparkles className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button className="w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-500 transition-colors">
+              <Mic className="w-4 h-4" />
+            </button>
+            
+            <div className="flex items-center bg-black/40 rounded-full p-1 border border-white/5">
+              <button className="px-3 py-1 text-xs font-medium text-zinc-400 rounded-full hover:text-white transition-colors">Plan</button>
+              <button className="px-3 py-1 text-xs font-medium text-white bg-white/10 rounded-full shadow-sm">Build</button>
+            </div>
+
+            <button className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white transition-colors shadow-[0_0_15px_rgba(79,70,229,0.4)] shrink-0 ml-1">
+              <ArrowUp className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
