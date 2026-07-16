@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, TerminalSquare } from "lucide-react";
+import { LayoutDashboard, Network, Settings, Server } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
@@ -17,7 +17,7 @@ export default function DashboardLayout({
   const navItems = [
     { name: "God View", href: "/", icon: LayoutDashboard },
     { name: "Topology", href: "/topology", icon: Network },
-    { name: "Onboarding", href: "/onboarding", icon: TerminalSquare },
+    { name: "Fleet", href: "/fleet", icon: Server },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 
