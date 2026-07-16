@@ -10,6 +10,12 @@ const (
 	TaskFailed    = "FAILED"
 )
 
+// MaxLeaseAttempts bounds how many times a task may be leased before it is
+// treated as a poison pill. A task whose lease expires after this many attempts
+// is dead-lettered (marked FAILED) rather than requeued forever — so a spec
+// that reliably crashes its daemon cannot loop indefinitely.
+const MaxLeaseAttempts = 5
+
 // QueuedTask is a unit of work (a worker-spec) waiting for a daemon to lease and
 // execute it. It implements a lease-based queue rather than a destructive pop:
 // a task is NOT removed when handed out — it is LEASED to one daemon for a
