@@ -113,9 +113,9 @@ sequenceDiagram
 ### 4.1 Secure Credential Management (Asymmetric Encryption)
 To securely transmit credentials (LLM keys, Git tokens) to the customer's VPC without exposing them in transit:
 * `KiwiDaemon` boots on a VM and generates an Ed25519 keypair, registering its Public Key with the CP.
-* The SaaS Control Plane holds the API keys securely in its database and uses them to communicate with the Frontier Model for planning.
-* When enqueueing a task for execution, the SaaS encrypts the plaintext API keys using the `KiwiDaemon`'s Public Key.
-* KD pulls the payload via HTTPS polling (Pull Model) and decrypts the credentials in-memory during execution.
+* The SaaS Control Plane holds **its own** Global API keys securely to communicate with the Frontier Model for planning.
+* **Customer-provided credentials** (e.g., Worker LLM keys, Git tokens) are stored in the SaaS database only in zero-knowledge encrypted form using the `KiwiDaemon`'s Public Key. The SaaS never has plaintext access to them.
+* KD pulls the payload via HTTPS polling (Pull Model) and decrypts the customer credentials in-memory during execution.
 
 ### 4.2 LFU Repository Caching (`git worktree`)
 To avoid expensive network clones for parallel agents:
