@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { Cpu, Key, CheckCircle2, XCircle, Plus, X } from "lucide-react";
+import { SiAnthropic, SiGoogle, SiMeta } from "react-icons/si";
+import { TbBrandOpenai } from "react-icons/tb";
 
 export default function ModelsPage() {
   const { providers } = useFleetStore();
@@ -15,6 +17,16 @@ export default function ModelsPage() {
     // For now, just close the modal
     setIsConnectModalOpen(false);
     setNewKey('');
+  };
+
+  const getProviderIcon = (name: string) => {
+    switch(name) {
+      case 'OpenAI': return <TbBrandOpenai className="w-6 h-6 text-white" />;
+      case 'Anthropic': return <SiAnthropic className="w-6 h-6 text-[#d97757]" />;
+      case 'Google': return <SiGoogle className="w-6 h-6 text-blue-400" />;
+      case 'Meta': return <SiMeta className="w-6 h-6 text-blue-600" />;
+      default: return <Cpu className="w-6 h-6 text-zinc-300" />; // Fallback for Cohere and others
+    }
   };
 
   return (
@@ -39,7 +51,7 @@ export default function ModelsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
-                  <Cpu className="w-6 h-6 text-zinc-300" />
+                  {getProviderIcon(provider.name)}
                 </div>
                 <div>
                   <h3 className="text-lg font-medium text-white">{provider.name}</h3>

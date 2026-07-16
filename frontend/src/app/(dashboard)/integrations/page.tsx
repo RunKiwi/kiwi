@@ -1,18 +1,20 @@
 "use client";
 
 import { useFleetStore } from "@/store/useFleetStore";
-import { Link2, CheckCircle2, XCircle, GitBranch, MessageSquare, Kanban, Hash } from "lucide-react";
+import { Link2, CheckCircle2, XCircle } from "lucide-react";
+import { SiGithub, SiJira, SiLinear, SiDiscord } from "react-icons/si";
+import { TbBrandSlack } from "react-icons/tb";
 
 export default function IntegrationsPage() {
   const { integrations } = useFleetStore();
 
   const getIcon = (name: string) => {
     switch(name) {
-      case 'GitHub': return <GitBranch className="w-8 h-8 text-white" />;
-      case 'Slack': return <Hash className="w-8 h-8 text-pink-500" />;
-      case 'Jira': return <Kanban className="w-8 h-8 text-blue-500" />;
-      case 'Linear': return <MessageSquare className="w-8 h-8 text-indigo-400" />;
-      case 'Discord': return <MessageSquare className="w-8 h-8 text-purple-500" />;
+      case 'GitHub': return <SiGithub className="w-8 h-8 text-white" />;
+      case 'Slack': return <TbBrandSlack className="w-8 h-8 text-pink-500" />;
+      case 'Jira': return <SiJira className="w-8 h-8 text-blue-500" />;
+      case 'Linear': return <SiLinear className="w-8 h-8 text-indigo-400" />;
+      case 'Discord': return <SiDiscord className="w-8 h-8 text-indigo-500" />;
       default: return <Link2 className="w-8 h-8 text-zinc-300" />;
     }
   };
