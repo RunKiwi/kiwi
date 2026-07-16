@@ -84,54 +84,73 @@ export default function GodView() {
                   <Users className="w-3 h-3 text-zinc-500" />
                   <span className="font-mono text-zinc-300">{task.subAgents.length} Agents</span>
                 </div>
-                {task.pullRequests?.length > 0 && (
-                  <div className="relative">
-                    <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveDropdownTaskId(activeDropdownTaskId === task.id ? null : task.id);
-                      }}
-                      className="flex items-center gap-1.5 hover:bg-white/10 p-1 -m-1 rounded transition-colors cursor-pointer group/pr"
-                      title="View Pull Requests"
-                    >
-                      {task.pullRequests.every(pr => pr.status === 'merged') ? (
-                        <GitMerge className="w-3 h-3 text-purple-400" />
-                      ) : (
-                        <GitPullRequest className="w-3 h-3 text-green-400" />
-                      )}
-                      <span className="font-mono text-zinc-300 group-hover/pr:text-white transition-colors">{task.pullRequests.length}</span>
-                    </div>
-
-                    {/* PR Dropdown */}
-                    {activeDropdownTaskId === task.id && (
+                {(() => {
+                  if (!task.pullRequests || task.pullRequests.length === 0) return null;
+                  const openPRs = task.pullRequests.filter(pr => pr.status === 'open');
+                  const mergedPRs = task.pullRequests.filter(pr => pr.status === 'merged');
+                  const closedPRs = task.pullRequests.filter(pr => pr.status === 'closed');
+                  
+                  return (
+                    <div className="relative">
                       <div 
-                        className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-[#0a0a0a] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdownTaskId(activeDropdownTaskId === task.id ? null : task.id);
+                        }}
+                        className="flex items-center gap-2 hover:bg-white/10 p-1 -m-1 rounded transition-colors cursor-pointer group/pr"
+                        title="View Pull Requests"
                       >
-                        {task.pullRequests.map(pr => (
-                          <div 
-                            key={pr.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(`https://github.com/RunKiwi/kiwi/pull/${pr.id.split('-')[1]}`, "_blank");
-                              setActiveDropdownTaskId(null);
-                            }}
-                            className="flex items-center gap-2 px-3 py-2 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
-                          >
-                            {pr.status === 'open' ? (
-                              <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                            ) : pr.status === 'merged' ? (
-                              <GitMerge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                            ) : (
-                              <GitPullRequestClosed className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                            )}
-                            <span className="font-mono text-xs text-zinc-300 truncate">#{pr.id.split('-')[1]}</span>
+                        {openPRs.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <GitPullRequest className="w-3 h-3 text-green-400" />
+                            <span className="font-mono text-zinc-300 group-hover/pr:text-white transition-colors">{openPRs.length}</span>
                           </div>
-                        ))}
+                        )}
+                        {mergedPRs.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <GitMerge className="w-3 h-3 text-purple-400" />
+                            <span className="font-mono text-zinc-300 group-hover/pr:text-white transition-colors">{mergedPRs.length}</span>
+                          </div>
+                        )}
+                        {closedPRs.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <GitPullRequestClosed className="w-3 h-3 text-red-400" />
+                            <span className="font-mono text-zinc-300 group-hover/pr:text-white transition-colors">{closedPRs.length}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+
+                      {/* PR Dropdown */}
+                      {activeDropdownTaskId === task.id && (
+                        <div 
+                          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 glass-panel border border-white/10 rounded-lg shadow-[0_8px_30px_rgba(0,0,0,0.5)] z-50 overflow-hidden"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {task.pullRequests.map(pr => (
+                            <div 
+                              key={pr.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`https://github.com/RunKiwi/kiwi/pull/${pr.id.split('-')[1]}`, "_blank");
+                                setActiveDropdownTaskId(null);
+                              }}
+                              className="flex items-center gap-2 px-3 py-2 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
+                            >
+                              {pr.status === 'open' ? (
+                                <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                              ) : pr.status === 'merged' ? (
+                                <GitMerge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                              ) : (
+                                <GitPullRequestClosed className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                              )}
+                              <span className="font-mono text-xs text-zinc-300 truncate">#{pr.id.split('-')[1]}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="flex items-center gap-1.5">
                 <Clock className="w-3 h-3 text-zinc-500" />
