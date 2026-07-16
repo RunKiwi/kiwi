@@ -23,15 +23,16 @@ Wait for the task to complete.`
 		return fmt.Errorf("claude CLI not found in PATH: %w", err)
 	}
 
-	cmd := exec.Command(claudePath, fs.Args()...)
+	cmdArgs := append([]string{"--append-system-prompt", sysPrompt}, fs.Args()...)
+	cmd := exec.Command(claudePath, cmdArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	env := append(os.Environ(), fmt.Sprintf("CLAUDE_SYSTEM_PROMPT=%s", sysPrompt))
-	cmd.Env = env
-
 	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
 		return fmt.Errorf("claude CLI exited with error: %w", err)
 	}
 

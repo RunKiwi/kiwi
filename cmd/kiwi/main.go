@@ -8,7 +8,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: kiwi <command> [args]")
-		fmt.Println("Commands: login, submit")
+		fmt.Println("Commands: login, submit, claude")
 		os.Exit(1)
 	}
 
