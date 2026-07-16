@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, Users, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Activity, Clock, Users, CheckCircle2, XCircle, Loader2, GitPullRequest, GitMerge } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 
 export default function GodView() {
@@ -75,9 +75,21 @@ export default function GodView() {
             </h3>
 
             <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between text-xs text-zinc-400">
-              <div className="flex items-center gap-1.5">
-                <Users className="w-3 h-3 text-zinc-500" />
-                <span className="font-mono text-zinc-300">{task.subAgents.length} Agents</span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5">
+                  <Users className="w-3 h-3 text-zinc-500" />
+                  <span className="font-mono text-zinc-300">{task.subAgents.length} Agents</span>
+                </div>
+                {task.pullRequests?.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    {task.pullRequests.every(pr => pr.status === 'merged') ? (
+                      <GitMerge className="w-3 h-3 text-purple-400" />
+                    ) : (
+                      <GitPullRequest className="w-3 h-3 text-green-400" />
+                    )}
+                    <span className="font-mono text-zinc-300">{task.pullRequests.length} PRs</span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
                 <Clock className="w-3 h-3 text-zinc-500" />
