@@ -1,9 +1,14 @@
 package orchestrator
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -31,8 +36,32 @@ func (s *Server) handleLinearWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	orgID := strings.TrimPrefix(r.URL.Path, "/api/v1/webhooks/linear/")
+	if orgID == "" {
+		http.Error(w, "Missing org ID in path", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusInternalServerError)
+		return
+	}
+
+	secret := os.Getenv("LINEAR_WEBHOOK_SECRET")
+	if secret != "" {
+		signature := r.Header.Get("Linear-Signature")
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(body)
+		expectedMAC := hex.EncodeToString(mac.Sum(nil))
+		if !hmac.Equal([]byte(signature), []byte(expectedMAC)) {
+			http.Error(w, "Invalid signature", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	var payload LinearWebhookPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
@@ -55,19 +84,20 @@ func (s *Server) handleLinearWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgID := "default-org"
 	userID := "linear-webhook"
-
 	taskID := generateTaskID()
 	taskDesc := fmt.Sprintf("%s\n\n%s", payload.Data.Title, payload.Data.Description)
+	idempotencyKey := "linear:" + payload.Data.Id
 
 	job := &store.Job{
-		ID:     taskID,
-		OrgID:  orgID,
-		UserID: userID,
-		Status: "PENDING",
+		ID:             taskID,
+		OrgID:          orgID,
+		UserID:         userID,
+		Status:         "PENDING",
+		IdempotencyKey: &idempotencyKey,
 		Inputs: map[string]interface{}{
-			"task": taskDesc,
+			"task":     taskDesc,
+			"issue_id": payload.Data.Id,
 		},
 	}
 

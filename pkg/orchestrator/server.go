@@ -363,7 +363,6 @@ func (s *Server) Start(addr string) error {
 	auth.AdminRouter(s.db, mux)
 
 	mux.HandleFunc("/api/v1/planner/plan", s.planner.HandlePlan)
-	mux.HandleFunc("/api/v1/webhooks/linear", s.handleLinearWebhook)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
@@ -394,6 +393,7 @@ func (s *Server) Start(addr string) error {
 	if s.agentAPI != nil {
 		root.Handle("/agent/", s.agentAPI.Handler())
 	}
+	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.Handle("/", auth.AuthMiddleware(s.db, mux))
 
 	// CORS + rate limiting apply to the whole surface.
