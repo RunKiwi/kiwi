@@ -23,6 +23,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/infra"
+	"github.com/ibreakthecloud/kiwi/pkg/planner"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -55,6 +56,7 @@ type Server struct {
 	infra        infra.Infra
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 	agentAPI     *agentapi.Server
+	planner      *planner.Service
 }
 
 func NewServer(storage store.Store, role string) *Server {
@@ -67,6 +69,9 @@ func NewServer(storage store.Store, role string) *Server {
 		storage:      storage,
 		infra:        infra.NewDockerInfra(os.TempDir()),
 		snapshotRoot: root,
+		// Planner uses the deterministic HeuristicPlanner by default; the
+		// frontier-model LLMPlanner plugs in behind the same interface.
+		planner: planner.NewService(storage, planner.NewHeuristicPlanner()),
 	}
 	// Sandbox-facing Agent API: scoped-token authorized, secrets bridged to the
 	// reverse tunnel, events into the durable log (issue #34).
@@ -357,6 +362,7 @@ func (s *Server) Start(addr string) error {
 	// Register admin endpoints (auth middleware applied at the mux level below).
 	auth.AdminRouter(s.db, mux)
 
+	mux.HandleFunc("/api/v1/planner/plan", s.planner.HandlePlan)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
