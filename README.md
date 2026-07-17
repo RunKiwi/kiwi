@@ -13,16 +13,19 @@ Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightwe
 - **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
 - **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
 
-Design docs: [RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md) · [Vision](docs/STARTUP_VISION.md) · [Pivot Analysis](docs/PIVOT_ANALYSIS.md)
+Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md) · [Vision](docs/STARTUP_VISION.md) · [Pivot Analysis](docs/PIVOT_ANALYSIS.md)
 
 ## Implementation Status
 
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
-| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ✅ Complete |
-| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ✅ Complete |
+| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ⚠️ Components built, not connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ⚠️ Components built, not connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
 | 3. Integration Layer | `kiwi` CLI (`login`, `submit`, `claude`), Node/Python SDKs, Linear webhook receiver | ✅ Complete |
 | 4. Distribution | Terraform/CloudFormation 1-click deploy templates | 🔜 Pending |
+| M. Managed Execution Tier | Kiwi-operated Data Plane; managed as default entry, BYOC as graduation | 📋 Proposed ([RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)) |
+
+> **On Phases 1–2:** the individual components are implemented and tested, but the Data Plane and Control Plane have never been connected — no `/api/v1/daemon/heartbeat` handler exists, so a real `kiwidaemon` cannot receive work. No task flows end-to-end today. See [#115](https://github.com/RunKiwi/kiwi/issues/115).
 
 ## Building
 
