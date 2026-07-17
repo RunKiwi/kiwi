@@ -59,9 +59,9 @@ graph TD
     end
 
     subgraph MGD[Kiwi Cloud — Managed Data Plane]
-        AS[Autoscaler]
-        KDM[kiwidaemon<br/>org A · scale-to-zero]
-        FC1[Firecracker microVM]
+        KDM[kiwidaemon<br/>org A · always-on VM<br/>hand-provisioned]
+        KDM2[kiwidaemon<br/>org B · always-on VM]
+        FC1[Sandbox<br/>Docker v1 → microVM]
     end
 
     subgraph BYOC[Customer VPC — BYOC Data Plane]
@@ -71,8 +71,8 @@ graph TD
 
     API --> Q
     Planner --> Q
-    AS -->|provisions per-org| KDM
     KDM <-->|HTTPS lease poll<br/>identical protocol| API
+    KDM2 <-->|HTTPS lease poll| API
     KDB <-->|HTTPS lease poll<br/>identical protocol| API
     KDM --> FC1
     KDB --> FC2
@@ -84,13 +84,33 @@ graph TD
 
 A shared multi-tenant daemon pool is tempting and wrong. Credentials are sealed to a *daemon's* X25519 public key; a daemon serving many orgs would hold the ability to decrypt many orgs' credentials, collapsing the credential model into a single blast radius.
 
-**Managed runs one daemon per org, autoscaled to zero.** This preserves every existing invariant without a protocol change:
+**Managed runs one daemon per org.** This preserves every existing invariant without a protocol change:
 
 - one daemon ⇒ one org ⇒ one keypair; credential sealing is unchanged
 - `org_id` on every task-scoped row is unchanged
 - the lease queue is already per-org (`LeaseNextTask(ctx, orgID, …)`)
 
-Daemons are cheap Go processes; scale-to-zero plus a warm pool keeps idle cost near nothing. Cross-org isolation is enforced one layer down, at the sandbox (§4.2).
+### 3.2.1 v1 is always-on and hand-provisioned. Do not build an autoscaler.
+
+An earlier draft of this RFC said "autoscaled to zero." **That was wrong, and it is worth saying why, because the mistake is instructive.**
+
+**The daemon is a stateful pet by design, and that is a feature.** It keeps a bare clone on local disk (`-cache-dir`), materializes `git worktree`s from it, and persists its keypairs at `~/.kiwi/daemon.key`. The entire performance claim of this architecture — worktree add in milliseconds instead of a network clone — **depends on that cache being warm on a machine that stays up.**
+
+Scale-to-zero deletes exactly that. Every cold start re-clones the repo, discarding the reason `pkg/gitcache` exists, and pays 30–60s of VM boot before the first task — in the tier whose entire selling point is zero friction.
+
+**So for v1: one small always-on VM per customer, provisioned by hand.** At ten customers that is roughly $50–200/month — noise against the engineer-days of building an autoscaler and the ongoing cost of operating one. Warm cache, no cold start, identical binary, credential model untouched.
+
+This is not a compromise. Hand-provisioning ten VMs is the correct engineering decision at ten customers.
+
+### 3.2.2 When this expires
+
+In this order. Each step is forced by a real customer, not anticipated:
+
+1. **One customer's parallelism exceeds one VM.** → N daemons per org. The lease queue already supports this: `LeaseNextTask(ctx, orgID, leasedBy, ttl)` takes a `leasedBy`, so multiple daemons can lease one org's queue today. Architecture review §5.2 makes the same point — it is nearly free.
+2. **Idle VM cost stops being noise.** → *then* autoscaling, or packing daemons onto shared hosts.
+3. **Density forces shared hosts.** → now Org A and Org B share a kernel and per-sandbox microVM isolation becomes structural, not optional (§4.2).
+
+Cross-org isolation while one org owns its whole VM is enforced by the VM boundary. From step 3 it moves down to the sandbox — but see §4.2 for why that does **not** make Docker acceptable in managed v1.
 
 ## 4. Technical Deep Dives
 
@@ -106,9 +126,16 @@ Handled honestly, it becomes the ladder's best selling point:
 
 ### 4.2 Multi-tenancy raises the isolation bar — this is the real new work
 
-In BYOC we can be relaxed about isolation: it is the customer's code, in the customer's VPC, and the blast radius is their own account. In managed, **Org A's LLM-generated code runs next to Org B's on our hardware.** Three things become mandatory:
+In BYOC we can be relaxed about isolation: it is the customer's code, in the customer's VPC, and the blast radius is their own account. Managed changes this, but **not** in the way an earlier draft of this section claimed.
 
-1. **Hardware-level isolation.** The current sandbox (`USE_DOCKER=true`, `pkg/sandbox`) is a shared-kernel container. That is not a multi-tenant boundary for untrusted, model-generated code. Managed requires a microVM boundary — Firecracker (dedicated kernel per sandbox, KVM-enforced, ~5MB overhead, ~125ms cold start) or equivalent.
+With per-org VMs (§3.2.1), Org A's code does *not* run next to Org B's — the VM is the tenant boundary, as in BYOC. It is tempting to conclude Docker is therefore fine in managed v1. **It is not, and the reason is the one thing BYOC never had:**
+
+> In BYOC, a container escape lands the attacker in **the customer's own account** — their machine, their data, their problem. In managed, the identical escape lands them in **our production network**, with whatever that VM's identity and reachability grant them. Same escape, categorically different blast radius.
+
+So the cross-tenant argument is deferred by per-org VMs; the escape-into-our-infrastructure argument is not, and it arrives with the first real customer. Three things follow:
+
+1. **Hardware-level isolation.** The current sandbox (`USE_DOCKER=true`, `pkg/sandbox`) is a shared-kernel container running untrusted model-generated code on our hardware. Managed wants a microVM boundary — Firecracker (dedicated kernel per sandbox, KVM-enforced, ~5MB overhead, ~125ms cold start) or equivalent. Structurally mandatory from §3.2.2 step 3; strongly wanted well before that.
+   **If v1 ships on Docker as an interim,** then every daemon VM must be treated as already hostile: minimal instance identity, no ambient cloud credentials, network-segmented from the control plane and from other daemon VMs, and reachable only outbound. That is the price of deferring, and it should be a deliberate decision rather than an oversight.
 2. **Default-deny egress + credential-injecting proxy.** Already argued in architecture review §3.1/§3.2 and deferred; managed makes it non-negotiable. The sandbox must never hold the LLM key — the daemon runs a local proxy that injects auth headers, and egress is allowlisted to the model endpoint and VCS only. `pkg/tunnel` is a head start.
 3. **Abuse controls.** Cryptomining, resource exhaustion, and egress abuse are managed-only problems. Quotas plus detection.
 
@@ -156,7 +183,8 @@ Tracked in **#115**. The Data Plane and Control Plane are not connected: no `/ap
 **Neither tier ships until one task flows end-to-end.** This is the shared spine — build it once and managed becomes weeks of work rather than a quarter.
 
 ### Phase M1 — Managed daemon operation
-* Per-org daemon provisioning in Kiwi's account; autoscale to zero + warm pool.
+* One always-on daemon VM per org in Kiwi's account, **hand-provisioned. No autoscaler** (§3.2.1).
+* Daemon VMs hardened as untrusted: minimal instance identity, no ambient cloud credentials, network-segmented, outbound-only (§4.2).
 * Kiwi-side key custody and registration (join tokens issued internally rather than to a customer).
 * Tier flag on the org; `kiwi submit` works with no setup.
 
