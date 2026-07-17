@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-16
 **Reviews:** [RFC: Startup-First BYOC Platform Pivot](../rfcs/2026-07-16-startup-byoc-platform-rfc.md)
-**Related:** [Architecture](ARCHITECTURE.md) · [Phased Plan](../PHASED_PLAN.md) · [Phase 3 Completion Analysis](../../phase3_completion_analysis.md)
+**Related:** [Architecture](ARCHITECTURE.md) · [Phased Plan](../PHASED_PLAN.md) · [Managed Execution Tier RFC](../rfcs/2026-07-17-managed-execution-tier-rfc.md)
 
 ---
 
