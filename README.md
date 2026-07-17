@@ -1,63 +1,119 @@
-# Kiwi: Distributed Agentic Execution Platform
+# Kiwi: BYOC Agentic Execution Engine for Startups
 
 > [!WARNING]
 > **NOT PRODUCTION READY**
-> The current codebase (`main`) is an early prototype (v0 monolith). We are actively re-architecting the system into a Distributed Agentic Execution Platform as described in our [target-state RFC](docs/rfcs/2026-07-10-agentic-execution-platform-rfc.md). Do not use this in production.
+> The codebase is mid-pivot from an enterprise SaaS prototype to a startup-first BYOC (Bring Your Own Cloud) execution platform, as described in the [Startup-First BYOC Platform RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md). Do not use this in production.
 
-Kiwi is an enterprise-ready secure execution engine that runs autonomous developer loops in the cloud while pulling required secrets dynamically and securely from the local machine over a reverse tunnel or natively via cloud OIDC.
+Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightweight SaaS **Control Plane** plans and orchestrates work, while fleets of AI agents (**The Swarm**) execute in Docker sandboxes inside the customer's own AWS/GCP account (**Data Plane**) — code and credentials never leave the customer's VPC.
 
-## The Vision: Target Architecture
-We are transitioning to a distributed, strongly-consistent control plane to orchestrate LLM agent workflows inside isolated sandboxes. 
-Key features of the target architecture include:
-- **Control Plane & Sandbox Separation**: Stateless API servers, a PostgreSQL source of truth, and NATS JetStream for durable task queues.
-- **Idempotency & Resiliency**: Checkpoint/rollback mechanisms using S3 workspace snapshots, a side-effect ledger to prevent double-firing effects, and automatic recovery of interrupted runs.
-- **Master-Worker Topology**: Complex workflows driven by a Master agent coordinating multiple sub-task Workers within the sandbox.
-- **Pluggable Infrastructure & BYO-LLM**: Choose your execution isolation (Docker, gVisor, Firecracker, Kubernetes) and your LLM provider (Anthropic, Codex, Gemini, or any compatible endpoint).
-- **Bring-Your-Own-Cloud (BYOC)**: A SaaS control plane with remote `kiwi-runner` daemons deployed directly in customer VPCs.
+## Architecture
 
-For detailed plans, please see the [RFCs & Implementation Plans](docs/).
+- **Control Plane (Kiwi SaaS)**: API gateway and auth, a Fable-powered Planner that decomposes tasks into a DAG of `worker-spec.json` payloads, a lease-based event queue, and encrypted credential storage.
+- **Data Plane (`kiwidaemon`, customer VPC)**: pull-model daemon that polls the Control Plane over HTTPS, decrypts credentials in memory, provisions instant workspaces via `git worktree` from a cached bare clone, and mounts them into Docker sandboxes running the Actor-Critic execution loop.
+- **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
+- **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
 
----
+Design docs: [RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md) · [Vision](docs/STARTUP_VISION.md) · [Pivot Analysis](docs/PIVOT_ANALYSIS.md)
 
-## The Prototype (Current State)
+## Implementation Status
 
-The code currently in `main` represents the **Phase 1 Prototype**. It operates as a monolithic daemon (`kiwid`) with local SQLite persistence and a CLI client (`kiwi`).
+| Phase | Scope | Status |
+| :--- | :--- | :--- |
+| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ✅ Complete |
+| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ✅ Complete |
+| 3. Integration Layer | `kiwi` CLI (`login`, `submit`, `claude`), Node/Python SDKs, Linear webhook receiver | ✅ Complete |
+| 4. Distribution | Terraform/CloudFormation 1-click deploy templates | 🔜 Pending |
 
-### Core Prototype Features
-1. **Actor-Critic Alignment Loop**: A test-driven development (TDD) controller that iteratively edits code, evaluates compiler/test stdout in a local Docker sandbox, and refines fixes.
-2. **Reverse Credential Tunneling**: Pulls temporary credentials (e.g., `GITHUB_TOKEN`) locally and passes them to the sandbox on-demand.
-3. **Interactive Kanban Dashboard**: Embedded dark-themed dashboard featuring status cards, live polling, log filters, and a real-time console log viewer.
+## Building
 
-### Quick Setup (Prototype)
+Because of the newer macOS `dyld` dynamic linker requirements, Go binaries must be compiled with external linking and ad-hoc signed:
 
-1. **Clone & Build**:
-    ```bash
-    go build -ldflags="-linkmode=external" -o kiwi cmd/kiwi/main.go && codesign -s - -f ./kiwi
-    go build -ldflags="-linkmode=external" -o kiwid cmd/kiwid/main.go && codesign -s - -f ./kiwid
-    ```
+```bash
+# CLI client
+go build -ldflags="-linkmode=external" -o kiwi cmd/kiwi/main.go && codesign -s - -f ./kiwi
 
-2. **Start the Kiwi Server Daemon**:
-    ```bash
-    export USE_DOCKER="true"
-    export KIWI_SERVER_TOKEN="my-secret-token-1234"
-    ./kiwid -addr :8080 -db kiwi.db
-    ```
+# Control Plane daemon (prototype monolith)
+go build -ldflags="-linkmode=external" -o kiwid cmd/kiwid/main.go && codesign -s - -f ./kiwid
 
-3. **Deploy a Task**:
-    Set up a local `secrets.json` file in your workspace directory (or export env vars) and execute:
-    ```bash
-    echo '{"GITHUB_TOKEN": "real-token-value-here"}' > secrets.json
-    ./kiwi -token "my-secret-token-1234" -task "Fix division by zero" -file demo_project/math_utils.go -test-cmd "go test ./demo_project/..."
-    ```
+# BYOC Data Plane daemon
+go build -ldflags="-linkmode=external" -o kiwidaemon cmd/kiwidaemon/main.go && codesign -s - -f ./kiwidaemon
+```
 
-4. **Access the Dashboard**:
-    ```bash
-    npx -y serve -l 3000 web/
-    ```
+## Running
+
+### 1. Start the Control Plane daemon
+
+```bash
+export USE_DOCKER="true"
+export KIWI_SERVER_TOKEN="my-secret-token-1234"
+./kiwid -addr :8080 -db kiwi.db
+```
+
+### 2. Use the `kiwi` CLI
+
+```bash
+# Store your API token in ~/.config/kiwi/config.json
+./kiwi login -token "my-secret-token-1234"
+
+# Submit a task (packages -dir, uploads it, streams logs until completion)
+./kiwi submit -task "Fix division by zero in Divide()" \
+    -file demo_project/math_utils.go \
+    -test-cmd "go test ./demo_project/..." \
+    -dir .
+
+# Resume an existing task
+./kiwi submit -resume -task-id <task-id>
+
+# Launch Claude Code wrapped with Kiwi Swarm offloading instructions
+./kiwi claude
+```
+
+`kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
+
+### 3. Run the BYOC daemon (Data Plane)
+
+```bash
+./kiwidaemon -api-url https://api.runkiwi.com \
+    -key-path ~/.kiwi/daemon.key \
+    -poll-interval 5s \
+    -cache-dir /tmp/kiwi-cache
+```
+
+On first boot the daemon generates its keypairs, self-registers with the Control Plane, and begins heartbeat polling for `worker-spec.json` payloads.
+
+### 4. Dashboard (legacy prototype UI)
+
+```bash
+npx -y serve -l 3000 web/
+# Configure the daemon URL and token in the Settings gear panel.
+```
+
+## SDKs
+
+Minimal v1 SDKs for programmatic task submission (CI/CD, Sentry auto-triage) live in `sdk/`:
+
+```js
+// Node (sdk/node)
+const { KiwiClient } = require('kiwi-sdk');
+const client = new KiwiClient('http://localhost:8080', process.env.KIWI_TOKEN);
+await client.submitTask('Fix flaky test', 'pkg/foo/foo.go', 'go test ./...', './codebase.zip');
+```
+
+```python
+# Python (sdk/python)
+from kiwi import KiwiClient
+client = KiwiClient("http://localhost:8080", token)
+client.submit_task("Fix flaky test", "pkg/foo/foo.go", "go test ./...", "./codebase.zip")
+```
+
+## Linear Webhook
+
+The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` (or moved to **In Progress**) are automatically converted into planner jobs.
 
 ---
 
 ## Contributing & Context for AI
-For system context, PR checklist, and instructions for AI assistants, please refer to [CLAUDE.md](CLAUDE.md) and the plans inside `docs/plans/`.
+
+For system context, PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md) and the docs inside `docs/`.
 
 Every PR modifying the codebase must also keep this README updated. If no update is necessary, add the `skip-readme-check` label to the PR.
