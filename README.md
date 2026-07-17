@@ -85,10 +85,12 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 ./kiwidaemon -api-url https://api.runkiwi.com \
     -key-path ~/.kiwi/daemon.key \
     -poll-interval 5s \
-    -cache-dir /tmp/kiwi-cache
+    -cache-dir /tmp/kiwi-cache \
+    -max-cached-repos 20 \
+    -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs, self-registers with the Control Plane, and begins heartbeat polling for `worker-spec.json` payloads.
+On first boot the daemon generates its keypairs and registers with the Control Plane using a single-use join token (mint one with `POST /api/v1/daemon/join-token`, or pass it via `KIWI_JOIN_TOKEN`). Once registered, its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for `worker-spec.json` payloads. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used when a new clone would exceed the bound; `0` disables the bound.
 
 ### 4. Dashboard
 
