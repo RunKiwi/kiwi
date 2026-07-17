@@ -18,6 +18,7 @@ func main() {
 	var keyPath string
 	var pollInterval time.Duration
 	var cacheDir string
+	var joinToken string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -29,6 +30,7 @@ func main() {
 	flag.StringVar(&keyPath, "key-path", defaultKeyPath, "Path to load/save the X25519 private key.")
 	flag.DurationVar(&pollInterval, "poll-interval", 5*time.Second, "Base interval between Control Plane heartbeats (jitter and backoff are applied automatically).")
 	flag.StringVar(&cacheDir, "cache-dir", "/tmp/kiwi-cache", "Path to store bare git repositories and worktrees.")
+	flag.StringVar(&joinToken, "join-token", os.Getenv("KIWI_JOIN_TOKEN"), "Single-use join token to register this daemon (required on first boot; falls back to KIWI_JOIN_TOKEN).")
 	flag.Parse()
 
 	cfg := daemon.Config{
@@ -36,6 +38,7 @@ func main() {
 		KeyPath:      keyPath,
 		PollInterval: pollInterval,
 		CacheDir:     cacheDir,
+		JoinToken:    joinToken,
 	}
 
 	d, err := daemon.New(cfg)

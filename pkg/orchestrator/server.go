@@ -363,6 +363,8 @@ func (s *Server) Start(addr string) error {
 	auth.AdminRouter(s.db, mux)
 
 	mux.HandleFunc("/api/v1/planner/plan", s.planner.HandlePlan)
+	// Org admin mints a daemon join token for their own org (behind auth).
+	mux.HandleFunc("/api/v1/daemon/join-token", s.handleDaemonJoinToken)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
@@ -394,6 +396,11 @@ func (s *Server) Start(addr string) error {
 		root.Handle("/agent/", s.agentAPI.Handler())
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
+	// The daemon API authenticates by Ed25519 request signature, not an org API
+	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.
+	root.HandleFunc("/api/v1/daemon/register", s.handleDaemonRegister)
+	root.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
+	root.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
 	root.Handle("/", auth.AuthMiddleware(s.db, mux))
 
 	// CORS + rate limiting apply to the whole surface.

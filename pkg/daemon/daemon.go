@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -26,6 +27,10 @@ type Config struct {
 	CacheDir string
 	// PollInterval is the base interval between heartbeats. Defaults to 5s when zero.
 	PollInterval time.Duration
+	// JoinToken is the short-lived, org-bound registration secret. It is
+	// required on first boot to enrol the daemon; once registered, the daemon's
+	// persisted identity key is sufficient and the token can be omitted.
+	JoinToken string
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -73,7 +78,31 @@ func (d *Daemon) Start() error {
 	// Hand the signing key to the client so every heartbeat is authenticated.
 	d.client.SetSigner(d.signPrivKey)
 
+	// Register if a join token was supplied. Registration is idempotent for a
+	// known identity (it re-binds/rotates), so presenting a fresh token on a
+	// restart is harmless. Without a token we assume a prior registration and
+	// proceed straight to polling; an unregistered daemon simply gets 403s.
+	if d.config.JoinToken != "" {
+		if err := d.register(); err != nil {
+			return fmt.Errorf("daemon registration failed: %w", err)
+		}
+		log.Println("Daemon registered with Control Plane.")
+	} else {
+		log.Println("No join token supplied; assuming prior registration.")
+	}
+
 	return nil
+}
+
+// register performs the join handshake using the daemon's public keys.
+func (d *Daemon) register() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return d.client.Register(ctx, RegisterReq{
+		JoinToken:  d.config.JoinToken,
+		PubKey:     base64.StdEncoding.EncodeToString(d.pubKey.Bytes()),
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+	})
 }
 
 // Run starts the daemon's heartbeat polling engine.
@@ -152,66 +181,137 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 	}
 
 	log.Printf("Received worker specs from Control Plane! (Tasks: %d)", len(res.Specs))
+
+	// Open the sealed credential bundle once for this heartbeat. Only this
+	// daemon's X25519 private key can open it; the plaintext lives in memory for
+	// the duration of the tasks below and is never written to disk.
+	creds, err := d.openCredentials(res.EncryptedCreds)
+	if err != nil {
+		log.Printf("Failed to open sealed credentials: %v", err)
+		// Without credentials the agent cannot reach its LLM/Git provider. Do
+		// not silently run a half-configured task; fail the lease so it requeues.
+		for _, spec := range res.Specs {
+			d.reportResult(ctx, spec.ID, res.LeaseID, false)
+		}
+		return true
+	}
+
 	for _, spec := range res.Specs {
-		func(spec agent.WorkerSpec) {
-			log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
-
-			// 0. Sanitize spec.ID to prevent path traversal
-			if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
-				log.Printf("Invalid task ID format: %s", spec.ID)
-				return
-			}
-
-			// 1. Generate worktree path
-			worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
-
-			// 2. Clone worktree
-			if spec.RepoURL != "" && spec.Ref != "" {
-				log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
-				if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
-					log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-					return
-				}
-
-				// Defer cleanup of worktree
-				defer func(url, path string) {
-					log.Printf("Cleaning up worktree: %s", path)
-					if err := d.gitCache.RemoveWorktree(context.Background(), url, path); err != nil {
-						log.Printf("Failed to remove worktree: %v", err)
-					}
-				}(spec.RepoURL, worktreePath)
-			} else {
-				// Fallback if no repo is provided, just use a temp dir for sandbox
-				worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
-				if err := os.MkdirAll(worktreePath, 0755); err != nil {
-					log.Printf("Failed to create fallback sandbox dir: %v", err)
-					return
-				}
-			}
-
-			// 3. Inject Sandbox config
-			sandboxCtx := context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
-				UseDocker:   true,
-				MemoryLimit: "512m",
-				CPULimit:    "1.0",
-				NetworkNone: true,
-			})
-
-			// 4. Execute placeholder command inside sandbox
-			log.Printf("Spawning Docker sandbox for task %s...", spec.ID)
-			cmdStr := "echo 'Processing task' > sandbox.log && ls -la"
-			env := []string{"TASK=" + spec.Task}
-
-			result, err := sandbox.RunCommand(sandboxCtx, worktreePath, cmdStr, env)
-			if err != nil {
-				log.Printf("Sandbox execution failed for task %s: %v", spec.ID, err)
-			} else {
-				log.Printf("Sandbox execution complete. Success: %v\nOutput:\n%s", result.Success, result.Output)
-			}
-		}(spec)
+		ok := d.executeTask(ctx, spec, creds)
+		d.reportResult(ctx, spec.ID, res.LeaseID, ok)
 	}
 
 	return true
+}
+
+// openCredentials decrypts the sealed credential bundle from a heartbeat into a
+// name→value map. An empty blob (org has no credentials) is not an error.
+func (d *Daemon) openCredentials(sealed string) (map[string]string, error) {
+	if sealed == "" {
+		return map[string]string{}, nil
+	}
+	plaintext, err := crypto.OpenSealed(d.priKey, sealed)
+	if err != nil {
+		return nil, fmt.Errorf("open sealed box: %w", err)
+	}
+	var creds map[string]string
+	if err := json.Unmarshal(plaintext, &creds); err != nil {
+		return nil, fmt.Errorf("decode credential bundle: %w", err)
+	}
+	return creds, nil
+}
+
+// executeTask provisions a workspace and runs the worker inside a sandbox with
+// credentials injected. It returns whether the task succeeded.
+//
+// NOTE: the in-sandbox step is still a stand-in — it runs a real sandboxed
+// command with the decrypted credentials in its environment, but not yet the
+// Actor–Critic agent loop. Wiring the LLM agent runtime (pkg/agent + a live
+// provider) into the sandbox is the tracked follow-up. The seam around it —
+// identity, lease, credential seal/open, result reporting — is real.
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) bool {
+	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
+
+	// Sanitize spec.ID to prevent path traversal into the cache dir.
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
+		log.Printf("Invalid task ID format: %s", spec.ID)
+		return false
+	}
+
+	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
+
+	if spec.RepoURL != "" && spec.Ref != "" {
+		log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
+		if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
+			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
+			return false
+		}
+		defer func(url, path string) {
+			log.Printf("Cleaning up worktree: %s", path)
+			if err := d.gitCache.RemoveWorktree(context.Background(), url, path); err != nil {
+				log.Printf("Failed to remove worktree: %v", err)
+			}
+		}(spec.RepoURL, worktreePath)
+	} else {
+		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			log.Printf("Failed to create fallback sandbox dir: %v", err)
+			return false
+		}
+	}
+
+	sandboxCtx := context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+		UseDocker:   true,
+		MemoryLimit: "512m",
+		CPULimit:    "1.0",
+		NetworkNone: true,
+	})
+
+	log.Printf("Spawning sandbox for task %s...", spec.ID)
+	env := []string{"TASK=" + spec.Task}
+	for name, value := range creds {
+		env = append(env, name+"="+value)
+	}
+
+	result, err := sandbox.RunCommand(sandboxCtx, worktreePath, taskCommand(spec), env)
+	if err != nil {
+		log.Printf("Sandbox execution failed for task %s: %v", spec.ID, err)
+		return false
+	}
+	log.Printf("Sandbox execution complete for %s. Success: %v", spec.ID, result.Success)
+	return result.Success
+}
+
+// taskCommand returns the shell command run inside the sandbox for a spec. This
+// is the seam where the real agent loop will be invoked (see executeTask NOTE).
+func taskCommand(spec agent.WorkerSpec) string {
+	return "echo \"processing: $TASK\" > sandbox.log"
+}
+
+// reportResult closes the lease for a task by reporting its terminal status.
+// Failures here are logged, not fatal: if the report is lost, the lease simply
+// expires and the task is retried.
+func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool) {
+	if leaseID == "" {
+		// No fencing token (older CP, or a spec surfaced without a lease). Cannot
+		// safely complete; let the lease lapse.
+		return
+	}
+	status := "SUCCEEDED"
+	if !ok {
+		status = "FAILED"
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := d.client.ReportResult(reqCtx, ResultReq{
+		TaskID:     taskID,
+		LeaseID:    leaseID,
+		Status:     status,
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+	})
+	if err != nil {
+		log.Printf("Failed to report result for task %s: %v", taskID, err)
+	}
 }
 
 func (d *Daemon) initCrypto() error {
