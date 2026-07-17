@@ -14,6 +14,10 @@ type PlanRequest struct {
 	Ref        string `json:"ref"`
 	Model      string `json:"model"`
 	MaxWorkers int    `json:"max_workers"`
+	// TestCmd is the command that defines "done" for the workers this plan
+	// produces. Threaded onto every worker spec so the daemon's loop can verify
+	// its work (the test is the definition of done).
+	TestCmd string `json:"test_cmd"`
 }
 
 // PlannedWorker is one node in the plan DAG.
@@ -22,6 +26,7 @@ type PlannedWorker struct {
 	Task      string   `json:"task"`
 	File      string   `json:"file"`
 	Model     string   `json:"model"`
+	TestCmd   string   `json:"test_cmd,omitempty"`
 	DependsOn []string `json:"depends_on,omitempty"`
 }
 
