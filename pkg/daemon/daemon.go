@@ -31,6 +31,10 @@ type Config struct {
 	// required on first boot to enrol the daemon; once registered, the daemon's
 	// persisted identity key is sufficient and the token can be omitted.
 	JoinToken string
+	// MaxCachedRepos bounds the number of bare repositories the git cache keeps
+	// before evicting the least-frequently-used one. 0 leaves the cache
+	// unbounded; the kiwidaemon CLI supplies a sensible default.
+	MaxCachedRepos int
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -48,7 +52,12 @@ type Daemon struct {
 
 // New creates a new Daemon instance.
 func New(cfg Config) (*Daemon, error) {
-	cache, err := gitcache.New(cfg.CacheDir)
+	// 0 (or negative) means unbounded; the CLI default supplies a real bound.
+	maxRepos := cfg.MaxCachedRepos
+	if maxRepos < 0 {
+		maxRepos = 0
+	}
+	cache, err := gitcache.NewWithLimit(cfg.CacheDir, maxRepos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize git cache: %w", err)
 	}

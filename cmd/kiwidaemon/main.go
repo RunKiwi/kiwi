@@ -19,6 +19,7 @@ func main() {
 	var pollInterval time.Duration
 	var cacheDir string
 	var joinToken string
+	var maxCachedRepos int
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -31,14 +32,16 @@ func main() {
 	flag.DurationVar(&pollInterval, "poll-interval", 5*time.Second, "Base interval between Control Plane heartbeats (jitter and backoff are applied automatically).")
 	flag.StringVar(&cacheDir, "cache-dir", "/tmp/kiwi-cache", "Path to store bare git repositories and worktrees.")
 	flag.StringVar(&joinToken, "join-token", os.Getenv("KIWI_JOIN_TOKEN"), "Single-use join token to register this daemon (required on first boot; falls back to KIWI_JOIN_TOKEN).")
+	flag.IntVar(&maxCachedRepos, "max-cached-repos", 20, "Max bare repositories to keep in the git cache before evicting the least-frequently-used (0 = unbounded).")
 	flag.Parse()
 
 	cfg := daemon.Config{
-		APIURL:       apiURL,
-		KeyPath:      keyPath,
-		PollInterval: pollInterval,
-		CacheDir:     cacheDir,
-		JoinToken:    joinToken,
+		APIURL:         apiURL,
+		KeyPath:        keyPath,
+		PollInterval:   pollInterval,
+		CacheDir:       cacheDir,
+		JoinToken:      joinToken,
+		MaxCachedRepos: maxCachedRepos,
 	}
 
 	d, err := daemon.New(cfg)
