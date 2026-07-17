@@ -21,13 +21,13 @@ Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.
 
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
-| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ⚠️ Components built, not connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
-| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ⚠️ Components built, not connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ✅ Connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ✅ Connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
 | 3. Integration Layer | `kiwi` CLI (`login`, `submit`, `claude`), Node/Python SDKs, Linear webhook receiver | ✅ Complete |
 | 4. Distribution | Terraform/CloudFormation 1-click deploy templates | 🔜 Pending |
 | M. Managed Execution Tier | Kiwi-operated Data Plane; managed as default entry, BYOC as graduation | 📋 Proposed ([RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)) |
 
-> **On Phases 1–2:** the individual components are implemented and tested, but the Data Plane and Control Plane have never been connected — no `/api/v1/daemon/heartbeat` handler exists, so a real `kiwidaemon` cannot receive work. No task flows end-to-end today. See [#115](https://github.com/RunKiwi/kiwi/issues/115).
+> **On the seam ([#115](https://github.com/RunKiwi/kiwi/issues/115)):** a task now flows end-to-end — a registered `kiwidaemon` polls `/api/v1/daemon/heartbeat`, leases a task, opens its org's credentials sealed to its X25519 key, executes, and reports the result to close the lease. Registration is gated by a single-use join token. **One thing remains a stand-in:** the in-sandbox step runs a real sandboxed command with credentials injected, but not yet the Actor–Critic LLM agent loop — wiring that in is the tracked follow-up.
 
 ## Building
 

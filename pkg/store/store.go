@@ -45,6 +45,14 @@ type Store interface {
 	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 
+	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
+	// identity and resolves a heartbeat to an org; registration is gated by a
+	// short-lived, org-bound, single-use join token (no trust-on-first-use).
+	CreateDaemonJoinToken(ctx context.Context, orgID string, ttl time.Duration) (string, error)
+	RegisterDaemon(ctx context.Context, joinToken, signPubKey, encPubKey string) (*Daemon, error)
+	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
+	TouchDaemon(ctx context.Context, id string) error
+
 	// Credentials: org-scoped secrets, AES-256-GCM encrypted at rest and
 	// re-sealed to a daemon's X25519 public key for delivery.
 	SaveCredential(ctx context.Context, orgID, name, kind, plaintext string) error

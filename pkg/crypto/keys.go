@@ -9,6 +9,13 @@ import (
 	"errors"
 )
 
+// PublicKeyFromRawBytes reconstructs an X25519 public key from its 32 raw
+// bytes — the encoding a daemon sends over the wire as base64(pub.Bytes()).
+// Distinct from DecodePublicKeyFromPEM, which handles the on-disk PEM form.
+func PublicKeyFromRawBytes(raw []byte) (*ecdh.PublicKey, error) {
+	return ecdh.X25519().NewPublicKey(raw)
+}
+
 // GenerateKeyPair generates a new X25519 public/private key pair.
 func GenerateKeyPair() (*ecdh.PublicKey, *ecdh.PrivateKey, error) {
 	priv, err := ecdh.X25519().GenerateKey(rand.Reader)

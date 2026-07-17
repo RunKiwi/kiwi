@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/orchestrator"
 	"github.com/ibreakthecloud/kiwi/pkg/queue"
@@ -67,6 +68,26 @@ func main() {
 	if *role == "all" || *role == "orchestrator" {
 		// Recover tasks interrupted by a previous restart before accepting new work.
 		server.RecoverTasks()
+
+		// Return expired daemon leases to the queue so a crashed daemon's work is
+		// picked up by another. Dead-lettering after MaxLeaseAttempts happens
+		// inside RequeueExpiredLeases.
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if n, err := storage.RequeueExpiredLeases(ctx); err != nil {
+						fmt.Printf("[Orchestrator] requeue expired leases: %v\n", err)
+					} else if n > 0 {
+						fmt.Printf("[Orchestrator] requeued %d expired lease(s)\n", n)
+					}
+				}
+			}
+		}()
 
 		if js != nil {
 			consumer := queue.NewConsumer(js, storage, server.LaunchTask)
