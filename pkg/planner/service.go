@@ -53,6 +53,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			"task":       w.Task,
 			"file":       w.File,
 			"model":      w.Model,
+			"test_cmd":   workerTestCmd(w, req),
 			"depends_on": w.DependsOn,
 		})
 	}
@@ -91,6 +92,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"task":       w.Task,
 				"file":       w.File,
 				"model":      w.Model,
+				"test_cmd":   workerTestCmd(w, req),
 				"depends_on": w.DependsOn,
 				"repo_url":   req.RepoURL,
 				"ref":        req.Ref,
@@ -118,6 +120,17 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		TaskIDs:    taskIDs,
 		Summary:    plan.Summary,
 	}, nil
+}
+
+// workerTestCmd resolves the test command for a worker: a per-worker command
+// from the planner takes precedence, otherwise the plan-wide command from the
+// request. Empty when neither is set (the daemon then cannot run a verifying
+// loop for that worker).
+func workerTestCmd(w PlannedWorker, req PlanRequest) string {
+	if w.TestCmd != "" {
+		return w.TestCmd
+	}
+	return req.TestCmd
 }
 
 // contentHash returns the SHA-256 of the canonical JSON encoding of content

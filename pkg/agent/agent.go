@@ -56,16 +56,26 @@ func (r *StoreReporter) Event(ctx context.Context, agentID, phase, outcome strin
 }
 
 // WorkerSpec is a single worker's scoped subtask (per-worker model/tools).
+//
+// The json tags are load-bearing: a spec round-trips as JSON through the lease
+// queue (queued_tasks.spec) where the planner writes snake_case keys, and it is
+// also the wire format the Control Plane sends the daemon in a heartbeat.
+// Without matching tags, snake_case keys like repo_url silently fail to
+// unmarshal (Go's field matching is case-insensitive but not underscore-aware).
 type WorkerSpec struct {
-	ID      string
-	Model   string
-	Task    string
-	File    string
-	RepoURL string
-	Ref     string
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Task    string `json:"task"`
+	File    string `json:"file"`
+	RepoURL string `json:"repo_url"`
+	Ref     string `json:"ref"`
+	// TestCmd is the command that defines "done": the daemon's Actor–Critic
+	// loop iterates until this command passes. Without it the loop has no way to
+	// verify its work, so the daemon cannot run real agentic execution.
+	TestCmd string `json:"test_cmd"`
 	// DependsOn lists the IDs of workers that must complete before this one
 	// (the plan DAG produced by the planner).
-	DependsOn []string
+	DependsOn []string `json:"depends_on,omitempty"`
 }
 
 // WorkerResult is the outcome of one worker.
