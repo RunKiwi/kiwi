@@ -13,7 +13,7 @@ Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightwe
 - **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
 - **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
 
-Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md)
+Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Execution & Isolation Model RFC](docs/rfcs/2026-07-18-execution-and-isolation-model.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md)
 
 Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.com/RunKiwi/gtm). This repo holds engineering docs only.
 
