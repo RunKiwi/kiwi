@@ -17,6 +17,8 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/gitcache"
+	"github.com/ibreakthecloud/kiwi/pkg/loop"
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 )
 
@@ -35,6 +37,11 @@ type Config struct {
 	// before evicting the least-frequently-used one. 0 leaves the cache
 	// unbounded; the kiwidaemon CLI supplies a sensible default.
 	MaxCachedRepos int
+	// MaxSteps caps Actor iterations per task; 0 uses the loop default.
+	MaxSteps int
+	// MaxBudgetUSD caps provider spend per task on the customer's key; 0 uses
+	// the loop default. A runaway loop on a live key is a real cost risk.
+	MaxBudgetUSD float64
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -48,6 +55,12 @@ type Daemon struct {
 	signPrivKey ed25519.PrivateKey
 	client      *Client
 	gitCache    *gitcache.Cache
+
+	// newProvider builds the Actor/Critic from an unsealed API key and the
+	// worker's model. Injectable so tests can drive the loop with a mock LLM
+	// instead of calling Anthropic. A nil provider return means "no key" — the
+	// daemon then cannot run a real loop.
+	newProvider func(apiKey, model string) (provider.Provider, provider.Critic)
 }
 
 // New creates a new Daemon instance.
@@ -63,10 +76,23 @@ func New(cfg Config) (*Daemon, error) {
 	}
 
 	return &Daemon{
-		config:   cfg,
-		client:   NewClient(cfg.APIURL),
-		gitCache: cache,
+		config:      cfg,
+		client:      NewClient(cfg.APIURL),
+		gitCache:    cache,
+		newProvider: defaultProvider,
 	}, nil
+}
+
+// defaultProvider builds a live Anthropic Actor/Critic from the unsealed API
+// key. An empty key yields nil providers, signalling that no real loop can run.
+func defaultProvider(apiKey, model string) (provider.Provider, provider.Critic) {
+	if apiKey == "" {
+		return nil, nil
+	}
+	// One model drives both Actor and Critic for now; per-role models are a
+	// future refinement once the planner emits them.
+	ap := provider.NewAnthropicProviderWithModels(apiKey, model, model)
+	return ap, ap
 }
 
 // Start boots up the daemon, generating or loading its keypairs.
@@ -230,14 +256,24 @@ func (d *Daemon) openCredentials(sealed string) (map[string]string, error) {
 	return creds, nil
 }
 
-// executeTask provisions a workspace and runs the worker inside a sandbox with
-// credentials injected. It returns whether the task succeeded.
+// anthropicKeyName is the credential the daemon uses to call the LLM. It is
+// deliberately withheld from the sandbox environment: the Actor/Critic run in
+// the daemon process, so the sandbox — which executes model-generated code —
+// never holds the model key (architecture review §3.1).
+const anthropicKeyName = "ANTHROPIC_API_KEY"
+
+// smokeCommand is the fallback run when a task cannot drive a real loop (no test
+// command, target file, or LLM key). It keeps the end-to-end seam exercisable
+// for smoke tests without pretending an agent ran.
+const smokeCommand = `echo "processing: $TASK" > sandbox.log`
+
+// executeTask provisions a workspace and runs the worker's Actor–Critic loop
+// against it, returning whether the task succeeded (its test command passed).
 //
-// NOTE: the in-sandbox step is still a stand-in — it runs a real sandboxed
-// command with the decrypted credentials in its environment, but not yet the
-// Actor–Critic agent loop. Wiring the LLM agent runtime (pkg/agent + a live
-// provider) into the sandbox is the tracked follow-up. The seam around it —
-// identity, lease, credential seal/open, result reporting — is real.
+// The LLM Actor/Critic run in the daemon process; only the test command runs in
+// the sandbox. That split means the sandbox executes model-generated code with
+// a default-deny network and without the LLM key, while the daemon holds the
+// key and reaches the provider itself.
 func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) bool {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
@@ -276,25 +312,77 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		NetworkNone: true,
 	})
 
-	log.Printf("Spawning sandbox for task %s...", spec.ID)
-	env := []string{"TASK=" + spec.Task}
+	// Test-command environment: every credential except the LLM key.
+	testEnv := []string{"TASK=" + spec.Task}
 	for name, value := range creds {
-		env = append(env, name+"="+value)
+		if name == anthropicKeyName {
+			continue
+		}
+		testEnv = append(testEnv, name+"="+value)
 	}
 
-	result, err := sandbox.RunCommand(sandboxCtx, worktreePath, taskCommand(spec), env)
-	if err != nil {
-		log.Printf("Sandbox execution failed for task %s: %v", spec.ID, err)
-		return false
+	// Build the Actor/Critic from the LLM key (daemon-side, not in the sandbox).
+	actor, critic := d.newProvider(creds[anthropicKeyName], spec.Model)
+
+	// A real loop needs a target file, a definition of done, and a provider.
+	// Missing any, fall back to a smoke command rather than fake an agent run.
+	if spec.File == "" || spec.TestCmd == "" || actor == nil {
+		log.Printf("Task %s: no %s to run an agent loop; running smoke command instead",
+			spec.ID, missingLoopInput(spec, actor))
+		result, err := sandbox.RunCommand(sandboxCtx, worktreePath, smokeCommand, testEnv)
+		if err != nil {
+			log.Printf("Smoke command failed for task %s: %v", spec.ID, err)
+			return false
+		}
+		return result.Success
 	}
-	log.Printf("Sandbox execution complete for %s. Success: %v", spec.ID, result.Success)
+
+	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, spec.File, spec.TestCmd)
+	runner := &loop.Runner{
+		Provider: actor,
+		Critic:   critic,
+		Config: loop.Config{
+			MaxSteps:     d.config.MaxSteps,
+			MaxBudgetUSD: d.config.MaxBudgetUSD,
+			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
+		},
+	}
+	task := loop.Task{
+		Description: spec.Task,
+		FilePath:    filepath.Join(worktreePath, spec.File),
+	}
+	runTest := func(ctx context.Context) (string, bool, error) {
+		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, spec.TestCmd, testEnv)
+		if err != nil {
+			return "", false, err
+		}
+		return res.Output, res.Success, nil
+	}
+
+	result, err := runner.Run(ctx, task, runTest)
+	if err != nil {
+		log.Printf("Task %s loop ended without success: %v (steps=%d, cost=$%.2f)",
+			spec.ID, err, result.Steps, result.CostUSD)
+	} else {
+		log.Printf("Task %s loop complete: success=%v (steps=%d, cost=$%.2f)",
+			spec.ID, result.Success, result.Steps, result.CostUSD)
+	}
 	return result.Success
 }
 
-// taskCommand returns the shell command run inside the sandbox for a spec. This
-// is the seam where the real agent loop will be invoked (see executeTask NOTE).
-func taskCommand(spec agent.WorkerSpec) string {
-	return "echo \"processing: $TASK\" > sandbox.log"
+// missingLoopInput names the first missing prerequisite for a real loop, for a
+// clearer log line.
+func missingLoopInput(spec agent.WorkerSpec, actor provider.Provider) string {
+	switch {
+	case spec.File == "":
+		return "target file"
+	case spec.TestCmd == "":
+		return "test command"
+	case actor == nil:
+		return "LLM credentials"
+	default:
+		return "prerequisites"
+	}
 }
 
 // reportResult closes the lease for a task by reporting its terminal status.

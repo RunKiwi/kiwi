@@ -27,7 +27,7 @@ Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.
 | 4. Distribution | Terraform/CloudFormation 1-click deploy templates | 🔜 Pending |
 | M. Managed Execution Tier | Kiwi-operated Data Plane; managed as default entry, BYOC as graduation | 📋 Proposed ([RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)) |
 
-> **On the seam ([#115](https://github.com/RunKiwi/kiwi/issues/115)):** a task now flows end-to-end — a registered `kiwidaemon` polls `/api/v1/daemon/heartbeat`, leases a task, opens its org's credentials sealed to its X25519 key, executes, and reports the result to close the lease. Registration is gated by a single-use join token. **One thing remains a stand-in:** the in-sandbox step runs a real sandboxed command with credentials injected, but not yet the Actor–Critic LLM agent loop — wiring that in is the tracked follow-up.
+> **On the seam ([#115](https://github.com/RunKiwi/kiwi/issues/115), [#120](https://github.com/RunKiwi/kiwi/issues/120)):** a task flows end-to-end — a registered `kiwidaemon` polls `/api/v1/daemon/heartbeat`, leases a task, opens its org's credentials sealed to its X25519 key, runs the **Actor–Critic loop** ([`pkg/loop`](pkg/loop)) against the worktree until the task's test command passes, and reports the result to close the lease. Registration is gated by a single-use join token. The LLM Actor/Critic run in the daemon process; only the test command runs in the sandbox, so model-generated code executes with default-deny networking and never sees the LLM key.
 
 ## Building
 
@@ -87,10 +87,12 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
     -poll-interval 5s \
     -cache-dir /tmp/kiwi-cache \
     -max-cached-repos 20 \
+    -max-steps 6 \
+    -max-budget 0.50 \
     -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs and registers with the Control Plane using a single-use join token (mint one with `POST /api/v1/daemon/join-token`, or pass it via `KIWI_JOIN_TOKEN`). Once registered, its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for `worker-spec.json` payloads. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used when a new clone would exceed the bound; `0` disables the bound.
+On first boot the daemon generates its keypairs and registers with the Control Plane using a single-use join token (mint one with `POST /api/v1/daemon/join-token`, or pass it via `KIWI_JOIN_TOKEN`). Once registered, its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for `worker-spec.json` payloads and runs each through the Actor–Critic loop, iterating until the worker's test command passes (`-max-steps` iterations / `-max-budget` USD per task cap the loop). The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used when a new clone would exceed the bound; `0` disables the bound.
 
 ### 4. Dashboard
 
