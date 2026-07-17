@@ -13,7 +13,9 @@ Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightwe
 - **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
 - **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
 
-Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md) · [Vision](docs/STARTUP_VISION.md) · [Pivot Analysis](docs/PIVOT_ANALYSIS.md)
+Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md)
+
+Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.com/RunKiwi/gtm). This repo holds engineering docs only.
 
 ## Implementation Status
 
@@ -46,11 +48,15 @@ go build -ldflags="-linkmode=external" -o kiwidaemon cmd/kiwidaemon/main.go && c
 
 ### 1. Start the Control Plane daemon
 
+Requires Postgres. NATS is optional — the daemon degrades with a warning if it is unreachable.
+
 ```bash
 export USE_DOCKER="true"
 export KIWI_SERVER_TOKEN="my-secret-token-1234"
-./kiwid -addr :8080 -db kiwi.db
+./kiwid -addr :8080 -dsn "host=localhost user=postgres password=postgres dbname=kiwi port=5432 sslmode=disable"
 ```
+
+Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or bring the whole stack up with `make run-local`.
 
 ### 2. Use the `kiwi` CLI
 
@@ -84,11 +90,10 @@ export KIWI_SERVER_TOKEN="my-secret-token-1234"
 
 On first boot the daemon generates its keypairs, self-registers with the Control Plane, and begins heartbeat polling for `worker-spec.json` payloads.
 
-### 4. Dashboard (legacy prototype UI)
+### 4. Dashboard
 
 ```bash
-npx -y serve -l 3000 web/
-# Configure the daemon URL and token in the Settings gear panel.
+cd frontend && npm install && npm run dev
 ```
 
 ## SDKs
