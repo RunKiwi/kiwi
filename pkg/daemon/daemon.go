@@ -430,9 +430,31 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 				detail = d
 			}
 		}
+	} else {
+		// Surface WHY the loop failed so the FAILED task explains itself in the
+		// Control Plane (result_detail), not only in the daemon's local logs.
+		// Loop/provider errors carry the API response, not the key.
+		if err != nil {
+			detail = truncateDetail(fmt.Sprintf("loop failed after %d step(s): %v", result.Steps, err))
+		} else {
+			detail = fmt.Sprintf("test did not pass within %d step(s)", result.Steps)
+		}
 	}
 
 	return ok, prURL, detail
+}
+
+// maxDetailLen bounds the result detail stored on a task so a verbose provider
+// or test error cannot bloat the row or a status response.
+const maxDetailLen = 500
+
+// truncateDetail caps a detail string at maxDetailLen runes.
+func truncateDetail(s string) string {
+	r := []rune(s)
+	if len(r) <= maxDetailLen {
+		return s
+	}
+	return string(r[:maxDetailLen]) + "…(truncated)"
 }
 
 // dockerEnabled reports whether task commands run inside a Docker sandbox.
