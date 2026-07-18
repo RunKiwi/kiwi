@@ -306,7 +306,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 
 	sandboxCtx := context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
-		UseDocker:   true,
+		UseDocker:   dockerEnabled(),
 		MemoryLimit: "512m",
 		CPULimit:    "1.0",
 		NetworkNone: true,
@@ -368,6 +368,16 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			spec.ID, result.Success, result.Steps, result.CostUSD)
 	}
 	return result.Success
+}
+
+// dockerEnabled reports whether task commands run inside a Docker sandbox.
+// Isolation is on by default; set USE_DOCKER=false to run commands locally (for
+// tests and development on hosts without Docker). This must be honored here
+// rather than left to the sandbox package's env fallback, because executeTask
+// always supplies an explicit SandboxConfig, which takes precedence over the
+// environment inside RunCommand.
+func dockerEnabled() bool {
+	return os.Getenv("USE_DOCKER") != "false"
 }
 
 // missingLoopInput names the first missing prerequisite for a real loop, for a
