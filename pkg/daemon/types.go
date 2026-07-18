@@ -57,3 +57,10 @@ type ResultReq struct {
 	ResultURL  string `json:"result_url,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 }
+
+// RenewReq extends a task's lease while it is still running.
+type RenewReq struct {
+	TaskID     string `json:"task_id"`
+	LeaseID    string `json:"lease_id"`
+	SignPubKey string `json:"sign_pub_key"`
+}

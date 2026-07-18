@@ -267,6 +267,56 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+// handleDaemonRenew serves POST /api/v1/daemon/renew.
+func (s *Server) handleDaemonRenew(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req daemon.RenewReq
+	_, _, err := readSignedBody(r, func(b []byte) (string, error) {
+		if err := json.Unmarshal(b, &req); err != nil {
+			return "", errors.New("invalid request body")
+		}
+		return req.SignPubKey, nil
+	})
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if req.TaskID == "" || req.LeaseID == "" {
+		http.Error(w, "task_id and lease_id required", http.StatusBadRequest)
+		return
+	}
+
+	// Prove the daemon is known.
+	_, err = s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	if err != nil {
+		if errors.Is(err, store.ErrDaemonNotFound) {
+			http.Error(w, "daemon not registered", http.StatusForbidden)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	ok, err := s.storage.RenewLease(r.Context(), req.TaskID, req.LeaseID, leaseTTL)
+	if err != nil {
+		log.Printf("[daemon] renew %s failed: %v", req.TaskID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		// HTTP 409 Conflict if lease was lost
+		http.Error(w, "lease lost", http.StatusConflict)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleDaemonResult serves POST /api/v1/daemon/result. A daemon reports a
 // task's terminal outcome, presenting the lease fencing token from the
 // heartbeat. This is what closes the lease — without it a leased task would sit
