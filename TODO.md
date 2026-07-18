@@ -508,7 +508,7 @@ hashes it — verify). Do not weaken existing auth.
 
 ## PHASE C — Hardening (needed for real SaaS, after the demo works)
 
-### C1 — Daemon lease renewal for long tasks (issue #121)
+### [DONE] C1 — Daemon lease renewal for long tasks (issue #121)
 
 **Priority:** P1. **Depends on:** baseline. **Size:** S–M.
 **Goal.** The daemon must call `RenewLease` (already in `pkg/store/queue.go` and reachable via
