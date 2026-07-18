@@ -402,6 +402,7 @@ func (s *Server) Start(addr string) error {
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.
 	root.HandleFunc("/api/v1/daemon/register", s.handleDaemonRegister)
 	root.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
+	root.HandleFunc("/api/v1/daemon/renew", s.handleDaemonRenew)
 	root.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
 
 	root.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
