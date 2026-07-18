@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/kiwi-logo.svg" width="88" alt="Kiwi logo" />
+</p>
+
 # Kiwi: BYOC Agentic Execution Engine for Startups
 
 > [!WARNING]
