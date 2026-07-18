@@ -46,7 +46,7 @@ export default function LoginPage() {
         </div>
         
         <h1 className="text-3xl font-light tracking-tight text-white mb-2">Welcome to Kiwi</h1>
-        <p className="text-zinc-400 mb-8">Sign in with your Org API Key to control your BYOC Swarm</p>
+        <p className="text-zinc-400 mb-8">Sign in with your Org API Key to control your agent swarm</p>
 
         <form onSubmit={handleLogin} className="w-full flex flex-col gap-4">
           <div className="relative">

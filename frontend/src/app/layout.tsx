@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Swarm Control Center | Kiwi",
-  description: "Monitor and control your BYOC Agent Swarm",
+  description: "Monitor and control your agent swarm",
 };
 
 export default function RootLayout({
