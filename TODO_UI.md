@@ -297,7 +297,7 @@ echoed; `npm run build` passes.
 
 ---
 
-### UC4 — Fleet page (daemons) — optional
+### [DONE] UC4 — Fleet page (daemons) — optional
 
 **Priority:** P2. **Depends on:** UA2, UB3. **Size:** S.
 
