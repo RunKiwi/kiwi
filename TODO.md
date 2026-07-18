@@ -411,7 +411,7 @@ PR so the reviewer can diff against the models.
 
 ---
 
-### B3 — Production config: env-driven, fail-fast on missing secrets
+### [DONE] B3 — Production config: env-driven, fail-fast on missing secrets
 
 **Priority:** P0 (for deploy). **Depends on:** baseline. **Size:** S–M.
 
