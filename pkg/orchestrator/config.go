@@ -49,11 +49,11 @@ func LoadAndValidateConfig(flagAddr, flagDSN, flagRole, flagNats string) (*Confi
 			return nil, fmt.Errorf("production security error: KIWI_CORS_ALLOWED_ORIGINS must be set to specific origins (not wildcard)")
 		}
 	}
-	
+
 	// Ensure the os env is updated if it wasn't set, so that down-stream reads (like in crypto or corsMiddleware) match.
-	// Actually we just read from env in corsMiddleware. Let's make sure KIWI_CORS_ALLOWED_ORIGINS is set in env if we wanted to fallback, 
+	// Actually we just read from env in corsMiddleware. Let's make sure KIWI_CORS_ALLOWED_ORIGINS is set in env if we wanted to fallback,
 	// but we don't have a flag for CORS.
-	
+
 	return cfg, nil
 }
 

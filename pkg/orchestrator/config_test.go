@@ -17,7 +17,7 @@ func TestLoadAndValidateConfig(t *testing.T) {
 	t.Run("dev mode allows missing secrets", func(t *testing.T) {
 		os.Setenv("KIWI_ENV", "development")
 		os.Unsetenv("KIWI_ENCRYPTION_KEY")
-		
+
 		cfg, err := LoadAndValidateConfig(":8080", "dsn", "all", "nats")
 		if err != nil {
 			t.Fatalf("expected success, got error: %v", err)
