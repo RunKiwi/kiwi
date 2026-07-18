@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -382,4 +383,81 @@ func (s *PostgresStore) GetJobTasks(ctx context.Context, orgID, jobID string) ([
 		Order("created_at ASC").
 		Find(&tasks).Error
 	return tasks, err
+}
+
+func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummary, error) {
+	var tasks []QueuedTask
+	if err := s.db.WithContext(ctx).Where("org_id = ? AND job_id != ''", orgID).Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	type jobAgg struct {
+		JobID     string
+		CreatedAt time.Time
+		TaskCount int
+		Failed    int
+		Succeeded int
+		Leased    int
+		PRURLs    []string
+	}
+
+	jobMap := make(map[string]*jobAgg)
+	for _, t := range tasks {
+		agg, ok := jobMap[t.JobID]
+		if !ok {
+			agg = &jobAgg{JobID: t.JobID, CreatedAt: t.CreatedAt}
+			jobMap[t.JobID] = agg
+		}
+		agg.TaskCount++
+		if t.CreatedAt.After(agg.CreatedAt) {
+			agg.CreatedAt = t.CreatedAt
+		}
+		if t.Status == TaskFailed {
+			agg.Failed++
+		}
+		if t.Status == TaskSucceeded {
+			agg.Succeeded++
+		}
+		if t.Status == TaskLeased {
+			agg.Leased++
+		}
+		if t.ResultURL != nil && *t.ResultURL != "" {
+			agg.PRURLs = append(agg.PRURLs, *t.ResultURL)
+		}
+	}
+
+	var summaries []JobSummary
+	for _, agg := range jobMap {
+		status := "QUEUED"
+		if agg.Failed > 0 {
+			status = "FAILED"
+		} else if agg.Succeeded == agg.TaskCount {
+			status = "SUCCEEDED"
+		} else if agg.Leased > 0 {
+			status = "RUNNING"
+		}
+
+		prUrls := agg.PRURLs
+		if prUrls == nil {
+			prUrls = []string{}
+		}
+
+		summaries = append(summaries, JobSummary{
+			JobID:     agg.JobID,
+			CreatedAt: agg.CreatedAt,
+			TaskCount: agg.TaskCount,
+			Status:    status,
+			PRURLs:    prUrls,
+		})
+	}
+
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].CreatedAt.After(summaries[j].CreatedAt)
+	})
+
+	if summaries == nil {
+		summaries = []JobSummary{}
+	}
+
+	return summaries, nil
 }
