@@ -25,7 +25,7 @@ export default function FleetPage() {
           <ServerCrash className="w-12 h-12 text-zinc-600 mb-4" />
           <h2 className="text-xl font-medium text-white mb-2">No Daemons Registered</h2>
           <p className="text-zinc-400 max-w-md">
-            Generate a join token to register a new BYOC daemon and start executing tasks.
+            Generate a join token to register a new daemon and start executing tasks.
           </p>
         </div>
       ) : (
