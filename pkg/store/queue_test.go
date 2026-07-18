@@ -324,3 +324,52 @@ func TestRequeueDeadLettersPoisonPill(t *testing.T) {
 		t.Errorf("under-limit task should be requeued, got requeued=%d", requeued)
 	}
 }
+
+func TestDependencyFailureCascade(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create the job first so we can verify its status updates.
+	if err := s.DB().Create(&Job{
+		ID:     "j1",
+		OrgID:  "o1",
+		Status: "PENDING",
+	}).Error; err != nil {
+		t.Fatalf("setup job: %v", err)
+	}
+
+	// Enqueue a job with two tasks: impl (no deps) and verify (depends on impl)
+	// Task ID embeds jobID as "j1-impl" and "j1-verify"
+	enqueueTask(t, s, "j1-impl", "o1", "j1")
+	time.Sleep(2 * time.Millisecond)
+	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl")
+
+	// impl task is leased
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+
+	// impl task fails
+	ok, err := s.CompleteTask(ctx, "j1-impl", *l1.LeaseID, TaskFailed, "", "")
+	if err != nil || !ok {
+		t.Fatalf("CompleteTask(impl, FAILED): ok=%v err=%v", ok, err)
+	}
+
+	// Verify the dependent task (j1-verify) also failed
+	var verify QueuedTask
+	s.DB().First(&verify, "id = ?", "j1-verify")
+	if verify.Status != TaskFailed {
+		t.Errorf("expected dependent task to fail, got %s", verify.Status)
+	}
+	if verify.ResultDetail == nil || *verify.ResultDetail != "Sibling task failed" {
+		t.Errorf("expected dependent task failure detail, got %v", verify.ResultDetail)
+	}
+
+	// Verify the job also failed
+	var job Job
+	s.DB().First(&job, "id = ?", "j1")
+	if job.Status != "FAILED" {
+		t.Errorf("expected job to fail, got %s", job.Status)
+	}
+}
