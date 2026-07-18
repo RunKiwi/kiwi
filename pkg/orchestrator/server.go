@@ -403,6 +403,26 @@ func (s *Server) Start(addr string) error {
 	root.HandleFunc("/api/v1/daemon/register", s.handleDaemonRegister)
 	root.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
 	root.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
+	
+	root.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+	
+	root.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		sqlDB, err := s.db.DB()
+		if err != nil {
+			http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := sqlDB.PingContext(r.Context()); err != nil {
+			http.Error(w, "Database ping failed", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+
 	root.Handle("/", auth.AuthMiddleware(s.db, mux))
 
 	// CORS + rate limiting apply to the whole surface.
