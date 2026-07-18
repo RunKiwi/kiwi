@@ -8,7 +8,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: kiwi <command> [args]")
-		fmt.Println("Commands: login, submit, claude")
+		fmt.Println("Commands: login, submit, claude, creds")
 		os.Exit(1)
 	}
 
@@ -23,6 +23,8 @@ func main() {
 		err = runSubmit(args)
 	case "claude":
 		err = runClaude(args)
+	case "creds":
+		err = runCreds(args)
 	default:
 		fmt.Printf("Unknown command: %s\n", cmd)
 		os.Exit(1)

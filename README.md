@@ -81,6 +81,10 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 # Resume an existing task
 ./kiwi submit -resume -task-id <task-id>
 
+# Store credentials for the daemon to use in the cloud
+./kiwi creds set anthropic "sk-ant-..."
+./kiwi creds set git "github_pat_..."
+
 # Launch Claude Code wrapped with Kiwi Swarm offloading instructions
 ./kiwi claude
 ```
