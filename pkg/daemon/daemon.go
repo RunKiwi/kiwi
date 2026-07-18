@@ -319,6 +319,11 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return false, "", "invalid task ID format"
 	}
 
+	if spec.File != "" && !filepath.IsLocal(spec.File) {
+		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
+		return false, "", "file path escapes worktree"
+	}
+
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
 	if spec.RepoURL != "" && spec.Ref != "" {

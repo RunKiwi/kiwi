@@ -118,3 +118,35 @@ func TestExecuteTask_FailsWhenTestNeverPasses(t *testing.T) {
 		t.Fatal("expected failure when the test never passes")
 	}
 }
+
+func TestExecuteTask_FileScope(t *testing.T) {
+	d := newExecTestDaemon(t, "")
+
+	tests := []struct {
+		name  string
+		file  string
+		valid bool
+	}{
+		{"benign_simple", "main.go", true},
+		{"benign_nested", "pkg/main.go", true},
+		{"malicious_abs", "/etc/passwd", false},
+		{"malicious_dotdot", "../main.go", false},
+		{"malicious_nested_dotdot", "pkg/../../main.go", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := agent.WorkerSpec{
+				ID:   "task-" + tc.name,
+				File: tc.file,
+			}
+			ok, _, detail := d.executeTask(context.Background(), spec, nil)
+			if tc.valid && detail == "file path escapes worktree" {
+				t.Errorf("expected valid path %q to not be rejected", tc.file)
+			}
+			if !tc.valid && detail != "file path escapes worktree" {
+				t.Errorf("expected malicious path %q to be rejected, got %v (ok=%v)", tc.file, detail, ok)
+			}
+		})
+	}
+}
