@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *store.PostgresStore {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}); err != nil {
+	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return store.NewPostgresStore(db)
@@ -55,6 +55,58 @@ func TestHeuristicPlannerDAG(t *testing.T) {
 func TestHeuristicPlannerRequiresTask(t *testing.T) {
 	if _, err := NewHeuristicPlanner().Plan(context.Background(), PlanRequest{}); err == nil {
 		t.Error("expected error for empty task")
+	}
+}
+
+func TestIdempotentPlanSubmission(t *testing.T) {
+	st := newTestStore(t)
+	s := NewService(st, NewHeuristicPlanner())
+
+	req := PlanRequest{
+		OrgID:          "org1",
+		IdempotencyKey: "key1",
+		Task:           "do something",
+	}
+
+	// First submission
+	res1, err := s.SubmitPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+	if res1.JobID == "" {
+		t.Fatal("expected a job id")
+	}
+
+	var count int64
+	st.DB().Model(&store.QueuedTask{}).Count(&count)
+	expectedCount := count
+
+	// Second submission with same key
+	res2, err := s.SubmitPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second submit failed: %v", err)
+	}
+
+	if res1.JobID != res2.JobID {
+		t.Errorf("expected job id %s, got %s", res1.JobID, res2.JobID)
+	}
+	if len(res1.TaskIDs) != len(res2.TaskIDs) {
+		t.Errorf("expected %d tasks, got %d", len(res1.TaskIDs), len(res2.TaskIDs))
+	}
+
+	st.DB().Model(&store.QueuedTask{}).Count(&count)
+	if count != expectedCount {
+		t.Errorf("expected DB task count to remain %d, got %d", expectedCount, count)
+	}
+
+	// Third submission with different key
+	req.IdempotencyKey = "key2"
+	res3, err := s.SubmitPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("third submit failed: %v", err)
+	}
+	if res1.JobID == res3.JobID {
+		t.Errorf("expected different job id, got same %s", res3.JobID)
 	}
 }
 

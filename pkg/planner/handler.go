@@ -28,6 +28,7 @@ func (s *Service) HandlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.OrgID = claims.OrgID
+	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
 	if req.Task == "" {
 		http.Error(w, "task is required", http.StatusBadRequest)
 		return

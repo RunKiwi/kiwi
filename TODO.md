@@ -329,7 +329,7 @@ the four fields above.
 
 ---
 
-### A5 — Idempotent plan submission
+### [DONE] A5 — Idempotent plan submission
 
 **Priority:** P1. **Depends on:** A1–A4. **Size:** S–M.
 
