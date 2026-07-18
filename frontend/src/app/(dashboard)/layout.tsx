@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
+import { Logo } from "@/components/Logo";
 
 export default function DashboardLayout({
   children,
@@ -45,8 +46,8 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <aside className={`glass border-y-0 border-l-0 rounded-none shrink-0 flex flex-col p-4 z-10 transition-all duration-300 ${isCollapsed ? "w-20" : "w-64"}`}>
         <div className="flex items-center gap-2 px-2 py-4 mb-6">
-          <div className="w-8 h-8 shrink-0 rounded-lg bg-white shadow-[0_0_15px_rgba(255,255,255,0.3)] flex items-center justify-center">
-            <span className="text-black font-bold text-xl leading-none">K</span>
+          <div className="w-8 h-8 shrink-0 rounded-lg bg-[#0E1A24] shadow-[0_0_15px_rgba(147,198,69,0.35)] flex items-center justify-center">
+            <Logo className="w-5 h-5 text-[#93C645]" />
           </div>
           {!isCollapsed && <span className="text-xl font-medium tracking-tight text-white whitespace-nowrap overflow-hidden">Kiwi Swarm</span>}
         </div>
