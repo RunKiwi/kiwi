@@ -22,6 +22,14 @@ type PlanSubmission struct {
 	CreatedAt      time.Time
 }
 
+type JobSummary struct {
+	JobID     string    `json:"job_id"`
+	CreatedAt time.Time `json:"created_at"`
+	TaskCount int       `json:"task_count"`
+	Status    string    `json:"status"`
+	PRURLs    []string  `json:"pr_urls"`
+}
+
 // Store defines the data access interface for the control plane.
 // It abstracts away the underlying database (e.g. Postgres or SQLite)
 // and provides a unified interface for all subsystems.
@@ -32,6 +40,7 @@ type Store interface {
 	// Jobs (Target V2 Schema)
 	CreateJobWithOutbox(ctx context.Context, job *Job, outbox *Outbox) error
 	GetJob(ctx context.Context, id string) (*Job, error)
+	ListJobs(ctx context.Context, orgID string) ([]JobSummary, error)
 	UpdateJobStatus(ctx context.Context, id string, expectedStatus string, newStatus string) (bool, error)
 	UpdateJobCost(ctx context.Context, id string, additionalCost float64) error
 	CreateManifest(ctx context.Context, m *Manifest) error
