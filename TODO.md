@@ -359,7 +359,7 @@ current behavior (always new).
 
 ## PHASE B — Deploy as SaaS
 
-### B1 — Health & readiness endpoints
+### [DONE] B1 — Health & readiness endpoints
 
 **Priority:** P0 (for deploy). **Depends on:** baseline. **Size:** S.
 
