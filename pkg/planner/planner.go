@@ -19,6 +19,8 @@ type PlanRequest struct {
 	File       string `json:"file"`
 	Model      string `json:"model"`
 	MaxWorkers int    `json:"max_workers"`
+	// FleetID optionally scopes the job to a fleet.
+	FleetID string `json:"fleet_id"`
 	// TestCmd is the command that defines "done" for the workers this plan
 	// produces. Threaded onto every worker spec so the daemon's loop can verify
 	// its work (the test is the definition of done).

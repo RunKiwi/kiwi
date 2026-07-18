@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS fleets;
+DROP TABLE IF EXISTS org_models;
+ALTER TABLE queued_tasks DROP COLUMN IF EXISTS fleet_id;
