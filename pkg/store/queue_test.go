@@ -19,6 +19,84 @@ func enqueue(t *testing.T, s *PostgresStore, id, org string) {
 	}
 }
 
+// enqueueTask enqueues a task in a given job with optional plan dependencies
+// (worker IDs, as the planner stores them in the spec).
+func enqueueTask(t *testing.T, s *PostgresStore, id, org, job string, dependsOn ...string) {
+	t.Helper()
+	spec := map[string]interface{}{"task": "fix it", "id": id}
+	if len(dependsOn) > 0 {
+		deps := make([]interface{}, len(dependsOn))
+		for i, d := range dependsOn {
+			deps[i] = d
+		}
+		spec["depends_on"] = deps
+	}
+	if err := s.EnqueueTask(context.Background(), &QueuedTask{
+		ID: id, OrgID: org, JobID: job, Spec: spec,
+	}); err != nil {
+		t.Fatalf("EnqueueTask(%s): %v", id, err)
+	}
+}
+
+func TestLeaseEnforcesDAGDependencies(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Job j1: impl (no deps) → verify (depends_on impl). Task ids embed the
+	// job so verify's dependency "impl" resolves to sibling task "j1-impl".
+	enqueueTask(t, s, "j1-impl", "o1", "j1")
+	time.Sleep(2 * time.Millisecond) // distinct created_at ordering
+	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl")
+
+	// Only impl is leasable; verify is blocked on it.
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if l1 == nil || l1.ID != "j1-impl" {
+		t.Fatalf("expected j1-impl leased first, got %v", l1)
+	}
+
+	// verify must NOT lease while impl is merely LEASED (not yet SUCCEEDED).
+	l2, err := s.LeaseNextTask(ctx, "o1", "d2", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if l2 != nil {
+		t.Fatalf("verify must not lease before impl SUCCEEDED, got %s", l2.ID)
+	}
+
+	// Complete impl → its dependency is now satisfied.
+	if ok, err := s.CompleteTask(ctx, "j1-impl", *l1.LeaseID, TaskSucceeded); err != nil || !ok {
+		t.Fatalf("CompleteTask(impl): ok=%v err=%v", ok, err)
+	}
+
+	l3, err := s.LeaseNextTask(ctx, "o1", "d3", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if l3 == nil || l3.ID != "j1-verify" {
+		t.Fatalf("expected j1-verify leasable after impl SUCCEEDED, got %v", l3)
+	}
+}
+
+func TestLeaseBlockedTaskDoesNotStallQueue(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// An older task blocked on an unfinished dependency must not prevent a
+	// younger, dependency-free task from being leased.
+	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl") // blocked: j1-impl never enqueued
+	time.Sleep(2 * time.Millisecond)
+	enqueueTask(t, s, "j2-solo", "o1", "j2") // ready
+
+	l, err := s.LeaseNextTask(ctx, "o1", "d", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if l == nil || l.ID != "j2-solo" {
+		t.Fatalf("blocked older task must not stall a ready younger task; got %v", l)
+	}
+}
+
 func TestEnqueueAndLease(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
