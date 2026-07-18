@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,8 +19,7 @@ import (
 // All endpoints require the caller to have the "admin" role.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	mux.HandleFunc("/admin/orgs", func(w http.ResponseWriter, r *http.Request) {
-		claims := ClaimsFromContext(r.Context())
-		if claims == nil || !claims.IsAdmin() {
+		if !isAdminAuthorized(r) {
 			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
 			return
 		}
@@ -35,8 +35,7 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("/admin/orgs/", func(w http.ResponseWriter, r *http.Request) {
-		claims := ClaimsFromContext(r.Context())
-		if claims == nil || !claims.IsAdmin() {
+		if !isAdminAuthorized(r) {
 			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
 			return
 		}
@@ -137,6 +136,28 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			"role":     claims.Role,
 		})
 	})
+}
+
+func isAdminAuthorized(r *http.Request) bool {
+	// First check if there is a valid admin claim
+	claims := ClaimsFromContext(r.Context())
+	if claims != nil && claims.IsAdmin() {
+		return true
+	}
+
+	// Fallback to KIWI_SERVER_TOKEN
+	expectedToken := os.Getenv("KIWI_SERVER_TOKEN")
+	if expectedToken != "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			if token == expectedToken {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {

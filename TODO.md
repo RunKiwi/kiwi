@@ -474,7 +474,7 @@ path is the deliverable.
 
 ---
 
-### B5 — Onboarding/bootstrap: first org + API key, and admin auth
+### [DONE] B5 — Onboarding/bootstrap: first org + API key, and admin auth
 
 **Priority:** P0 (for deploy). **Depends on:** baseline. **Size:** S–M.
 
