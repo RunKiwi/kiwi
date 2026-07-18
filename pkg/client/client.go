@@ -143,7 +143,45 @@ func (c *Client) PlanTask(ctx context.Context, task, repoURL, ref, file, testCmd
 	return &out, nil
 }
 
-// GetStatus fetches the current task row.
+// JobTask is one worker task in a BYOC job.
+type JobTask struct {
+	ID           string  `json:"id"`
+	Status       string  `json:"status"`
+	ResultURL    *string `json:"result_url"`
+	ResultDetail *string `json:"result_detail"`
+}
+
+// JobStatus is the response from GET /api/v1/jobs/{jobID}
+type JobStatus struct {
+	JobID string    `json:"job_id"`
+	Tasks []JobTask `json:"tasks"`
+}
+
+// GetJob polls the BYOC job-status endpoint.
+func (c *Client) GetJob(ctx context.Context, jobID string) (*JobStatus, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ServerURL+"/api/v1/jobs/"+jobID, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.authErr(resp)
+	}
+
+	var out JobStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetStatus polls the legacy task status endpoint.
 func (c *Client) GetStatus(ctx context.Context, taskID string) (TaskStatus, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ServerURL+"/tasks/"+taskID, nil)
 	if err != nil {
