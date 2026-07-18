@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Key, DollarSign, Trash2, Plus } from "lucide-react";
+import { Key, DollarSign, CheckCircle2, Loader2 } from "lucide-react";
+import { client } from "@/lib/api";
 
 const mockCostData = [
   { name: 'Mon', cost: 12.5 },
@@ -15,10 +16,41 @@ const mockCostData = [
 ];
 
 export default function SettingsPage() {
-  const [keys, setKeys] = useState([
-    { id: '1', name: 'Production Daemon', key: 'kw_live_...x8f9', created: '2026-07-10' },
-    { id: '2', name: 'Staging Daemon', key: 'kw_test_...a2b1', created: '2026-07-15' },
-  ]);
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [gitToken, setGitToken] = useState("");
+  
+  const [savingAnthropic, setSavingAnthropic] = useState(false);
+  const [savingGemini, setSavingGemini] = useState(false);
+  const [savingGit, setSavingGit] = useState(false);
+
+  const [anthropicSaved, setAnthropicSaved] = useState(false);
+  const [geminiSaved, setGeminiSaved] = useState(false);
+  const [gitSaved, setGitSaved] = useState(false);
+
+  const handleSaveCredential = async (
+    name: string, 
+    kind: string, 
+    value: string, 
+    setSaving: (v: boolean) => void,
+    setSaved: (v: boolean) => void,
+    setValue: (v: string) => void
+  ) => {
+    if (!value.trim()) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      await client.setCredential(name, kind, value);
+      setSaved(true);
+      setValue(""); // clear the input on success as we never render stored values
+      setTimeout(() => setSaved(false), 3000); // clear success msg after 3s
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save credential");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="p-8 max-w-5xl mx-auto flex flex-col gap-8">
@@ -60,41 +92,79 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* API Keys */}
+        {/* API Credentials */}
         <div className="glass-panel p-6 flex flex-col">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-medium text-white flex items-center gap-2">
               <Key className="w-5 h-5 text-blue-400" />
-              API Keys
+              Provider Credentials
             </h2>
-            <button className="flex items-center gap-1 text-xs font-medium bg-white text-black px-3 py-1.5 rounded-md hover:bg-zinc-200 transition-colors">
-              <Plus className="w-3 h-3" /> Create Key
-            </button>
           </div>
 
-          <div className="space-y-3">
-            {keys.map(k => (
-              <div key={k.id} className="flex items-center justify-between p-3 rounded-lg bg-black/40 border border-white/5">
-                <div>
-                  <div className="text-sm font-medium text-white">{k.name}</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="font-mono text-xs text-zinc-500">{k.key}</span>
-                    <span className="text-[10px] text-zinc-600">&middot; Created {k.created}</span>
-                  </div>
-                </div>
+          <div className="space-y-6">
+            {/* Anthropic */}
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Anthropic API Key</label>
+              <div className="flex gap-2">
+                <input 
+                  type="password" 
+                  value={anthropicKey} 
+                  onChange={e => setAnthropicKey(e.target.value)}
+                  placeholder="sk-ant-..." 
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none transition-colors" 
+                />
                 <button 
-                  onClick={() => setKeys(keys.filter(key => key.id !== k.id))}
-                  className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"
+                  onClick={() => handleSaveCredential('ANTHROPIC_API_KEY', 'llm', anthropicKey, setSavingAnthropic, setAnthropicSaved, setAnthropicKey)}
+                  disabled={savingAnthropic || !anthropicKey.trim()}
+                  className="bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  {savingAnthropic ? <Loader2 className="w-4 h-4 animate-spin" /> : (anthropicSaved ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save')}
                 </button>
               </div>
-            ))}
-            {keys.length === 0 && (
-              <div className="text-center py-8 text-sm text-zinc-500 border border-dashed border-white/10 rounded-lg">
-                No active API keys.
+            </div>
+
+            {/* Gemini */}
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Gemini API Key</label>
+              <div className="flex gap-2">
+                <input 
+                  type="password" 
+                  value={geminiKey} 
+                  onChange={e => setGeminiKey(e.target.value)}
+                  placeholder="AIzaSy..." 
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none transition-colors" 
+                />
+                <button 
+                  onClick={() => handleSaveCredential('GEMINI_API_KEY', 'llm', geminiKey, setSavingGemini, setGeminiSaved, setGeminiKey)}
+                  disabled={savingGemini || !geminiKey.trim()}
+                  className="bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center"
+                >
+                  {savingGemini ? <Loader2 className="w-4 h-4 animate-spin" /> : (geminiSaved ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save')}
+                </button>
               </div>
-            )}
+            </div>
+
+            {/* Git */}
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">GitHub Personal Access Token</label>
+              <div className="flex gap-2">
+                <input 
+                  type="password" 
+                  value={gitToken} 
+                  onChange={e => setGitToken(e.target.value)}
+                  placeholder="ghp_..." 
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none transition-colors" 
+                />
+                <button 
+                  onClick={() => handleSaveCredential('GIT_TOKEN', 'git', gitToken, setSavingGit, setGitSaved, setGitToken)}
+                  disabled={savingGit || !gitToken.trim()}
+                  className="bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center"
+                >
+                  {savingGit ? <Loader2 className="w-4 h-4 animate-spin" /> : (gitSaved ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save')}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500 mt-2">Requires repo scope for PRs.</p>
+            </div>
           </div>
         </div>
 
