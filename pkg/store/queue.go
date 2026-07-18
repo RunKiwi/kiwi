@@ -273,3 +273,13 @@ func (s *PostgresStore) RequeueExpiredLeases(ctx context.Context) (int, error) {
 	}
 	return requeued, nil
 }
+
+// GetJobTasks retrieves all tasks for a given job, scoped by orgID and ordered by creation time.
+func (s *PostgresStore) GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error) {
+	var tasks []QueuedTask
+	err := s.db.WithContext(ctx).
+		Where("org_id = ? AND job_id = ?", orgID, jobID).
+		Order("created_at ASC").
+		Find(&tasks).Error
+	return tasks, err
+}
