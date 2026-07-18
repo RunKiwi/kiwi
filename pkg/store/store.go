@@ -14,6 +14,14 @@ type SnapshotRef struct {
 	Hash string
 }
 
+// PlanSubmission tracks idempotent plan submissions.
+type PlanSubmission struct {
+	OrgID          string `gorm:"primaryKey"`
+	IdempotencyKey string `gorm:"primaryKey"`
+	JobID          string
+	CreatedAt      time.Time
+}
+
 // Store defines the data access interface for the control plane.
 // It abstracts away the underlying database (e.g. Postgres or SQLite)
 // and provides a unified interface for all subsystems.
