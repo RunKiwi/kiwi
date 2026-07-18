@@ -18,3 +18,8 @@ query
 *.db
 *.db-wal
 *.db-shm
+
+# Local secrets (never commit real credentials)
+.env
+deploy/.env
+*.local.env
