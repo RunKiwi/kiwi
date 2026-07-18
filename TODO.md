@@ -150,7 +150,7 @@ names only — never values — if trivial, otherwise skip.)
 
 ---
 
-### A2 — Result payload plumbing (carry the PR URL back and store it)
+### [DONE] A2 — Result payload plumbing (carry the PR URL back and store it)
 
 **Priority:** P0. **Depends on:** baseline. **Size:** S–M.
 
@@ -286,7 +286,9 @@ on push, allow force-with-lease OR make the branch name include a short attempt 
 simplest correct choice for MVP: `git push <authURL> HEAD:refs/heads/kiwi/<JobID>` and if it
 fails because the ref exists, report FAILED with the git error (do not silently overwrite).
 
---- [DONE] **A4: BYOC job-status endpoint + CLI poll** (show the PR URL)
+---
+
+### [DONE] A4 — BYOC job-status endpoint + CLI poll (show the PR URL)
 
 **Priority:** P0. **Depends on:** A2, A3. **Size:** S.
 
