@@ -82,7 +82,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 ./kiwi submit -resume -task-id <task-id>
 
 # Store credentials for the daemon to use in the cloud
-./kiwi creds set anthropic "sk-ant-..."
+./kiwi creds set anthropic "sk-ant-..."   # or: ./kiwi creds set gemini "AI..."
 ./kiwi creds set git "github_pat_..."
 
 # Launch Claude Code wrapped with Kiwi Swarm offloading instructions
@@ -90,6 +90,8 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 ```
 
 `kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
+
+**LLM providers.** The daemon selects the provider from the worker's `-model`: a `gemini-*` model (e.g. `-model gemini-2.0-flash`) uses the stored `GEMINI_API_KEY`; any other model uses `ANTHROPIC_API_KEY`. Set whichever key(s) you use with `kiwi creds set`. Model keys are held daemon-side and never injected into the sandbox.
 
 ### 3. Run the BYOC daemon (Data Plane)
 

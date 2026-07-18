@@ -16,6 +16,9 @@ var PricingMap = map[string]Pricing{
 	"claude-opus-4-8":   {InputCostPerM: 5.00, OutputCostPerM: 25.00},
 	"claude-3-5-sonnet": {InputCostPerM: 3.00, OutputCostPerM: 15.00},
 	"claude-3-5-haiku":  {InputCostPerM: 0.80, OutputCostPerM: 4.00},
+	"gemini-2.0-flash":  {InputCostPerM: 0.10, OutputCostPerM: 0.40},
+	"gemini-1.5-flash":  {InputCostPerM: 0.075, OutputCostPerM: 0.30},
+	"gemini-1.5-pro":    {InputCostPerM: 1.25, OutputCostPerM: 5.00},
 }
 
 // ModelCostUSD computes the cost of a call given token usage and model pricing.
@@ -24,8 +27,13 @@ func ModelCostUSD(model string, inputTokens, outputTokens int64) float64 {
 	cleaned := strings.TrimPrefix(model, "Model")
 	p, ok := PricingMap[cleaned]
 	if !ok {
-		// Fallback to default Opus pricing
-		p = PricingMap["claude-opus-4-8"]
+		// Fall back to a same-family default so an unlisted model isn't billed at
+		// the wrong provider's (much higher) rate.
+		if strings.HasPrefix(cleaned, "gemini") {
+			p = PricingMap["gemini-2.0-flash"]
+		} else {
+			p = PricingMap["claude-opus-4-8"]
+		}
 	}
 	return float64(inputTokens)/1e6*p.InputCostPerM + float64(outputTokens)/1e6*p.OutputCostPerM
 }
