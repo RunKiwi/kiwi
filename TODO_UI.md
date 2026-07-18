@@ -279,7 +279,7 @@ visible. `npm run build` passes.
 
 ---
 
-### UC3 — Credentials (settings)
+### [DONE] UC3 — Credentials (settings)
 
 **Priority:** P1. **Depends on:** UB1–UB3. **Size:** S.
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { client } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -41,7 +42,7 @@ export default function LoginPage() {
       
       <div className="glass-panel w-full max-w-md p-8 relative z-10 flex flex-col items-center text-center">
         <div className="w-16 h-16 rounded-2xl bg-white shadow-[0_0_30px_rgba(255,255,255,0.4)] flex items-center justify-center mb-8">
-          <span className="text-black font-bold text-4xl leading-none">K</span>
+          <Logo className="w-10 h-10 text-black" />
         </div>
         
         <h1 className="text-3xl font-light tracking-tight text-white mb-2">Welcome to Kiwi</h1>
