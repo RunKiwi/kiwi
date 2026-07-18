@@ -261,36 +261,64 @@ func (s *PostgresStore) RenewLease(ctx context.Context, taskID, leaseID string, 
 	return res.RowsAffected > 0, nil
 }
 
-// CompleteTask marks taskID terminal (SUCCEEDED or FAILED) iff the presented
-// leaseID still owns it. The fencing check prevents a stale daemon from
-// completing a task that has since been requeued and reassigned.
 func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error) {
 	if finalStatus != TaskSucceeded && finalStatus != TaskFailed {
 		return false, fmt.Errorf("invalid final status %q (want %s or %s)", finalStatus, TaskSucceeded, TaskFailed)
 	}
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":     finalStatus,
-		"updated_at": now,
-	}
-	if resultURL == "" {
-		updates["result_url"] = nil
-	} else {
-		updates["result_url"] = resultURL
-	}
-	if detail == "" {
-		updates["result_detail"] = nil
-	} else {
-		updates["result_detail"] = detail
-	}
 
-	res := s.db.WithContext(ctx).Model(&QueuedTask{}).
-		Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
-		Updates(updates)
-	if res.Error != nil {
-		return false, res.Error
+	var rowsAffected int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		updates := map[string]interface{}{
+			"status":     finalStatus,
+			"updated_at": now,
+		}
+		if resultURL == "" {
+			updates["result_url"] = nil
+		} else {
+			updates["result_url"] = resultURL
+		}
+		if detail == "" {
+			updates["result_detail"] = nil
+		} else {
+			updates["result_detail"] = detail
+		}
+
+		res := tx.Model(&QueuedTask{}).
+			Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
+			Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		rowsAffected = res.RowsAffected
+
+		if rowsAffected > 0 && finalStatus == TaskFailed {
+			var t QueuedTask
+			if err := tx.Select("job_id").First(&t, "id = ?", taskID).Error; err == nil && t.JobID != "" {
+				failJobAndQueuedTasks(tx, t.JobID, "Sibling task failed")
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return false, err
 	}
-	return res.RowsAffected > 0, nil
+	return rowsAffected > 0, nil
+}
+
+func failJobAndQueuedTasks(tx *gorm.DB, jobID, reason string) {
+	now := time.Now()
+	tx.Model(&QueuedTask{}).Where("job_id = ? AND status = ?", jobID, TaskQueued).Updates(map[string]interface{}{
+		"status":        TaskFailed,
+		"result_detail": &reason,
+		"updated_at":    now,
+	})
+	tx.Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+		"status":     "FAILED",
+		"error":      &reason,
+		"updated_at": now,
+	})
 }
 
 // RequeueExpiredLeases returns any LEASED task whose lease has lapsed back to
@@ -304,13 +332,25 @@ func (s *PostgresStore) RequeueExpiredLeases(ctx context.Context) (int, error) {
 	var requeued int
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Dead-letter poison tasks first so the requeue below skips them.
-		if err := tx.Model(&QueuedTask{}).
-			Where("status = ? AND lease_expires_at < ? AND attempts >= ?", TaskLeased, now, MaxLeaseAttempts).
-			Updates(map[string]interface{}{
-				"status":     TaskFailed,
-				"updated_at": now,
-			}).Error; err != nil {
+		var poisonTasks []QueuedTask
+		if err := tx.Where("status = ? AND lease_expires_at < ? AND attempts >= ?", TaskLeased, now, MaxLeaseAttempts).Find(&poisonTasks).Error; err != nil {
 			return err
+		}
+
+		if len(poisonTasks) > 0 {
+			if err := tx.Model(&QueuedTask{}).
+				Where("status = ? AND lease_expires_at < ? AND attempts >= ?", TaskLeased, now, MaxLeaseAttempts).
+				Updates(map[string]interface{}{
+					"status":     TaskFailed,
+					"updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+			for _, pt := range poisonTasks {
+				if pt.JobID != "" {
+					failJobAndQueuedTasks(tx, pt.JobID, "Task dead-lettered")
+				}
+			}
 		}
 
 		res := tx.Model(&QueuedTask{}).
