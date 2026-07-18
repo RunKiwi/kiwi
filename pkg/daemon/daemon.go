@@ -42,6 +42,9 @@ type Config struct {
 	// MaxBudgetUSD caps provider spend per task on the customer's key; 0 uses
 	// the loop default. A runaway loop on a live key is a real cost risk.
 	MaxBudgetUSD float64
+	// RenewInterval configures how often the daemon extends the lease of a running task.
+	// Defaults to 4 minutes if zero.
+	RenewInterval time.Duration
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -232,7 +235,40 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 	}
 
 	for _, spec := range res.Specs {
+		// Start a lease renewal goroutine that ticks at half the lease TTL
+		// to ensure the task isn't reclaimed by the CP while we work on it.
+		renewCtx, renewCancel := context.WithCancel(ctx)
+		go func(specID string) {
+			interval := d.config.RenewInterval
+			if interval <= 0 {
+				interval = 4 * time.Minute
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-renewCtx.Done():
+					return
+				case <-ticker.C:
+					err := d.client.RenewLease(renewCtx, RenewReq{
+						TaskID:     specID,
+						LeaseID:    res.LeaseID,
+						SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+					})
+					if err != nil {
+						// A 409 means the lease was lost; we just log it here.
+						log.Printf("Failed to renew lease for task %s: %v", specID, err)
+					} else {
+						log.Printf("Successfully renewed lease for task %s", specID)
+					}
+				}
+			}
+		}(spec.ID)
+
 		ok, prURL, detail := d.executeTask(ctx, spec, creds)
+		renewCancel() // Stop the renewal timer
+
 		d.reportResult(ctx, spec.ID, res.LeaseID, ok, prURL, detail)
 	}
 
@@ -265,7 +301,7 @@ const anthropicKeyName = "ANTHROPIC_API_KEY"
 // smokeCommand is the fallback run when a task cannot drive a real loop (no test
 // command, target file, or LLM key). It keeps the end-to-end seam exercisable
 // for smoke tests without pretending an agent ran.
-const smokeCommand = `echo "processing: $TASK" > sandbox.log`
+var smokeCommand = `echo "processing: $TASK" > sandbox.log`
 
 // executeTask provisions a workspace and runs the worker's Actor–Critic loop
 // against it, returning whether the task succeeded (its test command passed).

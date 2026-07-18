@@ -127,3 +127,20 @@ func (c *Client) ReportResult(ctx context.Context, req ResultReq) error {
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	return fmt.Errorf("report result failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }
+
+// RenewLease extends a task's lease while it is still running, proving ongoing
+// liveness so the Control Plane does not requeue it. A 409 means the lease was
+// lost (e.g. expired and reassigned) — the caller should abort execution.
+func (c *Client) RenewLease(ctx context.Context, req RenewReq) error {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/renew", req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("renew lease failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+}
