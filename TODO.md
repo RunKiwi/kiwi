@@ -95,7 +95,7 @@ CGO_ENABLED=0 go test ./pkg/...    # MUST pass
 
 ## PHASE A — Make it work end-to-end (functional)
 
-### A1 — Credential set-surface (`kiwi creds set` → HTTP → store)
+### A1 — Credential set-surface (`kiwi creds set` → HTTP → store) [DONE]
 
 **Priority:** P0. **Depends on:** baseline. **Size:** S.
 
