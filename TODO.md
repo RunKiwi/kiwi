@@ -528,7 +528,7 @@ it is fast — this is the precondition for the massive-parallelism roadmap. **A
 org at its cap gets no new lease until one completes; a job exceeding its budget is stopped.
 **Tests:** lease-path test asserting the cap holds; budget test.
 
-### C3 — Enforce per-worker file scope / fix `spec.File` path traversal (issue #131)
+### [DONE] C3 — Enforce per-worker file scope / fix `spec.File` path traversal (issue #131)
 
 **Priority:** P1. **Depends on:** A3. **Size:** S.
 **Goal.** A worker must only write within its worktree and (ideally) only its scoped file.
