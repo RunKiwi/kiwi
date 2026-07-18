@@ -20,12 +20,12 @@ func TestRunMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to base postgres: %v", err)
 	}
-	
+
 	dbName := "kiwi_test_migrations"
-	
+
 	// Drop DB if it exists, ignoring errors
 	baseDB.Exec("DROP DATABASE " + dbName)
-	
+
 	if err := baseDB.Exec("CREATE DATABASE " + dbName).Error; err != nil {
 		t.Fatalf("Failed to create test DB: %v", err)
 	}
