@@ -30,12 +30,19 @@ func main() {
 	natsURL := flag.String("nats", "nats://localhost:4222", "The NATS server URL")
 	flag.Parse()
 
+	cfg, err := orchestrator.LoadAndValidateConfig(*addr, *dsn, *role, *natsURL)
+	if err != nil {
+		fmt.Printf("Startup error: %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Println("====================================================")
-	fmt.Printf("  KIWID: Kiwi Cloud Daemon Server (Role: %s)\n", *role)
+	fmt.Printf("  KIWID: Kiwi Cloud Daemon Server (Role: %s)\n", cfg.Role)
 	fmt.Println("====================================================")
+	cfg.Log()
 
 	// Initialize GORM Postgres DB
-	db, err := orchestrator.InitDB(*dsn)
+	db, err := orchestrator.InitDB(cfg.DSN)
 	if err != nil {
 		fmt.Printf("Error initializing database: %v\n", err)
 		os.Exit(1)
@@ -45,7 +52,7 @@ func main() {
 	var nc *nats.Conn
 	var errNats error
 
-	nc, errNats = nats.Connect(*natsURL)
+	nc, errNats = nats.Connect(cfg.NatsURL)
 	ctx := context.Background()
 
 	if errNats != nil {
@@ -63,9 +70,9 @@ func main() {
 	}
 
 	storage := store.NewPostgresStore(db)
-	server := orchestrator.NewServer(storage, *role)
+	server := orchestrator.NewServer(storage, cfg.Role)
 
-	if *role == "all" || *role == "orchestrator" {
+	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		// Recover tasks interrupted by a previous restart before accepting new work.
 		server.RecoverTasks()
 
@@ -101,7 +108,7 @@ func main() {
 		}
 	}
 
-	if *role == "all" || *role == "api" {
+	if cfg.Role == "all" || cfg.Role == "api" {
 		if js != nil {
 			relay := queue.NewRelay(storage, &JetStreamPublisher{js: js})
 			go relay.Start(ctx)
@@ -110,7 +117,7 @@ func main() {
 			fmt.Println("[API] JetStream not available; Outbox Relay NOT started")
 		}
 
-		err = server.Start(*addr)
+		err = server.Start(cfg.Addr)
 		if err != nil {
 			fmt.Printf("Error starting Kiwi daemon API: %v\n", err)
 			os.Exit(1)
