@@ -28,7 +28,7 @@ func newExecTestDaemon(t *testing.T, fixedContent string) *Daemon {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	d.newProvider = func(apiKey, model string) (provider.Provider, provider.Critic) {
+	d.newProvider = func(creds map[string]string, model string) (provider.Provider, provider.Critic) {
 		return &fixOnceProvider{fixedContent: fixedContent}, nil // no critic
 	}
 	return d

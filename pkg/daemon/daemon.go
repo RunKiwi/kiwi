@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -59,11 +60,11 @@ type Daemon struct {
 	client      *Client
 	gitCache    *gitcache.Cache
 
-	// newProvider builds the Actor/Critic from an unsealed API key and the
-	// worker's model. Injectable so tests can drive the loop with a mock LLM
-	// instead of calling Anthropic. A nil provider return means "no key" — the
-	// daemon then cannot run a real loop.
-	newProvider func(apiKey, model string) (provider.Provider, provider.Critic)
+	// newProvider builds the Actor/Critic from the unsealed credential bundle and
+	// the worker's model. Injectable so tests can drive the loop with a mock LLM
+	// instead of calling a real provider. A nil provider return means "no usable
+	// key for the selected provider" — the daemon then cannot run a real loop.
+	newProvider func(creds map[string]string, model string) (provider.Provider, provider.Critic)
 }
 
 // New creates a new Daemon instance.
@@ -86,15 +87,26 @@ func New(cfg Config) (*Daemon, error) {
 	}, nil
 }
 
-// defaultProvider builds a live Anthropic Actor/Critic from the unsealed API
-// key. An empty key yields nil providers, signalling that no real loop can run.
-func defaultProvider(apiKey, model string) (provider.Provider, provider.Critic) {
-	if apiKey == "" {
+// defaultProvider selects a live Actor/Critic by the worker's model: a
+// "gemini*" model routes to Gemini (using GEMINI_API_KEY), anything else to
+// Anthropic (using ANTHROPIC_API_KEY). If the selected provider's key is absent
+// from the bundle it returns nil providers, signalling no real loop can run.
+// One model drives both Actor and Critic for now; per-role models are a future
+// refinement once the planner emits them.
+func defaultProvider(creds map[string]string, model string) (provider.Provider, provider.Critic) {
+	if strings.HasPrefix(model, "gemini") {
+		key := creds[geminiKeyName]
+		if key == "" {
+			return nil, nil
+		}
+		gp := provider.NewGeminiProviderWithModels(key, model, model)
+		return gp, gp
+	}
+	key := creds[anthropicKeyName]
+	if key == "" {
 		return nil, nil
 	}
-	// One model drives both Actor and Critic for now; per-role models are a
-	// future refinement once the planner emits them.
-	ap := provider.NewAnthropicProviderWithModels(apiKey, model, model)
+	ap := provider.NewAnthropicProviderWithModels(key, model, model)
 	return ap, ap
 }
 
@@ -292,11 +304,20 @@ func (d *Daemon) openCredentials(sealed string) (map[string]string, error) {
 	return creds, nil
 }
 
-// anthropicKeyName is the credential the daemon uses to call the LLM. It is
-// deliberately withheld from the sandbox environment: the Actor/Critic run in
-// the daemon process, so the sandbox — which executes model-generated code —
-// never holds the model key (architecture review §3.1).
-const anthropicKeyName = "ANTHROPIC_API_KEY"
+// LLM API-key credential names. These are deliberately withheld from the
+// sandbox environment: the Actor/Critic run in the daemon process, so the
+// sandbox — which executes model-generated code — never holds a model key
+// (architecture review §3.1).
+const (
+	anthropicKeyName = "ANTHROPIC_API_KEY"
+	geminiKeyName    = "GEMINI_API_KEY"
+)
+
+// isLLMKey reports whether a credential is a model API key that must be kept out
+// of the sandbox environment.
+func isLLMKey(name string) bool {
+	return name == anthropicKeyName || name == geminiKeyName
+}
 
 // smokeCommand is the fallback run when a task cannot drive a real loop (no test
 // command, target file, or LLM key). It keeps the end-to-end seam exercisable
@@ -353,17 +374,18 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		NetworkNone: true,
 	})
 
-	// Test-command environment: every credential except the LLM key.
+	// Test-command environment: every credential except the LLM keys.
 	testEnv := []string{"TASK=" + spec.Task}
 	for name, value := range creds {
-		if name == anthropicKeyName {
+		if isLLMKey(name) {
 			continue
 		}
 		testEnv = append(testEnv, name+"="+value)
 	}
 
-	// Build the Actor/Critic from the LLM key (daemon-side, not in the sandbox).
-	actor, critic := d.newProvider(creds[anthropicKeyName], spec.Model)
+	// Build the Actor/Critic (daemon-side, not in the sandbox). The provider is
+	// selected from the worker's model; its key is picked from the bundle.
+	actor, critic := d.newProvider(creds, spec.Model)
 
 	// A real loop needs a target file, a definition of done, and a provider.
 	// Missing any, fall back to a smoke command rather than fake an agent run.

@@ -44,12 +44,18 @@ func runCredsSet(args []string) error {
 	credName := nameAlias
 	credKind := *kind
 
-	if nameAlias == "anthropic" {
+	switch nameAlias {
+	case "anthropic":
 		credName = "ANTHROPIC_API_KEY"
 		if credKind == "generic" {
 			credKind = "llm"
 		}
-	} else if nameAlias == "git" {
+	case "gemini":
+		credName = "GEMINI_API_KEY"
+		if credKind == "generic" {
+			credKind = "llm"
+		}
+	case "git":
 		credName = "GIT_TOKEN"
 		if credKind == "generic" {
 			credKind = "git"
