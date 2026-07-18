@@ -6,12 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var ErrIdempotentConflict = errors.New("idempotent conflict")
 
 // Service turns a high-level task into an immutable manifest and enqueues its
 // worker specs onto the lease queue for daemons to pick up. Credentials are NOT
@@ -39,6 +43,26 @@ type SubmitResult struct {
 func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResult, error) {
 	if req.OrgID == "" {
 		return nil, fmt.Errorf("org id is required")
+	}
+
+	if req.IdempotencyKey != "" {
+		var sub store.PlanSubmission
+		if err := s.store.DB().WithContext(ctx).Where("org_id = ? AND idempotency_key = ?", req.OrgID, req.IdempotencyKey).First(&sub).Error; err == nil {
+			var tasks []store.QueuedTask
+			if err := s.store.DB().WithContext(ctx).Where("org_id = ? AND job_id = ?", req.OrgID, sub.JobID).Order("id asc").Find(&tasks).Error; err != nil {
+				return nil, err
+			}
+			taskIDs := make([]string, len(tasks))
+			for i, t := range tasks {
+				taskIDs[i] = t.ID
+			}
+			return &SubmitResult{
+				ManifestID: "deduplicated",
+				JobID:      sub.JobID,
+				TaskIDs:    taskIDs,
+				Summary:    "Deduplicated run",
+			}, nil
+		}
 	}
 
 	plan, err := s.planner.Plan(ctx, req)
@@ -82,7 +106,21 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	jobID := "job_" + randHex(8)
 	taskIDs := make([]string, 0, len(plan.Workers))
 	err = s.store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(m).Error; err != nil {
+		if req.IdempotencyKey != "" {
+			res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&store.PlanSubmission{
+				OrgID:          req.OrgID,
+				IdempotencyKey: req.IdempotencyKey,
+				JobID:          jobID,
+			})
+			if res.Error != nil {
+				return fmt.Errorf("persist idempotency key: %w", res.Error)
+			}
+			if res.RowsAffected == 0 {
+				return ErrIdempotentConflict
+			}
+		}
+
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(m).Error; err != nil {
 			return fmt.Errorf("persist manifest: %w", err)
 		}
 		for _, w := range plan.Workers {
@@ -111,6 +149,25 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		}
 		return nil
 	})
+	if err == ErrIdempotentConflict {
+		var sub store.PlanSubmission
+		if err := s.store.DB().WithContext(ctx).Where("org_id = ? AND idempotency_key = ?", req.OrgID, req.IdempotencyKey).First(&sub).Error; err == nil {
+			var tasks []store.QueuedTask
+			if err := s.store.DB().WithContext(ctx).Where("org_id = ? AND job_id = ?", req.OrgID, sub.JobID).Order("id asc").Find(&tasks).Error; err != nil {
+				return nil, err
+			}
+			taskIDs := make([]string, len(tasks))
+			for i, t := range tasks {
+				taskIDs[i] = t.ID
+			}
+			return &SubmitResult{
+				ManifestID: "deduplicated",
+				JobID:      sub.JobID,
+				TaskIDs:    taskIDs,
+				Summary:    "Deduplicated run",
+			}, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
