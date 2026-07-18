@@ -409,6 +409,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			spec.ID, result.Success, result.Steps, result.CostUSD)
 	}
 
+	ok := result.Success
 	prURL := ""
 	detail := ""
 	if result.Success {
@@ -419,8 +420,11 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			gh := &restGitHub{token: gitToken}
 			pr, d, err := publishResult(ctx, worktreePath, spec, gitToken, gh, "")
 			if err != nil {
+				// The loop passed but delivery failed. Report FAILED rather than a
+				// false green — a SUCCEEDED task with no PR is misleading.
 				log.Printf("Failed to publish result for task %s: %v", spec.ID, err)
 				detail = fmt.Sprintf("publish failed: %v", err)
+				ok = false
 			} else {
 				prURL = pr
 				detail = d
@@ -428,7 +432,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	return result.Success, prURL, detail
+	return ok, prURL, detail
 }
 
 // dockerEnabled reports whether task commands run inside a Docker sandbox.

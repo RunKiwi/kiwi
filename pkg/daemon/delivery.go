@@ -138,7 +138,13 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 	log.Printf("Pushing to %s on branch %s...", spec.RepoURL, branchName)
 
 	if _, err := runGit("push", pushRemote, "HEAD:refs/heads/"+branchName); err != nil {
-		return "", "", fmt.Errorf("push failed: %w", err)
+		// git may echo the authenticated remote URL (with the token) in its error
+		// output; scrub the token before it reaches logs or the result detail.
+		msg := err.Error()
+		if gitToken != "" {
+			msg = strings.ReplaceAll(msg, gitToken, "***")
+		}
+		return "", "", fmt.Errorf("push failed: %s", msg)
 	}
 
 	owner, repo, isGH := parseGitHubRepo(spec.RepoURL)

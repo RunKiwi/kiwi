@@ -133,7 +133,9 @@ func (c *Client) PlanTask(ctx context.Context, task, repoURL, ref, file, testCmd
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	// The planner accepts work asynchronously and replies 202 Accepted (not 200);
+	// treat any 2xx as success so a valid submission is not reported as an error.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, c.authErr(resp)
 	}
 	var out PlanResult
