@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,6 +61,32 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy strin
 
 	var leased *QueuedTask
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Enforce OrgLimits for concurrency cap
+		var limits OrgLimits
+		if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				limits = OrgLimits{
+					OrgID:              orgID,
+					MaxConcurrentJobs:  10,
+					MaxBudgetPerJob:    5.00,
+					MaxBudgetPerMonth:  500.00,
+					MaxWorkersPerJob:   8,
+					TaskTimeoutSeconds: 1800,
+					MaxSandboxDiskMB:   2048,
+				}
+			} else {
+				return err
+			}
+		}
+
+		var inFlight int64
+		if err := tx.Model(&QueuedTask{}).Where("org_id = ? AND status = ?", orgID, TaskLeased).Count(&inFlight).Error; err != nil {
+			return err
+		}
+		if inFlight >= int64(limits.MaxConcurrentJobs) {
+			return nil // Org at cap, refuse new lease
+		}
+
 		q := tx.Where("org_id = ? AND status = ?", orgID, TaskQueued).
 			Order("created_at ASC, id ASC").
 			Limit(leaseCandidateBatch)
@@ -75,38 +102,71 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy strin
 			return nil // no work available
 		}
 
-		candidate, err := firstLeasable(tx, orgID, candidates)
-		if err != nil {
-			return err
-		}
-		if candidate == nil {
-			return nil // work exists but all of it is blocked on unfinished deps
-		}
+		for len(candidates) > 0 {
+			candidate, err := firstLeasable(tx, orgID, candidates)
+			if err != nil {
+				return err
+			}
+			if candidate == nil {
+				return nil // work exists but all of it is blocked on unfinished deps
+			}
 
-		now := time.Now()
-		expires := now.Add(ttl)
-		res := tx.Model(&QueuedTask{}).
-			Where("id = ? AND status = ?", candidate.ID, TaskQueued).
-			Updates(map[string]interface{}{
-				"status":           TaskLeased,
-				"leased_by":        leasedBy,
-				"lease_id":         leaseID,
-				"lease_expires_at": expires,
-				"attempts":         gorm.Expr("attempts + 1"),
-				"updated_at":       now,
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil // lost the race to another leaser; caller may retry
-		}
+			// Enforce per-job budget cap
+			if candidate.JobID != "" {
+				var job Job
+				if err := tx.Select("cost_usd").First(&job, "id = ?", candidate.JobID).Error; err == nil {
+					if job.CostUSD >= limits.MaxBudgetPerJob {
+						reason := "Job exceeded maximum budget per job cap"
+						tx.Model(&QueuedTask{}).Where("id = ?", candidate.ID).Updates(map[string]interface{}{
+							"status":        TaskFailed,
+							"result_detail": &reason,
+							"updated_at":    time.Now(),
+						})
+						tx.Model(&Job{}).Where("id = ?", candidate.JobID).Updates(map[string]interface{}{
+							"status":     "FAILED",
+							"error":      &reason,
+							"updated_at": time.Now(),
+						})
 
-		var fresh QueuedTask
-		if err := tx.First(&fresh, "id = ?", candidate.ID).Error; err != nil {
-			return err
+						// Filter out this candidate and try the next leasable one
+						var next []QueuedTask
+						for _, c := range candidates {
+							if c.ID != candidate.ID {
+								next = append(next, c)
+							}
+						}
+						candidates = next
+						continue
+					}
+				}
+			}
+
+			now := time.Now()
+			expires := now.Add(ttl)
+			res := tx.Model(&QueuedTask{}).
+				Where("id = ? AND status = ?", candidate.ID, TaskQueued).
+				Updates(map[string]interface{}{
+					"status":           TaskLeased,
+					"leased_by":        leasedBy,
+					"lease_id":         leaseID,
+					"lease_expires_at": expires,
+					"attempts":         gorm.Expr("attempts + 1"),
+					"updated_at":       now,
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return nil // lost the race to another leaser; caller may retry
+			}
+
+			var fresh QueuedTask
+			if err := tx.First(&fresh, "id = ?", candidate.ID).Error; err != nil {
+				return err
+			}
+			leased = &fresh
+			return nil
 		}
-		leased = &fresh
 		return nil
 	})
 	return leased, err
