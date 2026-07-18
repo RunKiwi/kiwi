@@ -20,3 +20,7 @@ stop-local:
 
 clean:
 	rm -f kiwid
+
+deploy-validate:
+	docker compose -f deploy/docker-compose.prod.yml config -q
+

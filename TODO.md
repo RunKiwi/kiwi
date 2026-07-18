@@ -437,7 +437,7 @@ missing `KIWI_SERVER_TOKEN`, or wildcard CORS causes a clear fatal error at star
 
 ---
 
-### B4 — Deployment artifacts (single-VM Docker Compose + TLS, incl. one managed daemon)
+### [DONE] B4 — Deployment artifacts (single-VM Docker Compose + TLS, incl. one managed daemon)
 
 **Priority:** P0 (for deploy). **Depends on:** B1, B2, B3. **Size:** M.
 
