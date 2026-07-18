@@ -6,12 +6,13 @@
 
 ## 1. Summary
 
-Four execution-model questions have been left implicit and have drifted apart from the original vision. This RFC decides them:
+Five execution-model questions have been left implicit and have drifted apart from the original vision. This RFC decides them:
 
 1. **Worker coordination** — who enforces the plan DAG and composes results. **Decision: the DAG is data, enforced by the Control-Plane scheduler; there is no runtime "master."**
-2. **Result composition** — how N workers on one task produce one reviewable change. **Decision: one job owns one git branch; workers commit to it in dependency order.**
+2. **Result composition** — how N workers on one task produce one reviewable change, and how they share findings. **Decision: one job owns one git branch (shared code); dependency result-summaries carry findings.**
 3. **Per-worker context** — the "persona / AGENT.md" idea. **Decision: no personas; a per-repo `AGENT.md` context file, plus scoped instructions on each worker.**
 4. **Multi-tenant isolation** — how orgs are truly isolated, especially under the managed tier. **Decision: isolation is layered, and which layer carries cross-tenant isolation depends on deployment topology.**
+5. **Parallelism** — the north-star goal of fire-and-forget concurrent tasks at scale. **Decision: the ceiling is inference, not sandboxes; the metric is verified throughput, not sandbox count; the levers are worker-slots per daemon, horizontal daemons per org, and a rate-limit-aware scheduler with enforced budget/concurrency caps.**
 
 ## 2. Motivation: the drift
 
@@ -59,6 +60,20 @@ This directly answers the review-bottleneck problem (see the GTM analysis): 50 w
 
 Independent (non-dependent) workers editing disjoint files can still run concurrently and merge cleanly; workers that would conflict must be expressed as dependencies by the planner. Conflict handling on the branch is an open question (§8).
 
+### Findings, not just code — how an `analyze` node feeds `impl` nodes
+
+The branch composes *code*, but some nodes produce no code — an `analyze` worker's output is a set of *findings* ("the bug is in `Divide()`; three call sites assume non-nil"). How does `impl-users` see what `analyze` found?
+
+**Decision: dependency result-summaries carry findings. Git carries code; the result channel carries context.** Each worker, on completion, reports a bounded, structured **result summary** back to the Control Plane (it already reports terminal status via `handleDaemonResult` — this extends that payload with a summary field). When the scheduler releases a task, it injects the result summaries of that task's `depends_on` predecessors into the worker's prompt.
+
+This keeps each layer doing one thing and stays symmetric with Decisions 1 and 2:
+
+- **Git branch = shared code state** (Decision 2). Durable, mergeable, the substrate of the PR.
+- **Dependency result-summaries = shared findings.** Held in the CP alongside the task row, threaded by the scheduler — the same passive-infrastructure model as DAG enforcement (Decision 1). No blackboard store, no worker-to-worker channel, no master holding context.
+- The summary is **bounded** (a size cap, enforced CP-side) so a fan-in node with many predecessors cannot blow its context window; when findings are large, the producing worker writes them to a file on the job branch and the summary points at the path.
+
+An analyze-only node thus commits nothing to the branch but still hands its dependents exactly what they need. This is the mechanism the original "master coordinates the subagents" vision was reaching for — recovered as data flow through the scheduler, not a runtime process.
+
 ## 5. Decision 3 — Context, not personas
 
 The vision was "N subagents with personas," plus an `AGENT.md`. These are two different ideas, and only one is worth building.
@@ -105,7 +120,39 @@ So: *v1 isolates orgs at the per-org VM boundary and hardens that VM; density is
 
 Related, and decided here for consistency: the **agent harness runs inside the sandbox**, reaching the model through the egress proxy. The current daemon-side harness (#120) works only because the agent is a single-shot full-file rewriter — the moment the agent uses tools (bash, read, build), that untrusted, model-directed execution must be inside the microVM, not the daemon. v1's daemon-side harness is an explicit simplification, not the target.
 
-## 7. Phased plan
+## 7. Decision 5 — Parallelism: the ceiling is inference, the metric is verified throughput
+
+The stated goal is **fire-and-forget concurrent tasks at scale** — an engineer queues many tasks across many repos, walks away, and comes back to finished, reviewable work. This is the right ambition and the lease queue is already the right foundation for it. But the framing of "break the sandbox-throughput record" targets the wrong metric, and mis-targeting it would send engineering effort at a number that neither sells nor applies to this product. This decision names the real ceiling, the real metric, and the levers.
+
+### The ceiling is inference, not sandboxes
+
+The public records — 1M concurrent sandboxes, 100k in 24s — are **sandbox-infrastructure** benchmarks: a sandbox in them runs *code*, a compute problem solved by adding VMs. A Kiwi worker runs an *agent*, and every agent step is a frontier-model API call. That is a different physics:
+
+- 1,000 concurrent sandboxes running a test suite is a compute problem.
+- 1,000 concurrent agents is 1,000 streams of model calls against **one customer's API key**, which has a requests/min and tokens/min rate limit. On a typical provider tier, a few dozen concurrent agents begin to hit 429s.
+
+So the practical concurrency ceiling on a single key is **tens, not thousands**, and no amount of sandbox engineering moves it — the bottleneck is the model provider, not the isolator. Chasing a sandbox-count record with an inference-bound product would spin up sandboxes that sit idle waiting on throttled inference. It is also **unsellable in BYOC**: a sandbox-per-second aggregate is a multi-tenant metric no single customer ever exercises in their own cloud.
+
+### The metric is verified throughput
+
+The defensible, differentiated metric is **verified, composed changes produced per hour** — not sandbox count. It is the metric the sandbox vendors (Modal, E2B, Northflank) *cannot* compete on, because they stop at "here is a sandbox, bring your own agent." Orchestration, DAG composition (Decision 2), and the test-gate (`test_cmd`, #120) are Kiwi's layer. Unverified output at scale is negative value — it relocates the bottleneck onto an exhausted reviewer — so the number that matters counts only changes a test suite has already gated green.
+
+The sellable claim is therefore: *"Fire 50 tasks across your repos before you close your laptop; wake up to 40 green, merge-ready PRs and 10 flagged — each verified by your own tests."* Every number in it is a verified change, not an idle sandbox.
+
+### The levers
+
+Parallelism = **(daemons per org) × (worker-slots per daemon)**, bounded by inference and budget. Four concrete pieces, all building on the existing queue:
+
+1. **Worker-slots per daemon.** Today `pollCP` processes leased specs sequentially — one daemon = one worker at a time. Give the daemon `K` concurrent slots and a bounded worker pool; it leases up to its free-slot count per heartbeat. The queue's `SKIP LOCKED` already makes concurrent leasing safe.
+2. **Horizontal daemons per org.** N daemons draining one org's queue is already correct under `SKIP LOCKED` — no code change to the queue, only registration and scheduling account for it. This is the primary BYOC scale-out lever and the Managed RFC's step-1 escape from one-VM-per-org.
+3. **Rate-limit-aware scheduler — the novel engineering.** The binding constraint is inference, so the scheduler must be inference-aware: track per-org (and per-key) provider budget, release tasks to keep the inference pipe saturated but under the rate limit, and back off on 429s instead of thrashing. In **managed**, it can pool multiple keys/providers and aggregate capacity across the fleet — which is precisely why massive parallelism is more achievable in managed than in BYOC. **This scheduler is the single piece of genuinely differentiated engineering in the system and is currently designed nowhere.**
+4. **Enforced concurrency + budget caps.** `MaxConcurrentJobs` (defined on the org model, default 10) is **not enforced** on the lease path today, and `MaxBudgetUSD` exists per-job. Fire-and-forget without these produces surprise five-figure bills. Enforce an org-level in-flight-lease cap in `LeaseNextTask` and a per-job/per-org spend cap in the scheduler. Caps are what make "and forget" safe.
+
+### Consequence
+
+"Massive parallelism" is real and winnable — but it is won by scheduling around inference limits and composing verified output, not by spinning sandboxes. The metric, the demo, and the roadmap all point at the rate-limit-aware scheduler (lever 3) and the caps (lever 4), not at a sandbox-density benchmark.
+
+## 8. Phased plan
 
 Sequenced so each step is independently useful and nothing depends on unbuilt pieces.
 
@@ -115,10 +162,14 @@ Sequenced so each step is independently useful and nothing depends on unbuilt pi
 4. **AGENT.md injection** (§5): read repo `AGENT.md`, prepend to worker prompts.
 5. **Isolation hardening** (§6), in risk order: daemon-VM hardening → default-deny egress allowlist + credential-injecting proxy → microVM sandbox driver behind the existing `pkg/sandbox` interface → Postgres RLS.
 6. **Turn on LLM planning**: wire a `Completer` adapter over a provider so `LLMPlanner` becomes a real path, and let it emit per-worker scope + `test_cmd`.
+7. **Findings channel** (§4): extend the daemon result payload with a bounded summary; the scheduler injects a task's `depends_on` predecessors' summaries into its prompt. Small; unlocks analyze→impl handoff.
+8. **Parallelism** (§7), sequenced cheap-to-hard: enforce the org concurrency cap and per-job budget cap in the lease path → `K` worker-slots per daemon → multi-daemon-per-org registration/accounting → the rate-limit-aware scheduler. The caps come first because they make everything after them safe to turn on.
 
-## 8. Open questions
+## 9. Open questions
 
 - **Branch conflict handling.** Concurrent independent workers on disjoint files merge cleanly; the planner must express would-conflict workers as dependencies. What happens when a commit *does* conflict — retry, serialize, or fail the job? Needs a policy.
 - **Per-worker file scope enforcement.** §5 makes scope the real lever, but nothing yet *enforces* that a worker only edits its scoped files. Related to the `spec.File` path-traversal gap (a worker can currently write outside its worktree).
 - **microVM vs. gVisor** for the density tier — isolation strength vs. I/O overhead; decide when the density tier is actually on the roadmap, not before.
 - **Managed compute: buy vs. build** (carried from the Managed RFC §6) — renting E2B/Modal would supply the microVM layer without operating it. Spike before building a Firecracker driver.
+- **Rate-limit discovery (§7).** The scheduler needs each org's real provider limits to pace against. Providers don't reliably advertise them; do we require the customer to declare their tier, probe adaptively from observed 429s/`retry-after` headers, or both?
+- **Findings summary format (§4).** Is the result summary free text, or a small typed schema (findings, touched files, follow-ups) the planner and dependents can rely on? A schema is more useful to fan-in nodes but constrains the worker.
