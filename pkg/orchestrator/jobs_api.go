@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 type JobTaskResponse struct {
@@ -18,6 +19,36 @@ type JobTaskResponse struct {
 type JobStatusResponse struct {
 	JobID string            `json:"job_id"`
 	Tasks []JobTaskResponse `json:"tasks"`
+}
+
+type JobsListResponse struct {
+	Jobs []store.JobSummary `json:"jobs"`
+}
+
+func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	jobs, err := s.storage.ListJobs(r.Context(), claims.OrgID)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := JobsListResponse{
+		Jobs: jobs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {

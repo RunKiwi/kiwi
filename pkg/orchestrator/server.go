@@ -366,6 +366,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/credentials", s.handleSetCredential)
 	// Org admin mints a daemon join token for their own org (behind auth).
 	mux.HandleFunc("/api/v1/daemon/join-token", s.handleDaemonJoinToken)
+	mux.HandleFunc("/api/v1/jobs", s.handleJobsList)
 	mux.HandleFunc("/api/v1/jobs/", s.handleJobStatus)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
