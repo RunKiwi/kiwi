@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kiwi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kiwipassword}
+      POSTGRES_DB: ${POSTGRES_DB:-kiwi}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiwi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  kiwid:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["./kiwid"]
+    environment:
+      - KIWI_ENV=production
+      - KIWI_DSN=postgres://${POSTGRES_USER:-kiwi}:${POSTGRES_PASSWORD:-kiwipassword}@postgres:5432/${POSTGRES_DB:-kiwi}?sslmode=disable
+      - KIWI_ENCRYPTION_KEY=${KIWI_ENCRYPTION_KEY}
+      - KIWI_SERVER_TOKEN=${KIWI_SERVER_TOKEN}
+      - KIWI_CORS_ALLOWED_ORIGINS=${KIWI_CORS_ALLOWED_ORIGINS}
+      - KIWI_ADDR=:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+    depends_on:
+      - kiwid
+
+  kiwidaemon:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["./kiwidaemon", "-api-url", "http://kiwid:8080"]
+    environment:
+      - KIWI_JOIN_TOKEN=${KIWI_JOIN_TOKEN}
+    volumes:
+      - kiwidaemon_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock # required for running sandboxes
+    depends_on:
+      - kiwid
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  kiwidaemon_data:
