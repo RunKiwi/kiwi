@@ -54,4 +54,6 @@ type ResultReq struct {
 	Status string `json:"status"`
 	// SignPubKey identifies the reporting daemon (verified against X-Kiwi-Signature).
 	SignPubKey string `json:"sign_pub_key"`
+	ResultURL  string `json:"result_url,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }

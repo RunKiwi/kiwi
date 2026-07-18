@@ -42,7 +42,7 @@ type Store interface {
 	EnqueueTask(ctx context.Context, task *QueuedTask) error
 	LeaseNextTask(ctx context.Context, orgID, leasedBy string, ttl time.Duration) (*QueuedTask, error)
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
-	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus string) (bool, error)
+	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its

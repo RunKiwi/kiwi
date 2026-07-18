@@ -231,7 +231,7 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		// Do not strand the lease on a spec we cannot parse: fail it now so it
 		// does not sit LEASED until expiry and then retry to the same end.
 		if task.LeaseID != nil {
-			if _, cerr := s.storage.CompleteTask(r.Context(), task.ID, *task.LeaseID, store.TaskFailed); cerr != nil {
+			if _, cerr := s.storage.CompleteTask(r.Context(), task.ID, *task.LeaseID, store.TaskFailed, "", "dead-lettered due to daemon disconnect"); cerr != nil {
 				log.Printf("[daemon] failing unusable task %s: %v", task.ID, cerr)
 			}
 		}
@@ -312,7 +312,7 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := s.storage.CompleteTask(r.Context(), req.TaskID, req.LeaseID, req.Status)
+	ok, err := s.storage.CompleteTask(r.Context(), req.TaskID, req.LeaseID, req.Status, req.ResultURL, req.Detail)
 	if err != nil {
 		log.Printf("[daemon] complete task %s: %v", req.TaskID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
