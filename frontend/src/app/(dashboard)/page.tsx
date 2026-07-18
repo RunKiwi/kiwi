@@ -25,6 +25,10 @@ export default function GodView() {
 
   useEffect(() => {
     loadJobs();
+    const interval = setInterval(() => {
+      loadJobs();
+    }, 3000);
+    return () => clearInterval(interval);
   }, [loadJobs]);
 
   const handleSubmit = async () => {
