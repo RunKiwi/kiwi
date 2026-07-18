@@ -91,7 +91,7 @@ treat any 2xx as success in the client.
 
 ## PHASE UA — Server endpoints the UI needs (Go)
 
-### UA1 — `GET /api/v1/jobs` : list the org's jobs
+### [DONE] UA1 — `GET /api/v1/jobs` : list the org's jobs
 
 **Priority:** P0. **Depends on:** none. **Size:** S–M.
 
@@ -233,7 +233,7 @@ the removed provider names remain (`grep` clean). No literal "Open"+"AI" string 
 
 ## PHASE UC — Wire the pages
 
-### UC1 — Submit a task (the entry)
+### [DONE] UC1 — Submit a task (the entry)
 
 **Priority:** P0. **Depends on:** UB1–UB3. **Size:** M.
 
@@ -254,7 +254,7 @@ swallowed. `npm run build` passes.
 
 ---
 
-### UC2 — Jobs list + detail (watch it reach a PR)
+### [DONE] UC2 — Jobs list + detail (watch it reach a PR)
 
 **Priority:** P0. **Depends on:** UA1, UC1. **Size:** M.
 
