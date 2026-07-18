@@ -1,10 +1,24 @@
 name: Continuous Integration
 
+# Backend (Go) CI. Path-filtered so it does not run on frontend-only changes;
+# the frontend has its own workflow (frontend-ci.yml).
 on:
   push:
     branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'migrations/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     types: [opened, synchronize, reopened, edited]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'migrations/**'
+      - '.github/workflows/ci.yml'
 
 jobs:
   lint:
@@ -65,5 +79,8 @@ jobs:
       - name: Build Kiwi Client
         run: go build -v -o kiwi ./cmd/kiwi
 
-      - name: Build Kiwi Daemon
+      - name: Build Control Plane Daemon
         run: go build -v -o kiwid ./cmd/kiwid
+
+      - name: Build BYOC Data Plane Daemon
+        run: go build -v -o kiwidaemon ./cmd/kiwidaemon
