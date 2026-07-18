@@ -363,6 +363,7 @@ func (s *Server) Start(addr string) error {
 	auth.AdminRouter(s.db, mux)
 
 	mux.HandleFunc("/api/v1/planner/plan", s.planner.HandlePlan)
+	mux.HandleFunc("/api/v1/credentials", s.handleSetCredential)
 	// Org admin mints a daemon join token for their own org (behind auth).
 	mux.HandleFunc("/api/v1/daemon/join-token", s.handleDaemonJoinToken)
 	mux.HandleFunc("/tasks", s.handleTasks)

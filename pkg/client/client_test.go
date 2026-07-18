@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,5 +95,33 @@ func TestDownloadResult(t *testing.T) {
 	}
 	if string(b) != "ZIPRESULT" {
 		t.Errorf("result: got %q", string(b))
+	}
+}
+
+func TestSetCredential(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/credentials" || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Errorf("auth header: got %q", got)
+		}
+		var req map[string]string
+		importJson := true
+		_ = importJson // avoid unused var if json is already imported
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if req["name"] != "FOO" || req["kind"] != "bar" || req["value"] != "baz" {
+			t.Errorf("wrong payload: %v", req)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	err := c.SetCredential(context.Background(), "FOO", "bar", "baz")
+	if err != nil {
+		t.Fatalf("SetCredential: %v", err)
 	}
 }

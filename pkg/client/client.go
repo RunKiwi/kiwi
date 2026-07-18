@@ -184,3 +184,34 @@ func (c *Client) DownloadResult(ctx context.Context, taskID string) ([]byte, err
 	}
 	return io.ReadAll(resp.Body)
 }
+
+// SetCredential stores a credential on the Control Plane for the user's org.
+func (c *Client) SetCredential(ctx context.Context, name, kind, value string) error {
+	body, err := json.Marshal(map[string]string{
+		"name":  name,
+		"kind":  kind,
+		"value": value,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ServerURL+"/api/v1/credentials", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if c.IdempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", c.IdempotencyKey)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return c.authErr(resp)
+	}
+	return nil
+}
