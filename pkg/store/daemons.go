@@ -172,3 +172,15 @@ func (s *PostgresStore) TouchDaemon(ctx context.Context, id string) error {
 		Where("id = ?", id).
 		Update("last_seen_at", now).Error
 }
+
+// ListDaemons returns all daemons registered to an org.
+func (s *PostgresStore) ListDaemons(ctx context.Context, orgID string) ([]Daemon, error) {
+	if orgID == "" {
+		return nil, errors.New("org id is required")
+	}
+	var daemons []Daemon
+	if err := s.db.WithContext(ctx).Where("org_id = ?", orgID).Order("created_at DESC").Find(&daemons).Error; err != nil {
+		return nil, err
+	}
+	return daemons, nil
+}
