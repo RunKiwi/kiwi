@@ -38,7 +38,7 @@ func runSubmit(args []string) error {
 	// -repo selects the BYOC path (planner → lease queue → daemon in your cloud).
 	// Without it, the legacy zip-upload path runs the task in the Control Plane.
 	if *repo != "" {
-		return submitPlan(*server, t, *idempotencyKey, *task, *repo, *ref, *file, *testCmd, *model, *maxWorkers)
+		return submitPlan(*server, t, *idempotencyKey, *task, *repo, *ref, *file, *testCmd, *model, *maxWorkers, *interval)
 	}
 
 	return submitTask(*server, t, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval)
@@ -61,7 +61,7 @@ func requireSecureRemote(server string) error {
 // planner, which decomposes it and enqueues workers onto the lease queue. A
 // registered daemon in the customer's cloud leases and executes them. No
 // codebase is uploaded — the daemon clones repo directly.
-func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, model string, maxWorkers int) error {
+func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, model string, maxWorkers int, interval time.Duration) error {
 	if err := requireSecureRemote(server); err != nil {
 		return err
 	}
@@ -85,7 +85,54 @@ func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, m
 	fmt.Printf("[kiwi] Enqueued %d worker task(s): %v\n", len(res.TaskIDs), res.TaskIDs)
 	fmt.Printf("[kiwi] A registered daemon in your cloud will lease and execute these. "+
 		"It clones %s@%s, runs the loop until %q passes, and opens a PR.\n", repo, ref, testCmd)
-	return nil
+
+	for {
+		status, err := c.GetJob(ctx, res.JobID)
+		if err != nil {
+			return fmt.Errorf("failed to get job status: %w", err)
+		}
+
+		allTerminal := true
+		anyFailed := false
+		for _, t := range status.Tasks {
+			if t.Status != "SUCCEEDED" && t.Status != "FAILED" {
+				allTerminal = false
+				break
+			}
+			if t.Status == "FAILED" {
+				anyFailed = true
+			}
+		}
+
+		if allTerminal {
+			fmt.Printf("\n[kiwi] Job %s complete:\n", res.JobID)
+			for _, t := range status.Tasks {
+				if t.Status == "SUCCEEDED" {
+					url := ""
+					if t.ResultURL != nil {
+						url = *t.ResultURL
+					}
+					fmt.Printf("✓ %s → %s\n", t.ID, url)
+				} else {
+					detail := ""
+					if t.ResultDetail != nil {
+						detail = *t.ResultDetail
+					}
+					fmt.Printf("✗ %s FAILED: %s\n", t.ID, detail)
+				}
+			}
+			if anyFailed {
+				return fmt.Errorf("job %s failed", res.JobID)
+			}
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 func resolveToken(flagToken string) string {

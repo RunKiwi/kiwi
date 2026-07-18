@@ -46,7 +46,12 @@ func TestOpenSealedTamperFails(t *testing.T) {
 	pub, priv, _ := GenerateKeyPair()
 	sealed, _ := SealToPublicKey(pub, []byte("secret"))
 	// Corrupt the ciphertext.
-	tampered := "A" + sealed[1:]
+	tampered := sealed
+	if sealed[0] == 'A' {
+		tampered = "B" + sealed[1:]
+	} else {
+		tampered = "A" + sealed[1:]
+	}
 	if _, err := OpenSealed(priv, tampered); err == nil {
 		t.Error("opening tampered ciphertext must fail")
 	}
