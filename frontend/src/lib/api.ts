@@ -1,11 +1,42 @@
 export interface PlanRequest {
   task: string;
   repo_url: string;
-  ref: string;
-  file: string;
-  test_cmd: string;
-  model: string;
-  max_workers: number;
+  // Everything below is optional — we're driving an AI agent, so file / test
+  // command / ref / model are hints, not hard requirements.
+  ref?: string;
+  file?: string;
+  test_cmd?: string;
+  model?: string;
+  max_workers?: number;
+  fleet_id?: string;
+}
+
+export interface Fleet {
+  id: string;
+  org_id: string;
+  name: string;
+  type: "self-managed" | "byoc";
+  created_at: string;
+}
+
+export interface ModelEntry {
+  id: string;
+  name: string;
+  provider: string;
+  created_at: string;
+}
+
+export interface Integration {
+  key: string;
+  kind: string;
+  connected: boolean;
+}
+
+export interface GithubRepo {
+  full_name: string;
+  url: string;
+  private: boolean;
+  default_branch: string;
 }
 
 export interface PlanResponse {
@@ -131,9 +162,47 @@ export const client = {
   listDaemons: () => 
     fetchApi<Daemon[]>("/api/v1/daemons"),
     
-  setCredential: (name: string, kind: string, value: string) => 
+  setCredential: (name: string, kind: string, value: string) =>
     fetchApi<void>("/api/v1/credentials", {
       method: "POST",
       body: JSON.stringify({ name, kind, value }),
     }),
+
+  listFleets: () => fetchApi<{ fleets: Fleet[] }>("/api/v1/fleets"),
+
+  createFleet: (name: string, type: "self-managed" | "byoc") =>
+    fetchApi<Fleet>("/api/v1/fleets", {
+      method: "POST",
+      body: JSON.stringify({ name, type }),
+    }),
+
+  listModels: () => fetchApi<{ models: ModelEntry[] }>("/api/v1/models"),
+
+  createModel: (name: string, provider: string) =>
+    fetchApi<ModelEntry>("/api/v1/models", {
+      method: "POST",
+      body: JSON.stringify({ name, provider }),
+    }),
+
+  deleteModel: (id: string) =>
+    fetchApi<void>(`/api/v1/models/${id}`, { method: "DELETE" }),
+
+  listIntegrations: () =>
+    fetchApi<{ integrations: Integration[] }>("/api/v1/integrations"),
+
+  listGithubRepos: () =>
+    fetchApi<{ repos: GithubRepo[] }>("/api/v1/github/repos"),
+
+  mintJoinToken: () =>
+    fetchApi<{ join_token: string; expires_in: number }>("/api/v1/daemon/join-token", {
+      method: "POST",
+    }),
 };
+
+// Built-in model ids offered even before an org adds custom ones. The daemon
+// routes gemini-* to Gemini, else Anthropic.
+export const BUILTIN_MODELS = [
+  "claude-opus-4-8",
+  "claude-haiku-4-5-20251001",
+  "gemini-2.0-flash",
+];
