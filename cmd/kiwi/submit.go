@@ -18,9 +18,13 @@ func runSubmit(args []string) error {
 	server := fs.String("server", "http://localhost:8080", "kiwid daemon URL")
 	token := fs.String("token", "", "Bearer auth token (defaults to KIWI_SERVER_TOKEN or config)")
 	task := fs.String("task", "", "task/goal description")
-	file := fs.String("file", "", "target file, relative to -dir")
+	file := fs.String("file", "", "target file (relative to -dir, or to the repo root with -repo)")
 	testCmd := fs.String("test-cmd", "", "test command the daemon runs")
-	dir := fs.String("dir", ".", "directory to zip and upload")
+	dir := fs.String("dir", ".", "directory to zip and upload (legacy path; ignored with -repo)")
+	repo := fs.String("repo", "", "git repo URL — BYOC path: the daemon clones it in your cloud and runs via the lease queue")
+	ref := fs.String("ref", "main", "git ref to check out (with -repo)")
+	model := fs.String("model", "", "LLM model for the worker (with -repo; planner default if empty)")
+	maxWorkers := fs.Int("max-workers", 1, "workers the planner may fan out (with -repo; 1 = single-worker MVP path)")
 	secretsPath := fs.String("secrets", "secrets.json", "path to secrets.json")
 	resume := fs.Bool("resume", false, "resume an existing task instead of submitting")
 	taskID := fs.String("task-id", "", "task ID to resume (with -resume)")
@@ -31,7 +35,57 @@ func runSubmit(args []string) error {
 
 	t := resolveToken(*token)
 
+	// -repo selects the BYOC path (planner → lease queue → daemon in your cloud).
+	// Without it, the legacy zip-upload path runs the task in the Control Plane.
+	if *repo != "" {
+		return submitPlan(*server, t, *idempotencyKey, *task, *repo, *ref, *file, *testCmd, *model, *maxWorkers)
+	}
+
 	return submitTask(*server, t, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval)
+}
+
+// requireSecureRemote refuses to send a bearer token in cleartext to a non-local
+// host.
+func requireSecureRemote(server string) error {
+	u, err := url.Parse(server)
+	if err != nil {
+		return fmt.Errorf("invalid server url: %w", err)
+	}
+	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		return fmt.Errorf("refusing to send token over cleartext HTTP to remote server %s. Use HTTPS", server)
+	}
+	return nil
+}
+
+// submitPlan drives the BYOC path: it submits the task to the Control Plane
+// planner, which decomposes it and enqueues workers onto the lease queue. A
+// registered daemon in the customer's cloud leases and executes them. No
+// codebase is uploaded — the daemon clones repo directly.
+func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, model string, maxWorkers int) error {
+	if err := requireSecureRemote(server); err != nil {
+		return err
+	}
+	if task == "" || file == "" || testCmd == "" {
+		return fmt.Errorf("-task, -file, and -test-cmd are required")
+	}
+
+	c := client.New(server, token)
+	c.IdempotencyKey = idempotencyKey
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	res, err := c.PlanTask(ctx, task, repo, ref, file, testCmd, model, maxWorkers)
+	if err != nil {
+		return fmt.Errorf("failed to submit plan: %w", err)
+	}
+
+	fmt.Printf("[kiwi] Plan submitted: %s\n", res.Summary)
+	fmt.Printf("[kiwi] Job:      %s\n", res.JobID)
+	fmt.Printf("[kiwi] Manifest: %s\n", res.ManifestID)
+	fmt.Printf("[kiwi] Enqueued %d worker task(s): %v\n", len(res.TaskIDs), res.TaskIDs)
+	fmt.Printf("[kiwi] A registered daemon in your cloud will lease and execute these. "+
+		"It clones %s@%s, runs the loop until %q passes, and opens a PR.\n", repo, ref, testCmd)
+	return nil
 }
 
 func resolveToken(flagToken string) string {

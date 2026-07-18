@@ -8,10 +8,14 @@ import "context"
 // PlanRequest is a high-level task to decompose. OrgID is set from auth, not the
 // request body.
 type PlanRequest struct {
-	OrgID      string `json:"-"`
-	Task       string `json:"task"`
-	RepoURL    string `json:"repo_url"`
-	Ref        string `json:"ref"`
+	OrgID   string `json:"-"`
+	Task    string `json:"task"`
+	RepoURL string `json:"repo_url"`
+	Ref     string `json:"ref"`
+	// File is the target file a worker edits, relative to the repo root. Threaded
+	// onto the executable worker(s) so the daemon's loop has a definition of what
+	// to change; without it the daemon has no target and falls back to a smoke run.
+	File       string `json:"file"`
 	Model      string `json:"model"`
 	MaxWorkers int    `json:"max_workers"`
 	// TestCmd is the command that defines "done" for the workers this plan

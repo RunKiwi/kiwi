@@ -64,7 +64,15 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 # Store your API token in ~/.config/kiwi/config.json
 ./kiwi login -token "my-secret-token-1234"
 
-# Submit a task (packages -dir, uploads it, streams logs until completion)
+# BYOC path (recommended): the daemon clones the repo in your cloud and runs
+# it through the planner → lease queue. No codebase upload.
+./kiwi submit -task "Fix division by zero in Divide()" \
+    -repo https://github.com/you/yourrepo \
+    -ref main \
+    -file math_utils.go \
+    -test-cmd "go test ./..."
+
+# Legacy path: packages -dir and uploads a zip, executed in the Control Plane.
 ./kiwi submit -task "Fix division by zero in Divide()" \
     -file demo_project/math_utils.go \
     -test-cmd "go test ./demo_project/..." \
