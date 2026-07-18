@@ -125,3 +125,31 @@ func TestSetCredential(t *testing.T) {
 		t.Fatalf("SetCredential: %v", err)
 	}
 }
+
+// TestPlanTaskAccepts202 guards the regression where the CLI treated the
+// planner's 202 Accepted as an error, failing `kiwi submit -repo` even though
+// the plan was created.
+func TestPlanTaskAccepts202(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/planner/plan" || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted) // the planner replies 202, not 200
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"manifest_id": "m1",
+			"job_id":      "job_1",
+			"task_ids":    []string{"job_1-impl"},
+			"summary":     "single worker: fix it",
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	res, err := c.PlanTask(context.Background(), "fix it", "https://github.com/x/y", "main", "a.go", "go test ./...", "", 1)
+	if err != nil {
+		t.Fatalf("PlanTask on 202 should succeed, got: %v", err)
+	}
+	if res.JobID != "job_1" || len(res.TaskIDs) != 1 {
+		t.Errorf("unexpected result: %+v", res)
+	}
+}

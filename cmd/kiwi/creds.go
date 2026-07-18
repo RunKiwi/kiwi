@@ -27,14 +27,19 @@ func runCredsSet(args []string) error {
 	kind := fs.String("kind", "generic", "Kind of credential (e.g. llm, git)")
 	token := fs.String("token", "", "Control plane API token (defaults to KIWI_SERVER_TOKEN or config)")
 	server := fs.String("server", "http://localhost:8080", "Control plane URL")
-	_ = fs.Parse(args)
+	// Allow flags after the positional name/value (e.g. `creds set git <tok> -token X`);
+	// the stdlib flag parser would otherwise stop at "git" and ignore later flags.
+	positionals, err := parseFlagsAnywhere(fs, args)
+	if err != nil {
+		return err
+	}
 
-	if fs.NArg() < 2 {
+	if len(positionals) < 2 {
 		return fmt.Errorf("usage: kiwi creds set <name> <value> [-kind <kind>]")
 	}
 
-	nameAlias := fs.Arg(0)
-	value := fs.Arg(1)
+	nameAlias := positionals[0]
+	value := positionals[1]
 
 	credName := nameAlias
 	credKind := *kind
@@ -61,8 +66,7 @@ func runCredsSet(args []string) error {
 	}
 
 	c := client.New(*server, apiToken)
-	err := c.SetCredential(context.Background(), credName, credKind, value)
-	if err != nil {
+	if err := c.SetCredential(context.Background(), credName, credKind, value); err != nil {
 		return fmt.Errorf("failed to set credential: %w", err)
 	}
 

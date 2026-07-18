@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -137,5 +138,34 @@ func TestPublishResult(t *testing.T) {
 	out, err := exec.Command("git", "--git-dir="+bareDir, "rev-parse", "refs/heads/kiwi/job1").CombinedOutput()
 	if err != nil {
 		t.Errorf("branch kiwi/job1 not in bare remote: %v %s", err, out)
+	}
+}
+
+// TestPublishResult_PushFailureIsError ensures a failed push surfaces as an
+// error (so the daemon reports the task FAILED instead of a false green) and
+// does not leak the git token in the error message.
+func TestPublishResult_PushFailureIsError(t *testing.T) {
+	tmp := t.TempDir()
+	workDir := filepath.Join(tmp, "work")
+	if err := exec.Command("git", "init", workDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+	// An initial commit, then an UNCOMMITTED change so publishResult has
+	// something to commit and proceeds to the (failing) push.
+	os.WriteFile(filepath.Join(workDir, "f.txt"), []byte("x"), 0644)
+	exec.Command("git", "-C", workDir, "add", "-A").Run()
+	exec.Command("git", "-C", workDir, "-c", "user.email=b@b.com", "-c", "user.name=B", "commit", "-m", "c").Run()
+	os.WriteFile(filepath.Join(workDir, "pending.txt"), []byte("new work"), 0644)
+
+	spec := agent.WorkerSpec{ID: "t1", JobID: "job1", Task: "t", RepoURL: "https://github.com/owner/repo"}
+	// Point the push at a non-existent path so it fails deterministically offline.
+	badRemote := filepath.Join(tmp, "does-not-exist.git")
+
+	_, _, err := publishResult(context.Background(), workDir, spec, "secretTOKEN", &fakeGH{}, badRemote)
+	if err == nil {
+		t.Fatal("expected an error when push fails, got nil (would be reported as false SUCCEEDED)")
+	}
+	if strings.Contains(err.Error(), "secretTOKEN") {
+		t.Errorf("push error leaked the git token: %v", err)
 	}
 }
