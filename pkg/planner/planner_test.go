@@ -58,6 +58,30 @@ func TestHeuristicPlannerRequiresTask(t *testing.T) {
 	}
 }
 
+func TestHeuristicPlannerSingleWorkerCarriesFile(t *testing.T) {
+	p := NewHeuristicPlanner()
+	// Default (MaxWorkers unset → 1) takes the single-worker MVP fast path.
+	plan, err := p.Plan(context.Background(), PlanRequest{
+		Task: "fix Divide", File: "math/util.go", TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Workers) != 1 {
+		t.Fatalf("single-worker path should yield exactly 1 worker, got %d", len(plan.Workers))
+	}
+	w := plan.Workers[0]
+	if w.ID != "impl" {
+		t.Errorf("worker id = %q, want impl", w.ID)
+	}
+	if w.File != "math/util.go" {
+		t.Errorf("worker file = %q, want the request's file", w.File)
+	}
+	if len(w.DependsOn) != 0 {
+		t.Errorf("single worker should have no dependencies, got %v", w.DependsOn)
+	}
+}
+
 type fakeCompleter struct{ out string }
 
 func (f fakeCompleter) Complete(ctx context.Context, system, user string) (string, error) {
@@ -119,6 +143,44 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	}
 	if leased.Spec["repo_url"] != "https://github.com/x/y" {
 		t.Errorf("task spec missing repo_url: %+v", leased.Spec)
+	}
+}
+
+func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
+	s := newTestStore(t)
+	svc := NewService(s, NewHeuristicPlanner())
+	ctx := context.Background()
+
+	// The MVP path: one worker whose enqueued spec carries everything the daemon
+	// loop needs — repo, ref, file, and test_cmd (resolved from the request).
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID:   "o1",
+		Task:    "fix Divide",
+		RepoURL: "https://github.com/x/y",
+		Ref:     "main",
+		File:    "math/util.go",
+		TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	if len(res.TaskIDs) != 1 {
+		t.Fatalf("expected 1 enqueued task, got %d", len(res.TaskIDs))
+	}
+
+	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", 60_000_000_000)
+	if err != nil || leased == nil {
+		t.Fatalf("expected a leasable task, got %v err=%v", leased, err)
+	}
+	for k, want := range map[string]string{
+		"repo_url": "https://github.com/x/y",
+		"ref":      "main",
+		"file":     "math/util.go",
+		"test_cmd": "go test ./...",
+	} {
+		if got, _ := leased.Spec[k].(string); got != want {
+			t.Errorf("spec[%q] = %q, want %q", k, got, want)
+		}
 	}
 }
 

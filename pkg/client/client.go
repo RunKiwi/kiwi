@@ -93,6 +93,56 @@ func (c *Client) SubmitTask(ctx context.Context, task, file, testCmd string, cod
 	return out.TaskID, nil
 }
 
+// PlanResult is the Control Plane's response to a BYOC plan submission.
+type PlanResult struct {
+	ManifestID string   `json:"manifest_id"`
+	JobID      string   `json:"job_id"`
+	TaskIDs    []string `json:"task_ids"`
+	Summary    string   `json:"summary"`
+}
+
+// PlanTask submits a task to the BYOC planner path (POST /api/v1/planner/plan).
+// Unlike SubmitTask, it does not upload a codebase: the daemon clones repoURL in
+// the customer's own cloud. The Control Plane decomposes the task into a plan and
+// enqueues its workers onto the lease queue for a daemon to pick up.
+func (c *Client) PlanTask(ctx context.Context, task, repoURL, ref, file, testCmd, model string, maxWorkers int) (*PlanResult, error) {
+	body, err := json.Marshal(map[string]interface{}{
+		"task":        task,
+		"repo_url":    repoURL,
+		"ref":         ref,
+		"file":        file,
+		"test_cmd":    testCmd,
+		"model":       model,
+		"max_workers": maxWorkers,
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ServerURL+"/api/v1/planner/plan", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if c.IdempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", c.IdempotencyKey)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.authErr(resp)
+	}
+	var out PlanResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetStatus fetches the current task row.
 func (c *Client) GetStatus(ctx context.Context, taskID string) (TaskStatus, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ServerURL+"/tasks/"+taskID, nil)
