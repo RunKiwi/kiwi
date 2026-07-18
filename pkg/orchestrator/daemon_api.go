@@ -442,3 +442,54 @@ func specFromQueuedTask(task *store.QueuedTask) (agent.WorkerSpec, error) {
 	}
 	return spec, nil
 }
+
+// DaemonResponse represents a single daemon in the /api/v1/daemons list response.
+// Identity material (keys) is omitted because the UI does not need it.
+type DaemonResponse struct {
+	ID         string     `json:"id"`
+	Online     bool       `json:"online"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// handleDaemonsList serves GET /api/v1/daemons.
+// Returns the org's registered daemons and computes their liveness.
+func (s *Server) handleDaemonsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	daemons, err := s.storage.ListDaemons(r.Context(), claims.OrgID)
+	if err != nil {
+		log.Printf("[daemon] list daemons for org %s: %v", claims.OrgID, err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var resp []DaemonResponse
+	now := time.Now()
+	for _, d := range daemons {
+		online := false
+		if d.LastSeenAt != nil && now.Sub(*d.LastSeenAt) < 30*time.Second {
+			online = true
+		}
+		resp = append(resp, DaemonResponse{
+			ID:         d.ID,
+			Online:     online,
+			LastSeenAt: d.LastSeenAt,
+			CreatedAt:  d.CreatedAt,
+		})
+	}
+	if resp == nil {
+		resp = []DaemonResponse{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

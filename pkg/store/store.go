@@ -70,6 +70,7 @@ type Store interface {
 	RegisterDaemon(ctx context.Context, joinToken, signPubKey, encPubKey string) (*Daemon, error)
 	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
 	TouchDaemon(ctx context.Context, id string) error
+	ListDaemons(ctx context.Context, orgID string) ([]Daemon, error)
 
 	// Credentials: org-scoped secrets, AES-256-GCM encrypted at rest and
 	// re-sealed to a daemon's X25519 public key for delivery.

@@ -127,7 +127,7 @@ fields above. Org-scope strictly.
 
 ---
 
-### UA2 — `GET /api/v1/daemons` : list registered daemons (for the fleet page)
+### [DONE] UA2 — `GET /api/v1/daemons` : list registered daemons (for the fleet page)
 
 **Priority:** P1. **Depends on:** none. **Size:** S.
 
