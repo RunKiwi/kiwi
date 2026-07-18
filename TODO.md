@@ -377,7 +377,7 @@ Postgres is up, 503 when it is not. Neither requires a token.
 
 ---
 
-### B2 — Migrations on boot & schema reconciliation
+### [DONE] B2 — Migrations on boot & schema reconciliation
 
 **Priority:** P0 (for deploy). **Depends on:** baseline (and merges A2/A5 migrations).
 **Size:** M.
