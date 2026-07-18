@@ -110,8 +110,14 @@ On first boot the daemon generates its keypairs and registers with the Control P
 
 ### 4. Dashboard
 
+To run the dashboard locally and connect it to the Control Plane:
+
 ```bash
-cd frontend && npm install && npm run dev
+# Control Plane with CORS for the dev UI origin
+KIWI_CORS_ALLOWED_ORIGINS=http://localhost:3000 ./kiwid -addr :8080 -dsn "..."
+# Frontend
+cd frontend && cp .env.local.example .env.local   # set NEXT_PUBLIC_KIWI_API_URL=http://localhost:8080
+npm ci && npm run dev                               # http://localhost:3000
 ```
 
 ## SDKs
