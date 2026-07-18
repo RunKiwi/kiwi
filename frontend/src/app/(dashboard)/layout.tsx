@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, Server, Cpu, Link2 } from "lucide-react";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
+import { useAuth, auth } from "@/lib/auth";
 
 export default function DashboardLayout({
   children,
@@ -12,7 +13,23 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const { isAuthenticated, logout } = useAuth();
+  const [orgName, setOrgName] = useState<string | null>("");
+
+  useEffect(() => {
+    if (isAuthenticated === false) {
+      router.push("/login");
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOrgName(auth.getOrgName());
+  }, [isAuthenticated, router]);
+
+  // Don't render until we confirm authentication
+  if (isAuthenticated === null || isAuthenticated === false) {
+    return null; 
+  }
 
   const navItems = [
     { name: "Command Center", href: "/", icon: LayoutDashboard },
@@ -58,17 +75,27 @@ export default function DashboardLayout({
         <div className="pt-4 border-t border-white/5 flex flex-col items-center">
           <button 
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="w-full flex items-center justify-center p-2 mb-4 text-zinc-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+            className="w-full flex items-center justify-center p-2 mb-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
           >
             {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <div className="flex items-center gap-2 whitespace-nowrap"><ChevronLeft className="w-5 h-5 shrink-0" /><span className="text-sm">Collapse</span></div>}
           </button>
           
+          <button 
+            onClick={logout}
+            title={isCollapsed ? "Log out" : undefined}
+            className="w-full flex items-center justify-center p-2 mb-4 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-md transition-colors"
+          >
+            {isCollapsed ? <LogOut className="w-5 h-5" /> : <div className="flex items-center gap-2 whitespace-nowrap"><LogOut className="w-5 h-5 shrink-0" /><span className="text-sm">Log out</span></div>}
+          </button>
+          
           <div className={`flex items-center w-full gap-3 px-2 ${isCollapsed ? "justify-center" : ""}`}>
-            <div className="w-8 h-8 shrink-0 rounded-full bg-zinc-800 border border-zinc-700"></div>
+            <div className="w-8 h-8 shrink-0 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs text-white uppercase">
+              {orgName ? orgName.charAt(0) : "A"}
+            </div>
             {!isCollapsed && (
               <div className="flex flex-col whitespace-nowrap overflow-hidden">
-                <span className="text-sm font-medium text-white">Acme Corp</span>
-                <span className="text-xs text-zinc-500">Startup Tier</span>
+                <span className="text-sm font-medium text-white">{orgName || "Unknown Org"}</span>
+                <span className="text-xs text-zinc-500">API Key Auth</span>
               </div>
             )}
           </div>
