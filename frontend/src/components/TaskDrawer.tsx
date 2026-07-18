@@ -13,9 +13,38 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const { currentJob, loadJob } = useFleetStore();
   
   useEffect(() => {
-    if (taskId) {
-      loadJob(taskId);
-    }
+    if (!taskId) return;
+
+    let isPolling = true;
+
+    const fetchAndCheck = async () => {
+      if (!isPolling) return;
+      await loadJob(taskId);
+      const state = useFleetStore.getState();
+      if (state.currentJob && state.currentJob.tasks && state.currentJob.tasks.length > 0) {
+        const isTerminal = state.currentJob.tasks.every(
+          t => t.status === 'SUCCEEDED' || t.status === 'FAILED'
+        );
+        if (isTerminal) {
+          isPolling = false;
+        }
+      }
+    };
+
+    fetchAndCheck();
+    
+    const interval = setInterval(() => {
+      if (isPolling) {
+        fetchAndCheck();
+      } else {
+        clearInterval(interval);
+      }
+    }, 2500);
+
+    return () => {
+      isPolling = false;
+      clearInterval(interval);
+    };
   }, [taskId, loadJob]);
 
   if (!taskId && !currentJob) return (
