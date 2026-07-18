@@ -140,4 +140,4 @@ The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` 
 
 For system context, PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md) and the docs inside `docs/`.
 
-Every PR modifying the codebase must also keep this README updated. If no update is necessary, add the `skip-readme-check` label to the PR.
+Every PR modifying the codebase must also keep this README updated. If no update is necessary, add the `skip-readme-check` label to the PR. (Note: The `/api/v1/planner/plan` endpoint supports idempotent submissions via the `Idempotency-Key` header.)
