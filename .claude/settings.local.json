@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/karn/Desktop/workspace/steelwing remote -v)",
+      "Bash(git -C /Users/karn/Desktop/workspace/steelwing log --oneline -15)",
+      "Bash(gofmt -l cmd/ pkg/)",
+      "Bash(go vet *)",
+      "Bash(go build *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(go test *)",
+      "Bash(gh issue *)",
+      "Bash(echo \"--- build exit: $? ---\")",
+      "Bash(gh auth *)",
+      "WebSearch",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr *)",
+      "Bash(gh api *)",
+      "Bash(python3 -)",
+      "Bash(docker rm *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(curl -s -o /dev/null -w \"GET / -> HTTP %{http_code}\\\\n\" http://localhost:18080/)",
+      "Read(//private/tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:18080/api/v1/daemon/heartbeat -d '{\"sign_pub_key\":\"x\"}')",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:18080/api/v1/daemon/register -d '{\"join_token\":\"bogus\",\"pub_key\":\"x\",\"sign_pub_key\":\"y\"}')",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:18080/api/v1/daemon/join-token)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST http://localhost:18080/api/v1/daemon/join-token -H \"Authorization: Bearer verify-admin-token\")",
+      "Bash(kill 12607)",
+      "Bash(pkill -f '/tmp/kiwid ')",
+      "Bash(rm -rf /tmp/kiwid /tmp/kiwidaemon /tmp/kiwid.log /tmp/kiwidaemon*.log /tmp/kiwi-verify* /tmp/kiwi-bogus* /tmp/kiwi-sandbox)"
+    ]
+  }
+}
