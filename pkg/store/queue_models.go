@@ -44,9 +44,11 @@ type QueuedTask struct {
 	// LeaseExpiresAt is when the current lease lapses (nil when QUEUED).
 	LeaseExpiresAt *time.Time `gorm:"index" json:"lease_expires_at"`
 	// Attempts counts how many times this task has been leased.
-	Attempts  int       `gorm:"not null;default:0" json:"attempts"`
-	CreatedAt time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `gorm:"not null;default:current_timestamp" json:"updated_at"`
+	Attempts     int       `gorm:"not null;default:0" json:"attempts"`
+	ResultURL    *string   `json:"result_url"`
+	ResultDetail *string   `json:"result_detail"`
+	CreatedAt    time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"not null;default:current_timestamp" json:"updated_at"`
 }
 
 func (QueuedTask) TableName() string { return "queued_tasks" }

@@ -204,17 +204,29 @@ func (s *PostgresStore) RenewLease(ctx context.Context, taskID, leaseID string, 
 // CompleteTask marks taskID terminal (SUCCEEDED or FAILED) iff the presented
 // leaseID still owns it. The fencing check prevents a stale daemon from
 // completing a task that has since been requeued and reassigned.
-func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, finalStatus string) (bool, error) {
+func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error) {
 	if finalStatus != TaskSucceeded && finalStatus != TaskFailed {
 		return false, fmt.Errorf("invalid final status %q (want %s or %s)", finalStatus, TaskSucceeded, TaskFailed)
 	}
 	now := time.Now()
+	updates := map[string]interface{}{
+		"status":     finalStatus,
+		"updated_at": now,
+	}
+	if resultURL == "" {
+		updates["result_url"] = nil
+	} else {
+		updates["result_url"] = resultURL
+	}
+	if detail == "" {
+		updates["result_detail"] = nil
+	} else {
+		updates["result_detail"] = detail
+	}
+
 	res := s.db.WithContext(ctx).Model(&QueuedTask{}).
 		Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
-		Updates(map[string]interface{}{
-			"status":     finalStatus,
-			"updated_at": now,
-		})
+		Updates(updates)
 	if res.Error != nil {
 		return false, res.Error
 	}

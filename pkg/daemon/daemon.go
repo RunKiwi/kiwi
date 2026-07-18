@@ -226,14 +226,14 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		// Without credentials the agent cannot reach its LLM/Git provider. Do
 		// not silently run a half-configured task; fail the lease so it requeues.
 		for _, spec := range res.Specs {
-			d.reportResult(ctx, spec.ID, res.LeaseID, false)
+			d.reportResult(ctx, spec.ID, res.LeaseID, false, "", "failed to open sealed credentials")
 		}
 		return true
 	}
 
 	for _, spec := range res.Specs {
 		ok := d.executeTask(ctx, spec, creds)
-		d.reportResult(ctx, spec.ID, res.LeaseID, ok)
+		d.reportResult(ctx, spec.ID, res.LeaseID, ok, "", "")
 	}
 
 	return true
@@ -398,7 +398,7 @@ func missingLoopInput(spec agent.WorkerSpec, actor provider.Provider) string {
 // reportResult closes the lease for a task by reporting its terminal status.
 // Failures here are logged, not fatal: if the report is lost, the lease simply
 // expires and the task is retried.
-func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool) {
+func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool, resultURL, detail string) {
 	if leaseID == "" {
 		// No fencing token (older CP, or a spec surfaced without a lease). Cannot
 		// safely complete; let the lease lapse.
@@ -415,6 +415,8 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bo
 		LeaseID:    leaseID,
 		Status:     status,
 		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		ResultURL:  resultURL,
+		Detail:     detail,
 	})
 	if err != nil {
 		log.Printf("Failed to report result for task %s: %v", taskID, err)
