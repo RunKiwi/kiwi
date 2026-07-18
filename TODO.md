@@ -537,7 +537,7 @@ Validate `spec.File` is a clean relative path inside the worktree before use. **
 a `spec.File` containing `..` or an absolute path is rejected; normal paths work. **Tests:**
 table test of malicious vs benign paths.
 
-### C4 — Failed-dependency cascade
+### [DONE] C4 — Failed-dependency cascade
 
 **Priority:** P2. **Depends on:** #135 (DAG enforcement). **Size:** S.
 **Goal.** With DAG enforcement, a task whose dependency `FAILED` stays `QUEUED` forever (its
