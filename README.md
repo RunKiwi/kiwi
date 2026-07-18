@@ -8,7 +8,7 @@ Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightwe
 
 ## Architecture
 
-- **Control Plane (Kiwi SaaS)**: API gateway and auth, a Fable-powered Planner that decomposes tasks into a DAG of `worker-spec.json` payloads, a lease-based event queue, and encrypted credential storage.
+- **Control Plane (Kiwi SaaS)**: API gateway and auth, a Fable-powered Planner that decomposes tasks into a DAG of `worker-spec.json` payloads, a lease-based event queue that releases a worker only once its DAG dependencies have succeeded, and encrypted credential storage.
 - **Data Plane (`kiwidaemon`, customer VPC)**: pull-model daemon that polls the Control Plane over HTTPS, decrypts credentials in memory, provisions instant workspaces via `git worktree` from a cached bare clone, and mounts them into Docker sandboxes running the Actor-Critic execution loop.
 - **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
 - **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
