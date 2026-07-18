@@ -96,6 +96,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"depends_on": w.DependsOn,
 				"repo_url":   req.RepoURL,
 				"ref":        req.Ref,
+				"job_id":     jobID,
 			}
 			if err := tx.Create(&store.QueuedTask{
 				ID:     taskID,

@@ -200,7 +200,7 @@ Update every `CompleteTask(` call site or the build breaks.
 
 ---
 
-### A3 — Daemon delivery: commit → push → open GitHub PR  ★ the visible output
+### [DONE] A3 — Daemon delivery: commit → push → open GitHub PR  ★ the visible output
 
 **Priority:** P0. **Depends on:** A1, A2. **Size:** M (largest task).
 

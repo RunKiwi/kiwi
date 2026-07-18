@@ -232,8 +232,8 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 	}
 
 	for _, spec := range res.Specs {
-		ok := d.executeTask(ctx, spec, creds)
-		d.reportResult(ctx, spec.ID, res.LeaseID, ok, "", "")
+		ok, prURL, detail := d.executeTask(ctx, spec, creds)
+		d.reportResult(ctx, spec.ID, res.LeaseID, ok, prURL, detail)
 	}
 
 	return true
@@ -274,13 +274,13 @@ const smokeCommand = `echo "processing: $TASK" > sandbox.log`
 // the sandbox. That split means the sandbox executes model-generated code with
 // a default-deny network and without the LLM key, while the daemon holds the
 // key and reaches the provider itself.
-func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) bool {
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) (bool, string, string) {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
 	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
 		log.Printf("Invalid task ID format: %s", spec.ID)
-		return false
+		return false, "", "invalid task ID format"
 	}
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
@@ -289,7 +289,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
 		if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-			return false
+			return false, "", "failed to provision worktree"
 		}
 		defer func(url, path string) {
 			log.Printf("Cleaning up worktree: %s", path)
@@ -301,7 +301,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
 		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 			log.Printf("Failed to create fallback sandbox dir: %v", err)
-			return false
+			return false, "", "failed to create fallback sandbox dir"
 		}
 	}
 
@@ -332,9 +332,9 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		result, err := sandbox.RunCommand(sandboxCtx, worktreePath, smokeCommand, testEnv)
 		if err != nil {
 			log.Printf("Smoke command failed for task %s: %v", spec.ID, err)
-			return false
+			return false, "", fmt.Sprintf("smoke command failed: %v", err)
 		}
-		return result.Success
+		return result.Success, "", "smoke command run"
 	}
 
 	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, spec.File, spec.TestCmd)
@@ -367,7 +367,27 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		log.Printf("Task %s loop complete: success=%v (steps=%d, cost=$%.2f)",
 			spec.ID, result.Success, result.Steps, result.CostUSD)
 	}
-	return result.Success
+
+	prURL := ""
+	detail := ""
+	if result.Success {
+		gitToken := creds["GIT_TOKEN"]
+		if gitToken == "" {
+			detail = "no GIT_TOKEN; skipped PR"
+		} else {
+			gh := &restGitHub{token: gitToken}
+			pr, d, err := publishResult(ctx, worktreePath, spec, gitToken, gh, "")
+			if err != nil {
+				log.Printf("Failed to publish result for task %s: %v", spec.ID, err)
+				detail = fmt.Sprintf("publish failed: %v", err)
+			} else {
+				prURL = pr
+				detail = d
+			}
+		}
+	}
+
+	return result.Success, prURL, detail
 }
 
 // dockerEnabled reports whether task commands run inside a Docker sandbox.

@@ -61,7 +61,7 @@ func TestExecuteTask_RealLoopFixesFileUntilTestPasses(t *testing.T) {
 	}
 	creds := map[string]string{"ANTHROPIC_API_KEY": "test-key"} // makes newProvider return the mock
 
-	ok := d.executeTask(context.Background(), spec, creds)
+	ok, _, _ := d.executeTask(context.Background(), spec, creds)
 	if !ok {
 		t.Fatal("executeTask returned false; expected the loop to fix the file and pass the test")
 	}
@@ -88,7 +88,7 @@ func TestExecuteTask_SmokeFallbackWhenNoTestCmd(t *testing.T) {
 	spec := agent.WorkerSpec{ID: specID, Task: "just smoke"}
 	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
 
-	if ok := d.executeTask(context.Background(), spec, map[string]string{}); !ok {
+	if ok, _, _ := d.executeTask(context.Background(), spec, map[string]string{}); !ok {
 		t.Fatal("smoke fallback should succeed")
 	}
 }
@@ -114,7 +114,7 @@ func TestExecuteTask_FailsWhenTestNeverPasses(t *testing.T) {
 		File:    "main.go",
 		TestCmd: "grep -q FIXED main.go",
 	}
-	if ok := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}); ok {
+	if ok, _, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}); ok {
 		t.Fatal("expected failure when the test never passes")
 	}
 }
