@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -114,8 +115,27 @@ func TestExecuteTask_FailsWhenTestNeverPasses(t *testing.T) {
 		File:    "main.go",
 		TestCmd: "grep -q FIXED main.go",
 	}
-	if ok, _, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}); ok {
+	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	if ok {
 		t.Fatal("expected failure when the test never passes")
+	}
+	// A FAILED task must explain itself (result_detail), not report an empty reason.
+	if detail == "" {
+		t.Error("expected a non-empty failure detail so the FAILED task explains itself")
+	}
+}
+
+func TestTruncateDetail(t *testing.T) {
+	if got := truncateDetail("short"); got != "short" {
+		t.Errorf("short string should pass through, got %q", got)
+	}
+	long := strings.Repeat("x", maxDetailLen+50)
+	got := truncateDetail(long)
+	if !strings.HasSuffix(got, "…(truncated)") {
+		t.Errorf("over-long string should be marked truncated, got suffix %q", got[len(got)-20:])
+	}
+	if len([]rune(got)) != maxDetailLen+len([]rune("…(truncated)")) {
+		t.Errorf("truncated length = %d runes, want %d", len([]rune(got)), maxDetailLen+len([]rune("…(truncated)")))
 	}
 }
 
