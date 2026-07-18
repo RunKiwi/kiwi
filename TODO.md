@@ -518,7 +518,7 @@ have its lease expire and its task requeued underneath it. Add a heartbeat-drive
 lease TTL is not requeued while its daemon is alive. **Tests:** store-level renew already
 tested; add a daemon-side timer test with a fake CP.
 
-### C2 — Enforce concurrency + budget caps on the lease path (parallelism precondition)
+### [DONE] C2 — Enforce concurrency + budget caps on the lease path (parallelism precondition)
 
 **Priority:** P1. **Depends on:** baseline. **Size:** M.
 **Goal.** `OrgLimits.MaxConcurrentJobs` (default 10) is defined but **not enforced**. In
