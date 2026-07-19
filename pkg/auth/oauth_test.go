@@ -137,6 +137,37 @@ func TestOAuthFlow_Github(t *testing.T) {
 	if apiKey.UserID != user.ID {
 		t.Errorf("API key user mismatch: got %s want %s", apiKey.UserID, user.ID)
 	}
+
+	// Verify idempotency
+	var orgs []Organization
+	db.Where("type = ?", "personal").Find(&orgs)
+	if len(orgs) != 1 {
+		t.Fatalf("expected 1 personal organization, got %d", len(orgs))
+	}
+	var joinReqs []OrgJoinRequest
+	db.Find(&joinReqs)
+	if len(joinReqs) != 1 {
+		t.Fatalf("expected 1 join request, got %d", len(joinReqs))
+	}
+
+	// Test 3: Duplicate callback
+	reqCallback2 := httptest.NewRequest("GET", "/auth/github/callback?state="+stateCookie.Value+"&code=mock_code", nil)
+	reqCallback2.AddCookie(stateCookie)
+	wCallback2 := httptest.NewRecorder()
+	router.ServeHTTP(wCallback2, reqCallback2)
+
+	if wCallback2.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected redirect to dashboard for duplicate login, got %v", wCallback2.Code)
+	}
+
+	db.Where("type = ?", "personal").Find(&orgs)
+	if len(orgs) != 1 {
+		t.Fatalf("expected exactly 1 personal organization after duplicate login, got %d", len(orgs))
+	}
+	db.Find(&joinReqs)
+	if len(joinReqs) != 1 {
+		t.Fatalf("expected exactly 1 join request after duplicate login, got %d", len(joinReqs))
+	}
 }
 
 func TestSessionAndMiddleware(t *testing.T) {

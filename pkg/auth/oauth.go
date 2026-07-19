@@ -261,28 +261,28 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 			if needsApproval {
 				// Create a personal org while they wait for approval
 				personalOrgID := "org_" + hex.EncodeToString([]byte(email))[:8]
-				personalOrg := Organization{
+				var personalOrg Organization
+				db.Where(Organization{ID: personalOrgID}).FirstOrCreate(&personalOrg, Organization{
 					ID:              personalOrgID,
 					Name:            email + "'s Workspace",
 					Type:            "personal",
 					ActivationState: "inactive",
 					Plan:            "free",
 					CreatedAt:       time.Now(),
-				}
-				db.Create(&personalOrg)
+				})
 				assignedOrgID = personalOrg.ID
 				role = "admin" // admin of their personal org
 
 				reqIDBytes := make([]byte, 8)
 				rand.Read(reqIDBytes)
-				joinReq := OrgJoinRequest{
+				var joinReq OrgJoinRequest
+				db.Where("org_id = ? AND user_email = ? AND status = ?", org.ID, email, "pending").FirstOrCreate(&joinReq, OrgJoinRequest{
 					ID:        "req_" + hex.EncodeToString(reqIDBytes),
 					OrgID:     org.ID,
 					UserEmail: email,
 					Status:    "pending",
 					CreatedAt: time.Now(),
-				}
-				db.Create(&joinReq)
+				})
 			}
 
 			idBytes := make([]byte, 8)
