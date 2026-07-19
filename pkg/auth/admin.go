@@ -102,6 +102,40 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
+		case len(parts) == 2 && parts[1] == "join_requests":
+			orgID := parts[0]
+			if r.Method == http.MethodGet {
+				handleListJoinRequests(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "approve":
+			orgID := parts[0]
+			reqID := parts[2]
+			if r.Method == http.MethodPost {
+				handleApproveJoinRequest(db, w, r, orgID, reqID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "deny":
+			orgID := parts[0]
+			reqID := parts[2]
+			if r.Method == http.MethodPost {
+				handleDenyJoinRequest(db, w, r, orgID, reqID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 2 && parts[1] == "domain_join":
+			orgID := parts[0]
+			if r.Method == http.MethodPut {
+				handleToggleDomainJoin(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
 		default:
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
