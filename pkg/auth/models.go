@@ -82,9 +82,18 @@ type OrgJoinRequest struct {
 // TableName overrides the default GORM table name.
 func (OrgJoinRequest) TableName() string { return "org_join_requests" }
 
+// ProvisioningRequest represents a request to provision or reclaim a per-org daemon VM.
+type ProvisioningRequest struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	OrgID     string    `json:"org_id" gorm:"index;not null"`
+	Type      string    `json:"type" gorm:"not null"`                   // "provision" or "reclaim"
+	Status    string    `json:"status" gorm:"not null;default:pending"` // pending, completed, failed
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // InitAuthDB initializes the auth database tables within an existing GORM DB.
 func InitAuthDB(db *gorm.DB) error {
-	return db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{})
+	return db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{})
 }
 
 // OpenDB initializes GORM with pure-Go SQLite and runs all migrations
@@ -98,7 +107,7 @@ func OpenDB(dbPath string, additionalModels ...interface{}) (*gorm.DB, error) {
 	}
 
 	// Migrate auth models
-	if err := db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}); err != nil {
+	if err := db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{}); err != nil {
 		return nil, err
 	}
 
