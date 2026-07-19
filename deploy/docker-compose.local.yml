@@ -1,0 +1,15 @@
+# Local override for docker-compose.prod.yml (no domain / no TLS).
+#
+# Usage (from repo root):
+#   docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.local.yml \
+#     --env-file deploy/.env up -d --build postgres kiwid kiwidaemon
+#
+# It publishes kiwid on localhost:8080 (prod keeps it internal behind Caddy) and
+# simply omits Caddy by not listing it in `up`. Fill deploy/.env first:
+#   KIWI_ENCRYPTION_KEY=$(openssl rand -hex 32)
+#   KIWI_SERVER_TOKEN=$(openssl rand -hex 32)
+#   KIWI_CORS_ALLOWED_ORIGINS=http://localhost:3000
+services:
+  kiwid:
+    ports:
+      - "8080:8080"

@@ -20,7 +20,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    command: ["./kiwid"]
+    # ENTRYPOINT is ./kiwid; no command override needed.
     environment:
       - KIWI_ENV=production
       - KIWI_DSN=postgres://${POSTGRES_USER:-kiwi}:${POSTGRES_PASSWORD:-kiwipassword}@postgres:5432/${POSTGRES_DB:-kiwi}?sslmode=disable
@@ -52,7 +52,12 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    command: ["./kiwidaemon", "-api-url", "http://kiwid:8080"]
+    # Override the entrypoint (the image ENTRYPOINT is ./kiwid). Using `command`
+    # alone would append args to ./kiwid and boot a second control plane.
+    # -key-path/-cache-dir live on the mounted volume so a restart keeps the
+    # daemon's identity (join tokens are single-use — regenerating would fail).
+    entrypoint: ["./kiwidaemon"]
+    command: ["-api-url", "http://kiwid:8080", "-key-path", "/data/daemon.key", "-cache-dir", "/data/cache"]
     environment:
       - KIWI_JOIN_TOKEN=${KIWI_JOIN_TOKEN}
     volumes:
