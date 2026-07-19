@@ -546,6 +546,16 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var org auth.Organization
+	if err := s.db.First(&org, "id = ?", claims.OrgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusInternalServerError)
+		return
+	}
+	if !org.CanRun() {
+		http.Error(w, "402 Payment Required: activate to run", http.StatusPaymentRequired)
+		return
+	}
+
 	// Parse multipart form
 	err := r.ParseMultipartForm(50 * 1024 * 1024) // 50MB max in memory
 	if err != nil {

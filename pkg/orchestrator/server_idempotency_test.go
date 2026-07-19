@@ -71,6 +71,14 @@ func TestIdempotentSubmit(t *testing.T) {
 	s := &Server{db: db, storage: st}
 	s.launchFn = func(taskID, sandboxPath string, manifest *store.Manifest) {} // no engine
 
+	// Create the mock org so CanRun() passes
+	org := auth.Organization{
+		ID:              "test-org",
+		Name:            "Test Org",
+		ActivationState: "active",
+	}
+	db.Create(&org)
+
 	first := postTask(t, s, "dup-key")
 	second := postTask(t, s, "dup-key")
 	if first["task_id"] != second["task_id"] {
