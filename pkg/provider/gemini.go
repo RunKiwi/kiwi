@@ -148,7 +148,8 @@ func (p *GeminiProvider) generate(ctx context.Context, model, system, user strin
 
 // GetCodeEdit is the Actor: propose the complete corrected file.
 func (p *GeminiProvider) GetCodeEdit(ctx context.Context, task, fileName, codeContent, buildOutput string) (string, error) {
-	system := "You are an expert Go engineer acting as the Actor in an automated fix loop. " +
+	system := "You are an expert software engineer acting as the Actor in an automated fix loop. " +
+		"Infer the programming language and its conventions from the file name and contents. " +
 		"Given a failing file and its build/test output, make the SMALLEST change that makes the tests pass. " +
 		"Do not refactor unrelated code. Respond with the COMPLETE corrected file inside a single fenced code block."
 

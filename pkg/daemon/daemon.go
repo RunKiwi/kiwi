@@ -319,11 +319,6 @@ func isLLMKey(name string) bool {
 	return name == anthropicKeyName || name == geminiKeyName
 }
 
-// smokeCommand is the fallback run when a task cannot drive a real loop (no test
-// command, target file, or LLM key). It keeps the end-to-end seam exercisable
-// for smoke tests without pretending an agent ran.
-var smokeCommand = `echo "processing: $TASK" > sandbox.log`
-
 // executeTask provisions a workspace and runs the worker's Actor–Critic loop
 // against it, returning whether the task succeeded (its test command passed).
 //
@@ -387,20 +382,39 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// selected from the worker's model; its key is picked from the bundle.
 	actor, critic := d.newProvider(creds, spec.Model)
 
-	// A real loop needs a target file, a definition of done, and a provider.
-	// Missing any, fall back to a smoke command rather than fake an agent run.
-	if spec.File == "" || spec.TestCmd == "" || actor == nil {
-		log.Printf("Task %s: no %s to run an agent loop; running smoke command instead",
-			spec.ID, missingLoopInput(spec, actor))
-		result, err := sandbox.RunCommand(sandboxCtx, worktreePath, smokeCommand, testEnv)
-		if err != nil {
-			log.Printf("Smoke command failed for task %s: %v", spec.ID, err)
-			return false, "", fmt.Sprintf("smoke command failed: %v", err)
-		}
-		return result.Success, "", "smoke command run"
+	// actor == nil means the model's provider has no key in this org's sealed
+	// bundle (e.g. a gemini-* model but no GEMINI_API_KEY). That is a
+	// configuration error — fail it with a precise reason instead of papering
+	// over it with a run that pretends to succeed.
+	if actor == nil {
+		reason := fmt.Sprintf("no API key configured for the %s provider that model %q needs — add it under Integrations",
+			providerNameForModel(spec.Model), spec.Model)
+		log.Printf("Task %s: %s", spec.ID, reason)
+		return false, "", reason
 	}
 
-	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, spec.File, spec.TestCmd)
+	// test_cmd is optional. When the submitter did not supply one, infer it from
+	// the repo (go.mod → `go test ./...`, package.json test script → `npm test`,
+	// and so on) so the caller does not have to know the project's test runner.
+	testCmd := spec.TestCmd
+	if testCmd == "" {
+		if inferred := inferTestCmd(worktreePath); inferred != "" {
+			log.Printf("Task %s: no test command given; inferred %q from the repo", spec.ID, inferred)
+			testCmd = inferred
+		}
+	}
+
+	// A target file and a way to verify are still required to run (and prove) a
+	// real fix. If either is missing, fail with an honest, actionable reason
+	// rather than the old smoke command that reported success while doing nothing.
+	if spec.File == "" {
+		return false, "", "no target file for this task — set one under Advanced options (automatic file discovery is not available yet)"
+	}
+	if testCmd == "" {
+		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"
+	}
+
+	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, spec.File, testCmd)
 	runner := &loop.Runner{
 		Provider: actor,
 		Critic:   critic,
@@ -415,7 +429,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		FilePath:    filepath.Join(worktreePath, spec.File),
 	}
 	runTest := func(ctx context.Context) (string, bool, error) {
-		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, spec.TestCmd, testEnv)
+		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
 			return "", false, err
 		}
@@ -455,9 +469,15 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	} else {
 		// Surface WHY the loop failed so the FAILED task explains itself in the
 		// Control Plane (result_detail), not only in the daemon's local logs.
-		// Loop/provider errors carry the API response, not the key.
 		if err != nil {
-			detail = truncateDetail(fmt.Sprintf("loop failed after %d step(s): %v", result.Steps, err))
+			// A provider-side failure (out of credits, rate limit, bad key/model)
+			// gets a clean, actionable reason instead of a raw API dump — this is
+			// what the dashboard shows the operator.
+			if kind, reason := provider.Classify(err); kind != provider.ErrOther {
+				detail = fmt.Sprintf("%s: %s", providerNameForModel(spec.Model), reason)
+			} else {
+				detail = truncateDetail(fmt.Sprintf("loop failed after %d step(s): %v", result.Steps, err))
+			}
 		} else {
 			detail = fmt.Sprintf("test did not pass within %d step(s)", result.Steps)
 		}
@@ -487,21 +507,6 @@ func truncateDetail(s string) string {
 // environment inside RunCommand.
 func dockerEnabled() bool {
 	return os.Getenv("USE_DOCKER") != "false"
-}
-
-// missingLoopInput names the first missing prerequisite for a real loop, for a
-// clearer log line.
-func missingLoopInput(spec agent.WorkerSpec, actor provider.Provider) string {
-	switch {
-	case spec.File == "":
-		return "target file"
-	case spec.TestCmd == "":
-		return "test command"
-	case actor == nil:
-		return "LLM credentials"
-	default:
-		return "prerequisites"
-	}
 }
 
 // reportResult closes the lease for a task by reporting its terminal status.
