@@ -352,8 +352,13 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
 	if spec.RepoURL != "" && spec.Ref != "" {
-		log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
-		if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
+		// One job = one branch (#126): base the worktree on the shared job branch
+		// when it already exists, so this worker sees earlier workers' committed
+		// edits and its commit fast-forwards onto them. The first worker falls
+		// back to spec.Ref.
+		jobBranch := jobBranchName(spec)
+		log.Printf("Provisioning worktree for %s (ref: %s, job branch: %s)...", spec.ID, spec.Ref, jobBranch)
+		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
 			return false, "", "failed to provision worktree"
 		}
