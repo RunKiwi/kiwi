@@ -130,33 +130,9 @@ resource "google_secret_manager_secret_version" "kiwi_github_oauth_client_secret
   secret_data = var.kiwi_github_oauth_client_secret
 }
 
-resource "google_secret_manager_secret" "kiwi_google_oauth_client_id" {
-  count     = var.kiwi_google_oauth_client_id != "" ? 1 : 0
-  secret_id = "kiwi-google-oauth-client-id"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "kiwi_google_oauth_client_id_version" {
-  count       = var.kiwi_google_oauth_client_id != "" ? 1 : 0
-  secret      = google_secret_manager_secret.kiwi_google_oauth_client_id[0].id
-  secret_data = var.kiwi_google_oauth_client_id
-}
-
-resource "google_secret_manager_secret" "kiwi_google_oauth_client_secret" {
-  count     = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
-  secret_id = "kiwi-google-oauth-client-secret"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "kiwi_google_oauth_client_secret_version" {
-  count       = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
-  secret      = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].id
-  secret_data = var.kiwi_google_oauth_client_secret
-}
+# Google OAuth is not wired for prod (GitHub-only). Add Google secrets + env
+# here when a Google client is configured; kept out to keep the config simple
+# and valid rather than shipping half-configured optional blocks.
 
 resource "google_secret_manager_secret" "kiwi_session_secret" {
   secret_id = "kiwi-session-secret"
@@ -214,19 +190,6 @@ resource "google_secret_manager_secret_iam_member" "github_oauth_client_secret_a
   member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "google_oauth_client_id_accessor" {
-  count     = var.kiwi_google_oauth_client_id != "" ? 1 : 0
-  secret_id = google_secret_manager_secret.kiwi_google_oauth_client_id[0].id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "google_oauth_client_secret_accessor" {
-  count     = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
-  secret_id = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
-}
 
 resource "google_secret_manager_secret_iam_member" "session_secret_accessor" {
   secret_id = google_secret_manager_secret.kiwi_session_secret.id
@@ -242,7 +205,7 @@ resource "google_cloud_run_v2_service" "api" {
   depends_on = [
     google_secret_manager_secret_version.kiwi_server_token_version,
     google_secret_manager_secret_version.kiwi_github_oauth_client_secret_version,
-    google_secret_manager_secret_iam_member.kiwi_github_oauth_client_secret_accessor
+    google_secret_manager_secret_iam_member.github_oauth_client_secret_accessor
   ]
 
   template {
@@ -276,7 +239,6 @@ resource "google_cloud_run_v2_service" "api" {
         value = "true"
       }
       env {
-      env {
         name  = "KIWI_OAUTH_REDIRECT_BASE"
         value = var.kiwi_oauth_redirect_base
       }
@@ -299,30 +261,6 @@ resource "google_cloud_run_v2_service" "api" {
           secret_key_ref {
             secret  = google_secret_manager_secret.kiwi_github_oauth_client_secret.secret_id
             version = "latest"
-          }
-        }
-      }
-      dynamic "env" {
-        for_each = var.kiwi_google_oauth_client_id != "" ? [1] : []
-        content {
-          name = "KIWI_GOOGLE_OAUTH_CLIENT_ID"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.kiwi_google_oauth_client_id[0].secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-      dynamic "env" {
-        for_each = var.kiwi_google_oauth_client_secret != "" ? [1] : []
-        content {
-          name = "KIWI_GOOGLE_OAUTH_CLIENT_SECRET"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].secret_id
-              version = "latest"
-            }
           }
         }
       }
