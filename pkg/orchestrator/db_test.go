@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"testing"
-	"time"
 )
 
 // ApplyPoolConfig configures the sql.DB connection pool from environment variables.
