@@ -18,6 +18,16 @@ type githubClient interface {
 	CreatePR(ctx context.Context, owner, repo, base, head, title, body string) (htmlURL string, err error)
 }
 
+// jobBranchName is the single branch a whole job shares — every worker commits
+// to it in dependency order so the job yields one branch and one PR (#126).
+func jobBranchName(spec agent.WorkerSpec) string {
+	jobID := spec.JobID
+	if jobID == "" {
+		jobID = spec.ID
+	}
+	return "kiwi/" + jobID
+}
+
 type restGitHub struct {
 	token string
 	api   string // default: "https://api.github.com"
@@ -55,6 +65,16 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 	}
 	defer resp.Body.Close()
 
+	// One job = one PR (#126): every successful worker of a job pushes to the
+	// same branch and calls CreatePR. GitHub returns 422 when a PR already exists
+	// for that head, so treat that as success and return the existing PR instead
+	// of failing the later workers.
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		if existing, e := c.findOpenPR(ctx, owner, repo, head); e == nil && existing != "" {
+			return existing, nil
+		}
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("github api returned status %d", resp.StatusCode)
 	}
@@ -66,6 +86,40 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	return res.HTMLURL, nil
+}
+
+// findOpenPR returns the html_url of the open PR whose head is `head` in
+// owner/repo, or "" if none. Used to make CreatePR idempotent per job branch.
+func (c *restGitHub) findOpenPR(ctx context.Context, owner, repo, head string) (string, error) {
+	api := c.api
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&head=%s:%s", api, owner, repo, owner, head)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("list pulls returned status %d", resp.StatusCode)
+	}
+	var prs []struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
+		return "", err
+	}
+	if len(prs) == 0 {
+		return "", nil
+	}
+	return prs[0].HTMLURL, nil
 }
 
 // parseGitHubRepo handles https://github.com/OWNER/REPO, .../REPO.git,
@@ -114,11 +168,7 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 		return "", "", err
 	}
 
-	jobID := spec.JobID
-	if jobID == "" {
-		jobID = spec.ID
-	}
-	branchName := "kiwi/" + jobID
+	branchName := jobBranchName(spec)
 
 	pushRemote := spec.RepoURL
 	if pushRemoteOverride != "" {

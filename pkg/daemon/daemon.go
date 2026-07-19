@@ -346,11 +346,25 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
+	// Anti-gaming: the loop's contract is "green test = done". If the Actor's
+	// target file is itself a test, it can pass the gate by weakening the test
+	// (delete an assertion, widen a tolerance) instead of fixing the code. Refuse
+	// the task rather than reward that (Execution Model RFC §8; issue #132).
+	if looksLikeTestFile(spec.File) {
+		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
+		return false, "", fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)
+	}
+
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
 	if spec.RepoURL != "" && spec.Ref != "" {
-		log.Printf("Cloning worktree for %s (ref: %s)...", spec.RepoURL, spec.Ref)
-		if err := d.gitCache.GetWorktree(ctx, spec.RepoURL, spec.Ref, worktreePath); err != nil {
+		// One job = one branch (#126): base the worktree on the shared job branch
+		// when it already exists, so this worker sees earlier workers' committed
+		// edits and its commit fast-forwards onto them. The first worker falls
+		// back to spec.Ref.
+		jobBranch := jobBranchName(spec)
+		log.Printf("Provisioning worktree for %s (ref: %s, job branch: %s)...", spec.ID, spec.Ref, jobBranch)
+		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
 			return false, "", "failed to provision worktree"
 		}
@@ -445,9 +459,15 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
 		},
 	}
-
+	// Inject the repo's AGENT.md (if any) as per-repo context for the Actor —
+	// conventions, how to run tests, what not to touch (Execution Model RFC §5).
+	description := spec.Task
+	if rc := repoContext(worktreePath); rc != "" {
+		log.Printf("Task %s: injecting repo AGENT.md context (%d bytes)", spec.ID, len(rc))
+		description = withRepoContext(description, rc)
+	}
 	task := loop.Task{
-		Description:  spec.Task,
+		Description:  description,
 		FilePath:     filepath.Join(worktreePath, targetFiles[0]),
 		WorktreeRoot: worktreePath,
 	}

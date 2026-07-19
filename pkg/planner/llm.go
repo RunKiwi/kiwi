@@ -24,14 +24,16 @@ func NewLLMPlanner(model Completer) *LLMPlanner { return &LLMPlanner{model: mode
 
 const plannerSystem = "You are the Planner in an autonomous coding swarm. " +
 	"Decompose the user's task into a DAG of small, independently-executable worker jobs. " +
+	"Scope each worker by the file it edits and a test command that defines 'done' — NOT a persona. " +
 	"Respond ONLY with a JSON object: " +
-	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "model": string, "depends_on": [string]}]}.`
+	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "model": string, "test_cmd": string, "depends_on": [string]}]}.`
 
 func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	if p.model == nil {
 		return nil, fmt.Errorf("llm planner: no model configured")
 	}
-	user := fmt.Sprintf("Task: %s\nRepo: %s @ %s\nMax workers: %d", req.Task, req.RepoURL, req.Ref, req.MaxWorkers)
+	user := fmt.Sprintf("Task: %s\nRepo: %s @ %s\nTarget file (if known): %s\nTest command (definition of done): %s\nMax workers: %d",
+		req.Task, req.RepoURL, req.Ref, req.File, req.TestCmd, req.MaxWorkers)
 
 	raw, err := p.model.Complete(ctx, plannerSystem, user)
 	if err != nil {
@@ -44,6 +46,21 @@ func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	}
 	if len(plan.Workers) == 0 {
 		return nil, fmt.Errorf("planner returned no workers")
+	}
+
+	// Ensure every worker carries the loop's scope: a model, a target file, and
+	// a test command that defines "done" (#130). Fall back to the request's
+	// values when the model omitted them, so a worker is always executable.
+	for i := range plan.Workers {
+		if plan.Workers[i].Model == "" {
+			plan.Workers[i].Model = req.Model
+		}
+		if plan.Workers[i].File == "" {
+			plan.Workers[i].File = req.File
+		}
+		if plan.Workers[i].TestCmd == "" {
+			plan.Workers[i].TestCmd = req.TestCmd
+		}
 	}
 	return &plan, nil
 }

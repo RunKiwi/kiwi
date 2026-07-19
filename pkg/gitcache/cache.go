@@ -178,6 +178,63 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 	return nil
 }
 
+// GetJobWorktree provisions a worktree for a worker of a job, basing it on the
+// job's shared branch (jobBranch) when that branch already exists on the remote,
+// and otherwise on baseRef. This is what makes workers compose (issue #126): the
+// scheduler runs a job's workers in dependency order, so by the time a later
+// worker leases, earlier workers have already committed to jobBranch — basing on
+// it means the later worker sees their edits, and its commit fast-forwards the
+// branch rather than forking a disconnected diff. The first worker (no branch
+// yet) falls back to baseRef. jobBranch == "" behaves exactly like GetWorktree.
+func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch, worktreePath string) error {
+	if jobBranch == "" {
+		return c.GetWorktree(ctx, repoURL, baseRef, worktreePath)
+	}
+
+	barePath := c.repoPath(repoURL)
+	mu := c.getRepoLock(barePath)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, err := os.Stat(barePath); os.IsNotExist(err) {
+		c.evictToFit(barePath)
+		if err := runGit(ctx, "", "clone", "--bare", repoURL, barePath); err != nil {
+			return fmt.Errorf("failed to clone bare repo: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check cache repo stat: %w", err)
+	}
+
+	os.RemoveAll(worktreePath)
+	runGit(ctx, barePath, "worktree", "prune")
+
+	// Prefer the shared job branch: if it exists on the remote, base the worktree
+	// on its tip (which carries earlier workers' commits).
+	if err := runGit(ctx, barePath, "fetch", "origin", jobBranch); err == nil {
+		if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
+			c.recordAccess(barePath, +1)
+			return nil
+		}
+		os.RemoveAll(worktreePath)
+	}
+
+	// First worker (or no job branch yet): base on the requested ref, mirroring
+	// GetWorktree's add-then-fetch fallback.
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, baseRef); err == nil {
+		c.recordAccess(barePath, +1)
+		return nil
+	}
+	if err := runGit(ctx, barePath, "fetch", "origin", baseRef); err != nil {
+		return fmt.Errorf("failed to fetch base ref %s: %w", baseRef, err)
+	}
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
+		os.RemoveAll(worktreePath)
+		return fmt.Errorf("failed to add worktree after fetch: %w", err)
+	}
+	c.recordAccess(barePath, +1)
+	return nil
+}
+
 // RemoveWorktree safely removes a worktree and cleans up the bare clone's worktree list.
 func (c *Cache) RemoveWorktree(ctx context.Context, repoURL, worktreePath string) error {
 	barePath := c.repoPath(repoURL)
