@@ -407,14 +407,26 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// A target file and a way to verify are still required to run (and prove) a
 	// real fix. If either is missing, fail with an honest, actionable reason
 	// rather than the old smoke command that reported success while doing nothing.
-	if spec.File == "" {
-		return false, "", "no target file for this task — set one under Advanced options (automatic file discovery is not available yet)"
+	var targetFiles []string
+	if spec.File != "" {
+		targetFiles = []string{spec.File}
 	}
+
+	if len(targetFiles) == 0 {
+		tree, _ := repoTree(worktreePath)
+		discovered, _ := discoverTargetFiles(ctx, actor, spec.Task, tree)
+		if len(discovered) > 0 {
+			targetFiles = discovered
+		} else {
+			return false, "", "could not identify a file to change from the task description — set one under Advanced options"
+		}
+	}
+
 	if testCmd == "" {
 		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"
 	}
 
-	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, spec.File, testCmd)
+	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, targetFiles[0], testCmd)
 	runner := &loop.Runner{
 		Provider: actor,
 		Critic:   critic,
@@ -426,7 +438,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 	task := loop.Task{
 		Description: spec.Task,
-		FilePath:    filepath.Join(worktreePath, spec.File),
+		FilePath:    filepath.Join(worktreePath, targetFiles[0]),
 	}
 	runTest := func(ctx context.Context) (string, bool, error) {
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)

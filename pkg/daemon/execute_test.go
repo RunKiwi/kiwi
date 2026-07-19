@@ -115,7 +115,7 @@ func TestExecuteTask_FailsWithClearReasonWhenNoTargetFile(t *testing.T) {
 	if ok {
 		t.Fatal("expected failure when there is no target file")
 	}
-	if !strings.Contains(detail, "no target file") {
+	if !strings.Contains(detail, "could not identify a file to change") {
 		t.Errorf("detail should explain the missing target file, got %q", detail)
 	}
 }
