@@ -2,65 +2,81 @@
   <img src="docs/assets/kiwi-logo.svg" width="88" alt="Kiwi logo" />
 </p>
 
-# Kiwi: BYOC Agentic Execution Engine for Startups
+# Kiwi
+
+**Kiwi turns a task into a swarm of coding agents that fix your code and open a pull request.**
+
+A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane** runs each worker in an isolated sandbox through an **Actor–Critic loop** — editing files and re-running your test command until it passes — then opens a PR. Run it **managed** (Kiwi operates the execution) or **BYOC** (the Data Plane runs in your own cloud, where code and credentials never leave your VPC).
+
+The differentiation is the layer above the sandbox: **the planner and the swarm**, not the sandbox itself.
 
 > [!WARNING]
-> **NOT PRODUCTION READY**
-> The codebase is mid-pivot from an enterprise SaaS prototype to a startup-first BYOC (Bring Your Own Cloud) execution platform, as described in the [Startup-First BYOC Platform RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md). Do not use this in production.
+> **Not production ready.** A task flows **end-to-end today** — you can submit one and get a real PR back (`make local`, below). But the managed-tier deployment on GCP, self-serve signup, and hardened multi-tenant isolation (Firecracker/egress) are **still in progress** — see the RFCs. Positioning is **managed-first, BYOC as graduation** ([Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)).
 
-Kiwi is an autonomous cloud execution engine for fast-moving startups. A lightweight SaaS **Control Plane** plans and orchestrates work, while fleets of AI agents (**The Swarm**) execute in Docker sandboxes inside the customer's own AWS/GCP account (**Data Plane**) — code and credentials never leave the customer's VPC.
+## Quickstart
 
-## Architecture
+One command brings up the whole platform — Control Plane in Docker plus a Data Plane daemon on your host. Put provider keys in `deploy/.env` and it runs real tasks immediately:
 
-- **Control Plane (Kiwi SaaS)**: API gateway and auth, a Fable-powered Planner that decomposes tasks into a DAG of `worker-spec.json` payloads, a lease-based event queue that releases a worker only once its DAG dependencies have succeeded, and encrypted credential storage.
-- **Data Plane (`kiwidaemon`, customer VPC)**: pull-model daemon that polls the Control Plane over HTTPS, decrypts credentials in memory, provisions instant workspaces via `git worktree` from a cached bare clone, and mounts them into Docker sandboxes running the Actor-Critic execution loop.
-- **Zero-knowledge credentials**: the daemon generates an X25519 keypair (credential sealing) plus an Ed25519 keypair (heartbeat signing) on boot. Customer LLM/Git credentials are stored by the SaaS only sealed to the daemon's X25519 public key — the Control Plane never sees plaintext.
-- **Integrations over UI**: `kiwi` CLI, Node/Python SDKs, and headless webhook receivers (Linear) instead of a heavy dashboard.
+```bash
+make local          # Control Plane + daemon; prints the URLs and admin token
+make local-down     # stop         (make local-clean wipes the database)
+```
 
-Design docs: [BYOC RFC](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Execution & Isolation Model RFC](docs/rfcs/2026-07-18-execution-and-isolation-model.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md) · [Architecture](docs/design/ARCHITECTURE.md)
+Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. To bring up the full production stack (Postgres + Control Plane + Caddy TLS + containerized daemon) on a single box, use `make prod` (requires a filled `deploy/.env`; see [`deploy/`](deploy/)).
+
+## How it works
+
+- **Control Plane** (`cmd/kiwid`, `pkg/orchestrator`): API + auth, a planner that decomposes a task into a DAG of `worker-spec` payloads, a Postgres **lease queue** (`pkg/store/queue.go`) that releases a worker only once its DAG dependencies have succeeded, and encrypted credential storage. Runs as split roles (`-role api | orchestrator | migrate | all`).
+- **Data Plane** (`cmd/kiwidaemon`, `pkg/daemon`): a pull-model daemon that polls the Control Plane over HTTPS, opens its org's sealed credentials in memory, provisions instant workspaces via `git worktree` from a cached bare clone, and runs the Actor–Critic loop (`pkg/loop`). It can **discover the target file(s)** from the task and **edit multiple files**, so a task needs only a description and a repo.
+- **Isolation**: the LLM Actor/Critic run **in the daemon process**; only the test command runs in the sandbox, so model-generated code executes with **default-deny networking** and never sees the LLM key. The sandbox driver is pluggable (`pkg/sandbox`) — Docker for dev/BYOC, a Firecracker microVM driver for hardened managed execution (`KIWI_SANDBOX=firecracker`).
+- **Credentials**: the daemon generates an X25519 keypair (credential sealing) and an Ed25519 keypair (heartbeat signing) on boot. Customer credentials are stored by the SaaS **sealed to the daemon's X25519 public key**, and at rest are encrypted via the configured key manager (a static key for dev/BYOC, **Cloud KMS envelope encryption** for managed — `pkg/crypto`).
+- **Surfaces**: the `kiwi` CLI, a Next.js **dashboard** (`frontend/` — jobs, fleets, models, integrations, live topology, settings), Node/Python SDKs, and a Linear webhook receiver.
+
+> **Zero-knowledge is a BYOC property, not a managed one.** In BYOC the daemon runs in the customer's cloud and the Control Plane never sees plaintext credentials. In **managed**, Kiwi operates the daemon and holds the private key, so it *can* decrypt — **managed is not zero-knowledge** ([Managed RFC §4.1](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)).
+
+**Design docs:** [BYOC Platform](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Execution & Isolation Model](docs/rfcs/2026-07-18-execution-and-isolation-model.md) · [Managed Tier on GCP](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md) · [Self-Serve Signup & Tenancy](docs/rfcs/2026-07-19-self-serve-signup-and-tenancy.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md)
 
 Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.com/RunKiwi/gtm). This repo holds engineering docs only.
 
-## Implementation Status
+## Status
 
-| Phase | Scope | Status |
-| :--- | :--- | :--- |
-| 1. Data Plane Foundation | `cmd/kiwidaemon`, X25519/Ed25519 crypto, heartbeat polling, `git worktree` cache, sandbox mounting | ✅ Connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
-| 2. Control Plane Adaptations | Lease-based work queue, encrypted credential storage, Planner API | ✅ Connected ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
-| 3. Integration Layer | `kiwi` CLI (`login`, `submit`, `claude`), Node/Python SDKs, Linear webhook receiver | ✅ Complete |
-| 4. Distribution | Terraform/CloudFormation 1-click deploy templates | 🔜 Pending |
-| M. Managed Execution Tier | Kiwi-operated Data Plane; managed as default entry, BYOC as graduation | 📋 Proposed ([RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)) |
-
-> **On the seam ([#115](https://github.com/RunKiwi/kiwi/issues/115), [#120](https://github.com/RunKiwi/kiwi/issues/120)):** a task flows end-to-end — a registered `kiwidaemon` polls `/api/v1/daemon/heartbeat`, leases a task, opens its org's credentials sealed to its X25519 key, runs the **Actor–Critic loop** ([`pkg/loop`](pkg/loop)) against the worktree until the task's test command passes, and reports the result to close the lease. Registration is gated by a single-use join token. The LLM Actor/Critic run in the daemon process; only the test command runs in the sandbox, so model-generated code executes with default-deny networking and never sees the LLM key.
+| Area | State |
+| :--- | :--- |
+| End-to-end seam — plan → lease → sandbox Actor–Critic loop → PR | ✅ Works ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| One-command local / single-box prod (`make local` / `make prod`) | ✅ |
+| Dashboard — jobs, fleets, models, integrations, topology, settings | ✅ |
+| Multi-file agent — file discovery + multi-file edits | ✅ |
+| Provider robustness — key validation on save, quota/error surfacing | ✅ |
+| Fleet routing — tasks lease only their fleet's daemons | ✅ |
+| Integration layer — `kiwi` CLI, Node/Python SDKs, Linear webhook | ✅ |
+| Managed-tier foundation — KMS envelope crypto, per-org VM Terraform (`deploy/gcp/`), `opsctl` provisioner, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
+| Managed-tier deployment on GCP | 🚧 In progress ([RFC](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md)) |
+| Self-serve signup & tenancy | 📋 Proposed ([RFC](docs/rfcs/2026-07-19-self-serve-signup-and-tenancy.md)) |
 
 ## Building
 
-Because of the newer macOS `dyld` dynamic linker requirements, Go binaries must be compiled with external linking and ad-hoc signed:
+`make local` builds and runs everything. To build individual binaries manually — note that newer macOS `dyld` requires external linking and an ad-hoc signature:
 
 ```bash
-# CLI client
-go build -ldflags="-linkmode=external" -o kiwi cmd/kiwi/main.go && codesign -s - -f ./kiwi
-
-# Control Plane daemon (prototype monolith)
-go build -ldflags="-linkmode=external" -o kiwid cmd/kiwid/main.go && codesign -s - -f ./kiwid
-
-# BYOC Data Plane daemon
-go build -ldflags="-linkmode=external" -o kiwidaemon cmd/kiwidaemon/main.go && codesign -s - -f ./kiwidaemon
+go build -ldflags="-linkmode=external" -o kiwi        cmd/kiwi/main.go        && codesign -s - -f ./kiwi         # CLI
+go build -ldflags="-linkmode=external" -o kiwid       cmd/kiwid/main.go       && codesign -s - -f ./kiwid        # Control Plane
+go build -ldflags="-linkmode=external" -o kiwidaemon  cmd/kiwidaemon/main.go  && codesign -s - -f ./kiwidaemon   # Data Plane daemon
 ```
 
-## Running
+## Running (manual)
 
-### 1. Start the Control Plane daemon
+`make local` does all of this for you; the manual steps are below for reference.
 
-Requires Postgres. NATS is optional — the daemon degrades with a warning if it is unreachable.
+### 1. Start the Control Plane
+
+Requires Postgres. NATS is optional — the Control Plane degrades with a warning if it is unreachable.
 
 ```bash
-export USE_DOCKER="true"
 export KIWI_SERVER_TOKEN="my-secret-token-1234"
 ./kiwid -addr :8080 -dsn "host=localhost user=postgres password=postgres dbname=kiwi port=5432 sslmode=disable"
 ```
 
-Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or bring the whole stack up with `make run-local`.
+Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-nats`. `-role migrate` applies migrations and exits (run it before rolling serving instances). Health checks: `/healthz` (liveness) and `/readyz` (DB-checked readiness).
 
 ### 2. Use the `kiwi` CLI
 
@@ -68,26 +84,19 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 # Store your API token in ~/.config/kiwi/config.json
 ./kiwi login -token "my-secret-token-1234"
 
-# BYOC path (recommended): the daemon clones the repo in your cloud and runs
-# it through the planner → lease queue. No codebase upload.
-./kiwi submit -task "Fix division by zero in Divide()" \
-    -repo https://github.com/you/yourrepo \
-    -ref main \
-    -file math_utils.go \
-    -test-cmd "go test ./..."
+# Store credentials for the daemon to use (held daemon-side, never in the sandbox)
+./kiwi creds set anthropic "sk-ant-..."   # or: ./kiwi creds set gemini "AI..."
+./kiwi creds set git "github_pat_..."
 
-# Legacy path: packages -dir and uploads a zip, executed in the Control Plane.
-./kiwi submit -task "Fix division by zero in Divide()" \
-    -file demo_project/math_utils.go \
-    -test-cmd "go test ./demo_project/..." \
-    -dir .
+# Submit a task. The agent can discover the file(s) and infer the test command,
+# so via the API/dashboard only the task and repo are required. The CLI still
+# asks for -file and -test-cmd:
+./kiwi submit -task "Fix the divide-by-zero panic in Divide()" \
+    -repo https://github.com/you/yourrepo -ref main \
+    -file math_utils.go -test-cmd "go test ./..."
 
 # Resume an existing task
 ./kiwi submit -resume -task-id <task-id>
-
-# Store credentials for the daemon to use in the cloud
-./kiwi creds set anthropic "sk-ant-..."   # or: ./kiwi creds set gemini "AI..."
-./kiwi creds set git "github_pat_..."
 
 # Launch Claude Code wrapped with Kiwi Swarm offloading instructions
 ./kiwi claude
@@ -95,38 +104,30 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `all`), `-nats`. Or br
 
 `kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
 
-**LLM providers.** The daemon selects the provider from the worker's `-model`: a `gemini-*` model (e.g. `-model gemini-2.0-flash`) uses the stored `GEMINI_API_KEY`; any other model uses `ANTHROPIC_API_KEY`. Set whichever key(s) you use with `kiwi creds set`. Model keys are held daemon-side and never injected into the sandbox.
+**LLM providers.** The daemon selects the provider from the worker's `-model`: a `gemini-*` model (e.g. `-model gemini-flash-latest`) uses the stored `GEMINI_API_KEY`; any other model uses `ANTHROPIC_API_KEY`. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
 
-### 3. Run the BYOC daemon (Data Plane)
+### 3. Run the Data Plane daemon
 
 ```bash
 ./kiwidaemon -api-url https://api.runkiwi.com \
-    -key-path ~/.kiwi/daemon.key \
-    -poll-interval 5s \
-    -cache-dir /tmp/kiwi-cache \
-    -max-cached-repos 20 \
-    -max-steps 6 \
-    -max-budget 0.50 \
+    -key-path ~/.kiwi/daemon.key -cache-dir /tmp/kiwi-cache \
+    -poll-interval 5s -max-cached-repos 20 -max-steps 6 -max-budget 0.50 \
     -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs and registers with the Control Plane using a single-use join token (mint one with `POST /api/v1/daemon/join-token`, or pass it via `KIWI_JOIN_TOKEN`). Once registered, its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for `worker-spec.json` payloads and runs each through the Actor–Critic loop, iterating until the worker's test command passes (`-max-steps` iterations / `-max-budget` USD per task cap the loop). The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used when a new clone would exceed the bound; `0` disables the bound.
+On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Actor–Critic loop (`-max-steps` iterations / `-max-budget` USD per task cap the loop). The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound.
 
 ### 4. Dashboard
 
-To run the dashboard locally and connect it to the Control Plane:
-
 ```bash
-# Control Plane with CORS for the dev UI origin
 KIWI_CORS_ALLOWED_ORIGINS=http://localhost:3000 ./kiwid -addr :8080 -dsn "..."
-# Frontend
 cd frontend && cp .env.local.example .env.local   # set NEXT_PUBLIC_KIWI_API_URL=http://localhost:8080
 npm ci && npm run dev                               # http://localhost:3000
 ```
 
 ## SDKs
 
-Minimal v1 SDKs for programmatic task submission (CI/CD, Sentry auto-triage) live in `sdk/`:
+Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`:
 
 ```js
 // Node (sdk/node)
@@ -142,14 +143,20 @@ client = KiwiClient("http://localhost:8080", token)
 client.submit_task("Fix flaky test", "pkg/foo/foo.go", "go test ./...", "./codebase.zip")
 ```
 
-## Linear Webhook
+## Linear webhook
 
-The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` (or moved to **In Progress**) are automatically converted into planner jobs.
+The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` (or moved to **In Progress**) are converted into planner jobs.
+
+## Operational notes
+
+- In `production` mode, `KIWI_ENCRYPTION_KEY`, `KIWI_SERVER_TOKEN`, and `KIWI_CORS_ALLOWED_ORIGINS` must be set explicitly. For managed, set `KIWI_KMS_KEY` to use Cloud KMS envelope encryption instead of a static key.
+- The `/api/v1/planner/plan` endpoint supports idempotent submissions via the `Idempotency-Key` header.
+- Database migrations apply automatically on boot; in a multi-replica deployment run `kiwid -role migrate` once before serving instead (`KIWI_SKIP_BOOT_MIGRATE=true` on serving roles).
 
 ---
 
-## Contributing & Context for AI
+## Contributing & context for AI
 
-For system context, PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md) and the docs inside `docs/`.
+For system context, the PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md) and the docs in [`docs/`](docs/).
 
-Every PR modifying the codebase must also keep this README updated. If no update is necessary, add the `skip-readme-check` label to the PR. (Note: In `production` mode, `KIWI_ENCRYPTION_KEY`, `KIWI_SERVER_TOKEN`, and `KIWI_CORS_ALLOWED_ORIGINS` must be explicitly configured.) (Note: Health checks are available at `/healthz` and `/readyz`.) (Note: The `/api/v1/planner/plan` endpoint supports idempotent submissions via the `Idempotency-Key` header.) (Note: Database migrations are applied automatically on boot in production.)
+Every PR modifying the codebase must keep this README current. If no update is needed, add the `skip-readme-check` label to the PR.
