@@ -88,6 +88,18 @@ func VerifySession(cookieValue string) (*SessionData, error) {
 }
 
 func OAuthRouter(db *gorm.DB, mux *http.ServeMux) {
+	mux.HandleFunc("/auth/providers", func(w http.ResponseWriter, r *http.Request) {
+		providers := []string{}
+		if os.Getenv("KIWI_GITHUB_OAUTH_CLIENT_ID") != "" {
+			providers = append(providers, "github")
+		}
+		if os.Getenv("KIWI_GOOGLE_OAUTH_CLIENT_ID") != "" {
+			providers = append(providers, "google")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string][]string{"providers": providers})
+	})
+
 	if os.Getenv("KIWI_GITHUB_OAUTH_CLIENT_ID") != "" {
 		mux.HandleFunc("/auth/github/start", func(w http.ResponseWriter, r *http.Request) { handleOAuthStart(w, r, "github") })
 		mux.HandleFunc("/auth/github/callback", func(w http.ResponseWriter, r *http.Request) { handleOAuthCallback(db, w, r, "github") })
