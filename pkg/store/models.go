@@ -44,6 +44,15 @@ type User struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// OrgJoinRequest represents a request by a user to join an organization.
+type OrgJoinRequest struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	OrgID     string    `json:"org_id" gorm:"index;not null"`
+	UserEmail string    `json:"user_email" gorm:"not null"`
+	Status    string    `json:"status" gorm:"not null;default:pending"` // "pending", "approved", "denied"
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // APIKey represents a hashed API key associated with a user.
 type APIKey struct {
 	ID        string     `json:"id" gorm:"primaryKey"`
