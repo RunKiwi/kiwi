@@ -33,18 +33,18 @@ func TestEnvKeyManager_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	pt := "secret_value"
 	ct, err := m.Encrypt(context.Background(), pt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	dec, err := m.Decrypt(context.Background(), ct)
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	if dec != pt {
 		t.Fatalf("expected %q, got %q", pt, dec)
 	}
@@ -67,7 +67,7 @@ func TestKMSKeyManager_Fallback(t *testing.T) {
 	// in the KMSKeyManager itself! We can test KMSKeyManager directly.
 	// Note: We can't easily test real KMSKeyManager without a client, but we can test the logic
 	// by invoking EnvKeyManager's decrypt.
-	
+
 	dec, err := DecryptAtRest(legacyCt)
 	if err != nil {
 		t.Fatal(err)

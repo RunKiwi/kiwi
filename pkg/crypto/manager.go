@@ -194,7 +194,7 @@ func (m *KMSKeyManager) Decrypt(ctx context.Context, ciphertextStr string) (stri
 	if len(parts) != 4 {
 		return "", errors.New("invalid KMS ciphertext format")
 	}
-	
+
 	wrappedDEKHex := parts[2]
 	payloadCiphertextHex := parts[3]
 
