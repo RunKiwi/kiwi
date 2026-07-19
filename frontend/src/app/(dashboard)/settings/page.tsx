@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [gitToken, setGitToken] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [showActivate, setShowActivate] = useState(false);
 
   useEffect(() => {
     client.validate().then(setOrg).catch(() => {});
@@ -68,14 +69,26 @@ export default function SettingsPage() {
         </div>
         
         {org?.activation_state !== 'active' && (
-          <div className="mt-4 p-4 rounded-xl border border-red-500/20 bg-red-500/10 flex items-center justify-between">
-            <div>
-              <h3 className="text-red-400 font-medium text-sm">Account Inactive</h3>
-              <p className="text-red-400/80 text-sm mt-1">You can preview tasks, but you must activate to run them.</p>
+          <div id="activation" className="mt-4 p-4 rounded-xl border border-amber-500/20 bg-amber-500/10 scroll-mt-8">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-amber-300 font-medium text-sm">Organization not activated</h3>
+                <p className="text-amber-300/80 text-sm mt-1">You can plan and preview tasks, but running them is disabled until your org is activated.</p>
+              </div>
+              <button onClick={() => setShowActivate(v => !v)} className="shrink-0 bg-amber-400 text-[#1a1400] hover:bg-amber-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+                Activate to run
+              </button>
             </div>
-            <button className="bg-red-500 text-white hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-              Activate to Run
-            </button>
+            {showActivate && (
+              <div className="mt-4 pt-4 border-t border-amber-500/20 text-sm text-amber-100/90 space-y-2">
+                <p>Activation turns on task execution for your organization. Self-serve billing isn&apos;t connected yet, so activation is handled by the Kiwi team.</p>
+                <p>Share your organization ID with support to get activated:</p>
+                <div className="flex items-center gap-2">
+                  <code className="font-mono text-xs bg-black/30 rounded px-2 py-1 text-amber-200">{org?.org_id || "—"}</code>
+                  <a href={`mailto:support@runkiwi.com?subject=${encodeURIComponent(`Activate org ${org?.org_id ?? ""}`)}`} className="text-xs underline hover:text-white">Email support</a>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

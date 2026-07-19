@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
+import { ActivationBanner } from "@/components/ActivationBanner";
 
 export default function DashboardLayout({
   children,
@@ -49,7 +50,7 @@ export default function DashboardLayout({
           <div className="w-8 h-8 shrink-0 rounded-lg bg-[#0E1A24] shadow-[0_0_15px_rgba(147,198,69,0.35)] flex items-center justify-center">
             <Logo className="w-5 h-5 text-[#93C645]" />
           </div>
-          {!isCollapsed && <span className="text-xl font-medium tracking-tight text-white whitespace-nowrap overflow-hidden">Kiwi Swarm</span>}
+          {!isCollapsed && <span className="text-xl font-medium tracking-tight text-white whitespace-nowrap overflow-hidden">Kiwi</span>}
         </div>
         
         <nav className="flex-1 space-y-1">
@@ -104,8 +105,9 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto relative">
-        {children}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        <ActivationBanner />
+        <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
     </div>
   );

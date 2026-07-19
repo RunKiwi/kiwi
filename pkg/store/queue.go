@@ -411,6 +411,54 @@ func (s *PostgresStore) RequeueExpiredLeases(ctx context.Context) (int, error) {
 	return requeued, nil
 }
 
+// ExpireStaleQueuedTasks fails any task that has waited in QUEUED longer than
+// ttl — e.g. no fleet ever connected to lease it — so work doesn't hang in the
+// queue forever. It fails the task's job too, mirroring the dead-letter path.
+// Returns the number of tasks expired. A non-positive ttl disables the sweep.
+// Run this periodically as a sweeper.
+func (s *PostgresStore) ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error) {
+	if ttl <= 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	cutoff := now.Add(-ttl)
+
+	var expired int
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stale []QueuedTask
+		if err := tx.Where("status = ? AND created_at < ?", TaskQueued, cutoff).Find(&stale).Error; err != nil {
+			return err
+		}
+		if len(stale) == 0 {
+			return nil
+		}
+
+		detail := fmt.Sprintf("timed out after %s waiting in the queue (no fleet available to run it)", ttl)
+		res := tx.Model(&QueuedTask{}).
+			Where("status = ? AND created_at < ?", TaskQueued, cutoff).
+			Updates(map[string]interface{}{
+				"status":        TaskFailed,
+				"result_detail": detail,
+				"updated_at":    now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		expired = int(res.RowsAffected)
+
+		for _, st := range stale {
+			if st.JobID != "" {
+				failJobAndQueuedTasks(tx, st.JobID, "Task timed out in queue")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return expired, nil
+}
+
 // GetJobTasks retrieves all tasks for a given job, scoped by orgID and ordered by creation time.
 func (s *PostgresStore) GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error) {
 	var tasks []QueuedTask

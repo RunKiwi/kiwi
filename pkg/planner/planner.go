@@ -16,9 +16,14 @@ type PlanRequest struct {
 	// File is the target file a worker edits, relative to the repo root.
 	File string `json:"file"`
 	// Files is an optional list of target files a worker edits.
-	Files      []string `json:"files,omitempty"`
-	Model      string   `json:"model"`
-	MaxWorkers int      `json:"max_workers"`
+	Files []string `json:"files,omitempty"`
+	// Model is the worker model (runs on the customer's provider key).
+	Model string `json:"model"`
+	// PlannerModel optionally overrides the model that decomposes and verifies
+	// the task. It runs on the Control Plane's own planning key, so it falls back
+	// to the platform default when empty or unsupported by that key.
+	PlannerModel string `json:"planner_model"`
+	MaxWorkers   int    `json:"max_workers"`
 	// FleetID optionally scopes the job to a fleet.
 	FleetID string `json:"fleet_id"`
 	// TestCmd is the command that defines "done" for the workers this plan
