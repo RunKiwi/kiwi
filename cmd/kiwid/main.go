@@ -127,15 +127,17 @@ func main() {
 		} else {
 			slog.Info("JetStream not available; Outbox Relay NOT started")
 		}
+	}
 
-		go func() {
-			err = server.Start(cfg.Addr)
-			if err != nil && err != fmt.Errorf("http: Server closed") && err.Error() != "http: Server closed" {
-				slog.Error("Error starting Kiwi daemon API", "err", err)
-				os.Exit(1)
-			}
-		}()
-	} else {
+	go func() {
+		err = server.Start(cfg.Addr)
+		if err != nil && err != fmt.Errorf("http: Server closed") && err.Error() != "http: Server closed" {
+			slog.Error("Error starting Kiwi daemon API", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	if cfg.Role != "all" && cfg.Role != "api" {
 		slog.Info("Running in background worker mode...")
 	}
 

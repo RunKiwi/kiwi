@@ -69,7 +69,7 @@ resource "google_sql_database_instance" "instance" {
       point_in_time_recovery_enabled = true
     }
 
-    availability_type = "REGIONAL"
+    availability_type = "ZONAL"
   }
   deletion_protection = false
 }
@@ -106,6 +106,20 @@ resource "google_secret_manager_secret_version" "kiwi_server_token_version" {
   secret_data = var.kiwi_server_token
 }
 
+resource "google_secret_manager_secret" "kiwi_github_oauth_client_secret" {
+  count     = var.github_oauth_client_secret != "" ? 1 : 0
+  secret_id = "kiwi-github-oauth-client-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "kiwi_github_oauth_client_secret_version" {
+  count       = var.github_oauth_client_secret != "" ? 1 : 0
+  secret      = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].id
+  secret_data = var.github_oauth_client_secret
+}
+
 # Cloud KMS
 resource "google_kms_key_ring" "keyring" {
   name     = var.kms_keyring_name
@@ -131,15 +145,35 @@ resource "google_project_iam_member" "cloudsql_client" {
   member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
+# Grant Secret Manager accessor
+resource "google_secret_manager_secret_iam_member" "kiwi_server_token_accessor" {
+  secret_id = google_secret_manager_secret.kiwi_server_token.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "kiwi_github_oauth_client_secret_accessor" {
+  count     = var.github_oauth_client_secret != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
 # Cloud Run Services
 resource "google_cloud_run_v2_service" "api" {
   name     = "kiwi-api"
   location = var.region
 
+  depends_on = [
+    google_secret_manager_secret_version.kiwi_server_token_version,
+    google_secret_manager_secret_version.kiwi_github_oauth_client_secret_version,
+    google_secret_manager_secret_iam_member.kiwi_github_oauth_client_secret_accessor
+  ]
+
   template {
     service_account = google_service_account.cloudrun_sa.email
     scaling {
-      min_instance_count = 1
+      min_instance_count = 0
     }
     containers {
       image = var.kiwid_image
@@ -166,11 +200,31 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "KIWI_SKIP_BOOT_MIGRATE"
         value = "true"
       }
+      env {
+        name  = "KIWI_GITHUB_OAUTH_CLIENT_ID"
+        value = var.github_oauth_client_id
+      }
+      dynamic "env" {
+        for_each = tolist(var.github_oauth_client_secret != "" ? ["1"] : [])
+        content {
+          name = "KIWI_GITHUB_OAUTH_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      env {
+        name  = "KIWI_OAUTH_REDIRECT_BASE"
+        value = "https://${var.api_domain}"
+      }
     }
 
     vpc_access {
       connector = google_vpc_access_connector.connector.id
-      egress    = "ALL_TRAFFIC"
+      egress    = "PRIVATE_RANGES_ONLY"
     }
   }
 }
@@ -198,13 +252,22 @@ resource "google_cloud_run_v2_service" "orchestrator" {
         value = "host=${google_sql_database_instance.instance.private_ip_address} user=${var.db_user} password=${var.db_password} dbname=${var.db_name} sslmode=disable"
       }
       env {
+        name = "KIWI_SERVER_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.kiwi_server_token.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
         name  = "KIWI_SKIP_BOOT_MIGRATE"
         value = "true"
       }
     }
     vpc_access {
       connector = google_vpc_access_connector.connector.id
-      egress    = "ALL_TRAFFIC"
+      egress    = "PRIVATE_RANGES_ONLY"
     }
   }
 }
@@ -244,7 +307,7 @@ resource "google_cloud_run_v2_job" "migrate" {
       }
       vpc_access {
         connector = google_vpc_access_connector.connector.id
-        egress    = "ALL_TRAFFIC"
+        egress    = "PRIVATE_RANGES_ONLY"
       }
     }
   }
