@@ -63,10 +63,12 @@ func (r *StoreReporter) Event(ctx context.Context, agentID, phase, outcome strin
 // Without matching tags, snake_case keys like repo_url silently fail to
 // unmarshal (Go's field matching is case-insensitive but not underscore-aware).
 type WorkerSpec struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Task    string `json:"task"`
-	File    string `json:"file"`
+	ID    string   `json:"id"`
+	Model string   `json:"model"`
+	Task  string   `json:"task"`
+	File  string   `json:"file"`
+	Files []string `json:"files,omitempty"`
+
 	RepoURL string `json:"repo_url"`
 	Ref     string `json:"ref"`
 	// TestCmd is the command that defines "done": the daemon's Actor–Critic
@@ -267,6 +269,7 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 					Model:     str(m["model"]),
 					Task:      str(m["task"]),
 					File:      str(m["file"]),
+					Files:     strSlice(m["files"]),
 					RepoURL:   str(m["repo_url"]),
 					Ref:       str(m["ref"]),
 					DependsOn: strSlice(m["depends_on"]),
@@ -281,6 +284,7 @@ func SpecsFromManifest(jobID string, manifest *store.Manifest) []WorkerSpec {
 		Model:   str(manifest.Content["model"]),
 		Task:    str(manifest.Content["task"]),
 		File:    str(manifest.Content["file"]),
+		Files:   strSlice(manifest.Content["files"]),
 		RepoURL: str(manifest.Content["repo_url"]),
 		Ref:     str(manifest.Content["ref"]),
 	}}

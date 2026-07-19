@@ -5,6 +5,7 @@ export interface PlanRequest {
   // command / ref / model are hints, not hard requirements.
   ref?: string;
   file?: string;
+  files?: string[];
   test_cmd?: string;
   model?: string;
   max_workers?: number;

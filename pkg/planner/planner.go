@@ -13,12 +13,12 @@ type PlanRequest struct {
 	Task           string `json:"task"`
 	RepoURL        string `json:"repo_url"`
 	Ref            string `json:"ref"`
-	// File is the target file a worker edits, relative to the repo root. Threaded
-	// onto the executable worker(s) so the daemon's loop has a definition of what
-	// to change; without it the daemon has no target and falls back to a smoke run.
-	File       string `json:"file"`
-	Model      string `json:"model"`
-	MaxWorkers int    `json:"max_workers"`
+	// File is the target file a worker edits, relative to the repo root.
+	File string `json:"file"`
+	// Files is an optional list of target files a worker edits.
+	Files      []string `json:"files,omitempty"`
+	Model      string   `json:"model"`
+	MaxWorkers int      `json:"max_workers"`
 	// FleetID optionally scopes the job to a fleet.
 	FleetID string `json:"fleet_id"`
 	// TestCmd is the command that defines "done" for the workers this plan
@@ -32,6 +32,7 @@ type PlannedWorker struct {
 	ID        string   `json:"id"`
 	Task      string   `json:"task"`
 	File      string   `json:"file"`
+	Files     []string `json:"files,omitempty"`
 	Model     string   `json:"model"`
 	TestCmd   string   `json:"test_cmd,omitempty"`
 	DependsOn []string `json:"depends_on,omitempty"`

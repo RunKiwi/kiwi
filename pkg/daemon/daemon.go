@@ -339,6 +339,12 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
 		return false, "", "file path escapes worktree"
 	}
+	for _, f := range spec.Files {
+		if !filepath.IsLocal(f) {
+			log.Printf("Task %s: file path %q escapes worktree", spec.ID, f)
+			return false, "", "file path escapes worktree"
+		}
+	}
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
@@ -404,12 +410,14 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	// A target file and a way to verify are still required to run (and prove) a
-	// real fix. If either is missing, fail with an honest, actionable reason
-	// rather than the old smoke command that reported success while doing nothing.
 	var targetFiles []string
-	if spec.File != "" {
+	var isMulti bool
+	if len(spec.Files) > 0 {
+		targetFiles = spec.Files
+		isMulti = true
+	} else if spec.File != "" {
 		targetFiles = []string{spec.File}
+		isMulti = false
 	}
 
 	if len(targetFiles) == 0 {
@@ -417,6 +425,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		discovered, _ := discoverTargetFiles(ctx, actor, spec.Task, tree)
 		if len(discovered) > 0 {
 			targetFiles = discovered
+			isMulti = true
 		} else {
 			return false, "", "could not identify a file to change from the task description — set one under Advanced options"
 		}
@@ -426,7 +435,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"
 	}
 
-	log.Printf("Running Actor–Critic loop for task %s (file %s, test %q)...", spec.ID, targetFiles[0], testCmd)
+	log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
 	runner := &loop.Runner{
 		Provider: actor,
 		Critic:   critic,
@@ -436,10 +445,20 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
 		},
 	}
+
 	task := loop.Task{
-		Description: spec.Task,
-		FilePath:    filepath.Join(worktreePath, targetFiles[0]),
+		Description:  spec.Task,
+		FilePath:     filepath.Join(worktreePath, targetFiles[0]),
+		WorktreeRoot: worktreePath,
 	}
+	if isMulti {
+		absFiles := make([]string, len(targetFiles))
+		for i, f := range targetFiles {
+			absFiles[i] = filepath.Join(worktreePath, f)
+		}
+		task.Files = absFiles
+	}
+
 	runTest := func(ctx context.Context) (string, bool, error) {
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
