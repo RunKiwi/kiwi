@@ -1,0 +1,9 @@
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.gcp_control_plane.google_compute_network.vpc will be created
+  + resource "google_compute_network" "vpc" { ... }
+
+Plan: 20 to add, 0 to change, 0 to destroy.
