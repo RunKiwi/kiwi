@@ -30,7 +30,7 @@ func TestRegisterDaemon_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	mkOrg(t, s, "o1")
 
-	token, err := s.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	token, err := s.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	if err != nil {
 		t.Fatalf("CreateDaemonJoinToken: %v", err)
 	}
@@ -57,12 +57,32 @@ func TestRegisterDaemon_HappyPath(t *testing.T) {
 	}
 }
 
+// A daemon inherits its fleet from the join token that enrolled it — the fleet
+// comes from the token, never the request body, so LeaseNextTask can route by it.
+func TestRegisterDaemon_InheritsFleetFromToken(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mkOrg(t, s, "o1")
+
+	token, err := s.CreateDaemonJoinToken(ctx, "o1", "fleet-a", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateDaemonJoinToken: %v", err)
+	}
+	d, err := s.RegisterDaemon(ctx, token, mkSignKey(t), "encpub")
+	if err != nil {
+		t.Fatalf("RegisterDaemon: %v", err)
+	}
+	if d.FleetID != "fleet-a" {
+		t.Errorf("daemon fleet = %q, want fleet-a (must come from the token)", d.FleetID)
+	}
+}
+
 func TestRegisterDaemon_TokenIsSingleUse(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	mkOrg(t, s, "o1")
 
-	token, _ := s.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	token, _ := s.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	if _, err := s.RegisterDaemon(ctx, token, mkSignKey(t), "enc1"); err != nil {
 		t.Fatalf("first register: %v", err)
 	}
@@ -84,7 +104,7 @@ func TestRegisterDaemon_InvalidAndExpiredTokens(t *testing.T) {
 	}
 
 	// Expired token.
-	token, _ := s.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	token, _ := s.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	// Force expiry in the past.
 	if err := s.db.Model(&DaemonJoinToken{}).
 		Where("org_id = ?", "o1").
@@ -102,14 +122,14 @@ func TestRegisterDaemon_ReRegisterRotatesEncKey(t *testing.T) {
 	mkOrg(t, s, "o1")
 	sign := mkSignKey(t)
 
-	t1, _ := s.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	t1, _ := s.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	d1, err := s.RegisterDaemon(ctx, t1, sign, "enc-old")
 	if err != nil {
 		t.Fatalf("first register: %v", err)
 	}
 
 	// Same identity, fresh token, new encryption key: rotation, not a new daemon.
-	t2, _ := s.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	t2, _ := s.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	d2, err := s.RegisterDaemon(ctx, t2, sign, "enc-new")
 	if err != nil {
 		t.Fatalf("re-register: %v", err)

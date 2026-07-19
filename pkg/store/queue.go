@@ -43,6 +43,13 @@ const leaseCandidateBatch = 64
 // marking it LEASED to leasedBy with a fresh fencing LeaseID for ttl. It returns
 // (nil, nil) when no leasable task is available.
 //
+// fleetID scopes routing: the caller (a daemon) leases only tasks assigned to
+// its own fleet, plus tasks with no fleet assignment (fleet_id = ”), which run
+// on any daemon in the org. A task pinned to a fleet therefore never runs on a
+// different fleet's daemon; an unassigned task is never stranded as long as any
+// daemon exists. A daemon with no fleet (fleetID = "") leases only unassigned
+// tasks.
+//
 // A task is leasable only when every task in its plan `depends_on` has already
 // SUCCEEDED (DAG enforcement — see the Execution Model RFC §3). This is what
 // keeps a `verify` worker from running before the `impl` workers it depends on.
@@ -54,7 +61,7 @@ const leaseCandidateBatch = 64
 // concurrent daemons never claim the same task; on other dialects (e.g. the
 // SQLite used in tests) the conditional UPDATE (WHERE status = QUEUED) provides
 // the same no-double-lease guarantee.
-func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy string, ttl time.Duration) (*QueuedTask, error) {
+func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, fleetID string, ttl time.Duration) (*QueuedTask, error) {
 	leaseID, err := newLeaseID()
 	if err != nil {
 		return nil, err
@@ -88,7 +95,9 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy strin
 			return nil // Org at cap, refuse new lease
 		}
 
-		q := tx.Where("org_id = ? AND status = ?", orgID, TaskQueued).
+		// Fleet routing: a daemon leases work for its own fleet, plus unassigned
+		// work (fleet_id = '') that may run anywhere.
+		q := tx.Where("org_id = ? AND status = ? AND (fleet_id = ? OR fleet_id = ?)", orgID, TaskQueued, fleetID, "").
 			Order("created_at ASC, id ASC").
 			Limit(leaseCandidateBatch)
 		if tx.Dialector.Name() == "postgres" {

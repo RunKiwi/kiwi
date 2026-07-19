@@ -57,7 +57,7 @@ type Store interface {
 	// Lease-based work queue (BYOC daemon handoff). Tasks are leased, not
 	// destructively popped, so a crashed daemon's work returns to the queue.
 	EnqueueTask(ctx context.Context, task *QueuedTask) error
-	LeaseNextTask(ctx context.Context, orgID, leasedBy string, ttl time.Duration) (*QueuedTask, error)
+	LeaseNextTask(ctx context.Context, orgID, leasedBy, fleetID string, ttl time.Duration) (*QueuedTask, error)
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
 	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
@@ -73,7 +73,7 @@ type Store interface {
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
 	// identity and resolves a heartbeat to an org; registration is gated by a
 	// short-lived, org-bound, single-use join token (no trust-on-first-use).
-	CreateDaemonJoinToken(ctx context.Context, orgID string, ttl time.Duration) (string, error)
+	CreateDaemonJoinToken(ctx context.Context, orgID, fleetID string, ttl time.Duration) (string, error)
 	RegisterDaemon(ctx context.Context, joinToken, signPubKey, encPubKey string) (*Daemon, error)
 	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
 	TouchDaemon(ctx context.Context, id string) error

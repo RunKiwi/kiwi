@@ -20,6 +20,11 @@ import "time"
 type Daemon struct {
 	ID    string `gorm:"primaryKey" json:"id"`
 	OrgID string `gorm:"index;not null" json:"org_id"`
+	// FleetID binds the daemon to a fleet (see Fleet). It is inherited from the
+	// join token at registration, never taken from the request body. Empty means
+	// the daemon belongs to no specific fleet and serves only unassigned tasks.
+	// It is what scopes LeaseNextTask so a fleet's daemons lease only its work.
+	FleetID string `gorm:"index" json:"fleet_id"`
 	// SignPubKey is the Ed25519 identity. Unique: two daemons cannot share an
 	// identity, and it is how a heartbeat resolves to an org.
 	SignPubKey string `gorm:"uniqueIndex;not null" json:"sign_pub_key"`
@@ -46,8 +51,11 @@ func (Daemon) TableName() string { return "daemons" }
 type DaemonJoinToken struct {
 	// TokenHash is hex(sha256(token)). The plaintext is returned once, at
 	// creation, and never persisted.
-	TokenHash string    `gorm:"primaryKey" json:"token_hash"`
-	OrgID     string    `gorm:"index;not null" json:"org_id"`
+	TokenHash string `gorm:"primaryKey" json:"token_hash"`
+	OrgID     string `gorm:"index;not null" json:"org_id"`
+	// FleetID is the fleet a daemon redeeming this token joins. Empty mints a
+	// token for the org's unassigned pool.
+	FleetID   string    `json:"fleet_id"`
 	ExpiresAt time.Time `gorm:"not null" json:"expires_at"`
 	// UsedAt is stamped when the token is redeemed, making it single-use.
 	UsedAt    *time.Time `json:"used_at"`

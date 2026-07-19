@@ -48,7 +48,7 @@ func TestLeaseEnforcesDAGDependencies(t *testing.T) {
 	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl")
 
 	// Only impl is leasable; verify is blocked on it.
-	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestLeaseEnforcesDAGDependencies(t *testing.T) {
 	}
 
 	// verify must NOT lease while impl is merely LEASED (not yet SUCCEEDED).
-	l2, err := s.LeaseNextTask(ctx, "o1", "d2", time.Minute)
+	l2, err := s.LeaseNextTask(ctx, "o1", "d2", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestLeaseEnforcesDAGDependencies(t *testing.T) {
 		t.Fatalf("CompleteTask(impl): ok=%v err=%v", ok, err)
 	}
 
-	l3, err := s.LeaseNextTask(ctx, "o1", "d3", time.Minute)
+	l3, err := s.LeaseNextTask(ctx, "o1", "d3", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestLeaseBlockedTaskDoesNotStallQueue(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	enqueueTask(t, s, "j2-solo", "o1", "j2") // ready
 
-	l, err := s.LeaseNextTask(ctx, "o1", "d", time.Minute)
+	l, err := s.LeaseNextTask(ctx, "o1", "d", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestEnqueueAndLease(t *testing.T) {
 	ctx := context.Background()
 	enqueue(t, s, "t1", "o1")
 
-	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", time.Minute)
+	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestEnqueueAndLease(t *testing.T) {
 	}
 
 	// Nothing left QUEUED → next lease returns nil, not the same task.
-	again, err := s.LeaseNextTask(ctx, "o1", "daemon-2", time.Minute)
+	again, err := s.LeaseNextTask(ctx, "o1", "daemon-2", "", time.Minute)
 	if err != nil {
 		t.Fatalf("second LeaseNextTask: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLeaseOrgScoping(t *testing.T) {
 	enqueue(t, s, "a1", "orgA")
 	enqueue(t, s, "b1", "orgB")
 
-	leased, err := s.LeaseNextTask(ctx, "orgB", "d", time.Minute)
+	leased, err := s.LeaseNextTask(ctx, "orgB", "d", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestLeaseFIFOOrdering(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	enqueue(t, s, "second", "o1")
 
-	leased, err := s.LeaseNextTask(ctx, "o1", "d", time.Minute)
+	leased, err := s.LeaseNextTask(ctx, "o1", "d", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestRenewLease(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	enqueue(t, s, "t1", "o1")
-	leased, _ := s.LeaseNextTask(ctx, "o1", "d", time.Minute)
+	leased, _ := s.LeaseNextTask(ctx, "o1", "d", "", time.Minute)
 	origExpiry := *leased.LeaseExpiresAt
 
 	// Wrong token cannot renew.
@@ -199,7 +199,7 @@ func TestCompleteTaskFencing(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	enqueue(t, s, "t1", "o1")
-	leased, _ := s.LeaseNextTask(ctx, "o1", "d", time.Minute)
+	leased, _ := s.LeaseNextTask(ctx, "o1", "d", "", time.Minute)
 
 	// Stale/wrong token cannot complete.
 	ok, err := s.CompleteTask(ctx, "t1", "stale-lease", TaskSucceeded, "", "")
@@ -241,7 +241,7 @@ func TestRequeueExpiredLeasesAndRefencing(t *testing.T) {
 	ctx := context.Background()
 	enqueue(t, s, "t1", "o1")
 
-	first, _ := s.LeaseNextTask(ctx, "o1", "daemon-1", time.Minute)
+	first, _ := s.LeaseNextTask(ctx, "o1", "daemon-1", "", time.Minute)
 	oldLease := *first.LeaseID
 
 	// Simulate daemon-1 dying: force the lease into the past.
@@ -266,7 +266,7 @@ func TestRequeueExpiredLeasesAndRefencing(t *testing.T) {
 	}
 
 	// A new daemon can now re-lease it with a fresh token.
-	second, err := s.LeaseNextTask(ctx, "o1", "daemon-2", time.Minute)
+	second, err := s.LeaseNextTask(ctx, "o1", "daemon-2", "", time.Minute)
 	if err != nil || second == nil {
 		t.Fatalf("re-lease after requeue failed: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestDependencyFailureCascade(t *testing.T) {
 	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl")
 
 	// impl task is leased
-	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil {
 		t.Fatalf("LeaseNextTask: %v", err)
 	}
