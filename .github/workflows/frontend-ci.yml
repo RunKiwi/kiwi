@@ -40,6 +40,6 @@ jobs:
         run: npm run lint
 
       # `next build` is also the type-check gate. There is no `test` script yet;
-      # add `npm test` here once the frontend has tests (see TODO_UI.md).
+      # add `npm test` here once the frontend has tests.
       - name: Build
         run: npm run build
