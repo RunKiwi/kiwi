@@ -113,15 +113,30 @@ variable "allowed_egress_cidrs" {
   default     = ["140.82.112.0/20", "192.30.252.0/22"] # Example GitHub CIDRs
 }
 
-variable "github_oauth_client_id" {
+variable "kiwi_oauth_redirect_base" {
   type        = string
-  description = "GitHub OAuth Client ID"
-  default     = ""
+  description = "Base URL for OAuth redirects (e.g. https://api.runkiwi.dev)"
 }
 
-variable "github_oauth_client_secret" {
+variable "kiwi_frontend_url" {
+  type        = string
+  description = "URL of the frontend (e.g. https://app.runkiwi.dev)"
+}
+
+variable "kiwi_github_oauth_client_id" {
+  type        = string
+  description = "GitHub OAuth Client ID"
+  sensitive   = true
+}
+
+variable "kiwi_github_oauth_client_secret" {
   type        = string
   description = "GitHub OAuth Client Secret"
   sensitive   = true
-  default     = ""
+}
+
+variable "kiwi_session_secret" {
+  type        = string
+  description = "Secret key for cookie sessions"
+  sensitive   = true
 }
