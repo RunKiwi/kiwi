@@ -42,6 +42,18 @@ resource "google_compute_instance" "daemon_vm" {
     }
   }
 
+  shielded_instance_config {
+    enable_secure_boot          = true
+    enable_vtpm                 = true
+    enable_integrity_monitoring = true
+  }
+
+  service_account {
+    # No email specified means it uses the default compute service account.
+    # We provide an empty scopes list to disable the default token scope.
+    scopes = []
+  }
+
   attached_disk {
     source      = google_compute_disk.cache_disk.id
     device_name = "cache-disk"
@@ -54,10 +66,13 @@ resource "google_compute_instance" "daemon_vm" {
   }
 
   metadata = {
-    "kiwi-org-id"     = var.org_id
-    "kiwi-join-token" = var.join_token
-    "kiwi-api-url"    = var.api_url
-    "kiwi-image"      = var.daemon_image
+    "kiwi-org-id"            = var.org_id
+    "kiwi-join-token"        = var.join_token
+    "kiwi-api-url"           = var.api_url
+    "kiwi-image"             = var.daemon_image
+    "block-project-ssh-keys" = "true"
+    "enable-oslogin"         = "false"
+    "serial-port-enable"     = "false"
   }
 
   # Startup script to mount the disk, pull the image, and run the daemon
