@@ -1,0 +1,26 @@
+project_id = "my-gcp-project-id"
+region     = "us-central1"
+
+vpc_name              = "kiwi-vpc"
+subnet_daemon_cidr    = "10.0.1.0/24"
+subnet_connector_cidr = "10.0.2.0/28"
+
+db_instance_name = "kiwi-db-instance"
+db_name          = "kiwi"
+db_user          = "postgres"
+db_password      = "supersecretpassword"
+db_tier          = "db-custom-2-8192"
+
+kms_keyring_name = "kiwi-keyring"
+kms_key_name     = "kiwi-encryption-key"
+
+artifact_registry_repo = "kiwi-repo"
+
+kiwi_server_token    = "bootstrap-token-1234"
+allowed_cors_origins = "https://app.runkiwi.com"
+
+api_domain      = "api.runkiwi.com"
+frontend_domain = "app.runkiwi.com"
+
+kiwid_image    = "us-central1-docker.pkg.dev/my-gcp-project-id/kiwi-repo/kiwid:latest"
+frontend_image = "us-central1-docker.pkg.dev/my-gcp-project-id/kiwi-repo/frontend:latest"

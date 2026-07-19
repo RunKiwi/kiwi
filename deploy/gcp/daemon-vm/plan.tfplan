@@ -1,0 +1,12 @@
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.daemon_vm.google_compute_instance.daemon_vm will be created
+  + resource "google_compute_instance" "daemon_vm" { ... }
+  
+  # module.daemon_vm.google_compute_disk.cache_disk will be created
+  + resource "google_compute_disk" "cache_disk" { ... }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
