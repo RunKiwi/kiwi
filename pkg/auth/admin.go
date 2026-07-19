@@ -45,6 +45,22 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		parts := strings.Split(path, "/")
 
 		switch {
+		case len(parts) == 2 && parts[1] == "activate":
+			orgID := parts[0]
+			if r.Method == http.MethodPost {
+				handleActivateOrg(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 2 && parts[1] == "suspend":
+			orgID := parts[0]
+			if r.Method == http.MethodPost {
+				handleSuspendOrg(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
 		case len(parts) == 2 && parts[1] == "usage":
 			orgID := parts[0]
 			if r.Method != http.MethodGet {
@@ -142,6 +158,7 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	})
 
 	// Auth validation endpoint (used by the dashboard to verify tokens and get user info).
+
 	mux.HandleFunc("/auth/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -238,6 +255,24 @@ func handleListOrgs(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(orgs)
+}
+
+func handleActivateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	if err := ActivateOrg(db, orgID); err != nil {
+		http.Error(w, "Failed to activate org: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = LogAuditEvent(db, r, "ACTIVATE", "ORG", orgID, "Admin manually activated org")
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleSuspendOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	if err := SuspendOrg(db, orgID); err != nil {
+		http.Error(w, "Failed to suspend org: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = LogAuditEvent(db, r, "SUSPEND", "ORG", orgID, "Admin manually suspended org")
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleCreateUser(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
