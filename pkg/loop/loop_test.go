@@ -217,3 +217,43 @@ func TestLoop_MultiFileEdit(t *testing.T) {
 		t.Errorf("got success=%v steps=%d, want true/1", res.Success, res.Steps)
 	}
 }
+
+// A loose or empty path in the model's response must not clobber the wrong file.
+// "a.go" must match only a.go — never a decoy like not_a.go — and an empty path
+// must match nothing (it previously matched an arbitrary file via HasSuffix).
+func TestLoop_MultiFileEdit_PathMatchingIsPrecise(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.go")
+	decoy := filepath.Join(dir, "not_a.go")
+	os.WriteFile(target, []byte("target"), 0o644)
+	os.WriteFile(decoy, []byte("decoy"), 0o644)
+
+	// The model returns a bare "a.go" plus a stray empty-path entry.
+	jsonEdit := `{"files":[{"path":"","content":"EMPTY WINS"},{"path":"a.go","content":"target FIXED"}]}`
+	prov := &scriptedProvider{edits: []string{jsonEdit}}
+	r := &Runner{Provider: prov}
+
+	_, err := r.Run(context.Background(), Task{
+		Description:  "fix a.go only",
+		Files:        []string{target, decoy},
+		WorktreeRoot: dir,
+	}, func(ctx context.Context) (string, bool, error) {
+		b, _ := os.ReadFile(target)
+		if strings.Contains(string(b), "FIXED") {
+			return "ok", true, nil
+		}
+		return "FAIL", false, nil
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The decoy must be untouched — the empty path must not have matched it, and
+	// "a.go" must not have suffix-matched not_a.go.
+	if b, _ := os.ReadFile(decoy); string(b) != "decoy" {
+		t.Errorf("decoy file was modified: %q — path matching is not precise", b)
+	}
+	if b, _ := os.ReadFile(target); !strings.Contains(string(b), "FIXED") {
+		t.Errorf("target not fixed: %q", b)
+	}
+}

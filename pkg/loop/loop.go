@@ -270,22 +270,31 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 	}
 
 	for _, f := range edit.Files {
+		// Reject empty/traversing paths outright. An empty path previously matched
+		// an arbitrary target (HasSuffix(vf, "") is always true), letting a
+		// malformed response overwrite an unrelated file in the set.
+		rel := filepath.Clean(f.Path)
+		if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			continue
+		}
+
+		// Map the model's path to one of the input files. Accept an exact match
+		// (absolute or worktree-relative) or a path-BOUNDARY suffix, so that
+		// "config.go" cannot match "old_config.go". Matches are always keys of
+		// validFiles, so a write can never land outside the target set.
+		var abs string
+		if task.WorktreeRoot != "" {
+			abs = filepath.Join(task.WorktreeRoot, rel)
+		}
 		var match string
 		for vf := range validFiles {
-			if strings.HasSuffix(vf, f.Path) {
+			if vf == rel || (abs != "" && vf == abs) || strings.HasSuffix(vf, string(os.PathSeparator)+rel) {
 				match = vf
 				break
 			}
 		}
 		if match == "" {
 			continue
-		}
-
-		if task.WorktreeRoot != "" {
-			rel, err := filepath.Rel(task.WorktreeRoot, match)
-			if err != nil || !filepath.IsLocal(rel) {
-				continue
-			}
 		}
 
 		if r.Critic != nil {
