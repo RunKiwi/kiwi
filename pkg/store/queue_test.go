@@ -38,6 +38,39 @@ func enqueueTask(t *testing.T, s *PostgresStore, id, org, job string, dependsOn 
 	}
 }
 
+func TestLeaseFailsDependentsOfFailedDependency(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Job j1: impl → verify (verify depends_on impl).
+	enqueueTask(t, s, "j1-impl", "o1", "j1")
+	enqueueTask(t, s, "j1-verify", "o1", "j1", "impl")
+
+	// impl fails.
+	if err := s.DB().Model(&QueuedTask{}).Where("id = ?", "j1-impl").
+		Update("status", TaskFailed).Error; err != nil {
+		t.Fatalf("force-fail impl: %v", err)
+	}
+
+	// A lease scan must not hand out verify; instead it cascades the failure.
+	leased, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if leased != nil {
+		t.Fatalf("expected nil (verify blocked by failed dep), got %s", leased.ID)
+	}
+
+	var verify QueuedTask
+	s.DB().First(&verify, "id = ?", "j1-verify")
+	if verify.Status != TaskFailed {
+		t.Errorf("verify should be cascaded to FAILED, got %s", verify.Status)
+	}
+	if verify.ResultDetail == nil || *verify.ResultDetail == "" {
+		t.Error("expected a failure reason on the cascaded task")
+	}
+}
+
 func TestLeaseEnforcesDAGDependencies(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
