@@ -1,0 +1,7 @@
+project_id   = "my-gcp-project-id"
+region       = "us-central1"
+zone         = "us-central1-a"
+org_id       = "org-123456"
+join_token   = "token_abcdef123456"
+api_url      = "https://api.runkiwi.com"
+daemon_image = "us-central1-docker.pkg.dev/my-gcp-project-id/kiwi-repo/kiwidaemon:latest"
