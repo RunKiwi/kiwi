@@ -12,8 +12,10 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -32,6 +34,10 @@ type Task struct {
 	Description string
 	// FilePath is the absolute path to the single file the Actor may edit.
 	FilePath string
+	// Files is a list of absolute paths to files the Actor may edit (multi-file mode).
+	Files []string
+	// WorktreeRoot is the absolute path to the worktree root, required for multi-file path validation.
+	WorktreeRoot string
 }
 
 // Config tunes the loop's safety rails. Zero values get sensible defaults.
@@ -124,40 +130,48 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 				fmt.Errorf("loop: budget limit ($%.2f) exceeded", maxBudget)
 		}
 
-		content, err := os.ReadFile(task.FilePath)
-		if err != nil {
-			return Result{Steps: step - 1, CostUSD: cost, FinalOutput: lastOutput},
-				fmt.Errorf("loop: read target file: %w", err)
-		}
+		if len(task.Files) > 0 {
+			r.logf("[loop] step %d: Actor proposing multi-file edit\n", step)
+			if err := r.proposeMultiFileEdit(ctx, &task, &cost, lastOutput, step); err != nil {
+				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput}, fmt.Errorf("loop: multi-file propose failed: %w", err)
+			}
+			criticReasons = ""
+		} else {
+			content, err := os.ReadFile(task.FilePath)
+			if err != nil {
+				return Result{Steps: step - 1, CostUSD: cost, FinalOutput: lastOutput},
+					fmt.Errorf("loop: read target file: %w", err)
+			}
 
-		r.logf("[loop] step %d: Actor proposing edit\n", step)
-		proposed, err := r.Provider.GetCodeEdit(ctx, task.Description, task.FilePath, string(content),
-			composeActorInput(lastOutput, criticReasons))
-		if err != nil {
-			return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
-				fmt.Errorf("loop: actor failed: %w", err)
-		}
-		cost += callCost(r.Provider, nominalActorCost)
-		criticReasons = ""
-
-		// Optional Critic gate before we touch the file.
-		if r.Critic != nil {
-			verdict, err := r.Critic.ReviewEdit(ctx, task.Description, task.FilePath, string(content), proposed, lastOutput)
+			r.logf("[loop] step %d: Actor proposing edit\n", step)
+			proposed, err := r.Provider.GetCodeEdit(ctx, task.Description, task.FilePath, string(content),
+				composeActorInput(lastOutput, criticReasons))
 			if err != nil {
 				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
-					fmt.Errorf("loop: critic failed: %w", err)
+					fmt.Errorf("loop: actor failed: %w", err)
 			}
-			cost += callCost(r.Critic, nominalCriticCost)
-			if !verdict.Approved {
-				r.logf("[loop] step %d: Critic rejected: %s\n", step, verdict.Reasons)
-				criticReasons = verdict.Reasons
-				continue // Actor retries with feedback; nothing applied, no test
-			}
-		}
+			cost += callCost(r.Provider, nominalActorCost)
+			criticReasons = ""
 
-		if err := os.WriteFile(task.FilePath, []byte(proposed), 0o644); err != nil {
-			return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
-				fmt.Errorf("loop: write target file: %w", err)
+			// Optional Critic gate before we touch the file.
+			if r.Critic != nil {
+				verdict, err := r.Critic.ReviewEdit(ctx, task.Description, task.FilePath, string(content), proposed, lastOutput)
+				if err != nil {
+					return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
+						fmt.Errorf("loop: critic failed: %w", err)
+				}
+				cost += callCost(r.Critic, nominalCriticCost)
+				if !verdict.Approved {
+					r.logf("[loop] step %d: Critic rejected: %s\n", step, verdict.Reasons)
+					criticReasons = verdict.Reasons
+					continue // Actor retries with feedback; nothing applied, no test
+				}
+			}
+
+			if err := os.WriteFile(task.FilePath, []byte(proposed), 0o644); err != nil {
+				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
+					fmt.Errorf("loop: write target file: %w", err)
+			}
 		}
 
 		output, passed, err := runTest(ctx)
@@ -203,4 +217,102 @@ func callCost(caller any, fallback float64) float64 {
 		return r.LastCostUSD()
 	}
 	return fallback
+}
+
+func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *float64, lastOutput string, step int) error {
+	var sb strings.Builder
+	validFiles := make(map[string]string)
+
+	for _, f := range task.Files {
+		stat, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		if stat.Size() > 256*1024 {
+			continue
+		}
+		content, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		validFiles[f] = string(content)
+		sb.WriteString(fmt.Sprintf("File: %s\n```\n%s\n```\n\n", f, string(content)))
+	}
+
+	if len(validFiles) == 0 {
+		return fmt.Errorf("no readable files within size limits")
+	}
+
+	system := "You are an expert software engineer in an automated fix loop. Make the SMALLEST changes to make the tests pass. Return ONLY JSON in this format: {\"files\":[{\"path\":\"<matching-input-path>\",\"content\":\"<full new file>\"}]}"
+	user := fmt.Sprintf("Task: %s\n\nFiles:\n%s\nBuild/test output:\n%s", task.Description, sb.String(), lastOutput)
+
+	resp, err := r.Provider.Complete(ctx, system, user)
+	if err != nil {
+		return fmt.Errorf("actor complete failed: %w", err)
+	}
+	*cost += callCost(r.Provider, nominalActorCost)
+
+	start := strings.IndexByte(resp, '{')
+	end := strings.LastIndexByte(resp, '}')
+	if start == -1 || end == -1 || start >= end {
+		return fmt.Errorf("invalid json response from model")
+	}
+
+	var edit struct {
+		Files []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+
+	if err := json.Unmarshal([]byte(resp[start:end+1]), &edit); err != nil {
+		return fmt.Errorf("parse json: %w", err)
+	}
+
+	for _, f := range edit.Files {
+		// Reject empty/traversing paths outright. An empty path previously matched
+		// an arbitrary target (HasSuffix(vf, "") is always true), letting a
+		// malformed response overwrite an unrelated file in the set.
+		rel := filepath.Clean(f.Path)
+		if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			continue
+		}
+
+		// Map the model's path to one of the input files. Accept an exact match
+		// (absolute or worktree-relative) or a path-BOUNDARY suffix, so that
+		// "config.go" cannot match "old_config.go". Matches are always keys of
+		// validFiles, so a write can never land outside the target set.
+		var abs string
+		if task.WorktreeRoot != "" {
+			abs = filepath.Join(task.WorktreeRoot, rel)
+		}
+		var match string
+		for vf := range validFiles {
+			if vf == rel || (abs != "" && vf == abs) || strings.HasSuffix(vf, string(os.PathSeparator)+rel) {
+				match = vf
+				break
+			}
+		}
+		if match == "" {
+			continue
+		}
+
+		if r.Critic != nil {
+			oldC := validFiles[match]
+			verdict, err := r.Critic.ReviewEdit(ctx, task.Description, match, oldC, f.Content, lastOutput)
+			if err != nil {
+				return fmt.Errorf("critic failed: %w", err)
+			}
+			*cost += callCost(r.Critic, nominalCriticCost)
+			if !verdict.Approved {
+				r.logf("[loop] step %d: Critic rejected edit for %s: %s\n", step, match, verdict.Reasons)
+				continue
+			}
+		}
+
+		if err := os.WriteFile(match, []byte(f.Content), 0o644); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
+	}
+	return nil
 }

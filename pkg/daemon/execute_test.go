@@ -19,6 +19,10 @@ func (p *fixOnceProvider) GetCodeEdit(ctx context.Context, task, fileName, code,
 	return p.fixedContent, nil
 }
 
+func (p *fixOnceProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 // newExecTestDaemon builds a Daemon wired with a mock provider and local (non-
 // Docker) sandbox execution, so executeTask can run the real Actor–Critic loop
 // end-to-end without a network or Docker.
@@ -111,7 +115,7 @@ func TestExecuteTask_FailsWithClearReasonWhenNoTargetFile(t *testing.T) {
 	if ok {
 		t.Fatal("expected failure when there is no target file")
 	}
-	if !strings.Contains(detail, "no target file") {
+	if !strings.Contains(detail, "could not identify a file to change") {
 		t.Errorf("detail should explain the missing target file, got %q", detail)
 	}
 }
@@ -190,5 +194,42 @@ func TestExecuteTask_FileScope(t *testing.T) {
 				t.Errorf("expected malicious path %q to be rejected, got %v (ok=%v)", tc.file, detail, ok)
 			}
 		})
+	}
+}
+
+type multiFileProvider struct{ jsonResponse string }
+
+func (p *multiFileProvider) GetCodeEdit(ctx context.Context, task, fileName, code, buildOutput string) (string, error) {
+	return "", nil
+}
+func (p *multiFileProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return p.jsonResponse, nil
+}
+
+func TestExecuteTask_MultiFile(t *testing.T) {
+	d := newExecTestDaemon(t, "")
+	d.newProvider = func(creds map[string]string, model string) (provider.Provider, provider.Critic) {
+		jsonEdit := `{"files":[{"path":"file1.txt","content":"file1 FIXED"},{"path":"file2.txt","content":"file2 FIXED"}]}`
+		return &multiFileProvider{jsonResponse: jsonEdit}, nil
+	}
+	specID := "multi-file-task"
+
+	worktreePath := filepath.Join(os.TempDir(), "kiwi-sandbox", specID)
+	os.MkdirAll(worktreePath, 0o755)
+	t.Cleanup(func() { os.RemoveAll(worktreePath) })
+	os.WriteFile(filepath.Join(worktreePath, "file1.txt"), []byte("file1"), 0o644)
+	os.WriteFile(filepath.Join(worktreePath, "file2.txt"), []byte("file2"), 0o644)
+
+	spec := agent.WorkerSpec{
+		ID:      specID,
+		Model:   "sonnet",
+		Task:    "fix it",
+		Files:   []string{"file1.txt", "file2.txt"},
+		TestCmd: "grep -q FIXED file1.txt && grep -q FIXED file2.txt",
+	}
+
+	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	if !ok {
+		t.Fatalf("expected success, got false (detail: %q)", detail)
 	}
 }

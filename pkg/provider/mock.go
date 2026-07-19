@@ -10,15 +10,28 @@ import (
 // Provider defines the interface for communicating with LLMs
 type Provider interface {
 	GetCodeEdit(ctx context.Context, task string, fileName string, codeContent string, buildOutput string) (string, error)
+	// Complete is a general single-shot completion: given a system and user
+	// prompt, return the model's text response. Used for repo exploration and
+	// multi-file edits, which are not shaped like GetCodeEdit's single-file fix.
+	Complete(ctx context.Context, system, user string) (string, error)
 }
 
 // MockProvider is a rule-based mock LLM simulator for offline testing.
 // It detects specific bugs in our demo files and returns pre-defined fixes,
 // simulating the iterative Actor feedback loop.
-type MockProvider struct{}
+type MockProvider struct {
+	CompleteFunc func(system, user string) (string, error)
+}
 
 func NewMockProvider() *MockProvider {
 	return &MockProvider{}
+}
+
+func (m *MockProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	if m.CompleteFunc != nil {
+		return m.CompleteFunc(system, user)
+	}
+	return "", nil
 }
 
 func (m *MockProvider) GetCodeEdit(ctx context.Context, task string, fileName string, codeContent string, buildOutput string) (string, error) {

@@ -76,6 +76,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			"id":         w.ID,
 			"task":       w.Task,
 			"file":       w.File,
+			"files":      w.Files,
 			"model":      w.Model,
 			"test_cmd":   workerTestCmd(w, req),
 			"depends_on": w.DependsOn,
