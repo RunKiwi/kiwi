@@ -148,7 +148,7 @@ func TestPublishResult(t *testing.T) {
 	if err != nil {
 		t.Errorf("branch kiwi/job1 not in bare remote: %v %s", err, out)
 	}
-	
+
 	// Test 3: idempotency (PR already exists)
 	gh.called = false
 	gh.existingOpen = "https://github.com/owner/repo/pull/123"
