@@ -44,6 +44,16 @@ func (s *Server) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the credential with its provider before storing it, so a typo'd or
+	// revoked key is rejected here instead of failing a task later. Fails open on
+	// unknown names and transient errors (see defaultCredValidator).
+	if s.credValidator != nil {
+		if err := s.credValidator(r.Context(), req.Name, req.Value); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	err := s.storage.SaveCredential(r.Context(), claims.OrgID, req.Name, req.Kind, req.Value)
 	if err != nil {
 		http.Error(w, "Failed to save credential", http.StatusInternalServerError)

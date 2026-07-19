@@ -76,21 +76,43 @@ func TestExecuteTask_RealLoopFixesFileUntilTestPasses(t *testing.T) {
 	}
 }
 
-func TestExecuteTask_SmokeFallbackWhenNoTestCmd(t *testing.T) {
-	// No test command and no provider key: executeTask must not pretend to run
-	// an agent; it falls back to the smoke command and still succeeds.
+func TestExecuteTask_FailsWithClearReasonWhenNoProviderKey(t *testing.T) {
+	// A model whose provider has no key in the bundle must fail with a precise,
+	// actionable reason — not a smoke run that pretends to succeed.
 	t.Setenv("USE_DOCKER", "false")
-	d, err := New(Config{CacheDir: t.TempDir(), KeyPath: ""})
+	d, err := New(Config{CacheDir: t.TempDir(), KeyPath: ""}) // real defaultProvider
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-
-	specID := "smoke-task-1"
-	spec := agent.WorkerSpec{ID: specID, Task: "just smoke"}
+	specID := "no-key-task"
 	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
 
-	if ok, _, _ := d.executeTask(context.Background(), spec, map[string]string{}); !ok {
-		t.Fatal("smoke fallback should succeed")
+	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "x", File: "main.go", TestCmd: "true"}
+	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{}) // no ANTHROPIC_API_KEY
+
+	if ok {
+		t.Fatal("expected failure when the model's provider has no key")
+	}
+	if !strings.Contains(detail, "no API key") || !strings.Contains(detail, "Anthropic") {
+		t.Errorf("detail should name the missing provider key, got %q", detail)
+	}
+}
+
+func TestExecuteTask_FailsWithClearReasonWhenNoTargetFile(t *testing.T) {
+	// No target file and none can be discovered yet: fail with an honest reason
+	// instead of silently doing nothing.
+	d := newExecTestDaemon(t, "")
+	specID := "no-file-task"
+	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
+
+	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "fix it", TestCmd: "true"}
+	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+
+	if ok {
+		t.Fatal("expected failure when there is no target file")
+	}
+	if !strings.Contains(detail, "no target file") {
+		t.Errorf("detail should explain the missing target file, got %q", detail)
 	}
 }
 

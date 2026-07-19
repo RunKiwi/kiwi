@@ -57,6 +57,10 @@ type Server struct {
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 	agentAPI     *agentapi.Server
 	planner      *planner.Service
+	// credValidator confirms a provider credential is accepted before it is
+	// saved. nil skips validation (kept nil in unit tests that construct Server
+	// directly so they make no external calls); NewServer wires the real one.
+	credValidator func(ctx context.Context, name, value string) error
 }
 
 func NewServer(storage store.Store, role string) *Server {
@@ -71,7 +75,8 @@ func NewServer(storage store.Store, role string) *Server {
 		snapshotRoot: root,
 		// Planner uses the deterministic HeuristicPlanner by default; the
 		// frontier-model LLMPlanner plugs in behind the same interface.
-		planner: planner.NewService(storage, planner.NewHeuristicPlanner()),
+		planner:       planner.NewService(storage, planner.NewHeuristicPlanner()),
+		credValidator: defaultCredValidator,
 	}
 	// Sandbox-facing Agent API: scoped-token authorized, secrets bridged to the
 	// reverse tunnel, events into the durable log (issue #34).

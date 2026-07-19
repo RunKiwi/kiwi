@@ -128,14 +128,22 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     
     let errorMessage = response.statusText;
     try {
-      const errorData = await response.json();
-      if (errorData && errorData.error) {
-        errorMessage = errorData.error;
+      const raw = await response.text();
+      if (raw) {
+        // Handlers return either JSON {error|message} or a plain-text body
+        // (Go's http.Error). Surface whichever we get so the real reason —
+        // e.g. "Anthropic rejected this credential" — reaches the user.
+        try {
+          const parsed = JSON.parse(raw);
+          errorMessage = parsed?.error || parsed?.message || raw;
+        } catch {
+          errorMessage = raw;
+        }
       }
     } catch {
-      // If we can't parse the JSON, fall back to statusText
+      // Body unreadable — fall back to statusText.
     }
-    throw new ApiError(errorMessage);
+    throw new ApiError(errorMessage.trim());
   }
 
   if (response.status === 204) {
