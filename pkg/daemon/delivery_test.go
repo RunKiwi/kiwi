@@ -72,9 +72,11 @@ func TestRestGitHub_CreatePR(t *testing.T) {
 }
 
 type fakeGH struct {
-	called bool
-	owner  string
-	repo   string
+	called       bool
+	findCalled   bool
+	owner        string
+	repo         string
+	existingOpen string
 }
 
 func (f *fakeGH) CreatePR(ctx context.Context, owner, repo, base, head, title, body string) (string, error) {
@@ -82,6 +84,13 @@ func (f *fakeGH) CreatePR(ctx context.Context, owner, repo, base, head, title, b
 	f.owner = owner
 	f.repo = repo
 	return "https://github.com/" + owner + "/" + repo + "/pull/1", nil
+}
+
+func (f *fakeGH) FindOpenPR(ctx context.Context, owner, repo, head string) (string, error) {
+	f.findCalled = true
+	f.owner = owner
+	f.repo = repo
+	return f.existingOpen, nil
 }
 
 func TestPublishResult(t *testing.T) {
@@ -138,6 +147,27 @@ func TestPublishResult(t *testing.T) {
 	out, err := exec.Command("git", "--git-dir="+bareDir, "rev-parse", "refs/heads/kiwi/job1").CombinedOutput()
 	if err != nil {
 		t.Errorf("branch kiwi/job1 not in bare remote: %v %s", err, out)
+	}
+
+	// Test 3: idempotency (PR already exists)
+	gh.called = false
+	gh.existingOpen = "https://github.com/owner/repo/pull/123"
+	os.WriteFile(filepath.Join(workDir, "test2.txt"), []byte("data2"), 0644)
+	pr, detail, err = publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail != "updated existing PR" {
+		t.Errorf("got detail: %q", detail)
+	}
+	if pr != "https://github.com/owner/repo/pull/123" {
+		t.Errorf("got pr url: %q", pr)
+	}
+	if gh.called {
+		t.Error("CreatePR was called even though PR exists")
+	}
+	if !gh.findCalled {
+		t.Error("FindOpenPR was not called")
 	}
 }
 

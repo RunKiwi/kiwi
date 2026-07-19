@@ -16,6 +16,7 @@ import (
 
 type githubClient interface {
 	CreatePR(ctx context.Context, owner, repo, base, head, title, body string) (htmlURL string, err error)
+	FindOpenPR(ctx context.Context, owner, repo, head string) (htmlURL string, err error)
 }
 
 // jobBranchName is the single branch a whole job shares — every worker commits
@@ -70,7 +71,7 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 	// for that head, so treat that as success and return the existing PR instead
 	// of failing the later workers.
 	if resp.StatusCode == http.StatusUnprocessableEntity {
-		if existing, e := c.findOpenPR(ctx, owner, repo, head); e == nil && existing != "" {
+		if existing, e := c.FindOpenPR(ctx, owner, repo, head); e == nil && existing != "" {
 			return existing, nil
 		}
 	}
@@ -88,9 +89,9 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 	return res.HTMLURL, nil
 }
 
-// findOpenPR returns the html_url of the open PR whose head is `head` in
+// FindOpenPR returns the html_url of the open PR whose head is `head` in
 // owner/repo, or "" if none. Used to make CreatePR idempotent per job branch.
-func (c *restGitHub) findOpenPR(ctx context.Context, owner, repo, head string) (string, error) {
+func (c *restGitHub) FindOpenPR(ctx context.Context, owner, repo, head string) (string, error) {
 	api := c.api
 	if api == "" {
 		api = "https://api.github.com"
@@ -187,7 +188,9 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 	// Never log pushRemote as it contains the token. Log spec.RepoURL instead.
 	log.Printf("Pushing to %s on branch %s...", spec.RepoURL, branchName)
 
-	if _, err := runGit("push", pushRemote, "HEAD:refs/heads/"+branchName); err != nil {
+	// Use + (force push) because a redelivered task will have a different commit hash
+	// than the previous attempt, resulting in a non-fast-forward push.
+	if _, err := runGit("push", pushRemote, "+HEAD:refs/heads/"+branchName); err != nil {
 		// git may echo the authenticated remote URL (with the token) in its error
 		// output; scrub the token before it reaches logs or the result detail.
 		msg := err.Error()
@@ -202,6 +205,11 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 		// Tests might pass a local repo for pushRemoteOverride which parseGitHubRepo will reject.
 		// Return unsupported host instead of erroring.
 		return "", "unsupported host", nil
+	}
+
+	// If this task was redelivered after previously opening a PR, adopt the existing PR.
+	if existing, err := gh.FindOpenPR(ctx, owner, repo, branchName); err == nil && existing != "" {
+		return existing, "updated existing PR", nil
 	}
 
 	base := spec.Ref
