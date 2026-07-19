@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -120,6 +121,21 @@ func TestOAuthFlow_Github(t *testing.T) {
 	}
 	if user.Email != "test@github.local" || user.Name != "Test User" || *user.OAuthProvider != "github" || *user.OAuthSubject != "12345" {
 		t.Errorf("user fields mismatch: %+v", user)
+	}
+
+	// The token handed back in the fragment must be persisted in api_keys and
+	// map to this user — otherwise the SPA's bearer auth (validate) 401s.
+	frag := loc[strings.Index(loc, "#token=")+len("#token="):]
+	tokenPlain, err := url.QueryUnescape(frag)
+	if err != nil {
+		t.Fatalf("failed to unescape token fragment: %v", err)
+	}
+	var apiKey APIKey
+	if err := db.First(&apiKey, "key_hash = ?", hashToken(tokenPlain)).Error; err != nil {
+		t.Fatalf("expected minted API key to be persisted: %v", err)
+	}
+	if apiKey.UserID != user.ID {
+		t.Errorf("API key user mismatch: got %s want %s", apiKey.UserID, user.ID)
 	}
 }
 
