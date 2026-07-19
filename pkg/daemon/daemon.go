@@ -340,6 +340,15 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return false, "", "file path escapes worktree"
 	}
 
+	// Anti-gaming: the loop's contract is "green test = done". If the Actor's
+	// target file is itself a test, it can pass the gate by weakening the test
+	// (delete an assertion, widen a tolerance) instead of fixing the code. Refuse
+	// the task rather than reward that (Execution Model RFC §8; issue #132).
+	if looksLikeTestFile(spec.File) {
+		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
+		return false, "", fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)
+	}
+
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
 	if spec.RepoURL != "" && spec.Ref != "" {
