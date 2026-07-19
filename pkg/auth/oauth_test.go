@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"golang.org/x/oauth2"
@@ -85,12 +86,14 @@ func TestOAuthFlow_Github(t *testing.T) {
 	router.ServeHTTP(wCallback, reqCallback)
 
 	if wCallback.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("expected redirect to dashboard, got %v", wCallback.Code)
+		t.Fatalf("expected redirect to SPA callback, got %v", wCallback.Code)
 	}
 
+	// The callback hands the browser back to the SPA on the frontend origin,
+	// carrying the freshly-minted API token in the URL fragment.
 	loc := wCallback.Header().Get("Location")
-	if loc == "" || loc[:10] != "/dashboard" {
-		t.Fatalf("expected dashboard redirect, got %v", loc)
+	if !strings.Contains(loc, "/auth/callback#token=") {
+		t.Fatalf("expected SPA callback redirect with token fragment, got %v", loc)
 	}
 
 	var sessionCookie *http.Cookie

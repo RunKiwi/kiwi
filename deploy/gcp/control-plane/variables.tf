@@ -112,3 +112,16 @@ variable "allowed_egress_cidrs" {
   description = "List of CIDRs allowed for egress from daemon VMs (e.g. GitHub, Anthropic, Kiwi API)"
   default     = ["140.82.112.0/20", "192.30.252.0/22"] # Example GitHub CIDRs
 }
+
+variable "github_oauth_client_id" {
+  type        = string
+  description = "GitHub OAuth Client ID"
+  default     = ""
+}
+
+variable "github_oauth_client_secret" {
+  type        = string
+  description = "GitHub OAuth Client Secret"
+  sensitive   = true
+  default     = ""
+}
