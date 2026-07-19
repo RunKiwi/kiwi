@@ -2,7 +2,7 @@
 
 import { useFleetStore } from "@/store/useFleetStore";
 import { useEffect, useState } from "react";
-import { Server, Activity, Clock, Plus, Cloud, Building2, Loader2, KeyRound, Copy, Check } from "lucide-react";
+import { Server, Activity, Clock, Plus, Cloud, Building2, Loader2, KeyRound, Copy, Check, AlertCircle } from "lucide-react";
 import { client, type Fleet } from "@/lib/api";
 
 export default function FleetPage() {
@@ -15,6 +15,7 @@ export default function FleetPage() {
   // so daemons enrol into the fleet whose tasks they should lease.
   const [token, setToken] = useState<{ fleetId: string; value: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState("");
 
   const loadFleets = () => client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
 
@@ -26,10 +27,12 @@ export default function FleetPage() {
   }, [loadDaemons]);
 
   const create = async () => {
-    if (!name.trim()) return;
+    setErr("");
+    if (!name.trim()) { setErr("Give the fleet a name."); return; }
     setBusy(true);
     try { await client.createFleet(name.trim(), type); setName(""); await loadFleets(); }
-    catch { /* ignore */ } finally { setBusy(false); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Failed to create fleet"); }
+    finally { setBusy(false); }
   };
 
   const mintToken = async (fleetId: string) => {
@@ -45,7 +48,7 @@ export default function FleetPage() {
     <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-white">
       <div className="mb-8">
         <h1 className="text-3xl font-light tracking-tight mb-2">Fleets</h1>
-        <p className="text-zinc-400">Groups of execution capacity. <b>Self-managed</b> runs on Kiwi; <b>BYOC</b> runs daemons in your own cloud.</p>
+        <p className="text-zinc-400">Groups of execution capacity. <b>Managed</b> runs on Kiwi; <b>BYOC</b> runs daemons in your own cloud.</p>
       </div>
 
       {/* Create fleet */}
@@ -60,7 +63,7 @@ export default function FleetPage() {
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Type</label>
             <div className="flex gap-2">
               <button onClick={() => setType("self-managed")} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${type === "self-managed" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}>
-                <Cloud className="w-4 h-4" /> Self-managed
+                <Cloud className="w-4 h-4" /> Managed
               </button>
               <button onClick={() => setType("byoc")} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${type === "byoc" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}>
                 <Building2 className="w-4 h-4" /> BYOC
@@ -71,6 +74,7 @@ export default function FleetPage() {
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create
           </button>
         </div>
+        {err && <div className="flex items-center gap-2 text-red-400 text-sm mt-3"><AlertCircle className="w-4 h-4 shrink-0" />{err}</div>}
         {type === "byoc" && (
           <p className="mt-4 pt-4 border-t border-white/5 text-sm text-zinc-400 flex items-center gap-2">
             <KeyRound className="w-4 h-4" /> After creating a BYOC fleet, generate a per-fleet join token below to enrol a daemon into it.
@@ -87,7 +91,7 @@ export default function FleetPage() {
                 {f.type === "byoc" ? <Building2 className="w-5 h-5 text-blue-400" /> : <Cloud className="w-5 h-5 text-green-400" />}
                 <div>
                   <div className="font-medium text-sm">{f.name}</div>
-                  <div className="text-xs text-zinc-500">{f.type === "byoc" ? "BYOC" : "Self-managed"}</div>
+                  <div className="text-xs text-zinc-500">{f.type === "byoc" ? "BYOC" : "Managed"}</div>
                 </div>
               </div>
               <button onClick={() => mintToken(f.id)}

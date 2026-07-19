@@ -7,7 +7,10 @@ export interface PlanRequest {
   file?: string;
   files?: string[];
   test_cmd?: string;
+  // model is the worker model (runs on your provider key). planner_model is the
+  // model that decomposes/verifies the task (runs on Kiwi's planning key).
   model?: string;
+  planner_model?: string;
   max_workers?: number;
   fleet_id?: string;
 }
@@ -222,3 +225,25 @@ export const BUILTIN_MODELS = [
   "claude-haiku-4-5-20251001",
   "gemini-2.0-flash",
 ];
+
+// Curated models we recommend, grouped by provider. Shown on the Models page for
+// one-click add so people don't have to hand-type ids. (Automatic discovery from
+// the org's stored key is a planned follow-up.)
+export interface RecommendedModel {
+  id: string;
+  label: string;
+  provider: "anthropic" | "gemini";
+  note?: string;
+}
+
+export const RECOMMENDED_MODELS: RecommendedModel[] = [
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8", provider: "anthropic", note: "Most capable" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic", note: "Balanced" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", provider: "anthropic", note: "Fast & cheap" },
+  { id: "gemini-flash-latest", label: "Gemini Flash (latest)", provider: "gemini", note: "Fast & cheap" },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", provider: "gemini" },
+];
+
+// A sensible default split for the task form: a strong planner, a fast worker.
+export const DEFAULT_PLANNER_MODEL = "claude-opus-4-8";
+export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";

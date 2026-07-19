@@ -86,8 +86,16 @@ func selectPlanner() planner.Planner {
 	if model == "" {
 		model = "claude-opus-4-8"
 	}
-	fmt.Printf("[planner] Using LLMPlanner (model %s)\n", model)
-	return planner.NewLLMPlanner(provider.NewAnthropicProviderWithModels(key, model, model))
+	fmt.Printf("[planner] Using LLMPlanner (default model %s)\n", model)
+	// Build the planner Completer per request so PlanRequest.PlannerModel can
+	// pick the model. The planning key is Anthropic, so non-Anthropic ids (e.g.
+	// gemini-*) fall back to the default rather than failing at call time.
+	return planner.NewLLMPlannerFunc(func(m string) planner.Completer {
+		if m == "" || strings.HasPrefix(m, "gemini") {
+			m = model
+		}
+		return provider.NewAnthropicProviderWithModels(key, m, m)
+	}, model)
 }
 
 func NewServer(storage store.Store, role string) *Server {

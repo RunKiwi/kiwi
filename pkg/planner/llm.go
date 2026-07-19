@@ -16,11 +16,27 @@ type Completer interface {
 
 // LLMPlanner asks a frontier model (e.g. Fable) to decompose a task into a DAG
 // of workers. It implements Planner, so callers depend only on the interface.
+//
+// newModel builds the Completer for a given model id, so the planning model can
+// be chosen per request (PlanRequest.PlannerModel) while still running on the
+// Control Plane's own key. defaultModel is used when the request doesn't ask for
+// a specific one.
 type LLMPlanner struct {
-	model Completer
+	newModel     func(model string) Completer
+	defaultModel string
 }
 
-func NewLLMPlanner(model Completer) *LLMPlanner { return &LLMPlanner{model: model} }
+// NewLLMPlanner wires a planner to a single fixed Completer (the model id is
+// ignored). Kept for tests and simple single-model setups.
+func NewLLMPlanner(model Completer) *LLMPlanner {
+	return &LLMPlanner{newModel: func(string) Completer { return model }}
+}
+
+// NewLLMPlannerFunc wires a planner that builds its Completer per request from
+// the requested model id, falling back to defaultModel.
+func NewLLMPlannerFunc(newModel func(model string) Completer, defaultModel string) *LLMPlanner {
+	return &LLMPlanner{newModel: newModel, defaultModel: defaultModel}
+}
 
 const plannerSystem = "You are the Planner in an autonomous coding swarm. " +
 	"Decompose the user's task into a DAG of small, independently-executable worker jobs. " +
@@ -29,13 +45,21 @@ const plannerSystem = "You are the Planner in an autonomous coding swarm. " +
 	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "model": string, "test_cmd": string, "depends_on": [string]}]}.`
 
 func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
-	if p.model == nil {
+	if p.newModel == nil {
+		return nil, fmt.Errorf("llm planner: no model configured")
+	}
+	plannerModel := req.PlannerModel
+	if plannerModel == "" {
+		plannerModel = p.defaultModel
+	}
+	model := p.newModel(plannerModel)
+	if model == nil {
 		return nil, fmt.Errorf("llm planner: no model configured")
 	}
 	user := fmt.Sprintf("Task: %s\nRepo: %s @ %s\nTarget file (if known): %s\nTest command (definition of done): %s\nMax workers: %d",
 		req.Task, req.RepoURL, req.Ref, req.File, req.TestCmd, req.MaxWorkers)
 
-	raw, err := p.model.Complete(ctx, plannerSystem, user)
+	raw, err := model.Complete(ctx, plannerSystem, user)
 	if err != nil {
 		return nil, fmt.Errorf("planner model call failed: %w", err)
 	}

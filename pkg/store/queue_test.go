@@ -19,6 +19,49 @@ func enqueue(t *testing.T, s *PostgresStore, id, org string) {
 	}
 }
 
+func TestExpireStaleQueuedTasks(t *testing.T) {
+	s := newTestStore(t)
+	enqueue(t, s, "old", "org1")
+	enqueue(t, s, "fresh", "org1")
+
+	// Set both timestamps explicitly via the same path so the comparison is
+	// deterministic regardless of the DB's default-timestamp timezone handling.
+	if err := s.db.Model(&QueuedTask{}).Where("id = ?", "old").
+		Update("created_at", time.Now().Add(-time.Hour)).Error; err != nil {
+		t.Fatalf("backdate old: %v", err)
+	}
+	if err := s.db.Model(&QueuedTask{}).Where("id = ?", "fresh").
+		Update("created_at", time.Now()).Error; err != nil {
+		t.Fatalf("set fresh: %v", err)
+	}
+
+	// A non-positive ttl disables the sweep.
+	if n, err := s.ExpireStaleQueuedTasks(context.Background(), 0); err != nil || n != 0 {
+		t.Fatalf("ttl=0: expected (0,nil), got (%d,%v)", n, err)
+	}
+
+	n, err := s.ExpireStaleQueuedTasks(context.Background(), 30*time.Minute)
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 stale task expired, got %d", n)
+	}
+
+	var old, fresh QueuedTask
+	s.db.First(&old, "id = ?", "old")
+	s.db.First(&fresh, "id = ?", "fresh")
+	if old.Status != TaskFailed {
+		t.Errorf("stale task should be FAILED, got %s", old.Status)
+	}
+	if old.ResultDetail == nil || *old.ResultDetail == "" {
+		t.Error("expired task should carry a result_detail explaining the timeout")
+	}
+	if fresh.Status != TaskQueued {
+		t.Errorf("fresh task should stay QUEUED, got %s", fresh.Status)
+	}
+}
+
 // enqueueTask enqueues a task in a given job with optional plan dependencies
 // (worker IDs, as the planner stores them in the spec).
 func enqueueTask(t *testing.T, s *PostgresStore, id, org, job string, dependsOn ...string) {

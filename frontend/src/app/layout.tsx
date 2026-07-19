@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Swarm Control Center | Kiwi",
-  description: "Monitor and control your agent swarm",
+  title: "Kiwi Dashboard",
+  description: "Plan tasks, run agent fleets, and ship pull requests with Kiwi.",
 };
 
 export default function RootLayout({
