@@ -65,6 +65,26 @@ func AuthMiddleware(db *gorm.DB, next http.Handler) http.Handler {
 
 		token := extractBearerToken(r)
 		if token == "" {
+			// check for session cookie
+			cookie, err := r.Cookie(SessionCookieName)
+			if err == nil && cookie.Value != "" {
+				sess, err := VerifySession(cookie.Value)
+				if err == nil {
+					var user User
+					if err := db.First(&user, "id = ?", sess.UserID).Error; err == nil {
+						claims := &UserClaims{
+							UserID: user.ID,
+							Email:  user.Email,
+							Name:   user.Name,
+							OrgID:  user.OrgID,
+							Role:   user.Role,
+						}
+						next.ServeHTTP(w, r.WithContext(ContextWithClaims(r.Context(), claims)))
+						return
+					}
+				}
+			}
+
 			http.Error(w, "Unauthorized: missing Authorization header", http.StatusUnauthorized)
 			return
 		}
@@ -123,6 +143,22 @@ func AuthMiddleware(db *gorm.DB, next http.Handler) http.Handler {
 func AuthFunc(db *gorm.DB, r *http.Request) (*UserClaims, error) {
 	token := extractBearerToken(r)
 	if token == "" {
+		cookie, err := r.Cookie(SessionCookieName)
+		if err == nil && cookie.Value != "" {
+			sess, err := VerifySession(cookie.Value)
+			if err == nil {
+				var user User
+				if err := db.First(&user, "id = ?", sess.UserID).Error; err == nil {
+					return &UserClaims{
+						UserID: user.ID,
+						Email:  user.Email,
+						Name:   user.Name,
+						OrgID:  user.OrgID,
+						Role:   user.Role,
+					}, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("missing Authorization header")
 	}
 
