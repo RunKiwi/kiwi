@@ -61,6 +61,7 @@ type Server struct {
 	// saved. nil skips validation (kept nil in unit tests that construct Server
 	// directly so they make no external calls); NewServer wires the real one.
 	credValidator func(ctx context.Context, name, value string) error
+	httpServer    *http.Server
 }
 
 // selectPlanner chooses the planner from the environment. With
@@ -467,8 +468,21 @@ func (s *Server) Start(addr string) error {
 	// CORS + rate limiting apply to the whole surface.
 	handler := corsMiddleware(s.rateLimitMiddleware(root))
 
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+
 	fmt.Printf("[Server] Kiwi daemon listening on %s\n", addr)
-	return http.ListenAndServe(addr, handler)
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully shuts down the server without interrupting any active connections.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpServer != nil {
+		return s.httpServer.Shutdown(ctx)
+	}
+	return nil
 }
 
 // corsMiddleware applies CORS headers to all responses and handles OPTIONS preflight.

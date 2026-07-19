@@ -29,3 +29,6 @@ deploy/.env
 .terraform/
 *.tfplan
 .terraform.lock.hcl
+
+# stray compiled cmd binary
+kms-migrate

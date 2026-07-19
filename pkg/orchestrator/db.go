@@ -5,6 +5,9 @@ import (
 
 	"os"
 
+	"strconv"
+	"time"
+
 	"github.com/ibreakthecloud/kiwi/pkg/agentapi"
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
@@ -46,10 +49,29 @@ func InitDB(dsn string) (*gorm.DB, error) {
 		); err != nil {
 			return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
 		}
-	} else {
+	} else if os.Getenv("KIWI_SKIP_BOOT_MIGRATE") != "true" {
 		// Apply SQL migrations
 		if err := RunMigrations(db); err != nil {
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
+		}
+	}
+
+	sqlDB, err := db.DB()
+	if err == nil {
+		if maxOpen := os.Getenv("KIWI_DB_MAX_OPEN"); maxOpen != "" {
+			if v, err := strconv.Atoi(maxOpen); err == nil {
+				sqlDB.SetMaxOpenConns(v)
+			}
+		}
+		if maxIdle := os.Getenv("KIWI_DB_MAX_IDLE"); maxIdle != "" {
+			if v, err := strconv.Atoi(maxIdle); err == nil {
+				sqlDB.SetMaxIdleConns(v)
+			}
+		}
+		if maxLife := os.Getenv("KIWI_DB_CONN_MAX_LIFETIME"); maxLife != "" {
+			if v, err := time.ParseDuration(maxLife); err == nil {
+				sqlDB.SetConnMaxLifetime(v)
+			}
 		}
 	}
 
