@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -243,8 +244,6 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 	// Resolve or create user
 	var user User
 	err = db.Where("oauth_provider = ? AND oauth_subject = ?", provider, subject).First(&user).Error
-	isNewAPIKey := false
-	var newAPIKeyPlaintext string
 
 	if err != nil {
 		// Try finding by email
@@ -301,10 +300,6 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 				CreatedAt:     time.Now(),
 			}
 			db.Create(&user)
-
-			// mint an initial API key
-			isNewAPIKey = true
-			newAPIKeyPlaintext, _, _ = GenerateAPIKey(user.ID, "Default Key", nil)
 		} else {
 			// Update existing user with oauth connection
 			user.OAuthProvider = &provider
@@ -313,7 +308,8 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 		}
 	}
 
-	// Issue session cookie
+	// Issue session cookie (used by the server-rendered surfaces; the SPA
+	// authenticates with the bearer API key handed back below).
 	sessionVal := CreateSessionCookieValue(user.ID)
 	secure := strings.HasPrefix(cfg.RedirectURL, "https")
 	http.SetCookie(w, &http.Cookie{
@@ -326,10 +322,23 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Redirect to dashboard
-	dashboardURL := "/dashboard"
-	if isNewAPIKey {
-		dashboardURL += "?new_api_key=" + newAPIKeyPlaintext
+	// Mint a fresh API key so the SPA (which authenticates with a bearer token
+	// held in localStorage) has a credential. An existing key's plaintext can't
+	// be recovered, so each OAuth sign-in issues a new "Web Session" key.
+	apiKey, _, keyErr := GenerateAPIKey(user.ID, "Web Session", nil)
+	if keyErr != nil {
+		http.Error(w, "Failed to create session key", http.StatusInternalServerError)
+		return
 	}
-	http.Redirect(w, r, dashboardURL, http.StatusTemporaryRedirect)
+
+	// Hand the browser back to the SPA on the frontend origin. The token rides
+	// in the URL fragment, which browsers never send to servers — so it stays
+	// out of access logs and Referer headers. KIWI_FRONTEND_URL must be the
+	// app origin (e.g. https://app.runkiwi.dev); default is the local dev SPA.
+	frontendURL := os.Getenv("KIWI_FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+	redirectURL := strings.TrimRight(frontendURL, "/") + "/auth/callback#token=" + url.QueryEscape(apiKey)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }

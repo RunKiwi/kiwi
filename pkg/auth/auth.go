@@ -58,7 +58,7 @@ func ContextWithClaims(ctx context.Context, claims *UserClaims) context.Context 
 func AuthMiddleware(db *gorm.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Exclude public paths from auth middleware so browser can load dashboard directly.
-		if r.URL.Path == "/" || r.URL.Path == "/dashboard" {
+		if r.URL.Path == "/" || r.URL.Path == "/dashboard" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}

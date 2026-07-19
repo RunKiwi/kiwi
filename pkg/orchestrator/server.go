@@ -450,6 +450,8 @@ func (s *Server) Start(addr string) error {
 		_, _ = w.Write([]byte("OK"))
 	})
 
+	auth.OAuthRouter(s.db, root)
+
 	root.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		sqlDB, err := s.db.DB()
 		if err != nil {
