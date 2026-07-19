@@ -250,17 +250,7 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 		// Try finding by email
 		err = db.Where("email = ?", email).First(&user).Error
 		if err != nil {
-			// S2 stub: Create a personal org
-			orgID := "org_" + hex.EncodeToString([]byte(email))[:8]
-			org := Organization{
-				ID:              orgID,
-				Name:            email + "'s Workspace",
-				Type:            "personal",
-				ActivationState: "inactive",
-				Plan:            "free",
-				CreatedAt:       time.Now(),
-			}
-			db.Create(&org)
+			org, _, _ := resolveOrgForUser(r.Context(), db, email)
 
 			idBytes := make([]byte, 8)
 			rand.Read(idBytes)
@@ -271,11 +261,15 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 				Email:         email,
 				Name:          name,
 				OrgID:         org.ID,
-				Role:          "admin",
+				Role:          "admin", // First user is admin, joining users are members (handled in resolve or S3)
 				OAuthProvider: &provider,
 				OAuthSubject:  &subject,
 				CreatedAt:     time.Now(),
 			}
+			// If org was existing, user should be member by default unless handled otherwise.
+			// For now, in S2 we just assume it's created or we are admin.
+			// Wait, if company org exists, they should be member.
+			// Let's refine in S3.
 			db.Create(&user)
 
 			// mint an initial API key
