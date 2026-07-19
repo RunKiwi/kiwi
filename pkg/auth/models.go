@@ -30,13 +30,16 @@ func (Organization) TableName() string { return "organizations" }
 
 // User represents an authenticated user belonging to an organization.
 type User struct {
-	ID            string    `json:"id" gorm:"primaryKey"`
-	Email         string    `json:"email" gorm:"uniqueIndex;not null"`
-	Name          string    `json:"name"`
-	OrgID         string    `json:"org_id" gorm:"index;not null"`
-	Role          string    `json:"role" gorm:"not null;default:member"` // "admin" or "member"
-	OAuthProvider *string   `json:"oauth_provider,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:1"`
-	OAuthSubject  *string   `json:"oauth_subject,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:2"`
+	ID    string `json:"id" gorm:"primaryKey"`
+	Email string `json:"email" gorm:"uniqueIndex;not null"`
+	Name  string `json:"name"`
+	OrgID string `json:"org_id" gorm:"index;not null"`
+	Role  string `json:"role" gorm:"not null;default:member"` // "admin" or "member"
+	// Explicit column names: without them GORM maps OAuthProvider ->
+	// "o_auth_provider", but migration 0008 (and the raw WHERE in oauth.go)
+	// use "oauth_provider". Pin the names so struct ops and SQL agree.
+	OAuthProvider *string   `json:"oauth_provider,omitempty" gorm:"column:oauth_provider;uniqueIndex:idx_users_oauth,priority:1"`
+	OAuthSubject  *string   `json:"oauth_subject,omitempty" gorm:"column:oauth_subject;uniqueIndex:idx_users_oauth,priority:2"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
