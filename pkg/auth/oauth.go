@@ -259,30 +259,31 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 			}
 
 			if needsApproval {
-				// Create a personal org while they wait for approval
+				// Create a personal org while they wait for approval. Use
+				// Where(stable key).Attrs(create-only) so a repeat sign-in
+				// resolves the existing row instead of inserting a duplicate.
 				personalOrgID := "org_" + hex.EncodeToString([]byte(email))[:8]
 				var personalOrg Organization
-				db.Where(Organization{ID: personalOrgID}).FirstOrCreate(&personalOrg, Organization{
-					ID:              personalOrgID,
+				db.Where(Organization{ID: personalOrgID}).Attrs(Organization{
 					Name:            email + "'s Workspace",
 					Type:            "personal",
 					ActivationState: "inactive",
 					Plan:            "free",
 					CreatedAt:       time.Now(),
-				})
+				}).FirstOrCreate(&personalOrg)
 				assignedOrgID = personalOrg.ID
 				role = "admin" // admin of their personal org
 
+				// Only the (org, user, pending) tuple identifies the request;
+				// the random ID and timestamp are create-only via Attrs, so they
+				// can't leak into the lookup and force a duplicate insert.
 				reqIDBytes := make([]byte, 8)
 				rand.Read(reqIDBytes)
 				var joinReq OrgJoinRequest
-				db.Where("org_id = ? AND user_email = ? AND status = ?", org.ID, email, "pending").FirstOrCreate(&joinReq, OrgJoinRequest{
+				db.Where(OrgJoinRequest{OrgID: org.ID, UserEmail: email, Status: "pending"}).Attrs(OrgJoinRequest{
 					ID:        "req_" + hex.EncodeToString(reqIDBytes),
-					OrgID:     org.ID,
-					UserEmail: email,
-					Status:    "pending",
 					CreatedAt: time.Now(),
-				})
+				}).FirstOrCreate(&joinReq)
 			}
 
 			idBytes := make([]byte, 8)
