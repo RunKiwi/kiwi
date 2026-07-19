@@ -106,8 +106,19 @@ resource "google_secret_manager_secret_version" "kiwi_server_token_version" {
   secret_data = var.kiwi_server_token
 }
 
+resource "google_secret_manager_secret" "kiwi_github_oauth_client_id" {
+  secret_id = "kiwi-github-oauth-client-id"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "kiwi_github_oauth_client_id_version" {
+  secret      = google_secret_manager_secret.kiwi_github_oauth_client_id.id
+  secret_data = var.kiwi_github_oauth_client_id
+}
+
 resource "google_secret_manager_secret" "kiwi_github_oauth_client_secret" {
-  count     = var.github_oauth_client_secret != "" ? 1 : 0
   secret_id = "kiwi-github-oauth-client-secret"
   replication {
     auto {}
@@ -115,9 +126,48 @@ resource "google_secret_manager_secret" "kiwi_github_oauth_client_secret" {
 }
 
 resource "google_secret_manager_secret_version" "kiwi_github_oauth_client_secret_version" {
-  count       = var.github_oauth_client_secret != "" ? 1 : 0
-  secret      = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].id
-  secret_data = var.github_oauth_client_secret
+  secret      = google_secret_manager_secret.kiwi_github_oauth_client_secret.id
+  secret_data = var.kiwi_github_oauth_client_secret
+}
+
+resource "google_secret_manager_secret" "kiwi_google_oauth_client_id" {
+  count     = var.kiwi_google_oauth_client_id != "" ? 1 : 0
+  secret_id = "kiwi-google-oauth-client-id"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "kiwi_google_oauth_client_id_version" {
+  count       = var.kiwi_google_oauth_client_id != "" ? 1 : 0
+  secret      = google_secret_manager_secret.kiwi_google_oauth_client_id[0].id
+  secret_data = var.kiwi_google_oauth_client_id
+}
+
+resource "google_secret_manager_secret" "kiwi_google_oauth_client_secret" {
+  count     = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
+  secret_id = "kiwi-google-oauth-client-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "kiwi_google_oauth_client_secret_version" {
+  count       = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
+  secret      = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].id
+  secret_data = var.kiwi_google_oauth_client_secret
+}
+
+resource "google_secret_manager_secret" "kiwi_session_secret" {
+  secret_id = "kiwi-session-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "kiwi_session_secret_version" {
+  secret      = google_secret_manager_secret.kiwi_session_secret.id
+  secret_data = var.kiwi_session_secret
 }
 
 # Cloud KMS
@@ -145,16 +195,41 @@ resource "google_project_iam_member" "cloudsql_client" {
   member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
-# Grant Secret Manager accessor
-resource "google_secret_manager_secret_iam_member" "kiwi_server_token_accessor" {
+# Grant Secret Manager Accessor
+resource "google_secret_manager_secret_iam_member" "server_token_accessor" {
   secret_id = google_secret_manager_secret.kiwi_server_token.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "kiwi_github_oauth_client_secret_accessor" {
-  count     = var.github_oauth_client_secret != "" ? 1 : 0
-  secret_id = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].id
+resource "google_secret_manager_secret_iam_member" "github_oauth_client_id_accessor" {
+  secret_id = google_secret_manager_secret.kiwi_github_oauth_client_id.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "github_oauth_client_secret_accessor" {
+  secret_id = google_secret_manager_secret.kiwi_github_oauth_client_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "google_oauth_client_id_accessor" {
+  count     = var.kiwi_google_oauth_client_id != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.kiwi_google_oauth_client_id[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "google_oauth_client_secret_accessor" {
+  count     = var.kiwi_google_oauth_client_secret != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "session_secret_accessor" {
+  secret_id = google_secret_manager_secret.kiwi_session_secret.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
@@ -201,24 +276,64 @@ resource "google_cloud_run_v2_service" "api" {
         value = "true"
       }
       env {
-        name  = "KIWI_GITHUB_OAUTH_CLIENT_ID"
-        value = var.github_oauth_client_id
+      env {
+        name  = "KIWI_OAUTH_REDIRECT_BASE"
+        value = var.kiwi_oauth_redirect_base
+      }
+      env {
+        name  = "KIWI_FRONTEND_URL"
+        value = var.kiwi_frontend_url
+      }
+      env {
+        name = "KIWI_GITHUB_OAUTH_CLIENT_ID"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.kiwi_github_oauth_client_id.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "KIWI_GITHUB_OAUTH_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.kiwi_github_oauth_client_secret.secret_id
+            version = "latest"
+          }
+        }
       }
       dynamic "env" {
-        for_each = tolist(var.github_oauth_client_secret != "" ? ["1"] : [])
+        for_each = var.kiwi_google_oauth_client_id != "" ? [1] : []
         content {
-          name = "KIWI_GITHUB_OAUTH_CLIENT_SECRET"
+          name = "KIWI_GOOGLE_OAUTH_CLIENT_ID"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.kiwi_github_oauth_client_secret[0].secret_id
+              secret  = google_secret_manager_secret.kiwi_google_oauth_client_id[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.kiwi_google_oauth_client_secret != "" ? [1] : []
+        content {
+          name = "KIWI_GOOGLE_OAUTH_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.kiwi_google_oauth_client_secret[0].secret_id
               version = "latest"
             }
           }
         }
       }
       env {
-        name  = "KIWI_OAUTH_REDIRECT_BASE"
-        value = "https://${var.api_domain}"
+        name = "KIWI_SESSION_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.kiwi_session_secret.secret_id
+            version = "latest"
+          }
+        }
       }
     }
 
@@ -227,6 +342,14 @@ resource "google_cloud_run_v2_service" "api" {
       egress    = "PRIVATE_RANGES_ONLY"
     }
   }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "api_public" {
+  project  = google_cloud_run_v2_service.api.project
+  location = google_cloud_run_v2_service.api.location
+  name     = google_cloud_run_v2_service.api.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 resource "google_cloud_run_v2_service" "orchestrator" {
@@ -286,6 +409,14 @@ resource "google_cloud_run_v2_service" "frontend" {
       }
     }
   }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "frontend_public" {
+  project  = google_cloud_run_v2_service.frontend.project
+  location = google_cloud_run_v2_service.frontend.location
+  name     = google_cloud_run_v2_service.frontend.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 # Cloud Run Job for Migrations
