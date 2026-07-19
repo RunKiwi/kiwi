@@ -120,3 +120,29 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 	}
 	return parseVerdict(collectText(resp)), nil
 }
+
+// Complete runs a single-turn (system + user) completion and returns the raw
+// response text. Unlike GetCodeEdit it does not extract a fenced code block —
+// callers such as the planner parse their own structured output. This satisfies
+// the planner's Completer interface so LLMPlanner can decompose tasks with a
+// live model.
+func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
+	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     anthropic.Model(p.actorModel),
+		MaxTokens: 8000,
+		System:    []anthropic.TextBlockParam{{Text: system}},
+		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("anthropic completion request failed: %w", err)
+	}
+	p.recordCost(resp.Usage, p.actorModel)
+	if resp.StopReason == anthropic.StopReasonRefusal {
+		return "", errors.New("completion refused by safety classifier")
+	}
+	return collectText(resp), nil
+}

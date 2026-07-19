@@ -161,6 +161,23 @@ func TestLLMPlannerRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestLLMPlannerDefaultsScopeFromRequest(t *testing.T) {
+	// Model omits file/model/test_cmd; the planner must backfill them from the
+	// request so every worker is executable (carries a definition of done).
+	resp := `{"summary":"s","workers":[{"id":"w1","task":"do it","depends_on":[]}]}`
+	p := NewLLMPlanner(fakeCompleter{out: resp})
+	plan, err := p.Plan(context.Background(), PlanRequest{
+		Task: "fix it", File: "pkg/x.go", Model: "sonnet", TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	w := plan.Workers[0]
+	if w.File != "pkg/x.go" || w.Model != "sonnet" || w.TestCmd != "go test ./..." {
+		t.Errorf("worker did not inherit request scope: %+v", w)
+	}
+}
+
 func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	s := newTestStore(t)
 	svc := NewService(s, NewHeuristicPlanner())
