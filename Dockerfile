@@ -21,7 +21,7 @@ FROM golang:1.25-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata git
 
 # Copy the binaries from the builder stage
 COPY --from=builder /app/kiwid .
