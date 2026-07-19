@@ -424,8 +424,15 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
 		},
 	}
+	// Inject the repo's AGENT.md (if any) as per-repo context for the Actor —
+	// conventions, how to run tests, what not to touch (Execution Model RFC §5).
+	description := spec.Task
+	if rc := repoContext(worktreePath); rc != "" {
+		log.Printf("Task %s: injecting repo AGENT.md context (%d bytes)", spec.ID, len(rc))
+		description = withRepoContext(description, rc)
+	}
 	task := loop.Task{
-		Description: spec.Task,
+		Description: description,
 		FilePath:    filepath.Join(worktreePath, spec.File),
 	}
 	runTest := func(ctx context.Context) (string, bool, error) {
