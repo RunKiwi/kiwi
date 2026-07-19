@@ -214,11 +214,38 @@ func firstLeasable(tx *gorm.DB, orgID string, candidates []QueuedTask) (*QueuedT
 	}
 
 	for i := range candidates {
+		// Failed-dependency policy (RFC §3): a task can never satisfy its DAG once
+		// one of its dependencies has FAILED, so fail it fast rather than leaving
+		// it QUEUED forever. This cascades transitively — a task failed here becomes
+		// a failed dependency for its own dependents on the next lease scan.
+		if dependencyFailed(&candidates[i], statuses) {
+			reason := "a dependency failed; task cannot run"
+			if err := tx.Model(&QueuedTask{}).
+				Where("id = ? AND status = ?", candidates[i].ID, TaskQueued).
+				Updates(map[string]interface{}{
+					"status":        TaskFailed,
+					"result_detail": &reason,
+					"updated_at":    time.Now(),
+				}).Error; err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if dependenciesSatisfied(&candidates[i], statuses) {
 			return &candidates[i], nil
 		}
 	}
 	return nil, nil
+}
+
+// dependencyFailed reports whether any of t's plan dependencies has FAILED.
+func dependencyFailed(t *QueuedTask, statuses map[string]string) bool {
+	for _, id := range dependencyTaskIDs(t) {
+		if statuses[id] == TaskFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // dependenciesSatisfied reports whether every dependency of t has SUCCEEDED. A
