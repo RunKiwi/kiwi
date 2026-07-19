@@ -437,6 +437,7 @@ func (s *Server) Start(addr string) error {
 		root.Handle("/agent/", s.agentAPI.Handler())
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
+	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
 	// The daemon API authenticates by Ed25519 request signature, not an org API
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.
 	root.HandleFunc("/api/v1/daemon/register", s.handleDaemonRegister)
