@@ -102,7 +102,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
                    </a>
                  )}
                  {task.result_detail && (
-                   <div className="text-red-400 text-xs mt-2">{task.result_detail}</div>
+                   <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-red-400' : 'text-zinc-400'}`}>{task.result_detail}</div>
                  )}
                </div>
              ))}
