@@ -50,15 +50,18 @@ export default function TopologyPage() {
       edges.push({ id: `e-cp-${id}`, source: "cp", target: id, animated: true, markerEnd: { type: MarkerType.ArrowClosed } });
     });
 
-    // Daemons row
+    // Daemons row. A daemon hangs off its fleet (that's what it leases work
+    // from); an unassigned daemon hangs off the Control Plane directly.
     const daemonY = 260;
+    const fleetNodeExists = (fid?: string) => !!fid && fleets.some(f => f.id === fid);
     daemons.forEach((d, i) => {
       const id = `daemon-${d.id}`;
+      const parent = fleetNodeExists(d.fleet_id) ? `fleet-${d.fleet_id}` : "cp";
       nodes.push({
         id, position: { x: 120 + i * 200, y: daemonY }, data: { label: `${d.id.slice(0, 14)}…\n${d.online ? "● online" : "○ offline"}` },
         style: { ...nodeBase, whiteSpace: "pre-line", border: d.online ? "1px solid #22c55e" : "1px solid #ef4444", color: d.online ? "#fff" : "#aaa" },
       });
-      edges.push({ id: `e-cp-${id}`, source: "cp", target: id, style: { stroke: d.online ? "#22c55e" : "#555" } });
+      edges.push({ id: `e-${parent}-${id}`, source: parent, target: id, style: { stroke: d.online ? "#22c55e" : "#555" } });
     });
 
     // Recent jobs

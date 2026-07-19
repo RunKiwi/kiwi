@@ -72,6 +72,7 @@ export interface JobsListResponse {
 
 export interface Daemon {
   id: string;
+  fleet_id?: string;
   online: boolean;
   last_seen_at?: string;
   created_at: string;
@@ -193,9 +194,13 @@ export const client = {
   listGithubRepos: () =>
     fetchApi<{ repos: GithubRepo[] }>("/api/v1/github/repos"),
 
-  mintJoinToken: () =>
-    fetchApi<{ join_token: string; expires_in: number }>("/api/v1/daemon/join-token", {
+  // Mint a single-use daemon join token. Pass a fleetId to bind the daemon to
+  // that fleet (so it leases only that fleet's tasks); omit it for the org's
+  // unassigned pool.
+  mintJoinToken: (fleetId?: string) =>
+    fetchApi<{ join_token: string; expires_in: number; fleet_id: string }>("/api/v1/daemon/join-token", {
       method: "POST",
+      body: JSON.stringify({ fleet_id: fleetId ?? "" }),
     }),
 };
 

@@ -214,7 +214,7 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[daemon] touch %s: %v", d.ID, err)
 	}
 
-	task, err := s.storage.LeaseNextTask(r.Context(), d.OrgID, d.ID, leaseTTL)
+	task, err := s.storage.LeaseNextTask(r.Context(), d.OrgID, d.ID, d.FleetID, leaseTTL)
 	if err != nil {
 		log.Printf("[daemon] lease for org %s: %v", d.OrgID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -407,7 +407,38 @@ func (s *Server) handleDaemonJoinToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.storage.CreateDaemonJoinToken(r.Context(), claims.OrgID, joinTokenTTL)
+	// fleet_id is optional: omit it to mint a token for the org's unassigned
+	// pool. A body is not required, so an empty/absent one is fine.
+	var req struct {
+		FleetID string `json:"fleet_id"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// A token may only target a fleet the caller's org owns — otherwise a daemon
+	// could be routed into a fleet the org cannot see.
+	if req.FleetID != "" {
+		fleets, err := s.storage.ListFleets(r.Context(), claims.OrgID)
+		if err != nil {
+			log.Printf("[daemon] list fleets for org %s: %v", claims.OrgID, err)
+			http.Error(w, "could not create join token", http.StatusInternalServerError)
+			return
+		}
+		owned := false
+		for _, f := range fleets {
+			if f.ID == req.FleetID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			http.Error(w, "unknown fleet", http.StatusBadRequest)
+			return
+		}
+	}
+
+	token, err := s.storage.CreateDaemonJoinToken(r.Context(), claims.OrgID, req.FleetID, joinTokenTTL)
 	if err != nil {
 		log.Printf("[daemon] mint join token for org %s: %v", claims.OrgID, err)
 		http.Error(w, "could not create join token", http.StatusInternalServerError)
@@ -419,6 +450,7 @@ func (s *Server) handleDaemonJoinToken(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"join_token": token,
 		"expires_in": int(joinTokenTTL.Seconds()),
+		"fleet_id":   req.FleetID,
 	})
 }
 
@@ -447,6 +479,7 @@ func specFromQueuedTask(task *store.QueuedTask) (agent.WorkerSpec, error) {
 // Identity material (keys) is omitted because the UI does not need it.
 type DaemonResponse struct {
 	ID         string     `json:"id"`
+	FleetID    string     `json:"fleet_id"`
 	Online     bool       `json:"online"`
 	LastSeenAt *time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -481,6 +514,7 @@ func (s *Server) handleDaemonsList(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = append(resp, DaemonResponse{
 			ID:         d.ID,
+			FleetID:    d.FleetID,
 			Online:     online,
 			LastSeenAt: d.LastSeenAt,
 			CreatedAt:  d.CreatedAt,

@@ -102,7 +102,7 @@ func TestDaemonSeam_EndToEnd(t *testing.T) {
 	d := newDaemonKeys(t, ts.URL)
 
 	// 1. Register with a valid join token bound to o1.
-	token, err := st.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	if err != nil {
 		t.Fatalf("mint join token: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestDaemonSeam_ForgedSignatureRejected(t *testing.T) {
 	}
 
 	victim := newDaemonKeys(t, ts.URL)
-	token, _ := st.CreateDaemonJoinToken(ctx, "o1", time.Hour)
+	token, _ := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
 	if err := victim.client.Register(ctx, daemon.RegisterReq{
 		JoinToken:  token,
 		PubKey:     victim.encPubB64(),

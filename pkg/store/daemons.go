@@ -33,7 +33,7 @@ func hashJoinToken(token string) string {
 // daemon registration into orgID. The plaintext token is returned exactly once
 // — only its hash is persisted — so the caller must deliver it to the operator
 // (Terraform output for BYOC, internal provisioning for managed) immediately.
-func (s *PostgresStore) CreateDaemonJoinToken(ctx context.Context, orgID string, ttl time.Duration) (string, error) {
+func (s *PostgresStore) CreateDaemonJoinToken(ctx context.Context, orgID, fleetID string, ttl time.Duration) (string, error) {
 	if orgID == "" {
 		return "", errors.New("org id is required")
 	}
@@ -50,6 +50,7 @@ func (s *PostgresStore) CreateDaemonJoinToken(ctx context.Context, orgID string,
 	row := &DaemonJoinToken{
 		TokenHash: hashJoinToken(token),
 		OrgID:     orgID,
+		FleetID:   fleetID,
 		ExpiresAt: time.Now().Add(ttl),
 		CreatedAt: time.Now(),
 	}
@@ -111,15 +112,19 @@ func (s *PostgresStore) RegisterDaemon(ctx context.Context, joinToken, signPubKe
 		err := tx.Where("sign_pub_key = ?", signPubKey).First(&existing).Error
 		switch {
 		case err == nil:
-			// Known identity: refresh the seal target and re-bind to this org.
+			// Known identity: refresh the seal target and re-bind to this org and
+			// the token's fleet. Re-registering with a token for a different fleet
+			// is how a daemon is moved between fleets.
 			if err := tx.Model(&Daemon{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
 				"enc_pub_key": encPubKey,
 				"org_id":      tok.OrgID,
+				"fleet_id":    tok.FleetID,
 			}).Error; err != nil {
 				return err
 			}
 			existing.EncPubKey = encPubKey
 			existing.OrgID = tok.OrgID
+			existing.FleetID = tok.FleetID
 			out = &existing
 			return nil
 		case errors.Is(err, gorm.ErrRecordNotFound):
@@ -130,6 +135,7 @@ func (s *PostgresStore) RegisterDaemon(ctx context.Context, joinToken, signPubKe
 			d := &Daemon{
 				ID:         "dmn_" + hex.EncodeToString(idBytes),
 				OrgID:      tok.OrgID,
+				FleetID:    tok.FleetID,
 				SignPubKey: signPubKey,
 				EncPubKey:  encPubKey,
 				CreatedAt:  now,

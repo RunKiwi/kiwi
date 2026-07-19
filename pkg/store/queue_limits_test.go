@@ -26,19 +26,19 @@ func TestLeaseEnforcesConcurrencyCap(t *testing.T) {
 	enqueueTask(t, s, "t3", "o1", "j3")
 
 	// 1st lease should succeed
-	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil || l1 == nil {
 		t.Fatalf("Lease 1 failed: %v, %v", err, l1)
 	}
 
 	// 2nd lease should succeed
-	l2, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l2, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil || l2 == nil {
 		t.Fatalf("Lease 2 failed: %v, %v", err, l2)
 	}
 
 	// 3rd lease should return nil because of concurrency cap
-	l3, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l3, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil {
 		t.Fatalf("Lease 3 error: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLeaseEnforcesBudgetCap(t *testing.T) {
 	enqueueTask(t, s, "t-good", "o1", "j-good")
 
 	// First lease should skip t-bad (fail it) and return t-good
-	l1, err := s.LeaseNextTask(ctx, "o1", "d1", time.Minute)
+	l1, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
 	if err != nil || l1 == nil {
 		t.Fatalf("Lease failed: %v, %v", err, l1)
 	}

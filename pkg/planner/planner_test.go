@@ -189,7 +189,7 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	}
 
 	// Tasks are leasable from the queue for that org.
-	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", 60_000_000_000) // 60s
+	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", "", 60_000_000_000) // 60s
 	if err != nil || leased == nil {
 		t.Fatalf("expected a leasable task, got %v err=%v", leased, err)
 	}
@@ -220,7 +220,7 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 		t.Fatalf("expected 1 enqueued task, got %d", len(res.TaskIDs))
 	}
 
-	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", 60_000_000_000)
+	leased, err := s.LeaseNextTask(ctx, "o1", "daemon-1", "", 60_000_000_000)
 	if err != nil || leased == nil {
 		t.Fatalf("expected a leasable task, got %v err=%v", leased, err)
 	}
