@@ -26,6 +26,9 @@ deploy/.env
 
 # Local one-command stack state (scripts/local-up.sh)
 .kiwi-local/
+.terraform/
+*.tfplan
+.terraform.lock.hcl
 
 # stray compiled cmd binary
 kms-migrate
