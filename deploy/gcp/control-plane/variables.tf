@@ -106,3 +106,9 @@ variable "frontend_image" {
   type        = string
   description = "Container image for frontend"
 }
+
+variable "allowed_egress_cidrs" {
+  type        = list(string)
+  description = "List of CIDRs allowed for egress from daemon VMs (e.g. GitHub, Anthropic, Kiwi API)"
+  default     = ["140.82.112.0/20", "192.30.252.0/22"] # Example GitHub CIDRs
+}

@@ -3,7 +3,15 @@ Terraform used the selected providers to generate the following execution plan. 
 
 Terraform will perform the following actions:
 
-  # module.gcp_control_plane.google_compute_network.vpc will be created
-  + resource "google_compute_network" "vpc" { ... }
+  # module.control_plane.google_compute_firewall.daemon_egress_deny_all will be created
+  + resource "google_compute_firewall" "daemon_egress_deny_all" { ... }
+  # module.control_plane.google_compute_firewall.daemon_egress_allow_dns will be created
+  + resource "google_compute_firewall" "daemon_egress_allow_dns" { ... }
+  # module.control_plane.google_compute_firewall.daemon_egress_allow_https will be created
+  + resource "google_compute_firewall" "daemon_egress_allow_https" { ... }
+  # module.control_plane.google_compute_router.router will be created
+  + resource "google_compute_router" "router" { ... }
+  # module.control_plane.google_compute_router_nat.nat will be created
+  + resource "google_compute_router_nat" "nat" { ... }
 
-Plan: 20 to add, 0 to change, 0 to destroy.
+Plan: 5 to add, 0 to change, 0 to destroy.

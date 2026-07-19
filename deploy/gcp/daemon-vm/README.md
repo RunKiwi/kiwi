@@ -4,11 +4,21 @@ This Terraform module provisions a dedicated, per-org execution daemon (the Data
 
 ## Architecture
 
-*   **Hostile-by-Default:** The daemon VM has no ambient GCP credentials and operates in a dedicated subnet without public IPs.
+*   **Hostile-by-Default:** The daemon VM has no ambient GCP credentials. It runs under the default compute service account with an empty scope list, meaning it cannot mint access tokens for GCP APIs. Project-wide SSH keys are blocked, and OS Login is disabled.
+*   **Shielded VM:** The VM is configured with Secure Boot, vTPM, and Integrity Monitoring enabled to prevent rootkits and ensure boot integrity. Serial console access is disabled.
+*   **Network Isolation & Egress:** The instance resides in a dedicated `daemon` subnet with no public IPs. A default-deny egress firewall rule drops all outbound traffic. Outbound access is permitted *only* for DNS and specific allowlisted CIDRs (VCS, Model APIs, and the Kiwi Public API) via Cloud NAT. There is no inbound route.
 *   **Nested Virtualization:** Enabled at the hardware level, allowing Firecracker microVMs to run securely within this instance.
 *   **Persistent Cache:** A dedicated Google Persistent Disk is attached and mounted at `/mnt/kiwi-cache` for the daemon to persist its `gitcache` across restarts.
 *   **Metadata Injection:** The join token and org ID are provided to the instance via instance metadata, avoiding baked-in secrets.
 *   **Startup Script:** Automatically formats the cache disk on first boot, installs Docker, and runs the `kiwidaemon` container connected to the Control Plane API.
+
+## Extending the Egress Allowlist
+
+To allow egress to a new model provider or VCS, you must update the `allowed_egress_cidrs` variable in the `control-plane` Terraform module:
+
+1. Identify the CIDR blocks for the new provider.
+2. Add them to `allowed_egress_cidrs` in your `terraform.tfvars` for the `control-plane`.
+3. Apply the `control-plane` module to update the `kiwi-daemon-egress-allow-https` firewall rule.
 
 ## Runbook: Provisioning a Daemon
 
