@@ -54,14 +54,27 @@ services:
       dockerfile: Dockerfile
     # Override the entrypoint (the image ENTRYPOINT is ./kiwid). Using `command`
     # alone would append args to ./kiwid and boot a second control plane.
-    # -key-path/-cache-dir live on the mounted volume so a restart keeps the
-    # daemon's identity (join tokens are single-use — regenerating would fail).
+    #
+    # The daemon runs each task's sandbox via the host Docker daemon (mounted
+    # socket). For those `docker run -v <worktree>:/workspace` bind-mounts to
+    # resolve, the worktree path must be identical on the host and inside this
+    # container — so the state dir (key + git cache) is bind-mounted at the SAME
+    # absolute path on both sides. A named volume would leave the sandbox mount
+    # pointing at a host path that does not exist, silently mounting nothing.
+    # It also persists the daemon's identity across restarts (join tokens are
+    # single-use, so re-registering would fail).
     entrypoint: ["./kiwidaemon"]
-    command: ["-api-url", "http://kiwid:8080", "-key-path", "/data/daemon.key", "-cache-dir", "/data/cache"]
+    command:
+      - "-api-url"
+      - "http://kiwid:8080"
+      - "-key-path"
+      - "${KIWI_DAEMON_STATE:-/var/lib/kiwi-daemon}/daemon.key"
+      - "-cache-dir"
+      - "${KIWI_DAEMON_STATE:-/var/lib/kiwi-daemon}/cache"
     environment:
       - KIWI_JOIN_TOKEN=${KIWI_JOIN_TOKEN}
     volumes:
-      - kiwidaemon_data:/data
+      - ${KIWI_DAEMON_STATE:-/var/lib/kiwi-daemon}:${KIWI_DAEMON_STATE:-/var/lib/kiwi-daemon}
       - /var/run/docker.sock:/var/run/docker.sock # required for running sandboxes
     depends_on:
       - kiwid
@@ -71,4 +84,3 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
-  kiwidaemon_data:

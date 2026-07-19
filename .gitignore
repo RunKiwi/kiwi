@@ -23,3 +23,6 @@ query
 .env
 deploy/.env
 *.local.env
+
+# Local one-command stack state (scripts/local-up.sh)
+.kiwi-local/
