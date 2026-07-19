@@ -10,9 +10,19 @@ import (
 
 // Organization represents a tenant in the multi-tenant system.
 type Organization struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	Name      string    `json:"name" gorm:"uniqueIndex;not null"`
-	CreatedAt time.Time `json:"created_at"`
+	ID              string    `json:"id" gorm:"primaryKey"`
+	Name            string    `json:"name" gorm:"uniqueIndex;not null"`
+	Type            string    `json:"type" gorm:"not null;default:personal"`
+	PrimaryDomain   string    `json:"primary_domain" gorm:"not null;default:''"`
+	DomainJoin      bool      `json:"domain_join" gorm:"not null;default:false"`
+	Plan            string    `json:"plan" gorm:"not null;default:free"`
+	ActivationState string    `json:"activation_state" gorm:"not null;default:inactive"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// CanRun returns true if the organization is active and allowed to run tasks.
+func (o *Organization) CanRun() bool {
+	return o.ActivationState == "active"
 }
 
 // TableName overrides the default GORM table name.
@@ -20,12 +30,14 @@ func (Organization) TableName() string { return "organizations" }
 
 // User represents an authenticated user belonging to an organization.
 type User struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
-	Name      string    `json:"name"`
-	OrgID     string    `json:"org_id" gorm:"index;not null"`
-	Role      string    `json:"role" gorm:"not null;default:member"` // "admin" or "member"
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id" gorm:"primaryKey"`
+	Email         string    `json:"email" gorm:"uniqueIndex;not null"`
+	Name          string    `json:"name"`
+	OrgID         string    `json:"org_id" gorm:"index;not null"`
+	Role          string    `json:"role" gorm:"not null;default:member"` // "admin" or "member"
+	OAuthProvider *string   `json:"oauth_provider,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:1"`
+	OAuthSubject  *string   `json:"oauth_subject,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:2"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // TableName overrides the default GORM table name.
