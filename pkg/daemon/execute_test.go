@@ -19,6 +19,10 @@ func (p *fixOnceProvider) GetCodeEdit(ctx context.Context, task, fileName, code,
 	return p.fixedContent, nil
 }
 
+func (p *fixOnceProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 // newExecTestDaemon builds a Daemon wired with a mock provider and local (non-
 // Docker) sandbox execution, so executeTask can run the real Actor–Critic loop
 // end-to-end without a network or Docker.

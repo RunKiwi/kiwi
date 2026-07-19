@@ -31,6 +31,10 @@ func (s slowActor) GetCodeEdit(ctx context.Context, task, fileName, codeContent,
 	return codeContent, nil
 }
 
+func (s slowActor) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 func TestDaemon_LeaseRenewal(t *testing.T) {
 	var renewCount int32
 

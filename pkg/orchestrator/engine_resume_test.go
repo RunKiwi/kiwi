@@ -24,6 +24,10 @@ func (f *fakeActor) GetCodeEdit(ctx context.Context, task, fileName, codeContent
 	return codeContent + "x", nil
 }
 
+func (f *fakeActor) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 type okCritic struct{}
 
 func (okCritic) ReviewEdit(ctx context.Context, task, fileName, oldContent, newContent, buildOutput string) (provider.Verdict, error) {

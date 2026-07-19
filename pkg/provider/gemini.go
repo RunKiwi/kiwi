@@ -184,3 +184,17 @@ func (p *GeminiProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	}
 	return parseVerdict(text), nil
 }
+
+// Complete is a general single-shot completion: given a system and user
+// prompt, return the model's text response. Used for repo exploration and
+// multi-file edits, which are not shaped like GetCodeEdit's single-file fix.
+func (p *GeminiProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	text, finish, err := p.generate(ctx, p.actorModel, system, user, 8192)
+	if err != nil {
+		return "", fmt.Errorf("gemini complete request failed: %w", err)
+	}
+	if finish == "SAFETY" || finish == "PROHIBITED_CONTENT" {
+		return "", fmt.Errorf("complete request blocked by safety filter (%s)", finish)
+	}
+	return text, nil
+}

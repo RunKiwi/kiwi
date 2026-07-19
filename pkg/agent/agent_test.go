@@ -28,6 +28,10 @@ func (fakeProvider) GetCodeEdit(ctx context.Context, task, fileName, codeContent
 	}
 }
 
+func (fakeProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 func newReporter(t *testing.T, jobID string) (*StoreReporter, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -160,6 +164,10 @@ func (b blockingProvider) GetCodeEdit(ctx context.Context, task, fileName, codeC
 		b.onStart()
 	}
 	return "ok", nil
+}
+
+func (b blockingProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
 }
 
 func itoa(n int) string { return string(rune('0' + n)) }

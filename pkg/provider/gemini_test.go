@@ -117,3 +117,20 @@ func TestGeminiPricingUsed(t *testing.T) {
 		t.Errorf("unlisted gemini fell back to wrong pricing: %v", unlisted)
 	}
 }
+
+func TestGeminiComplete(t *testing.T) {
+	resp := `{"candidates":[{"content":{"parts":[{"text":"hello world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
+	srv, gp := geminiTestServer(t, resp, http.StatusOK)
+	defer srv.Close()
+
+	text, err := gp.Complete(context.Background(), "system", "user")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if text != "hello world" {
+		t.Errorf("Complete = %q, want 'hello world'", text)
+	}
+	if in, out := gp.LastUsage(); in != 10 || out != 5 {
+		t.Errorf("usage = %d/%d, want 10/5", in, out)
+	}
+}

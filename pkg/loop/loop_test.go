@@ -23,6 +23,10 @@ func (p *scriptedProvider) GetCodeEdit(ctx context.Context, task, fileName, code
 	return e, nil
 }
 
+func (p *scriptedProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	return "", nil
+}
+
 // passWhenContains makes runTest pass once the file contains `marker`. On
 // failure it echoes the current file content in the output — as real
 // compiler/test output does — so distinct edits produce distinct failures and

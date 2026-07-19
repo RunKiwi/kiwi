@@ -120,3 +120,27 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 	}
 	return parseVerdict(collectText(resp)), nil
 }
+
+// Complete is a general single-shot completion: given a system and user
+// prompt, return the model's text response. Used for repo exploration and
+// multi-file edits, which are not shaped like GetCodeEdit's single-file fix.
+func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (string, error) {
+	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
+	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     anthropic.Model(p.actorModel),
+		MaxTokens: 8192,
+		System:    []anthropic.TextBlockParam{{Text: system}},
+		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("anthropic complete request failed: %w", err)
+	}
+	p.recordCost(resp.Usage, p.actorModel)
+	if resp.StopReason == anthropic.StopReasonRefusal {
+		return "", errors.New("complete request refused by safety classifier")
+	}
+	return collectText(resp), nil
+}
