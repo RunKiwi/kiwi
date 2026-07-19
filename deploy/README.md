@@ -54,12 +54,10 @@ We need to generate a join token so the daemon can authenticate with the control
 Using the `KIWI_API_KEY` obtained in step 3:
 
 ```bash
-curl -s -X POST "https://your-domain.com/api/v1/daemons/tokens" \
-  -H "Authorization: Bearer $KIWI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"expires_in": "24h"}'
+curl -s -X POST "https://your-domain.com/api/v1/daemon/join-token" \
+  -H "Authorization: Bearer $KIWI_API_KEY"
 ```
-Take the `token` from the response, and update your `.env` file:
+Take the `join_token` from the response, and update your `.env` file:
 ```bash
 KIWI_JOIN_TOKEN="<the-token>"
 ```
@@ -73,7 +71,22 @@ docker compose -f docker-compose.prod.yml up -d kiwidaemon
 Run a sample submission using the Kiwi CLI (assuming the CLI is installed and configured).
 
 ```bash
-export KIWI_API_KEY="<your-api-key>"
-export KIWI_SERVER_URL="https://your-domain.com"
-kiwi submit -repo "RunKiwi/kiwi" -prompt "Say hello world"
+kiwi submit -server "https://your-domain.com" -token "<your-api-key>" \
+  -repo "https://github.com/you/yourrepo" -task "Fix the failing test" \
+  -file path/to/file.go -test-cmd "go test ./..."
 ```
+
+## Local setup (no domain / no TLS)
+
+To run the whole stack on your machine, use the local override — it publishes
+`kiwid` on `localhost:8080` and skips Caddy:
+
+```bash
+# from the repo root, with deploy/.env filled in (see .env.example)
+docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.local.yml \
+  --env-file deploy/.env up -d --build postgres kiwid kiwidaemon
+curl http://localhost:8080/readyz     # {"status":"ok"}
+```
+
+Then run `bootstrap.sh` (with `KIWI_URL=http://localhost:8080`), mint a join token,
+put it in `deploy/.env`, and re-up `kiwidaemon`.
