@@ -172,19 +172,25 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		// Look up org name for display.
 		orgName := claims.OrgID
+		activationState := "inactive"
+		plan := "free"
 		var org Organization
 		if err := db.First(&org, "id = ?", claims.OrgID).Error; err == nil {
 			orgName = org.Name
+			activationState = org.ActivationState
+			plan = org.Plan
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"user_id":  claims.UserID,
-			"email":    claims.Email,
-			"name":     claims.Name,
-			"org_id":   claims.OrgID,
-			"org_name": orgName,
-			"role":     claims.Role,
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"user_id":          claims.UserID,
+			"email":            claims.Email,
+			"name":             claims.Name,
+			"org_id":           claims.OrgID,
+			"org_name":         orgName,
+			"role":             claims.Role,
+			"activation_state": activationState,
+			"plan":             plan,
 		})
 	})
 }

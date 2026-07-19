@@ -5,7 +5,7 @@ import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, Shie
 import { client, type Integration } from "@/lib/api";
 
 export default function SettingsPage() {
-  const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string } | null>(null);
+  const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [stats, setStats] = useState({ fleets: 0, daemons: 0, daemonsOnline: 0, jobs: 0, models: 0 });
 
@@ -52,11 +52,32 @@ export default function SettingsPage() {
       {/* Organization */}
       <div className="glass-panel p-6">
         <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-4"><Building2 className="w-5 h-5 text-zinc-300" /> Organization</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
           <div><div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Name</div><div className="text-white">{org?.org_name || "—"}</div></div>
           <div><div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Org ID</div><div className="font-mono text-zinc-300">{org?.org_id || "—"}</div></div>
           <div><div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Auth</div><div className="text-white flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-green-400" /> API Key</div></div>
+          <div>
+            <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Status</div>
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${org?.activation_state === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                {org?.activation_state?.toUpperCase() || "INACTIVE"}
+              </span>
+              <span className="text-zinc-400 capitalize">{org?.plan}</span>
+            </div>
+          </div>
         </div>
+        
+        {org?.activation_state !== 'active' && (
+          <div className="mt-4 p-4 rounded-xl border border-red-500/20 bg-red-500/10 flex items-center justify-between">
+            <div>
+              <h3 className="text-red-400 font-medium text-sm">Account Inactive</h3>
+              <p className="text-red-400/80 text-sm mt-1">You can preview tasks, but you must activate to run them.</p>
+            </div>
+            <button className="bg-red-500 text-white hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              Activate to Run
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Overview stats (real data) */}
