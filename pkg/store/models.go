@@ -6,9 +6,19 @@ import (
 
 // Organization represents a tenant in the system.
 type Organization struct {
-	ID        string    `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"not null" json:"name"`
-	CreatedAt time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+	ID              string    `gorm:"primaryKey" json:"id"`
+	Name            string    `gorm:"not null" json:"name"`
+	Type            string    `gorm:"not null;default:personal" json:"type"`
+	PrimaryDomain   string    `gorm:"not null;default:''" json:"primary_domain"`
+	DomainJoin      bool      `gorm:"not null;default:false" json:"domain_join"`
+	Plan            string    `gorm:"not null;default:free" json:"plan"`
+	ActivationState string    `gorm:"not null;default:inactive" json:"activation_state"`
+	CreatedAt       time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+}
+
+// CanRun returns true if the organization is active and allowed to run tasks.
+func (o *Organization) CanRun() bool {
+	return o.ActivationState == "active"
 }
 
 // OrgLimits represents the resource limits and quotas for an organization.
@@ -24,12 +34,14 @@ type OrgLimits struct {
 
 // User represents an authenticated user belonging to an organization.
 type User struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
-	Name      string    `json:"name"`
-	OrgID     string    `json:"org_id" gorm:"index;not null"`
-	Role      string    `json:"role" gorm:"not null;default:member"` // "admin" or "member"
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id" gorm:"primaryKey"`
+	Email         string    `json:"email" gorm:"uniqueIndex;not null"`
+	Name          string    `json:"name"`
+	OrgID         string    `json:"org_id" gorm:"index;not null"`
+	Role          string    `json:"role" gorm:"not null;default:member"` // "admin" or "member"
+	OAuthProvider *string   `json:"oauth_provider,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:1"`
+	OAuthSubject  *string   `json:"oauth_subject,omitempty" gorm:"uniqueIndex:idx_users_oauth,priority:2"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // APIKey represents a hashed API key associated with a user.
