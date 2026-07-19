@@ -201,7 +201,15 @@ export default function GodView() {
           <div className="flex-1">
             {submitError && (
               <div className="flex items-center gap-2 text-red-400 text-sm">
-                <AlertCircle className="w-4 h-4" />{submitError}
+                <AlertCircle className="w-4 h-4" />
+                {submitError.includes("402") || submitError.toLowerCase().includes("activate") || submitError.toLowerCase().includes("payment required") ? (
+                  <span>
+                    Your organization is inactive. You can preview tasks, but you must 
+                    <a href="/settings" className="underline ml-1 font-medium hover:text-white">Activate to Run</a>.
+                  </span>
+                ) : (
+                  <span>{submitError}</span>
+                )}
               </div>
             )}
             {submitSuccess && (

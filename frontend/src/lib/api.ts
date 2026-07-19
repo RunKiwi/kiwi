@@ -83,6 +83,8 @@ export interface ValidateResponse {
   user_id: string;
   org_id: string;
   org_name: string;
+  activation_state: string;
+  plan: string;
 }
 
 const getBaseUrl = () => {
