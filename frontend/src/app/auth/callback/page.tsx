@@ -18,12 +18,13 @@ export default function AuthCallbackPage() {
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
     const token = new URLSearchParams(hash).get("token");
 
-    if (!token) {
-      setError("No sign-in token was returned. Please try again.");
-      return;
-    }
-
+    // The work runs inside an async closure so any setState happens in a
+    // callback, not synchronously in the effect body (react-hooks/set-state-in-effect).
     (async () => {
+      if (!token) {
+        setError("No sign-in token was returned. Please try again.");
+        return;
+      }
       try {
         // Store the token first so client.validate() sends it, then enrich the
         // session with the org details it returns.
