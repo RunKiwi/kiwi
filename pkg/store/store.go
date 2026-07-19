@@ -63,6 +63,13 @@ type Store interface {
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)
 
+	// Fleets & models (dashboard).
+	CreateFleet(ctx context.Context, orgID, name, ftype string) (*Fleet, error)
+	ListFleets(ctx context.Context, orgID string) ([]Fleet, error)
+	CreateModel(ctx context.Context, orgID, name, provider string) (*ModelEntry, error)
+	ListModels(ctx context.Context, orgID string) ([]ModelEntry, error)
+	DeleteModel(ctx context.Context, orgID, id string) error
+
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
 	// identity and resolves a heartbeat to an org; registration is gated by a
 	// short-lived, org-bound, single-use join token (no trust-on-first-use).

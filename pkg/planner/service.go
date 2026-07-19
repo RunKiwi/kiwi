@@ -137,11 +137,12 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"job_id":     jobID,
 			}
 			if err := tx.Create(&store.QueuedTask{
-				ID:     taskID,
-				OrgID:  req.OrgID,
-				JobID:  jobID,
-				Status: store.TaskQueued,
-				Spec:   spec,
+				ID:      taskID,
+				OrgID:   req.OrgID,
+				JobID:   jobID,
+				FleetID: req.FleetID,
+				Status:  store.TaskQueued,
+				Spec:    spec,
 			}).Error; err != nil {
 				return fmt.Errorf("enqueue task %s: %w", taskID, err)
 			}

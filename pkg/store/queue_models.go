@@ -33,6 +33,8 @@ type QueuedTask struct {
 	OrgID string `gorm:"index;not null" json:"org_id"`
 	// JobID links the task back to the job/manifest that produced it.
 	JobID string `gorm:"index" json:"job_id"`
+	// FleetID optionally scopes the task to a fleet (empty = any fleet).
+	FleetID string `gorm:"index" json:"fleet_id"`
 	// Status ∈ QUEUED|LEASED|SUCCEEDED|FAILED.
 	Status string `gorm:"index;not null" json:"status"`
 	// Spec is the worker-spec.json payload the daemon executes.
