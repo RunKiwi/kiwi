@@ -26,3 +26,6 @@ deploy/.env
 
 # Local one-command stack state (scripts/local-up.sh)
 .kiwi-local/
+
+# stray compiled cmd binary
+kms-migrate
