@@ -24,7 +24,9 @@ func (p *scriptedProvider) GetCodeEdit(ctx context.Context, task, fileName, code
 }
 
 func (p *scriptedProvider) Complete(ctx context.Context, system, user string) (string, error) {
-	return "", nil
+	e := p.edits[p.calls%len(p.edits)]
+	p.calls++
+	return e, nil
 }
 
 // passWhenContains makes runTest pass once the file contains `marker`. On
@@ -182,4 +184,36 @@ func (c *scriptedCritic) ReviewEdit(ctx context.Context, task, fileName, oldC, n
 	v := provider.Verdict{Approved: c.approve[c.calls%len(c.approve)]}
 	c.calls++
 	return v, nil
+}
+
+func TestLoop_MultiFileEdit(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.go")
+	pathB := filepath.Join(dir, "b.go")
+	os.WriteFile(pathA, []byte("file A"), 0o644)
+	os.WriteFile(pathB, []byte("file B"), 0o644)
+
+	jsonEdit := `{"files":[{"path":"a.go","content":"file A FIXED"},{"path":"b.go","content":"file B FIXED"}]}`
+	prov := &scriptedProvider{edits: []string{jsonEdit}}
+	r := &Runner{Provider: prov}
+
+	res, err := r.Run(context.Background(), Task{
+		Description:  "fix both",
+		Files:        []string{pathA, pathB},
+		WorktreeRoot: dir,
+	}, func(ctx context.Context) (string, bool, error) {
+		b1, _ := os.ReadFile(pathA)
+		b2, _ := os.ReadFile(pathB)
+		if strings.Contains(string(b1), "FIXED") && strings.Contains(string(b2), "FIXED") {
+			return "ok", true, nil
+		}
+		return "FAIL", false, nil
+	})
+
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.Success || res.Steps != 1 {
+		t.Errorf("got success=%v steps=%d, want true/1", res.Success, res.Steps)
+	}
 }
