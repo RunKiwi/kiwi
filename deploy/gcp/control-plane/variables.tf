@@ -135,20 +135,6 @@ variable "kiwi_github_oauth_client_secret" {
   sensitive   = true
 }
 
-variable "kiwi_google_oauth_client_id" {
-  type        = string
-  description = "Google OAuth Client ID (optional)"
-  default     = ""
-  sensitive   = true
-}
-
-variable "kiwi_google_oauth_client_secret" {
-  type        = string
-  description = "Google OAuth Client Secret (optional)"
-  default     = ""
-  sensitive   = true
-}
-
 variable "kiwi_session_secret" {
   type        = string
   description = "Secret key for cookie sessions"
