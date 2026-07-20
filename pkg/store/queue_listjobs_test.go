@@ -9,11 +9,15 @@ func TestListJobsSurfacesTaskAndRepo(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	// A planner-produced task carries the overall goal ("job_task") and repo.
+	// A planner-produced task carries the overall goal ("job_task") and repo,
+	// plus a fleet and (once leased) the daemon that ran it.
+	daemon := "dmn_31eb64d8e5"
 	if err := s.EnqueueTask(ctx, &QueuedTask{
-		ID:    "job1-w1",
-		OrgID: "org1",
-		JobID: "job1",
+		ID:       "job1-w1",
+		OrgID:    "org1",
+		JobID:    "job1",
+		FleetID:  "fleet_a",
+		LeasedBy: &daemon,
 		Spec: map[string]interface{}{
 			"id":       "job1-w1",
 			"task":     "worker: patch handler",
@@ -36,6 +40,12 @@ func TestListJobsSurfacesTaskAndRepo(t *testing.T) {
 	}
 	if got, want := jobs[0].Repo, "acme/api"; got != want {
 		t.Errorf("Repo = %q, want %q", got, want)
+	}
+	if got, want := jobs[0].FleetID, "fleet_a"; got != want {
+		t.Errorf("FleetID = %q, want %q", got, want)
+	}
+	if got, want := jobs[0].DaemonID, daemon; got != want {
+		t.Errorf("DaemonID = %q, want %q", got, want)
 	}
 }
 

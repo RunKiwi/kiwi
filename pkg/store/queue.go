@@ -508,6 +508,8 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		PRURLs    []string
 		Task      string
 		Repo      string
+		FleetID   string
+		DaemonID  string
 	}
 
 	jobMap := make(map[string]*jobAgg)
@@ -534,6 +536,14 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 			if ru, ok := t.Spec["repo_url"].(string); ok {
 				agg.Repo = shortRepo(ru)
 			}
+		}
+		// Executor linkage: the fleet the work targets, and the daemon that
+		// leased it (retained after completion). First non-empty wins.
+		if agg.FleetID == "" && t.FleetID != "" {
+			agg.FleetID = t.FleetID
+		}
+		if agg.DaemonID == "" && t.LeasedBy != nil && *t.LeasedBy != "" {
+			agg.DaemonID = *t.LeasedBy
 		}
 		if t.Status == TaskFailed {
 			agg.Failed++
@@ -573,6 +583,8 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 			PRURLs:    prUrls,
 			Task:      agg.Task,
 			Repo:      agg.Repo,
+			FleetID:   agg.FleetID,
+			DaemonID:  agg.DaemonID,
 		})
 	}
 
