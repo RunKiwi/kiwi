@@ -68,6 +68,8 @@ export interface JobSummary {
   task_count: number;
   status: string;
   pr_urls: string[];
+  task?: string;
+  repo?: string;
 }
 
 export interface JobsListResponse {

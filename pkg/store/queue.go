@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,6 +21,28 @@ func newLeaseID() (string, error) {
 		return "", err
 	}
 	return "lease_" + hex.EncodeToString(b), nil
+}
+
+// shortRepo reduces a git remote URL to "owner/name" for compact display,
+// e.g. "https://github.com/acme/api.git" -> "acme/api". Falls back to the
+// trimmed input when it can't be parsed.
+func shortRepo(url string) string {
+	s := strings.TrimSpace(url)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimSuffix(s, ".git")
+	// Drop scheme / host: keep the last two path segments.
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	s = strings.TrimPrefix(s, "git@")
+	s = strings.ReplaceAll(s, ":", "/")
+	parts := strings.Split(strings.Trim(s, "/"), "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+	return strings.Trim(s, "/")
 }
 
 // EnqueueTask adds a task to the queue in QUEUED state.
@@ -483,6 +506,8 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		Succeeded int
 		Leased    int
 		PRURLs    []string
+		Task      string
+		Repo      string
 	}
 
 	jobMap := make(map[string]*jobAgg)
@@ -495,6 +520,20 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		agg.TaskCount++
 		if t.CreatedAt.After(agg.CreatedAt) {
 			agg.CreatedAt = t.CreatedAt
+		}
+		// The overall goal + repo live on the task spec. Prefer the job-level
+		// "job_task" the planner stamps; fall back to the worker task text.
+		if agg.Task == "" {
+			if jt, ok := t.Spec["job_task"].(string); ok && jt != "" {
+				agg.Task = jt
+			} else if wt, ok := t.Spec["task"].(string); ok {
+				agg.Task = wt
+			}
+		}
+		if agg.Repo == "" {
+			if ru, ok := t.Spec["repo_url"].(string); ok {
+				agg.Repo = shortRepo(ru)
+			}
 		}
 		if t.Status == TaskFailed {
 			agg.Failed++
@@ -532,6 +571,8 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 			TaskCount: agg.TaskCount,
 			Status:    status,
 			PRURLs:    prUrls,
+			Task:      agg.Task,
+			Repo:      agg.Repo,
 		})
 	}
 

@@ -28,6 +28,10 @@ type JobSummary struct {
 	TaskCount int       `json:"task_count"`
 	Status    string    `json:"status"`
 	PRURLs    []string  `json:"pr_urls"`
+	// Task is the overall goal that produced this job (from the task spec), shown
+	// on the job card. Repo is the "owner/name" the job targets.
+	Task string `json:"task"`
+	Repo string `json:"repo"`
 }
 
 // Store defines the data access interface for the control plane.
