@@ -129,6 +129,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			spec := map[string]interface{}{
 				"id":         taskID,
 				"task":       w.Task,
+				"job_task":   req.Task,
 				"file":       w.File,
 				"model":      w.Model,
 				"test_cmd":   workerTestCmd(w, req),

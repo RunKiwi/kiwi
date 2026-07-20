@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, Rocket, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
+import { Select } from "@/components/Select";
 import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo } from "@/lib/api";
 
 export default function CommandCenter() {
@@ -46,6 +47,23 @@ export default function CommandCenter() {
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
   }, []);
 
+  // Close the PR popover on Escape or any click outside the popover / its trigger.
+  useEffect(() => {
+    if (!openPrJob) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenPrJob(null); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest(".pr-popover") || t.closest("[data-pr-trigger]")) return;
+      setOpenPrJob(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [openPrJob]);
+
   const modelOptions = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
 
   const handleSubmit = async () => {
@@ -86,24 +104,32 @@ export default function CommandCenter() {
     }
   };
 
-  // The 4 job states. Each drives the whole card: a tint that washes the
-  // background, a matching border + glow, and the badge colour.
-  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; tint: string; glow: string; spin?: boolean }> = {
-    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.38)", tint: "rgba(232,161,83,0.12)", glow: "rgba(232,161,83,0.16)", spin: true },
-    RUNNING: { label: "Running", Icon: Activity, color: "#6FB1F2", border: "rgba(96,165,250,0.38)", tint: "rgba(96,165,250,0.12)", glow: "rgba(96,165,250,0.16)" },
-    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.34)", tint: "rgba(147,198,69,0.11)", glow: "rgba(147,198,69,0.14)" },
-    FAILED: { label: "Failed", Icon: XCircle, color: "#F26D6D", border: "rgba(242,109,109,0.34)", tint: "rgba(242,109,109,0.11)", glow: "rgba(242,109,109,0.14)" },
+  // The 4 job states. Like the earlier design, each card sits on a neutral
+  // near-black base (not navy — navy muddies the tint into grey) so a flat
+  // whole-card colour wash reads true. Plus a matching border, badge, and glow.
+  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; wash: string; glow: string; spin?: boolean }> = {
+    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.32)", wash: "rgba(232,161,83,0.14)", glow: "rgba(232,161,83,0.10)", spin: true },
+    RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
+    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
+    FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
   };
+  // Neutral near-black card base — lets the status wash read as true colour.
+  const CARD_BASE = "#0C0D10";
   const statusOf = (s: string) => STATUS[s] ?? STATUS.QUEUED;
 
   const prLabel = (url: string) => {
-    // Render a compact "repo#123" from a GitHub PR URL when possible.
+    // Render a compact "owner/repo#123" from a GitHub PR URL when possible.
     const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-    return m ? `${m[2]}#${m[3]}` : url.replace(/^https?:\/\//, "");
+    return m ? `${m[1]}/${m[2]}#${m[3]}` : url.replace(/^https?:\/\//, "");
   };
+
+  // Job ids are `job_` + 16 hex; show a friendly short form (job_a3f19c…).
+  const shortId = (id: string) => (id.length > 12 ? id.slice(0, 10) : id);
 
   const fieldClass = "field text-sm";
   const labelClass = "block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2";
+  // Which repo (full_name) the current repoUrl corresponds to, for the select.
+  const selectedRepo = repos.find(r => r.url === repoUrl)?.full_name ?? "";
 
   return (
     <div className="p-8 max-w-6xl mx-auto h-full flex flex-col">
@@ -113,95 +139,103 @@ export default function CommandCenter() {
         <p className="text-zinc-400 max-w-2xl">Describe the goal in plain English. Kiwi plans it, runs a swarm of agents, and opens one verified pull request — everything else is optional.</p>
       </div>
 
-      {/* Composer */}
-      <div className="glass-panel mb-6 flex flex-col relative z-20 overflow-visible">
-        <div className="p-6 pb-4 relative z-10 flex flex-col gap-4">
-          {/* Task — the hero input */}
-          <div>
-            <label htmlFor="task" className={labelClass}>Task</label>
-            <textarea
-              id="task"
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              placeholder="Describe what to build or fix, e.g. “The /api/report endpoint returns stale data — fix it and add a test.”"
-              className="field rounded-xl px-4 py-3.5 resize-none min-h-[120px] text-base leading-relaxed"
+      {/* Composer — one compact input with an inline control rail underneath. */}
+      <div className="glass-panel mb-6 flex flex-col relative z-20 overflow-visible p-4">
+        <textarea
+          id="task"
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          placeholder="Describe what to build or fix, e.g. “The /api/report endpoint returns stale data — fix it and add a test.”"
+          className="field border-0 bg-transparent rounded-lg px-2 py-1.5 resize-none min-h-[76px] text-base leading-relaxed focus:shadow-none"
+        />
+
+        {/* Control rail: repo · plan · worker chips, then Launch. */}
+        <div className="flex flex-wrap items-center gap-2 pt-3 mt-1 border-t border-white/5">
+          {/* Repository — searchable when repos are available, else a URL input. */}
+          {repos.length > 0 ? (
+            <Select
+              variant="chip" searchable label="Repo" ariaLabel="Repository"
+              icon={<FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
+              value={selectedRepo} onChange={onPickRepo} placeholder="Select…"
+              options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
             />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Repository */}
-            <div className="lg:col-span-2">
-              <label className={labelClass}>Repository</label>
-              {repos.length > 0 ? (
-                <div className="flex gap-2">
-                  <select onChange={e => onPickRepo(e.target.value)} className={fieldClass} defaultValue="">
-                    <option value="" disabled>Select a repo…</option>
-                    {repos.map(r => <option key={r.full_name} value={r.full_name}>{r.full_name}{r.private ? " (private)" : ""}</option>)}
-                  </select>
-                </div>
-              ) : (
-                <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="https://github.com/you/repo" className={fieldClass} />
-              )}
-              {repos.length > 0 && (
-                <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="…or paste a URL" className={fieldClass + " mt-2"} />
-              )}
-            </div>
-
-            {/* Fleet */}
-            <div>
-              <label className={labelClass}>Fleet</label>
-              <select value={fleetId} onChange={e => setFleetId(e.target.value)} className={fieldClass}>
-                <option value="">Any available fleet</option>
-                {fleets.map(f => <option key={f.id} value={f.id}>{f.name} · {f.type === "byoc" ? "BYOC" : "Managed"}</option>)}
-              </select>
-            </div>
-
-            {/* Planner & verifier model */}
-            <div>
-              <label className={labelClass}>Planner &amp; verifier</label>
-              <select value={plannerModel} onChange={e => setPlannerModel(e.target.value)} className={fieldClass}>
-                {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-
-            {/* Worker model */}
-            <div>
-              <label className={labelClass}>Worker</label>
-              <select value={workerModel} onChange={e => setWorkerModel(e.target.value)} className={fieldClass}>
-                {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Advanced (optional) */}
-          <button type="button" onClick={() => setShowAdvanced(v => !v)} className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors w-fit">
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
-            Advanced options
-          </button>
-          {showAdvanced && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-              <div>
-                <label className={labelClass}>Target file <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
-                <input type="text" value={file} onChange={e => setFile(e.target.value)} placeholder="let the agent decide" className={fieldClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Test command <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
-                <input type="text" value={testCmd} onChange={e => setTestCmd(e.target.value)} placeholder="e.g. go test ./..." className={fieldClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Git ref</label>
-                <input type="text" value={ref} onChange={e => setRef(e.target.value)} placeholder="main" className={fieldClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Max workers</label>
-                <input type="number" min="1" max="10" value={maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} className={fieldClass} />
-              </div>
-            </div>
+          ) : (
+            <label className="chip">
+              <FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <span className="k">Repo</span>
+              <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="github.com/you/repo"
+                className="bg-transparent outline-none border-0 text-sm font-mono text-white placeholder:text-zinc-600 w-[190px]" />
+            </label>
           )}
+
+          {/* Planner & verifier */}
+          <Select
+            variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
+            icon={<span className="pdot" style={{ background: "#93C645" }} />}
+            value={plannerModel} onChange={setPlannerModel}
+            options={modelOptions.map(m => ({ value: m, label: m }))}
+          />
+
+          {/* Worker */}
+          <Select
+            variant="chip" searchable label="Work" ariaLabel="Worker model"
+            icon={<span className="pdot" style={{ background: "#E8A153" }} />}
+            value={workerModel} onChange={setWorkerModel}
+            options={modelOptions.map(m => ({ value: m, label: m }))}
+          />
+
+          {/* Advanced toggle */}
+          <button type="button" onClick={() => setShowAdvanced(v => !v)}
+            className="chip cursor-pointer text-zinc-400 hover:text-white">
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+            <span className="text-xs">Advanced</span>
+          </button>
+
+          <div className="flex-1" />
+
+          <button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary px-5 py-2 shrink-0">
+            {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Launching…</> : <>Launch <ArrowRight className="w-4 h-4" /></>}
+          </button>
         </div>
 
-        <div className="flex items-center justify-between gap-4 px-6 pb-5 pt-3 relative z-10 border-t border-white/5">
-          <div className="flex-1 min-w-0">
+        {/* Advanced options — hidden by default to keep the composer compact. */}
+        {showAdvanced && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 mt-3 border-t border-white/5">
+            <div>
+              <label className={labelClass}>Fleet</label>
+              <Select
+                ariaLabel="Fleet" value={fleetId} onChange={setFleetId}
+                options={[{ value: "", label: "Any available fleet" }, ...fleets.map(f => ({ value: f.id, label: f.name, hint: f.type === "byoc" ? "BYOC" : "Managed" }))]}
+              />
+            </div>
+            {repos.length > 0 && (
+              <div>
+                <label className={labelClass}>Repository URL <span className="text-zinc-600 normal-case font-normal">(override)</span></label>
+                <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="…or paste a URL" className={fieldClass} />
+              </div>
+            )}
+            <div>
+              <label className={labelClass}>Git ref</label>
+              <input type="text" value={ref} onChange={e => setRef(e.target.value)} placeholder="main" className={fieldClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Target file <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
+              <input type="text" value={file} onChange={e => setFile(e.target.value)} placeholder="let the agent decide" className={fieldClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Test command <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
+              <input type="text" value={testCmd} onChange={e => setTestCmd(e.target.value)} placeholder="e.g. go test ./..." className={fieldClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Max workers</label>
+              <input type="number" min="1" max="10" value={maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} className={fieldClass} />
+            </div>
+          </div>
+        )}
+
+        {/* Status line */}
+        {(submitError || submitSuccess) && (
+          <div className="pt-3 mt-1">
             {submitError && (
               <div className="flex items-center gap-2 text-red-400 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -218,15 +252,11 @@ export default function CommandCenter() {
             {submitSuccess && (
               <div className="flex items-center gap-2 text-green-400 text-sm">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                Launched — <button className="underline" onClick={() => setActiveDrawerTaskId(submitSuccess)}>{submitSuccess}</button>
+                Launched — <button className="underline" onClick={() => setActiveDrawerTaskId(submitSuccess)}>{shortId(submitSuccess)}</button>
               </div>
             )}
           </div>
-          <button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary px-6 py-2.5 shrink-0">
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
-            {isSubmitting ? 'Launching…' : 'Launch'}
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Grid of Jobs */}
@@ -245,54 +275,80 @@ export default function CommandCenter() {
               onClick={() => setActiveDrawerTaskId(job.job_id)}
               onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
               style={{
-                background: `radial-gradient(135% 135% at 0% 0%, ${m.tint}, transparent 55%), linear-gradient(180deg, var(--panel-2), var(--panel))`,
+                background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
                 borderColor: m.border,
-                boxShadow: `0 22px 46px -28px rgba(0,0,0,0.75), 0 0 48px -24px ${m.glow}`,
+                boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
               }}
               className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <span className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-white transition-colors">{job.job_id}</span>
-                <div title={m.label} className="status-badge shrink-0" style={{ color: m.color, borderColor: m.border, background: m.tint }}>
-                  <Icon className={`w-3.5 h-3.5 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                  <span className="status-label">{m.label}</span>
+                <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">{shortId(job.job_id)}</span>
+                <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
+                  style={{ color: m.color, borderColor: m.border, background: m.wash }}>
+                  <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
+                  {m.label}
                 </div>
               </div>
-              <h3 className="text-sm font-medium text-white mb-6 line-clamp-2 leading-snug flex-1">Job {job.job_id}</h3>
-              <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between text-xs text-zinc-400">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-1.5" title={`${job.task_count} tasks`}>
-                    <Bot className="w-3.5 h-3.5 text-zinc-500" /><span className="font-mono text-zinc-300">{job.task_count}</span>
-                  </div>
-                  {job.pr_urls && job.pr_urls.length > 0 && (
-                    <div className="relative">
+
+              <h3 className="text-sm font-medium text-white mb-5 line-clamp-2 leading-snug flex-1">
+                {job.task?.trim() || `Job ${shortId(job.job_id)}`}
+              </h3>
+
+              <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
+                {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
+                <div className="min-w-0 relative">
+                  {job.pr_urls && job.pr_urls.length > 0 ? (
+                    <>
                       <button
+                        data-pr-trigger
                         onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
-                        className="flex items-center gap-1 text-green-400 hover:text-green-300 transition-colors"
+                        className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
                         title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
+                        aria-expanded={openPrJob === job.job_id}
                       >
-                        <GitPullRequest className="w-3.5 h-3.5" /><span className="font-mono">{job.pr_urls.length}</span>
+                        <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
+                        <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
+                        <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
                       </button>
                       {openPrJob === job.job_id && (
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute bottom-6 left-0 z-30 w-64 bg-[#0E1A24] border border-white/10 rounded-xl shadow-2xl p-1.5 flex flex-col gap-0.5"
+                          className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
                         >
-                          <div className="px-2 py-1 text-[10px] uppercase tracking-widest text-zinc-500">Pull requests</div>
-                          {job.pr_urls.map((url) => (
-                            <a key={url} href={url} target="_blank" rel="noreferrer"
-                              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-zinc-200 hover:bg-white/5">
-                              <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                              <span className="font-mono truncate flex-1">{prLabel(url)}</span>
-                              <ExternalLink className="w-3 h-3 text-zinc-500 shrink-0" />
-                            </a>
-                          ))}
+                          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
+                            <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
+                            <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
+                          </div>
+                          <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+                            {job.pr_urls.map((url) => (
+                              <a key={url} href={url} target="_blank" rel="noreferrer"
+                                onClick={() => setOpenPrJob(null)}
+                                className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
+                                <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                                  <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
+                                </span>
+                                <span className="font-mono truncate flex-1">{prLabel(url)}</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       )}
-                    </div>
+                    </>
+                  ) : job.repo ? (
+                    <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
+                      <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-zinc-500">
+                      <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
+                    </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3 h-3 text-zinc-500" /><span>{new Date(job.created_at).toLocaleTimeString()}</span>
+                {/* Right: task count. */}
+                <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
+                  <Bot className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
                 </div>
               </div>
             </div>
