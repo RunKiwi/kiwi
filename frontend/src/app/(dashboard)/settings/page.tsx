@@ -129,9 +129,9 @@ export default function SettingsPage() {
               <label className="block text-sm font-medium text-zinc-300 mb-1.5">{row.label}</label>
               <div className="flex gap-2">
                 <input type="password" value={row.val} onChange={e => row.set(e.target.value)} placeholder={row.ph}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none" />
+                  className="flex-1 field text-sm" />
                 <button onClick={() => save(row.label, row.name, row.kind, row.val, row.set)} disabled={saving === row.label || !row.val.trim()}
-                  className="bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-zinc-200 disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center">
+                  className="btn-primary px-4 py-2 text-sm disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center">
                   {saving === row.label ? <Loader2 className="w-4 h-4 animate-spin" /> : saved === row.label ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save'}
                 </button>
               </div>

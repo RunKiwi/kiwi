@@ -149,7 +149,7 @@ export default function TopologyPage() {
         </ReactFlow>
 
         {selected && (
-          <div className="absolute top-4 right-4 z-10 w-72 bg-[#0b0b0d]/95 backdrop-blur border border-white/10 rounded-xl shadow-2xl p-4">
+          <div className="absolute top-4 right-4 z-10 w-72 bg-[#0E1A24]/95 backdrop-blur border border-white/10 rounded-xl shadow-2xl p-4">
             <div className="flex items-start justify-between mb-3">
               <div>
                 <div className="text-[10px] uppercase tracking-widest text-zinc-500">{selected.kind}</div>

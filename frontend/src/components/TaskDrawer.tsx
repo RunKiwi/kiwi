@@ -48,21 +48,21 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   }, [taskId, loadJob]);
 
   if (!taskId && !currentJob) return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#050505]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
+    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
   );
 
   const getPhaseIcon = (phase: string) => {
     switch (phase) {
       case 'RUNNING':
       case 'LEASED': return <Activity className="w-4 h-4 text-blue-400" />;
-      case 'QUEUED': return <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />;
+      case 'QUEUED': return <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
       case 'SUCCEEDED': return <CheckCircle2 className="w-4 h-4 text-green-400" />;
       default: return null;
     }
   };
 
   return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#050505]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col ${taskId ? 'translate-x-0' : 'translate-x-full'}`}>
+    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col ${taskId ? 'translate-x-0' : 'translate-x-full'}`}>
       
       {/* Drawer Header */}
       <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
