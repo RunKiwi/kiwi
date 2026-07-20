@@ -81,12 +81,12 @@ export default function ModelsPage() {
           <div className="flex-1">
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Model id</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="gemini-2.5-flash"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none" />
+              className="w-full field text-sm" />
           </div>
           <div className="w-full md:w-52">
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Provider</label>
             <select value={provider} onChange={e => setProvider(e.target.value)}
-              className="w-full bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none appearance-none">
+              className="w-full field text-sm">
               <option value="">Auto-detect</option>
               <option value="anthropic">Anthropic</option>
               <option value="gemini">Gemini</option>
@@ -94,7 +94,7 @@ export default function ModelsPage() {
             </select>
           </div>
           <button onClick={add} disabled={busy}
-            className="flex items-center justify-center gap-2 bg-white hover:bg-zinc-200 text-black px-4 py-2 rounded-lg font-semibold disabled:opacity-50 h-[38px]">
+            className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50 h-[38px]">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Add
           </button>
         </div>

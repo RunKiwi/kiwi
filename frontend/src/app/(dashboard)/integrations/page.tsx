@@ -75,9 +75,9 @@ export default function IntegrationsPage() {
               <div className="flex flex-col sm:flex-row gap-2 mt-4">
                 <input type="password" value={values[key] || ""} onChange={e => setValues(v => ({ ...v, [key]: e.target.value }))}
                   placeholder={connected ? "•••••••• (paste to replace)" : meta.placeholder}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none" />
+                  className="flex-1 field text-sm" />
                 <button onClick={() => connect(key)} disabled={busy === key}
-                  className="flex items-center justify-center gap-2 bg-white hover:bg-zinc-200 text-black px-4 py-2 rounded-lg font-semibold disabled:opacity-50">
+                  className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50">
                   {busy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   {connected ? "Update" : "Connect"}
                 </button>
