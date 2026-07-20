@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { client, BUILTIN_MODELS, RECOMMENDED_MODELS, type ModelEntry, type RecommendedModel } from "@/lib/api";
 import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles } from "lucide-react";
+import { Select } from "@/components/Select";
 
 export default function ModelsPage() {
   const [models, setModels] = useState<ModelEntry[]>([]);
@@ -85,13 +86,15 @@ export default function ModelsPage() {
           </div>
           <div className="w-full md:w-52">
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Provider</label>
-            <select value={provider} onChange={e => setProvider(e.target.value)}
-              className="w-full field text-sm">
-              <option value="">Auto-detect</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="gemini">Gemini</option>
-              <option value="codex">Codex</option>
-            </select>
+            <Select
+              ariaLabel="Provider" value={provider} onChange={setProvider}
+              options={[
+                { value: "", label: "Auto-detect" },
+                { value: "anthropic", label: "Anthropic" },
+                { value: "gemini", label: "Gemini" },
+                { value: "codex", label: "Codex" },
+              ]}
+            />
           </div>
           <button onClick={add} disabled={busy}
             className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50 h-[38px]">

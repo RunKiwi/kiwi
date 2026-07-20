@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
+import { Select } from "@/components/Select";
 import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo } from "@/lib/api";
 
 export default function CommandCenter() {
@@ -150,17 +151,14 @@ export default function CommandCenter() {
 
         {/* Control rail: repo · plan · worker chips, then Launch. */}
         <div className="flex flex-wrap items-center gap-2 pt-3 mt-1 border-t border-white/5">
-          {/* Repository */}
+          {/* Repository — searchable when repos are available, else a URL input. */}
           {repos.length > 0 ? (
-            <label className="chip cursor-pointer">
-              <FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              <span className="k">Repo</span>
-              <select value={selectedRepo} onChange={e => onPickRepo(e.target.value)}
-                className="bg-transparent outline-none border-0 text-sm font-mono text-white cursor-pointer appearance-none max-w-[170px] truncate [&>option]:text-black">
-                <option value="">Select…</option>
-                {repos.map(r => <option key={r.full_name} value={r.full_name}>{r.full_name}{r.private ? " (private)" : ""}</option>)}
-              </select>
-            </label>
+            <Select
+              variant="chip" searchable label="Repo" ariaLabel="Repository"
+              icon={<FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
+              value={selectedRepo} onChange={onPickRepo} placeholder="Select…"
+              options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
+            />
           ) : (
             <label className="chip">
               <FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -171,24 +169,20 @@ export default function CommandCenter() {
           )}
 
           {/* Planner & verifier */}
-          <label className="chip cursor-pointer">
-            <span className="pdot" style={{ background: "#93C645" }} />
-            <span className="k">Plan</span>
-            <select value={plannerModel} onChange={e => setPlannerModel(e.target.value)}
-              className="bg-transparent outline-none border-0 text-sm font-mono text-white cursor-pointer appearance-none max-w-[170px] truncate [&>option]:text-black">
-              {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </label>
+          <Select
+            variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
+            icon={<span className="pdot" style={{ background: "#93C645" }} />}
+            value={plannerModel} onChange={setPlannerModel}
+            options={modelOptions.map(m => ({ value: m, label: m }))}
+          />
 
           {/* Worker */}
-          <label className="chip cursor-pointer">
-            <span className="pdot" style={{ background: "#E8A153" }} />
-            <span className="k">Work</span>
-            <select value={workerModel} onChange={e => setWorkerModel(e.target.value)}
-              className="bg-transparent outline-none border-0 text-sm font-mono text-white cursor-pointer appearance-none max-w-[170px] truncate [&>option]:text-black">
-              {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </label>
+          <Select
+            variant="chip" searchable label="Work" ariaLabel="Worker model"
+            icon={<span className="pdot" style={{ background: "#E8A153" }} />}
+            value={workerModel} onChange={setWorkerModel}
+            options={modelOptions.map(m => ({ value: m, label: m }))}
+          />
 
           {/* Advanced toggle */}
           <button type="button" onClick={() => setShowAdvanced(v => !v)}
@@ -209,10 +203,10 @@ export default function CommandCenter() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 mt-3 border-t border-white/5">
             <div>
               <label className={labelClass}>Fleet</label>
-              <select value={fleetId} onChange={e => setFleetId(e.target.value)} className={fieldClass}>
-                <option value="">Any available fleet</option>
-                {fleets.map(f => <option key={f.id} value={f.id}>{f.name} · {f.type === "byoc" ? "BYOC" : "Managed"}</option>)}
-              </select>
+              <Select
+                ariaLabel="Fleet" value={fleetId} onChange={setFleetId}
+                options={[{ value: "", label: "Any available fleet" }, ...fleets.map(f => ({ value: f.id, label: f.name, hint: f.type === "byoc" ? "BYOC" : "Managed" }))]}
+              />
             </div>
             {repos.length > 0 && (
               <div>
