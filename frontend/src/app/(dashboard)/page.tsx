@@ -46,6 +46,23 @@ export default function CommandCenter() {
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
   }, []);
 
+  // Close the PR popover on Escape or any click outside the popover / its trigger.
+  useEffect(() => {
+    if (!openPrJob) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenPrJob(null); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest(".pr-popover") || t.closest("[data-pr-trigger]")) return;
+      setOpenPrJob(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [openPrJob]);
+
   const modelOptions = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
 
   const handleSubmit = async () => {
@@ -283,33 +300,44 @@ export default function CommandCenter() {
               </h3>
 
               <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
-                {/* Left: PR link when there is one, else repo, else time. */}
+                {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
                 <div className="min-w-0 relative">
                   {job.pr_urls && job.pr_urls.length > 0 ? (
                     <>
                       <button
+                        data-pr-trigger
                         onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
-                        className="flex items-center gap-1.5 text-green-400 hover:text-green-300 transition-colors min-w-0 max-w-full"
+                        className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
                         title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
+                        aria-expanded={openPrJob === job.job_id}
                       >
                         <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
-                        <span className="font-mono truncate">{prLabel(job.pr_urls[0])}</span>
-                        {job.pr_urls.length > 1 && <span className="font-mono text-green-500/80 shrink-0">+{job.pr_urls.length - 1}</span>}
+                        <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
+                        <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
                       </button>
                       {openPrJob === job.job_id && (
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute bottom-6 left-0 z-30 w-64 bg-[#0E1A24] border border-white/10 rounded-xl shadow-2xl p-1.5 flex flex-col gap-0.5"
+                          className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
                         >
-                          <div className="px-2 py-1 text-[10px] uppercase tracking-widest text-zinc-500">Pull requests</div>
-                          {job.pr_urls.map((url) => (
-                            <a key={url} href={url} target="_blank" rel="noreferrer"
-                              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-zinc-200 hover:bg-white/5">
-                              <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                              <span className="font-mono truncate flex-1">{prLabel(url)}</span>
-                              <ExternalLink className="w-3 h-3 text-zinc-500 shrink-0" />
-                            </a>
-                          ))}
+                          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
+                            <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
+                            <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
+                          </div>
+                          <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+                            {job.pr_urls.map((url) => (
+                              <a key={url} href={url} target="_blank" rel="noreferrer"
+                                onClick={() => setOpenPrJob(null)}
+                                className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
+                                <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                                  <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
+                                </span>
+                                <span className="font-mono truncate flex-1">{prLabel(url)}</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </>
