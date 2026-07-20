@@ -145,6 +145,23 @@ body {
 .card-hover { transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease; }
 .card-hover:hover { transform: translateY(-2px); border-color: var(--line-hi); }
 
+/* Status badge — icon-only by default; the label reveals on card/badge hover
+   (colour comes from inline styles per status). */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 0;
+  border: 1px solid; border-radius: 999px; padding: 4px; line-height: 1;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  transition: gap 0.25s ease, padding 0.25s ease;
+}
+.status-label {
+  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
+  transition: max-width 0.28s ease, opacity 0.2s ease;
+}
+.group:hover .status-badge,
+.status-badge:hover { gap: 6px; padding: 4px 10px 4px 6px; }
+.group:hover .status-label,
+.status-badge:hover .status-label { max-width: 110px; opacity: 1; }
+
 } /* @layer components */
 
 /* Selection + focus-visible + scrollbar polish */
