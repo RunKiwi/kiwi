@@ -86,36 +86,15 @@ export default function CommandCenter() {
     }
   };
 
-  const getPhaseIcon = (phase: string) => {
-    switch (phase) {
-      case 'RUNNING': return <Activity className="w-4 h-4 text-blue-400" />;
-      case 'QUEUED': return <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
-      case 'SUCCEEDED': return <CheckCircle2 className="w-4 h-4 text-green-400" />;
-      case 'FAILED': return <XCircle className="w-4 h-4 text-red-400" />;
-      default: return null;
-    }
+  // The 4 job states. Each drives the whole card: a tint that washes the
+  // background, a matching border + glow, and the badge colour.
+  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; tint: string; glow: string; spin?: boolean }> = {
+    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.38)", tint: "rgba(232,161,83,0.12)", glow: "rgba(232,161,83,0.16)", spin: true },
+    RUNNING: { label: "Running", Icon: Activity, color: "#6FB1F2", border: "rgba(96,165,250,0.38)", tint: "rgba(96,165,250,0.12)", glow: "rgba(96,165,250,0.16)" },
+    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.34)", tint: "rgba(147,198,69,0.11)", glow: "rgba(147,198,69,0.14)" },
+    FAILED: { label: "Failed", Icon: XCircle, color: "#F26D6D", border: "rgba(242,109,109,0.34)", tint: "rgba(242,109,109,0.11)", glow: "rgba(242,109,109,0.14)" },
   };
-
-  const getPhaseColor = (phase: string) => {
-    switch (phase) {
-      case 'RUNNING': return 'bg-blue-500/10 border-blue-500/30 text-blue-300';
-      case 'QUEUED': return 'bg-amber-500/10 border-amber-500/30 text-amber-300';
-      case 'SUCCEEDED': return 'bg-green-500/10 border-green-500/20 text-green-300';
-      case 'FAILED': return 'bg-red-500/10 border-red-500/20 text-red-300';
-      default: return 'bg-white/5 border-white/10 text-white';
-    }
-  };
-
-  const getCardStyle = (phase: string) => {
-    const base = "text-left glass-panel p-4 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(255,255,255,0.05)] transition-all cursor-pointer group flex flex-col h-full relative ";
-    switch (phase) {
-      case 'RUNNING': return base + "border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.1)]";
-      case 'QUEUED': return base + "animate-breathing";
-      case 'SUCCEEDED': return base + "bg-green-950/20 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.05)]";
-      case 'FAILED': return base + "bg-red-950/20 border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.05)]";
-      default: return base;
-    }
-  };
+  const statusOf = (s: string) => STATUS[s] ?? STATUS.QUEUED;
 
   const prLabel = (url: string) => {
     // Render a compact "repo#123" from a GitHub PR URL when possible.
@@ -258,15 +237,24 @@ export default function CommandCenter() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-32 relative z-10">
-          {jobs.map(job => (
+          {jobs.map(job => {
+            const m = statusOf(job.status);
+            const Icon = m.Icon;
+            return (
             <div key={job.job_id} role="button" tabIndex={0}
               onClick={() => setActiveDrawerTaskId(job.job_id)}
               onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
-              className={getCardStyle(job.status)}>
-              <div className="flex items-start justify-between mb-3">
-                <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{job.job_id}</span>
-                <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] uppercase font-bold tracking-wider ${getPhaseColor(job.status)}`}>
-                  {getPhaseIcon(job.status)}{job.status}
+              style={{
+                background: `radial-gradient(135% 135% at 0% 0%, ${m.tint}, transparent 55%), linear-gradient(180deg, var(--panel-2), var(--panel))`,
+                borderColor: m.border,
+                boxShadow: `0 22px 46px -28px rgba(0,0,0,0.75), 0 0 48px -24px ${m.glow}`,
+              }}
+              className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-white transition-colors">{job.job_id}</span>
+                <div title={m.label} className="status-badge shrink-0" style={{ color: m.color, borderColor: m.border, background: m.tint }}>
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
+                  <span className="status-label">{m.label}</span>
                 </div>
               </div>
               <h3 className="text-sm font-medium text-white mb-6 line-clamp-2 leading-snug flex-1">Job {job.job_id}</h3>
@@ -308,7 +296,8 @@ export default function CommandCenter() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
