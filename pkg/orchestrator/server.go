@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -565,6 +566,29 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if !org.CanRun() {
 		http.Error(w, "402 Payment Required: activate to run", http.StatusPaymentRequired)
 		return
+	}
+
+	// Cold-start for free tier: enqueue a provision request so a per-org daemon
+	// spins up. Non-blocking — the task waits in the queue until the daemon
+	// leases it. The `idx_prov_one_pending_provision` partial unique index
+	// (provisioner.EnsureSchema) guarantees at most one PENDING provision per
+	// org, so concurrent submits cannot enqueue duplicates: a racing insert hits
+	// ON CONFLICT DO NOTHING and is silently discarded.
+	if org.Plan == "free" {
+		go func(orgID string) {
+			reqIDBytes := make([]byte, 8)
+			rand.Read(reqIDBytes)
+			req := auth.ProvisioningRequest{
+				ID:        "prov_" + hex.EncodeToString(reqIDBytes),
+				OrgID:     orgID,
+				Type:      "provision",
+				Status:    "pending",
+				CreatedAt: time.Now(),
+			}
+			if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&req).Error; err != nil {
+				log.Printf("[coldstart] enqueue provision for org %s: %v", orgID, err)
+			}
+		}(org.ID)
 	}
 
 	// Parse multipart form
