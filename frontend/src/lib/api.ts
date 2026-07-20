@@ -70,6 +70,8 @@ export interface JobSummary {
   pr_urls: string[];
   task?: string;
   repo?: string;
+  fleet_id?: string;
+  daemon_id?: string;
 }
 
 export interface JobsListResponse {

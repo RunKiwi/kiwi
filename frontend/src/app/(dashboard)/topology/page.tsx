@@ -85,19 +85,35 @@ export default function TopologyPage() {
       };
     });
 
-    const jobY = 390;
+    const jobY = 520;
+    const daemonIds = new Set(daemons.map(d => d.id));
+    const fleetIds = new Set(fleets.map(f => f.id));
     jobs.forEach((j, i) => {
       const id = `job-${j.job_id}`;
       const color = j.status === "SUCCEEDED" ? "#4ade80" : j.status === "FAILED" ? "#ef4444" : j.status === "RUNNING" ? "#60a5fa" : "#a78bfa";
+      // Hang the job off its actual executor: daemon → fleet → Control Plane.
+      let parent = "cp";
+      if (j.daemon_id && daemonIds.has(j.daemon_id)) parent = `daemon-${j.daemon_id}`;
+      else if (j.fleet_id && fleetIds.has(j.fleet_id)) parent = `fleet-${j.fleet_id}`;
+      const onExecutor = parent !== "cp";
       computedNodes.push({
         id, position: { x: 120 + i * 190, y: jobY }, data: { label: `${j.job_id.slice(0, 12)}…\n${j.status}` },
         style: { ...nodeBase, whiteSpace: "pre-line", border: `1px solid ${color}`, fontSize: 11 },
       });
-      computedEdges.push({ id: `e-cp-${id}`, source: "cp", target: id, style: { stroke: "#333", strokeDasharray: "4 4" } });
+      computedEdges.push({
+        id: `e-${parent}-${id}`, source: parent, target: id,
+        animated: j.status === "RUNNING",
+        style: onExecutor
+          ? { stroke: color, strokeWidth: 1.5, opacity: 0.7 }
+          : { stroke: "#333", strokeDasharray: "4 4" },
+      });
+      const fleetName = j.fleet_id ? (fleets.find(f => f.id === j.fleet_id)?.name ?? j.fleet_id) : "Any fleet";
       meta[id] = {
         kind: "Job", title: j.job_id, lines: [
           ["Status", j.status],
           ["Tasks", String(j.task_count)],
+          ["Fleet", fleetName],
+          ["Daemon", j.daemon_id ? `${j.daemon_id.slice(0, 14)}…` : "—"],
           ["Pull requests", String(j.pr_urls?.length ?? 0)],
           ["Created", new Date(j.created_at).toLocaleString()],
         ],
@@ -132,7 +148,7 @@ export default function TopologyPage() {
     <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-white">
       <div className="mb-6">
         <h1 className="text-3xl font-light tracking-tight mb-2">Topology</h1>
-        <p className="text-zinc-400">Live view: Control Plane → fleets → daemons, and recent jobs. Drag to rearrange; click any node for details.</p>
+        <p className="text-zinc-400">Live view: Control Plane → fleets → daemons → jobs. A job hangs off the daemon that ran it (or its fleet); unassigned jobs link straight to the Control Plane. Drag to rearrange; click any node for details.</p>
       </div>
       <div className="glass-panel border border-white/10 rounded-2xl flex-1 min-h-[520px] overflow-hidden relative">
         <ReactFlow

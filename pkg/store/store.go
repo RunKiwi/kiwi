@@ -32,6 +32,11 @@ type JobSummary struct {
 	// on the job card. Repo is the "owner/name" the job targets.
 	Task string `json:"task"`
 	Repo string `json:"repo"`
+	// FleetID is the fleet the job's tasks target (empty = any fleet). DaemonID
+	// is the daemon that leased the work, when known. Used by the topology view
+	// to hang a job off its actual executor rather than the Control Plane.
+	FleetID  string `json:"fleet_id"`
+	DaemonID string `json:"daemon_id"`
 }
 
 // Store defines the data access interface for the control plane.
