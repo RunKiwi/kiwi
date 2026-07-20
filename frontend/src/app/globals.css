@@ -53,7 +53,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), "Inter", system-ui, Arial, sans-serif;
+  font-family: var(--font-sans), "Manrope", system-ui, Arial, sans-serif;
   min-height: 100vh;
   background-image:
     radial-gradient(1100px 560px at 50% -10%, rgba(147, 198, 69, 0.06), transparent 60%),
