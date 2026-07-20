@@ -86,14 +86,17 @@ export default function CommandCenter() {
     }
   };
 
-  // The 4 job states. Each drives the whole card: a tint that washes the
-  // background, a matching border + glow, and the badge colour.
-  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; tint: string; glow: string; spin?: boolean }> = {
-    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.38)", tint: "rgba(232,161,83,0.12)", glow: "rgba(232,161,83,0.16)", spin: true },
-    RUNNING: { label: "Running", Icon: Activity, color: "#6FB1F2", border: "rgba(96,165,250,0.38)", tint: "rgba(96,165,250,0.12)", glow: "rgba(96,165,250,0.16)" },
-    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.34)", tint: "rgba(147,198,69,0.11)", glow: "rgba(147,198,69,0.14)" },
-    FAILED: { label: "Failed", Icon: XCircle, color: "#F26D6D", border: "rgba(242,109,109,0.34)", tint: "rgba(242,109,109,0.11)", glow: "rgba(242,109,109,0.14)" },
+  // The 4 job states. Like the earlier design, each card sits on a neutral
+  // near-black base (not navy — navy muddies the tint into grey) so a flat
+  // whole-card colour wash reads true. Plus a matching border, badge, and glow.
+  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; wash: string; glow: string; spin?: boolean }> = {
+    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.32)", wash: "rgba(232,161,83,0.14)", glow: "rgba(232,161,83,0.10)", spin: true },
+    RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
+    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
+    FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
   };
+  // Neutral near-black card base — lets the status wash read as true colour.
+  const CARD_BASE = "#0C0D10";
   const statusOf = (s: string) => STATUS[s] ?? STATUS.QUEUED;
 
   const prLabel = (url: string) => {
@@ -245,14 +248,14 @@ export default function CommandCenter() {
               onClick={() => setActiveDrawerTaskId(job.job_id)}
               onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
               style={{
-                background: `radial-gradient(135% 135% at 0% 0%, ${m.tint}, transparent 55%), linear-gradient(180deg, var(--panel-2), var(--panel))`,
+                background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
                 borderColor: m.border,
-                boxShadow: `0 22px 46px -28px rgba(0,0,0,0.75), 0 0 48px -24px ${m.glow}`,
+                boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
               }}
               className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-white transition-colors">{job.job_id}</span>
-                <div title={m.label} className="status-badge shrink-0" style={{ color: m.color, borderColor: m.border, background: m.tint }}>
+                <div title={m.label} className="status-badge shrink-0" style={{ color: m.color, borderColor: m.border, background: m.wash }}>
                   <Icon className={`w-3.5 h-3.5 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
                   <span className="status-label">{m.label}</span>
                 </div>
