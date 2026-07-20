@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+
+// The theme references --font-geist-sans/mono; wire them to real faces so the UI
+// isn't falling back to Arial (Inter for text, JetBrains Mono for ids/code).
+const sans = Inter({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
 
 const TITLE = "Kiwi — One issue in. One PR out.";
 const DESCRIPTION =
@@ -32,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${sans.variable} ${mono.variable}`}>
       <body className="antialiased min-h-screen">
         {children}
       </body>

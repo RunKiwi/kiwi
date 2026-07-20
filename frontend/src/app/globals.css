@@ -2,11 +2,29 @@
 
 :root {
   color-scheme: dark;
-  --background: #09090b;
-  --foreground: #fafafa;
-  
+
+  /* ---- Night-navy canvas + kiwi-green accent (brand) ---- */
+  --background: #0A1017;
+  --foreground: #EAF0F2;
+
+  --panel: #0E1A24;
+  --panel-2: #10202C;
+  --field: #0C1620;
+  --field-hi: #13222E;
+  --line: rgba(234, 240, 242, 0.08);
+  --line-hi: rgba(234, 240, 242, 0.16);
+
+  --green: #93C645;
+  --green-2: #9ED052;
+  --green-dim: #6FA232;
+  --green-glow: rgba(147, 198, 69, 0.30);
+
+  --tx: #EAF0F2;
+  --tx-mut: #9DB0BC;
+  --tx-dim: #6E8290;
+
   --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.06);
 }
 
 @theme inline {
@@ -23,22 +41,122 @@
   border-radius: 0.75rem;
 }
 
+/* The shared card — every panel across the app uses this. Gradient fill, a 1px
+   top highlight, hairline border and a soft deep shadow for real elevation. */
 @utility glass-panel {
-  background-color: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
   border-radius: 1rem;
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 50px -22px rgba(0, 0, 0, 0.75);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Inter", system-ui, Arial, sans-serif;
   min-height: 100vh;
-  /* subtle gradient background for depth */
-  background-image: radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%);
+  background-image:
+    radial-gradient(1100px 560px at 50% -10%, rgba(147, 198, 69, 0.06), transparent 60%),
+    radial-gradient(900px 640px at 100% 0%, rgba(46, 92, 130, 0.10), transparent 55%),
+    linear-gradient(180deg, #0B141D 0%, var(--background) 60%);
   background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Premium primitives (used across pages) ----------
+   In @layer components so Tailwind utilities (e.g. min-h-*, px-*) still win. */
+@layer components {
+
+/* Text inputs / textareas / selects */
+.field {
+  width: 100%;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  color: var(--tx);
+  padding: 0.62rem 0.85rem;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.field::placeholder { color: var(--tx-dim); }
+.field:hover { border-color: var(--line-hi); }
+.field:focus,
+.field:focus-visible {
+  outline: none;
+  border-color: rgba(147, 198, 69, 0.6);
+  background: var(--field-hi);
+  box-shadow: 0 0 0 4px rgba(147, 198, 69, 0.12);
+}
+
+/* Native select wrapper adds a custom chevron */
+.select-wrap { position: relative; }
+.select-wrap select { appearance: none; -webkit-appearance: none; padding-right: 2.1rem; cursor: pointer; }
+.select-wrap::after {
+  content: ""; position: absolute; right: 0.85rem; top: 50%; width: 8px; height: 8px;
+  border-right: 1.6px solid var(--tx-dim); border-bottom: 1.6px solid var(--tx-dim);
+  transform: translateY(-70%) rotate(45deg); pointer-events: none;
+}
+
+/* Primary (green) button */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: linear-gradient(180deg, var(--green-2), var(--green));
+  color: #0A1017; font-weight: 650; font-size: 0.9rem;
+  padding: 0.6rem 1.15rem; border: none; border-radius: 0.7rem; cursor: pointer;
+  box-shadow: 0 8px 22px -10px var(--green-glow), 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -10px var(--green-glow), 0 1px 0 rgba(255, 255, 255, 0.4) inset; }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Ghost / secondary button */
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: var(--field); color: var(--tx); font-weight: 500; font-size: 0.88rem;
+  padding: 0.55rem 1rem; border: 1px solid var(--line); border-radius: 0.7rem; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+.btn-ghost:hover { border-color: var(--line-hi); background: var(--field-hi); }
+
+/* Chips (repo / model, etc.) */
+.chip {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: var(--field); border: 1px solid var(--line); color: var(--tx);
+  padding: 0.5rem 0.75rem; border-radius: 0.6rem; font-size: 0.8rem; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chip:hover { border-color: var(--line-hi); background: var(--field-hi); }
+.chip .k { color: var(--tx-dim); font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.chip .v { font-family: var(--font-mono), ui-monospace, monospace; font-size: 0.78rem; }
+
+.pdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.pdot-ant { background: #D97757; }
+.pdot-gem { background: #4C8DF6; }
+
+/* Section eyebrow */
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  color: var(--green); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green-glow); }
+
+/* Card hover-lift micro-interaction */
+.card-hover { transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease; }
+.card-hover:hover { transform: translateY(-2px); border-color: var(--line-hi); }
+
+} /* @layer components */
+
+/* Selection + focus-visible + scrollbar polish */
+::selection { background: rgba(147, 198, 69, 0.28); color: #fff; }
+:focus-visible { outline: 2px solid rgba(147, 198, 69, 0.55); outline-offset: 2px; }
+* { scrollbar-width: thin; scrollbar-color: rgba(234, 240, 242, 0.14) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(234, 240, 242, 0.12); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(234, 240, 242, 0.22); background-clip: padding-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
 @theme {
@@ -50,14 +168,9 @@ body {
     to { background-position: -200% 0; }
   }
 
+  /* Queued-task "breathing" — amber (waiting), not the old purple. */
   @keyframes breathing {
-    0%, 100% {
-      background-color: rgba(168, 85, 247, 0.05);
-      border-color: rgba(168, 85, 247, 0.2);
-    }
-    50% {
-      background-color: rgba(168, 85, 247, 0.2);
-      border-color: rgba(168, 85, 247, 0.4);
-    }
+    0%, 100% { background-color: rgba(232, 161, 83, 0.05); border-color: rgba(232, 161, 83, 0.22); }
+    50% { background-color: rgba(232, 161, 83, 0.15); border-color: rgba(232, 161, 83, 0.42); }
   }
 }
