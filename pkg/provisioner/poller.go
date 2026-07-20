@@ -28,10 +28,6 @@ const (
 	statusFailed     = "failed"
 )
 
-// sharedFreeFleet is the well-known fleet id every free-tier daemon joins. Free
-// work is routed to it; see the Free Tier RFC.
-const sharedFreeFleet = "shared-free"
-
 type Provisioner struct {
 	db       *gorm.DB
 	store    store.Store
@@ -152,11 +148,11 @@ func (p *Provisioner) claim(ctx context.Context) (auth.ProvisioningRequest, bool
 func (p *Provisioner) execute(ctx context.Context, req auth.ProvisioningRequest) (string, error) {
 	switch req.Type {
 	case "provision":
-		joinToken, err := p.store.CreateDaemonJoinToken(ctx, req.OrgID, sharedFreeFleet, time.Hour)
+		joinToken, err := p.store.CreateDaemonJoinToken(ctx, req.OrgID, auth.SharedFreeFleet, time.Hour)
 		if err != nil {
 			return statusFailed, fmt.Errorf("mint join token for org %s: %w", req.OrgID, err)
 		}
-		if _, err := p.launcher.Launch(ctx, req.OrgID, sharedFreeFleet, joinToken, p.apiURL); err != nil {
+		if _, err := p.launcher.Launch(ctx, req.OrgID, auth.SharedFreeFleet, joinToken, p.apiURL); err != nil {
 			return statusFailed, fmt.Errorf("launch daemon for org %s: %w", req.OrgID, err)
 		}
 		return statusCompleted, nil

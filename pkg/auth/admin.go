@@ -237,7 +237,27 @@ func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		Name:      body.Name,
 		CreatedAt: time.Now(),
 	}
-	if err := db.Create(&org).Error; err != nil {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&org).Error; err != nil {
+			return err
+		}
+		if org.Plan == "" || org.Plan == "free" {
+			limits := OrgLimits{
+				OrgID:              org.ID,
+				MaxConcurrentJobs:  1,
+				MaxWorkersPerJob:   2,
+				MaxBudgetPerJob:    0.50,
+				TaskTimeoutSeconds: 600,
+				MaxSandboxDiskMB:   512,
+				MaxBudgetPerMonth:  0,
+			}
+			if err := tx.Create(&limits).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			http.Error(w, "Organization name already exists", http.StatusConflict)
 			return

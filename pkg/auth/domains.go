@@ -62,7 +62,21 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			Plan:            "free",
 			CreatedAt:       time.Now(),
 		}
-		db.Create(org)
+		db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(org).Error; err != nil {
+				return err
+			}
+			limits := OrgLimits{
+				OrgID:              org.ID,
+				MaxConcurrentJobs:  1,
+				MaxWorkersPerJob:   2,
+				MaxBudgetPerJob:    0.50,
+				TaskTimeoutSeconds: 600,
+				MaxSandboxDiskMB:   512,
+				MaxBudgetPerMonth:  0,
+			}
+			return tx.Create(&limits).Error
+		})
 		return org, true, false
 	}
 
@@ -82,7 +96,21 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			Plan:            "free",
 			CreatedAt:       time.Now(),
 		}
-		db.Create(&org)
+		db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&org).Error; err != nil {
+				return err
+			}
+			limits := OrgLimits{
+				OrgID:              org.ID,
+				MaxConcurrentJobs:  1,
+				MaxWorkersPerJob:   2,
+				MaxBudgetPerJob:    0.50,
+				TaskTimeoutSeconds: 600,
+				MaxSandboxDiskMB:   512,
+				MaxBudgetPerMonth:  0,
+			}
+			return tx.Create(&limits).Error
+		})
 		return &org, true, false
 	}
 

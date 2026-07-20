@@ -8,16 +8,15 @@ import (
 )
 
 // OrgLimits defines the resource constraints and configuration for an organization.
+// This is a read-through struct. The canonical schema is store.OrgLimits.
 type OrgLimits struct {
 	OrgID              string  `json:"org_id" gorm:"primaryKey;index;not null"`
-	MaxConcurrentTasks int     `json:"max_concurrent_tasks"`
-	MaxBudgetPerTask   float64 `json:"max_budget_per_task"`
+	MaxConcurrentJobs  int     `json:"max_concurrent_jobs"`
+	MaxBudgetPerJob    float64 `json:"max_budget_per_job"`
 	MaxBudgetPerMonth  float64 `json:"max_budget_per_month"`
+	MaxWorkersPerJob   int     `json:"max_workers_per_job"`
+	TaskTimeoutSeconds int     `json:"task_timeout_seconds"`
 	MaxSandboxDiskMB   int     `json:"max_sandbox_disk_mb"`
-	MaxSandboxMemoryMB int     `json:"max_sandbox_memory_mb"`
-	MaxSandboxCPU      float64 `json:"max_sandbox_cpu"`
-	DockerImage        string  `json:"docker_image"`
-	TaskTimeoutMinutes int     `json:"task_timeout_minutes"`
 }
 
 // TableName overrides the default GORM table name.
@@ -27,14 +26,12 @@ func (OrgLimits) TableName() string { return "org_limits" }
 func DefaultLimits(orgID string) *OrgLimits {
 	return &OrgLimits{
 		OrgID:              orgID,
-		MaxConcurrentTasks: 5,
-		MaxBudgetPerTask:   1.00,
-		MaxBudgetPerMonth:  50.00,
-		MaxSandboxDiskMB:   200,
-		MaxSandboxMemoryMB: 512,
-		MaxSandboxCPU:      1.0,
-		DockerImage:        "golang:1.21-alpine",
-		TaskTimeoutMinutes: 10,
+		MaxConcurrentJobs:  10,
+		MaxBudgetPerJob:    5.00,
+		MaxBudgetPerMonth:  500.00,
+		MaxWorkersPerJob:   8,
+		TaskTimeoutSeconds: 1800,
+		MaxSandboxDiskMB:   2048,
 	}
 }
 
@@ -49,29 +46,23 @@ func GetOrgLimits(db *gorm.DB, orgID string) (*OrgLimits, error) {
 	}
 
 	// Apply individual defaults if specific fields are zero/empty
-	if limits.MaxConcurrentTasks <= 0 {
-		limits.MaxConcurrentTasks = 5
+	if limits.MaxConcurrentJobs <= 0 {
+		limits.MaxConcurrentJobs = 10
 	}
-	if limits.MaxBudgetPerTask <= 0 {
-		limits.MaxBudgetPerTask = 1.00
+	if limits.MaxBudgetPerJob <= 0 {
+		limits.MaxBudgetPerJob = 5.00
 	}
 	if limits.MaxBudgetPerMonth <= 0 {
-		limits.MaxBudgetPerMonth = 50.00
+		limits.MaxBudgetPerMonth = 500.00
+	}
+	if limits.MaxWorkersPerJob <= 0 {
+		limits.MaxWorkersPerJob = 8
+	}
+	if limits.TaskTimeoutSeconds <= 0 {
+		limits.TaskTimeoutSeconds = 1800
 	}
 	if limits.MaxSandboxDiskMB <= 0 {
-		limits.MaxSandboxDiskMB = 200
-	}
-	if limits.MaxSandboxMemoryMB <= 0 {
-		limits.MaxSandboxMemoryMB = 512
-	}
-	if limits.MaxSandboxCPU <= 0 {
-		limits.MaxSandboxCPU = 1.0
-	}
-	if limits.DockerImage == "" {
-		limits.DockerImage = "golang:1.21-alpine"
-	}
-	if limits.TaskTimeoutMinutes <= 0 {
-		limits.TaskTimeoutMinutes = 10
+		limits.MaxSandboxDiskMB = 2048
 	}
 
 	return &limits, nil
@@ -89,7 +80,7 @@ func (l *OrgLimits) CheckConcurrentLimit(db *gorm.DB) (bool, error) {
 		return false, fmt.Errorf("failed to count active tasks: %w", err)
 	}
 
-	return int(activeCount) < l.MaxConcurrentTasks, nil
+	return int(activeCount) < l.MaxConcurrentJobs, nil
 }
 
 // CheckMonthlyBudget checks if the organization has remaining monthly budget.
