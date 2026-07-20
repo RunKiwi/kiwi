@@ -61,6 +61,7 @@ type Store interface {
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
 	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
+	ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)
 
 	// Fleets & models (dashboard).

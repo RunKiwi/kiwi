@@ -161,6 +161,27 @@ func TestLLMPlannerRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestLLMPlannerSelectsModelPerRequest(t *testing.T) {
+	resp := `{"summary":"s","workers":[{"id":"w1","task":"do it","model":"sonnet","test_cmd":"go test"}]}`
+	var requested []string
+	p := NewLLMPlannerFunc(func(m string) Completer {
+		requested = append(requested, m)
+		return fakeCompleter{out: resp}
+	}, "default-planner")
+
+	// No planner model in the request → the default is used.
+	if _, err := p.Plan(context.Background(), PlanRequest{Task: "x"}); err != nil {
+		t.Fatalf("Plan (default): %v", err)
+	}
+	// An explicit planner model → that id is what the factory is asked to build.
+	if _, err := p.Plan(context.Background(), PlanRequest{Task: "x", PlannerModel: "opus-x"}); err != nil {
+		t.Fatalf("Plan (explicit): %v", err)
+	}
+	if len(requested) != 2 || requested[0] != "default-planner" || requested[1] != "opus-x" {
+		t.Fatalf("expected planner models [default-planner opus-x], got %v", requested)
+	}
+}
+
 func TestLLMPlannerDefaultsScopeFromRequest(t *testing.T) {
 	// Model omits file/model/test_cmd; the planner must backfill them from the
 	// request so every worker is executable (carries a definition of done).

@@ -90,6 +90,17 @@ func main() {
 	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		server.RecoverTasks()
 
+		// How long a task may sit QUEUED before it's failed (e.g. no fleet ever
+		// connected to run it). Configurable via KIWI_QUEUE_TTL; default 30m.
+		queueTTL := 30 * time.Minute
+		if v := os.Getenv("KIWI_QUEUE_TTL"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				queueTTL = d
+			} else {
+				slog.Warn("invalid KIWI_QUEUE_TTL, using default", "value", v, "default", queueTTL)
+			}
+		}
+
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
@@ -102,6 +113,11 @@ func main() {
 						slog.Error("requeue expired leases failed", "err", err)
 					} else if n > 0 {
 						slog.Info("requeued expired lease(s)", "count", n)
+					}
+					if n, err := storage.ExpireStaleQueuedTasks(ctx, queueTTL); err != nil {
+						slog.Error("expire stale queued tasks failed", "err", err)
+					} else if n > 0 {
+						slog.Info("expired stale queued task(s)", "count", n, "ttl", queueTTL)
 					}
 				}
 			}
