@@ -1,33 +1,40 @@
-FROM golang:1.25-alpine AS builder
+# syntax=docker/dockerfile:1.7
+# Builds the kiwid (Control Plane) and kiwidaemon binaries.
+#
+# The builder runs on the *native* build platform and cross-compiles to the
+# target arch (Go does this natively), so building a linux/amd64 image on an
+# arm64 Mac never emulates the compiler under QEMU. Go's module + build caches
+# are persisted via BuildKit cache mounts, so incremental builds are fast.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 WORKDIR /app
-
-# Install build dependencies
 RUN apk add --no-cache git
 
-# Copy go.mod and go.sum and download dependencies
+# Download modules first so this layer is cached until go.mod/go.sum change.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-# Copy the source code
 COPY . .
 
-# Build the kiwid and kiwidaemon binaries
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kiwid ./cmd/kiwid
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kiwidaemon ./cmd/kiwidaemon
+# TARGETOS/TARGETARCH are provided by buildx from --platform.
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/kiwid ./cmd/kiwid && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/kiwidaemon ./cmd/kiwidaemon
 
-# Final stage
-FROM golang:1.25-alpine
+# Minimal runtime — alpine keeps git available (gitcache shells out to it)
+# while dropping the ~300MB Go toolchain from the shipped image.
+FROM alpine:3.20
 
 WORKDIR /app
-
 RUN apk add --no-cache ca-certificates tzdata git
 
-# Copy the binaries from the builder stage
-COPY --from=builder /app/kiwid .
-COPY --from=builder /app/kiwidaemon .
+COPY --from=builder /out/kiwid /out/kiwidaemon ./
 
-# Expose port
 EXPOSE 8080
-
 ENTRYPOINT ["./kiwid"]

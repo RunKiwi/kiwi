@@ -1,0 +1,15 @@
+# Keep the frontend build context small and cache-stable. node_modules alone
+# is ~630MB and is reinstalled from package-lock inside the image anyway.
+node_modules
+.next
+.git
+.gitignore
+Dockerfile
+.dockerignore
+npm-debug.log*
+.env
+.env.local
+.DS_Store
+.vscode
+.idea
+coverage

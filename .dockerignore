@@ -1,0 +1,27 @@
+# The root image (Dockerfile) builds only the Go binaries. Keep the build
+# context tiny: no VCS history, no frontend, no local build junk.
+.git
+.gitignore
+.github
+frontend
+sdk
+docs
+demo_project
+**/node_modules
+*.md
+!go.mod
+!go.sum
+# Local binaries / artifacts
+kiwi
+kiwid
+kiwidaemon
+*.test
+*.out
+coverage*
+.env
+.env.*
+.claude
+.vscode
+.idea
+.DS_Store
+deploy.sh
