@@ -19,7 +19,7 @@ export interface Fleet {
   id: string;
   org_id: string;
   name: string;
-  type: "self-managed" | "byoc";
+  type: "managed" | "byoc";
   created_at: string;
 }
 
@@ -204,7 +204,7 @@ export const client = {
 
   listFleets: () => fetchApi<{ fleets: Fleet[] }>("/api/v1/fleets"),
 
-  createFleet: (name: string, type: "self-managed" | "byoc") =>
+  createFleet: (name: string, type: "managed" | "byoc") =>
     fetchApi<Fleet>("/api/v1/fleets", {
       method: "POST",
       body: JSON.stringify({ name, type }),

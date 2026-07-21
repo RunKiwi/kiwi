@@ -86,8 +86,8 @@ func assertDefaultFleet(t *testing.T, db *gorm.DB, orgID string) {
 	if len(fleets) != 1 {
 		t.Fatalf("org %s: want exactly 1 default fleet, got %d", orgID, len(fleets))
 	}
-	if fleets[0].Type != store.FleetSelfManaged {
-		t.Errorf("org %s: want self-managed fleet, got %q", orgID, fleets[0].Type)
+	if fleets[0].Type != store.FleetManaged {
+		t.Errorf("org %s: want managed fleet, got %q", orgID, fleets[0].Type)
 	}
 }
 

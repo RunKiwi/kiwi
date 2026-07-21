@@ -257,7 +257,7 @@ func CreateDefaultFleet(tx *gorm.DB, orgID string) error {
 		ID:        store.NewDashID("flt"),
 		OrgID:     orgID,
 		Name:      "Managed (Default)",
-		Type:      store.FleetSelfManaged,
+		Type:      store.FleetManaged,
 		CreatedAt: time.Now(),
 	}
 	return tx.Create(f).Error
