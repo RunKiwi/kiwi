@@ -153,9 +153,9 @@ The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` 
 
 The Free tier needs an execution host the control plane does **not** provide today. `kiwi-api` / `kiwi-orchestrator` run on **Cloud Run**, which cannot run the provisioner's `docker run` launches or a gVisor (`runsc`) sandbox. Deploying Free therefore requires:
 
-1. A **Docker + gVisor GCE VM** ("free-fleet host") that runs the provisioner and the per-org `kiwidaemon` containers it launches, with the execution zone's default-deny egress (public API LB, model API, VCS only).
-2. The **`kiwidaemon` image** published to Artifact Registry (the current `deploy.sh` builds only `kiwid` + `frontend`; add a `kiwidaemon` build/push).
-3. **Gating the provisioner** so it runs on the free-fleet host, not on the Cloud Run orchestrator (which has no Docker) — otherwise the orchestrator logs a failed launch for every free `ProvisioningRequest`.
+1. A **Docker + gVisor GCE VM** ("free-fleet host") with `runsc` registered as a Docker runtime and the execution zone's default-deny egress (public API LB, model API, VCS only). Run the control-plane binary there with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), `KIWI_PUBLIC_API_URL=<public API>`, and `KIWI_DAEMON_IMAGE=<AR path>/kiwidaemon:latest`. The launcher bind-mounts the host `docker.sock` into each daemon so its test sandbox runs as a sibling container under `runsc`.
+2. The **`kiwidaemon` image** in Artifact Registry — `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets; `deploy.sh` pushes it).
+3. Cloud Run leaves `KIWI_PROVISIONER` unset, so its orchestrator keeps only the singleton sweepers and never attempts a `docker run`.
 
 The schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. Pro stays on per-org VMs ([Managed Tier on GCP RFC](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md) §5).
 

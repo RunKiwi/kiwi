@@ -28,13 +28,23 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-s -w" -o /out/kiwidaemon ./cmd/kiwidaemon
 
 # Minimal runtime — alpine keeps git available (gitcache shells out to it)
-# while dropping the ~300MB Go toolchain from the shipped image.
-FROM alpine:3.20
+# while dropping the ~300MB Go toolchain from the shipped image. Both binaries
+# ship in the base layer; the two final stages differ only by entrypoint.
+FROM alpine:3.20 AS base
 
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata git
 
 COPY --from=builder /out/kiwid /out/kiwidaemon ./
+
+# Data Plane daemon image — build with `--target kiwidaemon`. Used by the
+# free-tier provisioner, which runs `docker run kiwidaemon:latest`.
+FROM base AS kiwidaemon
+ENTRYPOINT ["./kiwidaemon"]
+
+# Control Plane image — the default target (last stage), so an untargeted
+# `docker build` still produces the kiwid image as before.
+FROM base AS kiwid
 
 EXPOSE 8080
 ENTRYPOINT ["./kiwid"]

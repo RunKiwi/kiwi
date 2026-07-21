@@ -98,17 +98,6 @@ func main() {
 	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		server.RecoverTasks()
 
-		apiURL := "http://127.0.0.1"
-		if cfg.Addr[0] == ':' {
-			apiURL += cfg.Addr
-		} else {
-			apiURL = "http://" + cfg.Addr
-		}
-		launcher := provisioner.NewDockerLauncher()
-		prov := provisioner.NewProvisioner(db, storage, launcher, apiURL)
-		prov.Start(ctx)
-		slog.Info("Provisioner started")
-
 		// How long a task may sit QUEUED before it's failed (e.g. no fleet ever
 		// connected to run it). Configurable via KIWI_QUEUE_TTL; default 30m.
 		queueTTL := 30 * time.Minute
@@ -162,6 +151,29 @@ func main() {
 		} else {
 			slog.Info("JetStream not available; Outbox Relay NOT started")
 		}
+	}
+
+	// Free-tier provisioner: it launches per-org daemon containers via `docker
+	// run`, so it must run on a Docker + gVisor host (a free-fleet VM), never on
+	// Cloud Run. It is gated on KIWI_PROVISIONER and deliberately independent of
+	// -role, so the free-fleet host does not also have to run the singleton
+	// orchestrator sweepers. Default (unset) = off, which is correct for both
+	// Cloud Run and local single-box dev (which runs its daemon on the host).
+	if os.Getenv("KIWI_PROVISIONER") == "docker" {
+		// Daemons launched here must reach the PUBLIC control plane, not this
+		// host, so their -api-url comes from KIWI_PUBLIC_API_URL. Fall back to the
+		// local listen address for single-box/dev use.
+		apiURL := os.Getenv("KIWI_PUBLIC_API_URL")
+		if apiURL == "" {
+			if len(cfg.Addr) > 0 && cfg.Addr[0] == ':' {
+				apiURL = "http://127.0.0.1" + cfg.Addr
+			} else {
+				apiURL = "http://" + cfg.Addr
+			}
+		}
+		prov := provisioner.NewProvisioner(db, storage, provisioner.NewDockerLauncher(), apiURL)
+		prov.Start(ctx)
+		slog.Info("Free-tier provisioner started", "api_url", apiURL)
 	}
 
 	go func() {
