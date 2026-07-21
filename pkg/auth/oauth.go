@@ -276,13 +276,25 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 				// resolves the existing row instead of inserting a duplicate.
 				personalOrgID := "org_" + hex.EncodeToString([]byte(email))[:8]
 				var personalOrg Organization
-				db.Where(Organization{ID: personalOrgID}).Attrs(Organization{
-					Name:            email + "'s Workspace",
-					Type:            "personal",
-					ActivationState: "inactive",
-					Plan:            "free",
-					CreatedAt:       time.Now(),
-				}).FirstOrCreate(&personalOrg)
+				if err := db.Where(Organization{ID: personalOrgID}).First(&personalOrg).Error; err != nil {
+					db.Transaction(func(tx *gorm.DB) error {
+						personalOrg = Organization{
+							ID:              personalOrgID,
+							Name:            email + "'s Workspace",
+							Type:            "personal",
+							ActivationState: "inactive",
+							Plan:            "free",
+							CreatedAt:       time.Now(),
+						}
+						if err := tx.Create(&personalOrg).Error; err != nil {
+							return err
+						}
+						if err := tx.Create(FreeLimits(personalOrg.ID)).Error; err != nil {
+							return err
+						}
+						return CreateDefaultFleet(tx, personalOrg.ID)
+					})
+				}
 				assignedOrgID = personalOrg.ID
 				role = "admin" // admin of their personal org
 
