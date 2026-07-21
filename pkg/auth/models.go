@@ -22,6 +22,12 @@ type Organization struct {
 	Plan            string    `json:"plan" gorm:"not null;default:free"`
 	ActivationState string    `json:"activation_state" gorm:"not null;default:inactive"`
 	CreatedAt       time.Time `json:"created_at"`
+	// AbuseStrikes counts recent abuse signals within AbuseStrikeWindow; the org
+	// is auto-suspended once it reaches the threshold. It decays (resets) when a
+	// strike arrives after the window, and is cleared on suspend. See
+	// RecordAbuseStrike — a single strike is a weak signal, so we require repeats.
+	AbuseStrikes int        `json:"abuse_strikes" gorm:"not null;default:0"`
+	LastAbuseAt  *time.Time `json:"last_abuse_at"`
 }
 
 // CanRun returns true if the organization is active and allowed to run tasks.

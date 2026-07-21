@@ -371,10 +371,17 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Abuse {
-		if err := auth.SuspendOrg(s.db, d.OrgID); err != nil {
-			log.Printf("[daemon] auto-suspend failed for org %s: %v", d.OrgID, err)
-		} else {
-			log.Printf("[daemon] auto-suspended org %s for abuse", d.OrgID)
+		// Don't suspend on a single strike — the daemon's heuristic also fires for
+		// a legitimately slow test suite. Accumulate strikes in a rolling window
+		// and suspend only past the threshold.
+		suspended, strikes, err := auth.RecordAbuseStrike(s.db, d.OrgID, 0, 0)
+		switch {
+		case err != nil:
+			log.Printf("[daemon] record abuse strike for org %s: %v", d.OrgID, err)
+		case suspended:
+			log.Printf("[daemon] auto-suspended org %s after %d abuse strikes", d.OrgID, strikes)
+		default:
+			log.Printf("[daemon] abuse strike %d recorded for org %s (below suspend threshold)", strikes, d.OrgID)
 		}
 	}
 
