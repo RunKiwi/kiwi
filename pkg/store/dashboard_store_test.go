@@ -12,7 +12,7 @@ func TestFleetsAndModelsAreOrgScoped(t *testing.T) {
 	if _, err := s.CreateFleet(ctx, "orgA", "prod", FleetBYOC); err != nil {
 		t.Fatalf("CreateFleet: %v", err)
 	}
-	if _, err := s.CreateFleet(ctx, "orgB", "other", FleetSelfManaged); err != nil {
+	if _, err := s.CreateFleet(ctx, "orgB", "other", FleetManaged); err != nil {
 		t.Fatalf("CreateFleet B: %v", err)
 	}
 	fa, err := s.ListFleets(ctx, "orgA")
@@ -23,10 +23,10 @@ func TestFleetsAndModelsAreOrgScoped(t *testing.T) {
 		t.Errorf("orgA should see only its fleet, got %+v", fa)
 	}
 
-	// Invalid type falls back to self-managed.
-	f, _ := s.CreateFleet(ctx, "orgA", "weird", "bogus")
-	if f.Type != FleetSelfManaged {
-		t.Errorf("invalid fleet type should default to self-managed, got %q", f.Type)
+	// Invalid type falls back to managed.
+	f, err := s.CreateFleet(ctx, "orgA", "bad-type", "bogus")
+	if f.Type != FleetManaged {
+		t.Errorf("invalid fleet type should default to managed, got %q", f.Type)
 	}
 
 	m, err := s.CreateModel(ctx, "orgA", "gemini-2.0-flash", "gemini")
