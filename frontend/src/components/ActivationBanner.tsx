@@ -1,18 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { client } from "@/lib/api";
 
-// A persistent banner shown on every dashboard page while the org can't run
-// tasks. Running is gated on activation_state server-side (the submit endpoint
-// returns 402 when inactive), so this makes the gate visible everywhere instead
-// of only surfacing as a cryptic error after a failed dispatch.
+// A persistent banner shown on every dashboard page while the org is SUSPENDED —
+// task submission is blocked server-side (the planner endpoint returns 403).
+// Note: free orgs are created "inactive" and still run on the shared fleet, so
+// "inactive" is NOT a blocking state; only "suspended" is surfaced here.
 export function ActivationBanner() {
   const [state, setState] = useState<string | null>(null);
-  const pathname = usePathname();
 
   useEffect(() => {
     client
@@ -21,26 +18,22 @@ export function ActivationBanner() {
       .catch(() => setState(null));
   }, []);
 
-  if (!state || state === "active") return null;
-
-  // Don't stack the banner on the page that already explains activation.
-  const onSettings = pathname?.startsWith("/settings");
+  if (state !== "suspended") return null;
 
   return (
-    <div className="flex items-center gap-3 px-6 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-sm">
-      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+    <div className="flex items-center gap-3 px-6 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-200 text-sm">
+      <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
       <span className="flex-1 min-w-0">
-        Your organization isn&apos;t activated — you can plan and preview tasks, but
-        <span className="font-medium text-amber-100"> running them is disabled</span>.
+        Your organization is <span className="font-medium text-red-100">suspended</span> —
+        running tasks is disabled. This can follow repeated abuse signals or
+        exhausting your plan&apos;s limits.
       </span>
-      {!onSettings && (
-        <Link
-          href="/settings#activation"
-          className="font-semibold underline underline-offset-2 hover:text-white shrink-0"
-        >
-          Activate to run
-        </Link>
-      )}
+      <a
+        href="mailto:support@runkiwi.com?subject=Suspended%20organization"
+        className="font-semibold underline underline-offset-2 hover:text-white shrink-0"
+      >
+        Contact support
+      </a>
     </div>
   );
 }

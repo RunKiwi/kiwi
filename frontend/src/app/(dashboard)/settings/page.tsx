@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle } from "lucide-react";
 import { client, type Integration } from "@/lib/api";
+import { PlanUsage } from "@/components/PlanUsage";
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
@@ -14,7 +15,6 @@ export default function SettingsPage() {
   const [gitToken, setGitToken] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [showActivate, setShowActivate] = useState(false);
 
   useEffect(() => {
     client.validate().then(setOrg).catch(() => {});
@@ -60,38 +60,33 @@ export default function SettingsPage() {
           <div>
             <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Status</div>
             <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${org?.activation_state === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                {org?.activation_state?.toUpperCase() || "INACTIVE"}
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                org?.activation_state === 'active' ? 'bg-green-500/10 text-green-400'
+                : org?.activation_state === 'suspended' ? 'bg-red-500/10 text-red-400'
+                : 'bg-white/5 text-zinc-400'
+              }`}>
+                {org?.activation_state?.toUpperCase() || "—"}
               </span>
               <span className="text-zinc-400 capitalize">{org?.plan}</span>
             </div>
           </div>
         </div>
-        
-        {org?.activation_state !== 'active' && (
-          <div id="activation" className="mt-4 p-4 rounded-xl border border-amber-500/20 bg-amber-500/10 scroll-mt-8">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-amber-300 font-medium text-sm">Organization not activated</h3>
-                <p className="text-amber-300/80 text-sm mt-1">You can plan and preview tasks, but running them is disabled until your org is activated.</p>
-              </div>
-              <button onClick={() => setShowActivate(v => !v)} className="shrink-0 bg-amber-400 text-[#1a1400] hover:bg-amber-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-                Activate to run
-              </button>
-            </div>
-            {showActivate && (
-              <div className="mt-4 pt-4 border-t border-amber-500/20 text-sm text-amber-100/90 space-y-2">
-                <p>Activation turns on task execution for your organization. Self-serve billing isn&apos;t connected yet, so activation is handled by the Kiwi team.</p>
-                <p>Share your organization ID with support to get activated:</p>
-                <div className="flex items-center gap-2">
-                  <code className="font-mono text-xs bg-black/30 rounded px-2 py-1 text-amber-200">{org?.org_id || "—"}</code>
-                  <a href={`mailto:support@runkiwi.com?subject=${encodeURIComponent(`Activate org ${org?.org_id ?? ""}`)}`} className="text-xs underline hover:text-white">Email support</a>
-                </div>
-              </div>
-            )}
+
+        {org?.activation_state === 'suspended' && (
+          <div id="activation" className="mt-4 p-4 rounded-xl border border-red-500/20 bg-red-500/10 scroll-mt-8">
+            <h3 className="text-red-300 font-medium text-sm">Organization suspended</h3>
+            <p className="text-red-300/80 text-sm mt-1">
+              Running tasks is disabled. This can follow repeated abuse signals or exhausting your plan&apos;s limits.
+              Contact{" "}
+              <a href={`mailto:support@runkiwi.com?subject=${encodeURIComponent(`Suspended org ${org?.org_id ?? ""}`)}`} className="underline hover:text-white">support</a>
+              {" "}if you think this is a mistake.
+            </p>
           </div>
         )}
       </div>
+
+      {/* Plan & usage */}
+      <PlanUsage />
 
       {/* Overview stats (real data) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

@@ -94,6 +94,15 @@ export interface ValidateResponse {
   plan: string;
 }
 
+export interface UsageResponse {
+  plan: string;
+  activation_state: string;
+  agent_minutes_used: number;
+  agent_minutes_limit: number; // 0 = unlimited
+  concurrent_jobs_running: number;
+  max_concurrent_jobs: number;
+}
+
 const getBaseUrl = () => {
   return process.env.NEXT_PUBLIC_KIWI_API_URL || "http://localhost:8080";
 };
@@ -170,6 +179,7 @@ export interface AuthProvidersResponse {
 export const client = {
   getAuthProviders: () => fetchApi<AuthProvidersResponse>("/auth/providers"),
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
+  getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
   
   submitPlan: (req: PlanRequest) => 
     fetchApi<PlanResponse>("/api/v1/planner/plan", {
