@@ -3,6 +3,9 @@ package auth
 import (
 	"context"
 	"testing"
+
+	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"gorm.io/gorm"
 )
 
 func TestIsPersonalDomain(t *testing.T) {
@@ -65,4 +68,43 @@ func TestResolveOrgForUser(t *testing.T) {
 	if org3.ID != org1.ID || isNew3 || needsApproval3 {
 		t.Errorf("expected existing team org without approval needed, got %+v, %v, %v", org3, isNew3, needsApproval3)
 	}
+}
+
+// fleetsForOrg returns every fleet row belonging to an org.
+func fleetsForOrg(t *testing.T, db *gorm.DB, orgID string) []store.Fleet {
+	t.Helper()
+	var fleets []store.Fleet
+	if err := db.Where("org_id = ?", orgID).Find(&fleets).Error; err != nil {
+		t.Fatalf("query fleets: %v", err)
+	}
+	return fleets
+}
+
+func assertDefaultFleet(t *testing.T, db *gorm.DB, orgID string) {
+	t.Helper()
+	fleets := fleetsForOrg(t, db, orgID)
+	if len(fleets) != 1 {
+		t.Fatalf("org %s: want exactly 1 default fleet, got %d", orgID, len(fleets))
+	}
+	if fleets[0].Type != store.FleetSelfManaged {
+		t.Errorf("org %s: want self-managed fleet, got %q", orgID, fleets[0].Type)
+	}
+}
+
+// A freshly created org — personal or company — must be provisioned with exactly
+// one default managed fleet, and resolving an already-existing org must not add
+// another.
+func TestResolveOrgProvisionsDefaultFleet(t *testing.T) {
+	db := setupTestDB(t)
+
+	personal, _, _ := resolveOrgForUser(context.Background(), db, "test@gmail.com")
+	assertDefaultFleet(t, db, personal.ID)
+
+	company, _, _ := resolveOrgForUser(context.Background(), db, "alice@acmecorp.com")
+	assertDefaultFleet(t, db, company.ID)
+
+	// A second user on the same company domain resolves the existing org and must
+	// not provision a duplicate fleet.
+	resolveOrgForUser(context.Background(), db, "bob@acmecorp.com")
+	assertDefaultFleet(t, db, company.ID)
 }
