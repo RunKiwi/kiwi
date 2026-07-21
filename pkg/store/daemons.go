@@ -190,3 +190,14 @@ func (s *PostgresStore) ListDaemons(ctx context.Context, orgID string) ([]Daemon
 	}
 	return daemons, nil
 }
+
+// DeleteDaemonsByOrgAndFleet removes an org's daemon rows for a fleet. Used by
+// idle-reclaim after the container is stopped, so a reclaimed free daemon does
+// not leave an orphan registration behind; a later cold-start registers fresh.
+func (s *PostgresStore) DeleteDaemonsByOrgAndFleet(ctx context.Context, orgID, fleetID string) (int64, error) {
+	if orgID == "" {
+		return 0, errors.New("org id is required")
+	}
+	res := s.db.WithContext(ctx).Where("org_id = ? AND fleet_id = ?", orgID, fleetID).Delete(&Daemon{})
+	return res.RowsAffected, res.Error
+}
