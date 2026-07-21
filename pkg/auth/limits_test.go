@@ -32,6 +32,25 @@ func setupLimitsTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestGetOrgLimitsFreePlanFallback(t *testing.T) {
+	db := setupLimitsTestDB(t)
+	if err := db.Create(&Organization{ID: "of", Name: "of", Plan: "free"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	// A free-plan org with no explicit limits row must get the Free profile, not
+	// the generic (unlimited) defaults.
+	limits, err := GetOrgLimits(db, "of")
+	if err != nil {
+		t.Fatalf("GetOrgLimits: %v", err)
+	}
+	if limits.MaxConcurrentJobs != 1 {
+		t.Errorf("free fallback: want 1 concurrent, got %d", limits.MaxConcurrentJobs)
+	}
+	if limits.MaxAgentMinutesPerMonth != 500 {
+		t.Errorf("free fallback: want 500 agent-minutes, got %.0f", limits.MaxAgentMinutesPerMonth)
+	}
+}
+
 func TestOrgLimitsDefaultsAndOverrides(t *testing.T) {
 	db := setupLimitsTestDB(t)
 	orgID := "org-test"

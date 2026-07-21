@@ -96,14 +96,31 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, flee
 		var limits OrgLimits
 		if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				limits = OrgLimits{
-					OrgID:              orgID,
-					MaxConcurrentJobs:  10,
-					MaxBudgetPerJob:    5.00,
-					MaxBudgetPerMonth:  500.00,
-					MaxWorkersPerJob:   8,
-					TaskTimeoutSeconds: 1800,
-					MaxSandboxDiskMB:   2048,
+				// No explicit row: a free-plan org gets the Free caps, others the
+				// generic defaults — mirroring auth.FreeLimits so enforcement here
+				// and the usage display agree for row-less orgs.
+				var org Organization
+				if e := tx.Select("plan").First(&org, "id = ?", orgID).Error; e == nil && org.Plan == "free" {
+					limits = OrgLimits{
+						OrgID:                   orgID,
+						MaxConcurrentJobs:       1,
+						MaxWorkersPerJob:        2,
+						MaxBudgetPerJob:         0.50,
+						MaxBudgetPerMonth:       0,
+						MaxAgentMinutesPerMonth: 500,
+						TaskTimeoutSeconds:      600,
+						MaxSandboxDiskMB:        512,
+					}
+				} else {
+					limits = OrgLimits{
+						OrgID:              orgID,
+						MaxConcurrentJobs:  10,
+						MaxBudgetPerJob:    5.00,
+						MaxBudgetPerMonth:  500.00,
+						MaxWorkersPerJob:   8,
+						TaskTimeoutSeconds: 1800,
+						MaxSandboxDiskMB:   2048,
+					}
 				}
 			} else {
 				return err

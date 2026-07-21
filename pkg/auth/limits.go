@@ -37,11 +37,35 @@ func DefaultLimits(orgID string) *OrgLimits {
 	}
 }
 
+// FreeLimits returns the resource caps for a Free-tier organization. This is the
+// single source of truth for the Free profile — org creation writes it, and
+// GetOrgLimits falls back to it for a free-plan org that has no explicit row.
+func FreeLimits(orgID string) *OrgLimits {
+	return &OrgLimits{
+		OrgID:                   orgID,
+		MaxConcurrentJobs:       1,
+		MaxWorkersPerJob:        2,
+		MaxBudgetPerJob:         0.50,
+		MaxBudgetPerMonth:       0,
+		MaxAgentMinutesPerMonth: 500,
+		TaskTimeoutSeconds:      600,
+		MaxSandboxDiskMB:        512,
+	}
+}
+
 // GetOrgLimits retrieves limits for an org from the DB, falling back to defaults.
 func GetOrgLimits(db *gorm.DB, orgID string) (*OrgLimits, error) {
 	var limits OrgLimits
 	if err := db.Where("org_id = ?", orgID).First(&limits).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
+			// No explicit limits row: a free-plan org gets the Free profile, any
+			// other plan the generic defaults. This keeps the Free caps correct for
+			// orgs created before the profile was written at signup — no backfill
+			// needed for the fallback to be right.
+			var org Organization
+			if e := db.Select("plan").First(&org, "id = ?", orgID).Error; e == nil && org.Plan == "free" {
+				return FreeLimits(orgID), nil
+			}
 			return DefaultLimits(orgID), nil
 		}
 		return nil, fmt.Errorf("failed to fetch org limits: %w", err)
