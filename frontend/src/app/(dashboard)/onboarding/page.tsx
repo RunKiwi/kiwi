@@ -15,10 +15,10 @@ export default function OnboardingPage() {
     setTimeout(() => setStep(2), 500);
   };
 
-  const handleActivate = async () => {
+  const handleUpgrade = async () => {
     setIsActivating(true);
-    // Real implementation would redirect to Stripe Checkout
-    // We will just redirect to settings for now
+    // Real implementation would redirect to Stripe Checkout for the Pro plan.
+    // We just redirect to settings for now.
     setTimeout(() => {
       router.push("/settings");
     }, 1000);
@@ -63,26 +63,26 @@ export default function OnboardingPage() {
               2
             </div>
             <div className="flex-1">
-              <h2 className="text-xl font-medium text-white mb-2">Activate to Run</h2>
+              <h2 className="text-xl font-medium text-white mb-2">You&apos;re on the Free plan</h2>
               <p className="text-zinc-400 mb-6">
-                You can plan and preview tasks for free. To actually <strong>execute</strong> tasks and have the Swarm write code, you need an active plan.
+                Free runs on Kiwi&apos;s <strong>shared fleet</strong> — no card, no setup. Submit a task and the swarm plans it, runs it in an isolated sandbox, and opens a pull request. Add your model key under <strong>Integrations</strong> (you bring your own), and you&apos;re set. Free includes a monthly agent-minute allowance and runs one task at a time. Need a dedicated fleet, higher limits, or your own cloud? <strong>Upgrade to Pro</strong> anytime.
               </p>
-              
+
               {step === 2 && (
                 <div className="flex gap-4">
-                  <button 
-                    onClick={handleActivate}
-                    disabled={isActivating}
-                    className="flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600 px-6 py-2.5 rounded-xl font-medium transition-colors disabled:opacity-50"
-                  >
-                    {isActivating ? 'Activating...' : 'Activate Now'}
-                    {!isActivating && <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  <button 
+                  <button
                     onClick={() => router.push("/")}
-                    className="flex items-center gap-2 bg-white/5 text-white hover:bg-white/10 px-6 py-2.5 rounded-xl font-medium transition-colors"
+                    className="flex items-center gap-2 btn-primary px-6 py-2.5 transition-colors"
                   >
-                    Skip & Preview only
+                    Start building
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleUpgrade}
+                    disabled={isActivating}
+                    className="flex items-center gap-2 bg-white/5 text-white hover:bg-white/10 px-6 py-2.5 rounded-xl font-medium transition-colors disabled:opacity-50"
+                  >
+                    {isActivating ? 'Opening…' : 'Upgrade to Pro'}
                   </button>
                 </div>
               )}
