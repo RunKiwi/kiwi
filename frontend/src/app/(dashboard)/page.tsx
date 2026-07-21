@@ -5,7 +5,7 @@ import { useFleetStore } from "@/store/useFleetStore";
 import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo } from "@/lib/api";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse } from "@/lib/api";
 
 export default function CommandCenter() {
   const { jobs, loadJobs } = useFleetStore();
@@ -29,6 +29,7 @@ export default function CommandCenter() {
   const [fleets, setFleets] = useState<Fleet[]>([]);
   const [customModels, setCustomModels] = useState<ModelEntry[]>([]);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [u, setU] = useState<UsageResponse | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -43,9 +44,14 @@ export default function CommandCenter() {
   useEffect(() => {
     client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
     client.listModels().then(r => setCustomModels(r.models)).catch(() => {});
+    client.getUsage().then(setU).catch(() => setU(null));
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
   }, []);
+
+  // Show the fleet selector only once we positively know the org is not Free
+  // (Free work always routes to the shared fleet, so the control is a no-op there).
+  const showFleetSelector = !!u && u.plan !== "free";
 
   // Close the PR popover on Escape or any click outside the popover / its trigger.
   useEffect(() => {
@@ -201,13 +207,15 @@ export default function CommandCenter() {
         {/* Advanced options — hidden by default to keep the composer compact. */}
         {showAdvanced && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 mt-3 border-t border-white/5">
-            <div>
-              <label className={labelClass}>Fleet</label>
-              <Select
-                ariaLabel="Fleet" value={fleetId} onChange={setFleetId}
-                options={[{ value: "", label: "Any available fleet" }, ...fleets.map(f => ({ value: f.id, label: f.name, hint: f.type === "byoc" ? "BYOC" : "Managed" }))]}
-              />
-            </div>
+            {showFleetSelector && (
+              <div>
+                <label className={labelClass}>Fleet</label>
+                <Select
+                  ariaLabel="Fleet" value={fleetId} onChange={setFleetId}
+                  options={[{ value: "", label: "Any available fleet" }, ...fleets.map(f => ({ value: f.id, label: f.name, hint: f.type === "byoc" ? "BYOC" : "Managed" }))]}
+                />
+              </div>
+            )}
             {repos.length > 0 && (
               <div>
                 <label className={labelClass}>Repository URL <span className="text-zinc-600 normal-case font-normal">(override)</span></label>
