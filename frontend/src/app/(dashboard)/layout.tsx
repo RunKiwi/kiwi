@@ -34,9 +34,9 @@ export default function DashboardLayout({
   }
 
   const navItems = [
-    { name: "Command Center", href: "/", icon: LayoutDashboard },
+    { name: "Tasks", href: "/", icon: LayoutDashboard },
     { name: "Topology", href: "/topology", icon: Network },
-    { name: "Fleet", href: "/fleet", icon: Server },
+    { name: "Fleets", href: "/fleet", icon: Server },
     { name: "Models", href: "/models", icon: Cpu },
     { name: "Integrations", href: "/integrations", icon: Link2 },
     { name: "Settings", href: "/settings", icon: Settings },
