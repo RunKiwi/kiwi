@@ -42,11 +42,15 @@ func DefaultLimits(orgID string) *OrgLimits {
 // GetOrgLimits falls back to it for a free-plan org that has no explicit row.
 func FreeLimits(orgID string) *OrgLimits {
 	return &OrgLimits{
-		OrgID:                   orgID,
-		MaxConcurrentJobs:       1,
-		MaxWorkersPerJob:        2,
-		MaxBudgetPerJob:         0.50,
-		MaxBudgetPerMonth:       0,
+		OrgID:             orgID,
+		MaxConcurrentJobs: 1,
+		MaxWorkersPerJob:  2,
+		MaxBudgetPerJob:   0.50,
+		// A real dollar value, not the 0 sentinel that GetOrgLimits rewrites at
+		// read time — this profile is also returned directly as a fallback, where
+		// 0 would read as a hard $0/month cap and block every submit. The Free
+		// compute lever is agent-minutes below, not the dollar budget.
+		MaxBudgetPerMonth:       500.00,
 		MaxAgentMinutesPerMonth: 500,
 		TaskTimeoutSeconds:      600,
 		MaxSandboxDiskMB:        512,
