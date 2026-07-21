@@ -33,7 +33,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:3.20 AS base
 
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata git
+# docker-cli: the provisioner (kiwid) and the sandbox (kiwidaemon) shell out to
+# `docker` — the provisioner to launch per-org daemon containers, the daemon to
+# run the test command as a sibling container under runsc. Both talk to the host
+# Docker daemon via a bind-mounted /var/run/docker.sock.
+RUN apk add --no-cache ca-certificates tzdata git docker-cli
 
 COPY --from=builder /out/kiwid /out/kiwidaemon ./
 
