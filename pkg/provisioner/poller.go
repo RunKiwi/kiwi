@@ -54,32 +54,65 @@ func EnsureSchema(db *gorm.DB) error {
 		`ON provisioning_requests (org_id) WHERE status = 'pending' AND type = 'provision'`).Error
 }
 
-// Start ensures the schema, then runs the poller loop in a background goroutine.
+// Start ensures the schema, then runs the poller and the sweeper loops in
+// background goroutines.
 func (p *Provisioner) Start(ctx context.Context) {
 	if err := EnsureSchema(p.db); err != nil {
 		slog.Error("provisioner: ensure schema failed", "err", err)
 	}
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				for {
-					processed, err := p.PollOnce(ctx)
-					if err != nil {
-						slog.Error("provisioner poll error", "err", err)
-						break
-					}
-					if !processed {
-						break // no more pending requests
-					}
+	go p.pollLoop(ctx)
+	go p.sweepLoop(ctx)
+}
+
+// pollLoop drains pending provisioning requests on a short ticker.
+func (p *Provisioner) pollLoop(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for {
+				processed, err := p.PollOnce(ctx)
+				if err != nil {
+					slog.Error("provisioner poll error", "err", err)
+					break
+				}
+				if !processed {
+					break // no more pending requests
 				}
 			}
 		}
-	}()
+	}
+}
+
+// sweepLoop periodically requeues stale in_progress requests (crashed mid-claim)
+// and reclaims idle free daemons (scale-to-zero). Intervals/TTLs are env-tunable.
+func (p *Provisioner) sweepLoop(ctx context.Context) {
+	interval := envDuration("KIWI_PROVISIONER_SWEEP_INTERVAL", defaultSweepInterval)
+	staleTTL := envDuration("KIWI_PROVISIONER_STALE_TTL", defaultStaleTTL)
+	idleTTL := envDuration("KIWI_FREE_IDLE_TTL", defaultIdleTTL)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n, err := p.ReclaimStaleInProgress(ctx, staleTTL); err != nil {
+				slog.Error("provisioner: stale sweep failed", "err", err)
+			} else if n > 0 {
+				slog.Info("provisioner: requeued stale in_progress request(s)", "count", n)
+			}
+			if n, err := p.ReclaimIdle(ctx, idleTTL); err != nil {
+				slog.Error("provisioner: idle reclaim failed", "err", err)
+			} else if n > 0 {
+				slog.Info("provisioner: enqueued idle reclaim(s)", "count", n)
+			}
+		}
+	}
 }
 
 // PollOnce claims one pending ProvisioningRequest, executes its side effects, and
@@ -159,6 +192,13 @@ func (p *Provisioner) execute(ctx context.Context, req auth.ProvisioningRequest)
 	case "reclaim":
 		if err := p.launcher.Stop(ctx, req.OrgID); err != nil {
 			return statusFailed, fmt.Errorf("stop daemon for org %s: %w", req.OrgID, err)
+		}
+		// Deregister the stopped free daemon so it doesn't orphan a row; a later
+		// cold-start registers fresh. Non-fatal: the container is already stopped,
+		// and Stop is not idempotent on a gone container, so a lingering row is not
+		// worth failing (and re-running) the reclaim over.
+		if _, err := p.store.DeleteDaemonsByOrgAndFleet(ctx, req.OrgID, auth.SharedFreeFleet); err != nil {
+			slog.Warn("provisioner: deregister after reclaim failed", "org", req.OrgID, "err", err)
 		}
 		return statusCompleted, nil
 	default:

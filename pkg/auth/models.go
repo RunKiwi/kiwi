@@ -100,8 +100,12 @@ type ProvisioningRequest struct {
 	ID        string    `json:"id" gorm:"primaryKey"`
 	OrgID     string    `json:"org_id" gorm:"index;not null"`
 	Type      string    `json:"type" gorm:"not null"`                   // "provision" or "reclaim"
-	Status    string    `json:"status" gorm:"not null;default:pending"` // pending, completed, failed
+	Status    string    `json:"status" gorm:"not null;default:pending"` // pending, in_progress, completed, failed
 	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt is GORM-managed (bumped on every Update), so it marks when a row
+	// was last claimed/settled. The stale-in_progress sweep uses it to find rows
+	// a crashed provisioner left claimed.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InitAuthDB initializes the auth database tables within an existing GORM DB.

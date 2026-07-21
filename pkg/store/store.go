@@ -88,6 +88,10 @@ type Store interface {
 	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
 	TouchDaemon(ctx context.Context, id string) error
 	ListDaemons(ctx context.Context, orgID string) ([]Daemon, error)
+	// DeleteDaemonsByOrgAndFleet removes an org's daemon registrations for a fleet
+	// (used by idle-reclaim to deregister a stopped free daemon so it does not
+	// orphan a row). Returns the number deleted.
+	DeleteDaemonsByOrgAndFleet(ctx context.Context, orgID, fleetID string) (int64, error)
 
 	// Credentials: org-scoped secrets, AES-256-GCM encrypted at rest and
 	// re-sealed to a daemon's X25519 public key for delivery.
