@@ -60,13 +60,24 @@ export default function SettingsPage() {
           <div>
             <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Status</div>
             <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                org?.activation_state === 'active' ? 'bg-green-500/10 text-green-400'
-                : org?.activation_state === 'suspended' ? 'bg-red-500/10 text-red-400'
-                : 'bg-white/5 text-zinc-400'
-              }`}>
-                {org?.activation_state?.toUpperCase() || "—"}
-              </span>
+              {(() => {
+                // "Active" here means "can run tasks", not the paid activation step.
+                // A Free org is created activation_state=inactive but runs fine on the
+                // shared fleet — only a suspended org is actually blocked, so we show
+                // ACTIVE for anything that isn't suspended (and isn't a paid org still
+                // awaiting activation).
+                const suspended = org?.activation_state === 'suspended';
+                const inactivePaid = org?.activation_state !== 'active' && org?.plan !== 'free';
+                const label = suspended ? 'SUSPENDED' : inactivePaid ? 'INACTIVE' : 'ACTIVE';
+                const cls = suspended ? 'bg-red-500/10 text-red-400'
+                  : inactivePaid ? 'bg-white/5 text-zinc-400'
+                  : 'bg-green-500/10 text-green-400';
+                return (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+                    {org ? label : '—'}
+                  </span>
+                );
+              })()}
               <span className="text-zinc-400 capitalize">{org?.plan}</span>
             </div>
           </div>
