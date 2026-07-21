@@ -51,7 +51,8 @@ export default function TopologyPage() {
     meta["cp"] = { kind: "Control Plane", title: "Control Plane", lines: [["Role", "Plans tasks & hands out work"]] };
 
     const fleetY = 130;
-    (fleets.length ? fleets : [{ id: "default", name: "No fleets", type: "self-managed" } as Fleet]).forEach((f, i) => {
+    // Group daemons by fleet
+    (fleets.length ? fleets : [{ id: "default", name: "No fleets", type: "managed" } as Fleet]).forEach((f, i) => {
       const id = `fleet-${f.id}`;
       const typeLabel = f.type === "byoc" ? "BYOC" : "Managed";
       computedNodes.push({

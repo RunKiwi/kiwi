@@ -14,7 +14,7 @@ export default function FleetPage() {
   const [u, setU] = useState<UsageResponse | null>(null);
   const [usageLoaded, setUsageLoaded] = useState(false);
   const [name, setName] = useState("");
-  const [type, setType] = useState<"self-managed" | "byoc">("self-managed");
+  const [type, setType] = useState<"managed" | "byoc">("managed");
   const [busy, setBusy] = useState(false);
   // A minted join token is scoped to one fleet — track which fleet it belongs to
   // so daemons enrol into the fleet whose tasks they should lease.
@@ -82,12 +82,12 @@ export default function FleetPage() {
             </div>
             <div>
               <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Type</label>
-              <div className="flex gap-2">
-                <button onClick={() => setType("self-managed")} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${type === "self-managed" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}>
+              <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1">
+                <button onClick={() => setType("managed")} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${type === "managed" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}>
                   <Cloud className="w-4 h-4" /> Managed
                 </button>
                 <button onClick={() => setType("byoc")} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${type === "byoc" ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}>
-                  <Building2 className="w-4 h-4" /> BYOC
+                  <Server className="w-4 h-4" /> BYOC
                 </button>
               </div>
             </div>

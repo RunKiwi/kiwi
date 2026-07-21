@@ -8,17 +8,17 @@ import (
 )
 
 // Fleet is a named group of execution capacity for an org. Type is either
-// self-managed (Kiwi operates the daemons) or byoc (the customer runs them).
+// managed (Kiwi operates the daemons) or byoc (the customer runs them).
 const (
-	FleetSelfManaged = "self-managed"
-	FleetBYOC        = "byoc"
+	FleetManaged = "managed"
+	FleetBYOC    = "byoc"
 )
 
 type Fleet struct {
 	ID        string    `gorm:"primaryKey" json:"id"`
 	OrgID     string    `gorm:"index;not null" json:"org_id"`
 	Name      string    `gorm:"not null" json:"name"`
-	Type      string    `gorm:"not null" json:"type"` // self-managed | byoc
+	Type      string    `gorm:"not null" json:"type"` // managed | byoc
 	CreatedAt time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 
@@ -46,8 +46,8 @@ func NewDashID(prefix string) string {
 // --- Fleets ---
 
 func (s *PostgresStore) CreateFleet(ctx context.Context, orgID, name, ftype string) (*Fleet, error) {
-	if ftype != FleetSelfManaged && ftype != FleetBYOC {
-		ftype = FleetSelfManaged
+	if ftype != FleetManaged && ftype != FleetBYOC {
+		ftype = FleetManaged
 	}
 	f := &Fleet{ID: NewDashID("flt"), OrgID: orgID, Name: name, Type: ftype, CreatedAt: time.Now()}
 	if err := s.db.WithContext(ctx).Create(f).Error; err != nil {
