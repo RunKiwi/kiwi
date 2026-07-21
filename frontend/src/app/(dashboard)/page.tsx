@@ -6,7 +6,7 @@ import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, A
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter } from "next/navigation";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse } from "@/lib/api";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration } from "@/lib/api";
 
 export default function CommandCenter() {
   const { jobs, loadJobs } = useFleetStore();
@@ -54,7 +54,7 @@ export default function CommandCenter() {
     // First-run redirect to onboarding
     if (!sessionStorage.getItem("onboarded")) {
       Promise.all([client.listIntegrations(), client.listJobs()]).then(([ints, jbs]) => {
-        const hasInt = ints.integrations.some((i: any) => i.connected);
+        const hasInt = ints.integrations.some((i: Integration) => i.connected);
         const hasJob = jbs.jobs.length > 0;
         if (!hasInt && !hasJob) {
           router.push("/onboarding");

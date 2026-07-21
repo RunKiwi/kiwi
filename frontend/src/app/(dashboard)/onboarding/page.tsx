@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { CheckCircle2, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { client } from "@/lib/api";
+import { client, type Integration } from "@/lib/api";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -12,16 +12,17 @@ export default function OnboardingPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  // Check if GitHub is already connected
+  // Poll for a GitHub connection only while on step 1 (e.g. the user connected
+  // it on another tab); once we advance there's nothing left to detect, so we
+  // stop hitting the API.
   useEffect(() => {
+    if (step !== 1) return;
     const checkGH = async () => {
       try {
         const res = await client.listIntegrations();
-        const gh = res.integrations.find((i: any) => i.key === "github");
-        if (gh?.connected && step === 1) {
-          setStep(2);
-        }
-      } catch (e) {}
+        const gh = res.integrations.find((i: Integration) => i.key === "github");
+        if (gh?.connected) setStep(2);
+      } catch { /* best-effort */ }
     };
     checkGH();
     const interval = setInterval(checkGH, 3000);
@@ -35,7 +36,7 @@ export default function OnboardingPage() {
     try {
       await client.setCredential("GITHUB_TOKEN", "github", val);
       const res = await client.listIntegrations();
-      const gh = res.integrations.find((i: any) => i.key === "github");
+      const gh = res.integrations.find((i: Integration) => i.key === "github");
       if (gh?.connected) {
         setStep(2);
       } else {
