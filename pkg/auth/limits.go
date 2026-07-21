@@ -10,13 +10,14 @@ import (
 // OrgLimits defines the resource constraints and configuration for an organization.
 // This is a read-through struct. The canonical schema is store.OrgLimits.
 type OrgLimits struct {
-	OrgID              string  `json:"org_id" gorm:"primaryKey;index;not null"`
-	MaxConcurrentJobs  int     `json:"max_concurrent_jobs"`
-	MaxBudgetPerJob    float64 `json:"max_budget_per_job"`
-	MaxBudgetPerMonth  float64 `json:"max_budget_per_month"`
-	MaxWorkersPerJob   int     `json:"max_workers_per_job"`
-	TaskTimeoutSeconds int     `json:"task_timeout_seconds"`
-	MaxSandboxDiskMB   int     `json:"max_sandbox_disk_mb"`
+	OrgID                   string  `json:"org_id" gorm:"primaryKey;index;not null"`
+	MaxConcurrentJobs       int     `json:"max_concurrent_jobs"`
+	MaxBudgetPerJob         float64 `json:"max_budget_per_job"`
+	MaxBudgetPerMonth       float64 `json:"max_budget_per_month"`
+	MaxAgentMinutesPerMonth float64 `json:"max_agent_minutes_per_month"`
+	MaxWorkersPerJob        int     `json:"max_workers_per_job"`
+	TaskTimeoutSeconds      int     `json:"task_timeout_seconds"`
+	MaxSandboxDiskMB        int     `json:"max_sandbox_disk_mb"`
 }
 
 // TableName overrides the default GORM table name.
@@ -25,13 +26,14 @@ func (OrgLimits) TableName() string { return "org_limits" }
 // DefaultLimits returns the fallback resource limits for any organization.
 func DefaultLimits(orgID string) *OrgLimits {
 	return &OrgLimits{
-		OrgID:              orgID,
-		MaxConcurrentJobs:  10,
-		MaxBudgetPerJob:    5.00,
-		MaxBudgetPerMonth:  500.00,
-		MaxWorkersPerJob:   8,
-		TaskTimeoutSeconds: 1800,
-		MaxSandboxDiskMB:   2048,
+		OrgID:                   orgID,
+		MaxConcurrentJobs:       10,
+		MaxBudgetPerJob:         5.00,
+		MaxBudgetPerMonth:       500.00,
+		MaxAgentMinutesPerMonth: 0,
+		MaxWorkersPerJob:        8,
+		TaskTimeoutSeconds:      1800,
+		MaxSandboxDiskMB:        2048,
 	}
 }
 

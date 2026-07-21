@@ -45,6 +45,11 @@ type QueuedTask struct {
 	LeaseID *string `json:"lease_id"`
 	// LeaseExpiresAt is when the current lease lapses (nil when QUEUED).
 	LeaseExpiresAt *time.Time `gorm:"index" json:"lease_expires_at"`
+	// StartedAt is when the task was leased (execution start). Unlike UpdatedAt,
+	// it is set once at lease and never touched by RenewLease, so it is the
+	// correct basis for agent-minutes metering: time.Since(StartedAt) is the full
+	// task duration, whereas UpdatedAt resets on every renewal.
+	StartedAt *time.Time `json:"started_at"`
 	// Attempts counts how many times this task has been leased.
 	Attempts     int       `gorm:"not null;default:0" json:"attempts"`
 	ResultURL    *string   `json:"result_url"`

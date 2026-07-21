@@ -243,13 +243,14 @@ func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		}
 		if org.Plan == "" || org.Plan == "free" {
 			limits := OrgLimits{
-				OrgID:              org.ID,
-				MaxConcurrentJobs:  1,
-				MaxWorkersPerJob:   2,
-				MaxBudgetPerJob:    0.50,
-				TaskTimeoutSeconds: 600,
-				MaxSandboxDiskMB:   512,
-				MaxBudgetPerMonth:  0,
+				OrgID:                   org.ID,
+				MaxConcurrentJobs:       1,
+				MaxWorkersPerJob:        2,
+				MaxBudgetPerJob:         0.50,
+				MaxBudgetPerMonth:       0,
+				MaxAgentMinutesPerMonth: 500, // E.g., 500 minutes ceiling
+				TaskTimeoutSeconds:      600,
+				MaxSandboxDiskMB:        512,
 			}
 			if err := tx.Create(&limits).Error; err != nil {
 				return err
