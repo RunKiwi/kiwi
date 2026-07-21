@@ -78,7 +78,6 @@ export default function SettingsPage() {
                   </span>
                 );
               })()}
-              <span className="text-zinc-400 capitalize">{org?.plan}</span>
             </div>
           </div>
         </div>

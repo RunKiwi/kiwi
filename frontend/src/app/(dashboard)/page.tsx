@@ -51,15 +51,33 @@ export default function CommandCenter() {
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
 
-    // First-run redirect to onboarding
+    // First-run redirect to onboarding and default model setup
     if (!sessionStorage.getItem("onboarded")) {
       Promise.all([client.listIntegrations(), client.listJobs()]).then(([ints, jbs]) => {
-        const hasInt = ints.integrations.some((i: Integration) => i.connected);
+        const hasInt = ints.integrations.some((i: any) => i.connected);
         const hasJob = jbs.jobs.length > 0;
         if (!hasInt && !hasJob) {
           router.push("/onboarding");
         }
         sessionStorage.setItem("onboarded", "1");
+        
+        // M14: Default task-form models based on connected keys
+        const ant = ints.integrations.find((i: any) => i.key === "anthropic")?.connected;
+        const gem = ints.integrations.find((i: any) => i.key === "gemini")?.connected;
+        if (gem && !ant) {
+          setPlannerModel("gemini-2.0-flash");
+          setWorkerModel("gemini-flash-latest");
+        }
+      }).catch(() => {});
+    } else {
+      // If already onboarded, just check for model defaults once on mount
+      client.listIntegrations().then(ints => {
+        const ant = ints.integrations.find((i: any) => i.key === "anthropic")?.connected;
+        const gem = ints.integrations.find((i: any) => i.key === "gemini")?.connected;
+        if (gem && !ant) {
+          setPlannerModel("gemini-2.0-flash");
+          setWorkerModel("gemini-flash-latest");
+        }
       }).catch(() => {});
     }
   }, [router]);
