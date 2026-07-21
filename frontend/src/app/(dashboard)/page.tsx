@@ -5,7 +5,8 @@ import { useFleetStore } from "@/store/useFleetStore";
 import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration } from "@/lib/api";
 
 export default function CommandCenter() {
   const { jobs, loadJobs } = useFleetStore();
@@ -35,6 +36,8 @@ export default function CommandCenter() {
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
+  const router = useRouter();
+
   useEffect(() => {
     loadJobs();
     const interval = setInterval(() => loadJobs(), 3000);
@@ -47,7 +50,19 @@ export default function CommandCenter() {
     client.getUsage().then(setU).catch(() => setU(null));
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
-  }, []);
+
+    // First-run redirect to onboarding
+    if (!sessionStorage.getItem("onboarded")) {
+      Promise.all([client.listIntegrations(), client.listJobs()]).then(([ints, jbs]) => {
+        const hasInt = ints.integrations.some((i: Integration) => i.connected);
+        const hasJob = jbs.jobs.length > 0;
+        if (!hasInt && !hasJob) {
+          router.push("/onboarding");
+        }
+        sessionStorage.setItem("onboarded", "1");
+      }).catch(() => {});
+    }
+  }, [router]);
 
   // Show the fleet selector only once we positively know the org is not Free
   // (Free work always routes to the shared fleet, so the control is a no-op there).
