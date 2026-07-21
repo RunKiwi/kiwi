@@ -66,7 +66,10 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			if err := tx.Create(org).Error; err != nil {
 				return err
 			}
-			return tx.Create(FreeLimits(org.ID)).Error
+			if err := tx.Create(FreeLimits(org.ID)).Error; err != nil {
+				return err
+			}
+			return CreateDefaultFleet(tx, org.ID)
 		})
 		return org, true, false
 	}
@@ -91,7 +94,10 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			if err := tx.Create(&org).Error; err != nil {
 				return err
 			}
-			return tx.Create(FreeLimits(org.ID)).Error
+			if err := tx.Create(FreeLimits(org.ID)).Error; err != nil {
+				return err
+			}
+			return CreateDefaultFleet(tx, org.ID)
 		})
 		return &org, true, false
 	}

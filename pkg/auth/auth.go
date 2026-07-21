@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -248,4 +249,16 @@ func GenerateAPIKey(userID, label string, expiresAt *time.Time) (plaintext strin
 		ExpiresAt: expiresAt,
 	}
 	return plaintext, key, nil
+}
+
+// CreateDefaultFleet provisions a default managed fleet for a newly created organization.
+func CreateDefaultFleet(tx *gorm.DB, orgID string) error {
+	f := &store.Fleet{
+		ID:        store.NewDashID("flt"),
+		OrgID:     orgID,
+		Name:      "Managed (Default)",
+		Type:      store.FleetSelfManaged,
+		CreatedAt: time.Now(),
+	}
+	return tx.Create(f).Error
 }
