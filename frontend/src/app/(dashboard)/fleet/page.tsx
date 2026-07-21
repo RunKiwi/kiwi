@@ -111,12 +111,15 @@ export default function FleetPage() {
             <Cloud className="w-6 h-6 text-green-400" />
             <div>
               <div className="font-medium text-base text-white">Running on <span className="font-bold">Kiwi Managed</span> (shared)</div>
+              {/* Free runs a per-org daemon on demand: it starts on submit and is
+                  reclaimed when idle. So "no daemon" is the normal resting state,
+                  not an outage — show a neutral "idle", never a red "offline". */}
               <div className="text-sm text-zinc-400 flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
                   {daemonsOnline > 0 && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${daemonsOnline > 0 ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${daemonsOnline > 0 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
                 </span>
-                daemon {daemonsOnline > 0 ? "online" : "offline"}
+                {daemonsOnline > 0 ? "daemon online" : "idle · starts on your next task"}
               </div>
             </div>
           </div>
