@@ -1,27 +1,52 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, ChevronRight } from "lucide-react";
+import { useState, useEffect } from "react";
+import { CheckCircle2, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { client, type Integration } from "@/lib/api";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [isActivating, setIsActivating] = useState(false);
+  const [ghToken, setGhToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Poll for a GitHub connection only while on step 1 (e.g. the user connected
+  // it on another tab); once we advance there's nothing left to detect, so we
+  // stop hitting the API.
+  useEffect(() => {
+    if (step !== 1) return;
+    const checkGH = async () => {
+      try {
+        const res = await client.listIntegrations();
+        const gh = res.integrations.find((i: Integration) => i.key === "github");
+        if (gh?.connected) setStep(2);
+      } catch { /* best-effort */ }
+    };
+    checkGH();
+    const interval = setInterval(checkGH, 3000);
+    return () => clearInterval(interval);
+  }, [step]);
 
   const handleConnectRepo = async () => {
-    // In a real flow, this would redirect to GitHub App installation
-    // For now, we simulate success and move to next step
-    setTimeout(() => setStep(2), 500);
-  };
-
-  const handleUpgrade = async () => {
-    setIsActivating(true);
-    // Real implementation would redirect to Stripe Checkout for the Pro plan.
-    // We just redirect to settings for now.
-    setTimeout(() => {
-      router.push("/settings");
-    }, 1000);
+    const val = ghToken.trim();
+    if (!val) { setErr("Paste a GitHub PAT first."); return; }
+    setBusy(true); setErr("");
+    try {
+      await client.setCredential("GITHUB_TOKEN", "github", val);
+      const res = await client.listIntegrations();
+      const gh = res.integrations.find((i: Integration) => i.key === "github");
+      if (gh?.connected) {
+        setStep(2);
+      } else {
+        setErr("Connected, but waiting for verification...");
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to connect");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -38,19 +63,34 @@ export default function OnboardingPage() {
             <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${step > 1 ? 'bg-[#93C645] text-[#0A1017]' : 'bg-white text-black'}`}>
               {step > 1 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <h2 className="text-xl font-medium text-white mb-2">Connect your Repository</h2>
-              <p className="text-zinc-400 mb-6">Link your codebase so Kiwi agents can analyze, plan, and submit pull requests.</p>
+              <p className="text-zinc-400 mb-6">Link your codebase so Kiwi agents can analyze, plan, and submit pull requests. Provide a GitHub Personal Access Token (repo scope).</p>
               {step === 1 && (
-                <button 
-                  onClick={handleConnectRepo}
-                  className="flex items-center gap-2 btn-primary px-5 py-2.5 transition-colors"
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
-                    <path fill="currentColor" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                  </svg>
-                  Connect GitHub
-                </button>
+                <div className="flex flex-col gap-3 max-w-md">
+                  <div className="flex gap-2">
+                    <input 
+                      type="password" 
+                      value={ghToken} 
+                      onChange={e => setGhToken(e.target.value)}
+                      placeholder="github_pat_..." 
+                      className="flex-1 field text-sm"
+                    />
+                    <button 
+                      onClick={handleConnectRepo}
+                      disabled={busy}
+                      className="flex items-center justify-center gap-2 btn-primary px-5 py-2.5 transition-colors disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Connect
+                    </button>
+                  </div>
+                  {err && (
+                    <div className="flex items-center gap-2 text-red-400 text-sm">
+                      <AlertCircle className="w-4 h-4 shrink-0" /> {err}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -78,11 +118,11 @@ export default function OnboardingPage() {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={handleUpgrade}
-                    disabled={isActivating}
-                    className="flex items-center gap-2 bg-white/5 text-white hover:bg-white/10 px-6 py-2.5 rounded-xl font-medium transition-colors disabled:opacity-50"
+                    disabled
+                    title="Upgrade flow coming soon. Contact us to upgrade."
+                    className="flex items-center gap-2 bg-white/5 text-zinc-500 px-6 py-2.5 rounded-xl font-medium cursor-not-allowed transition-colors"
                   >
-                    {isActivating ? 'Opening…' : 'Upgrade to Pro'}
+                    Upgrade to Pro (Coming Soon)
                   </button>
                 </div>
               )}
