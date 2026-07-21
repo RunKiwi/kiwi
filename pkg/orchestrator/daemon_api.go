@@ -239,6 +239,13 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var limits store.OrgLimits
+	if err := s.db.First(&limits, "org_id = ?", d.OrgID).Error; err == nil {
+		spec.TimeoutSeconds = limits.TaskTimeoutSeconds
+	} else {
+		spec.TimeoutSeconds = 1800 // Fallback
+	}
+
 	// Seal to the REGISTERED key, not one from the body: the body is signed, but
 	// binding delivery to the registered row keeps rotation an explicit,
 	// join-token-gated act rather than something a heartbeat can do silently.
@@ -352,7 +359,8 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	// The daemon must be registered; the lease id (a fencing token) does the
 	// real authorization inside CompleteTask, but resolving the identity first
 	// keeps unregistered callers off the endpoint entirely.
-	if _, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey); err != nil {
+	d, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	if err != nil {
 		if errors.Is(err, store.ErrDaemonNotFound) {
 			http.Error(w, "daemon not registered", http.StatusForbidden)
 			return
@@ -360,6 +368,14 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[daemon] result lookup failed: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	if req.Abuse {
+		if err := auth.SuspendOrg(s.db, d.OrgID); err != nil {
+			log.Printf("[daemon] auto-suspend failed for org %s: %v", d.OrgID, err)
+		} else {
+			log.Printf("[daemon] auto-suspended org %s for abuse", d.OrgID)
+		}
 	}
 
 	ok, err := s.storage.CompleteTask(r.Context(), req.TaskID, req.LeaseID, req.Status, req.ResultURL, req.Detail)

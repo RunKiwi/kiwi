@@ -66,7 +66,7 @@ func TestExecuteTask_RealLoopFixesFileUntilTestPasses(t *testing.T) {
 	}
 	creds := map[string]string{"ANTHROPIC_API_KEY": "test-key"} // makes newProvider return the mock
 
-	ok, _, _ := d.executeTask(context.Background(), spec, creds)
+	ok, _, _, _ := d.executeTask(context.Background(), spec, creds)
 	if !ok {
 		t.Fatal("executeTask returned false; expected the loop to fix the file and pass the test")
 	}
@@ -92,7 +92,7 @@ func TestExecuteTask_FailsWithClearReasonWhenNoProviderKey(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
 
 	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "x", File: "main.go", TestCmd: "true"}
-	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{}) // no ANTHROPIC_API_KEY
+	ok, _, detail, _ := d.executeTask(context.Background(), spec, map[string]string{}) // no ANTHROPIC_API_KEY
 
 	if ok {
 		t.Fatal("expected failure when the model's provider has no key")
@@ -110,7 +110,7 @@ func TestExecuteTask_FailsWithClearReasonWhenNoTargetFile(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
 
 	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "fix it", TestCmd: "true"}
-	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	ok, _, detail, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
 
 	if ok {
 		t.Fatal("expected failure when there is no target file")
@@ -141,7 +141,7 @@ func TestExecuteTask_FailsWhenTestNeverPasses(t *testing.T) {
 		File:    "main.go",
 		TestCmd: "grep -q FIXED main.go",
 	}
-	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	ok, _, detail, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
 	if ok {
 		t.Fatal("expected failure when the test never passes")
 	}
@@ -186,7 +186,7 @@ func TestExecuteTask_FileScope(t *testing.T) {
 				ID:   "task-" + tc.name,
 				File: tc.file,
 			}
-			ok, _, detail := d.executeTask(context.Background(), spec, nil)
+			ok, _, detail, _ := d.executeTask(context.Background(), spec, nil)
 			if tc.valid && detail == "file path escapes worktree" {
 				t.Errorf("expected valid path %q to not be rejected", tc.file)
 			}
@@ -228,7 +228,7 @@ func TestExecuteTask_MultiFile(t *testing.T) {
 		TestCmd: "grep -q FIXED file1.txt && grep -q FIXED file2.txt",
 	}
 
-	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	ok, _, detail, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
 	if !ok {
 		t.Fatalf("expected success, got false (detail: %q)", detail)
 	}

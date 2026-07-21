@@ -44,8 +44,9 @@ type Config struct {
 	// the loop default. A runaway loop on a live key is a real cost risk.
 	MaxBudgetUSD float64
 	// RenewInterval configures how often the daemon extends the lease of a running task.
-	// Defaults to 4 minutes if zero.
 	RenewInterval time.Duration
+	// SandboxRuntime configures the OCI runtime for docker sandboxes (e.g. "runsc").
+	SandboxRuntime string
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -241,7 +242,7 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		// Without credentials the agent cannot reach its LLM/Git provider. Do
 		// not silently run a half-configured task; fail the lease so it requeues.
 		for _, spec := range res.Specs {
-			d.reportResult(ctx, spec.ID, res.LeaseID, false, "", "failed to open sealed credentials")
+			d.reportResult(ctx, spec.ID, res.LeaseID, false, "", "failed to open sealed credentials", false)
 		}
 		return true
 	}
@@ -278,10 +279,10 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 			}
 		}(spec.ID)
 
-		ok, prURL, detail := d.executeTask(ctx, spec, creds)
+		ok, prURL, detail, abuse := d.executeTask(ctx, spec, creds)
 		renewCancel() // Stop the renewal timer
 
-		d.reportResult(ctx, spec.ID, res.LeaseID, ok, prURL, detail)
+		d.reportResult(ctx, spec.ID, res.LeaseID, ok, prURL, detail, abuse)
 	}
 
 	return true
@@ -325,24 +326,24 @@ func isLLMKey(name string) bool {
 // The LLM Actor/Critic run in the daemon process; only the test command runs in
 // the sandbox. That split means the sandbox executes model-generated code with
 // a default-deny network and without the LLM key, while the daemon holds the
-// key and reaches the provider itself.
-func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) (bool, string, string) {
+// the key and reaches the provider itself.
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) (bool, string, string, bool) {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
 	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
 		log.Printf("Invalid task ID format: %s", spec.ID)
-		return false, "", "invalid task ID format"
+		return false, "", "invalid task ID format", false
 	}
 
 	if spec.File != "" && !filepath.IsLocal(spec.File) {
 		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
-		return false, "", "file path escapes worktree"
+		return false, "", "file path escapes worktree", false
 	}
 	for _, f := range spec.Files {
 		if !filepath.IsLocal(f) {
 			log.Printf("Task %s: file path %q escapes worktree", spec.ID, f)
-			return false, "", "file path escapes worktree"
+			return false, "", "file path escapes worktree", false
 		}
 	}
 
@@ -352,7 +353,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// the task rather than reward that (Execution Model RFC §8; issue #132).
 	if looksLikeTestFile(spec.File) {
 		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
-		return false, "", fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)
+		return false, "", fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File), false
 	}
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
@@ -366,7 +367,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		log.Printf("Provisioning worktree for %s (ref: %s, job branch: %s)...", spec.ID, spec.Ref, jobBranch)
 		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-			return false, "", "failed to provision worktree"
+			return false, "", "failed to provision worktree", false
 		}
 		defer func(url, path string) {
 			log.Printf("Cleaning up worktree: %s", path)
@@ -378,14 +379,27 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
 		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 			log.Printf("Failed to create fallback sandbox dir: %v", err)
-			return false, "", "failed to create fallback sandbox dir"
+			return false, "", "failed to create fallback sandbox dir", false
 		}
 	}
 
-	sandboxCtx := context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+	// Wall-clock cap for the whole task (Phase 4 abuse control). The sandbox
+	// context is derived from this capped context on purpose: a docker run bound
+	// to a non-expiring context would ignore the deadline, so a spinning test
+	// command (the cryptomining case) would hang the daemon and never be killed.
+	// Deriving sandboxCtx from taskCtx is what makes the cap enforceable.
+	timeout := spec.TimeoutSeconds
+	if timeout <= 0 {
+		timeout = 1800
+	}
+	taskCtx, taskCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer taskCancel()
+
+	sandboxCtx := context.WithValue(taskCtx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
 		UseDocker:   dockerEnabled(),
 		MemoryLimit: "512m",
 		CPULimit:    "1.0",
+		Runtime:     d.config.SandboxRuntime,
 		NetworkNone: true,
 	})
 
@@ -410,7 +424,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		reason := fmt.Sprintf("no API key configured for the %s provider that model %q needs — add it under Integrations",
 			providerNameForModel(spec.Model), spec.Model)
 		log.Printf("Task %s: %s", spec.ID, reason)
-		return false, "", reason
+		return false, "", reason, false
 	}
 
 	// test_cmd is optional. When the submitter did not supply one, infer it from
@@ -436,17 +450,17 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 
 	if len(targetFiles) == 0 {
 		tree, _ := repoTree(worktreePath)
-		discovered, _ := discoverTargetFiles(ctx, actor, spec.Task, tree)
+		discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree)
 		if len(discovered) > 0 {
 			targetFiles = discovered
 			isMulti = true
 		} else {
-			return false, "", "could not identify a file to change from the task description — set one under Advanced options"
+			return false, "", "could not identify a file to change from the task description — set one under Advanced options", false
 		}
 	}
 
 	if testCmd == "" {
-		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"
+		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", false
 	}
 
 	log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
@@ -487,13 +501,19 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return res.Output, res.Success, nil
 	}
 
-	result, err := runner.Run(ctx, task, runTest)
+	result, err := runner.Run(taskCtx, task, runTest)
 	if err != nil {
 		log.Printf("Task %s loop ended without success: %v (steps=%d, cost=$%.2f)",
 			spec.ID, err, result.Steps, result.CostUSD)
 	} else {
 		log.Printf("Task %s loop complete: success=%v (steps=%d, cost=$%.2f)",
 			spec.ID, result.Success, result.Steps, result.CostUSD)
+	}
+
+	abuse := false
+	if taskCtx.Err() == context.DeadlineExceeded && result.Steps < 2 {
+		log.Printf("Task %s timed out with %d steps — flagging for cryptomining abuse", spec.ID, result.Steps)
+		abuse = true
 	}
 
 	ok := result.Success
@@ -534,7 +554,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	return ok, prURL, detail
+	return ok, prURL, detail, abuse
 }
 
 // maxDetailLen bounds the result detail stored on a task so a verbose provider
@@ -563,7 +583,7 @@ func dockerEnabled() bool {
 // reportResult closes the lease for a task by reporting its terminal status.
 // Failures here are logged, not fatal: if the report is lost, the lease simply
 // expires and the task is retried.
-func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool, resultURL, detail string) {
+func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool, resultURL, detail string, abuse bool) {
 	if leaseID == "" {
 		// No fencing token (older CP, or a spec surfaced without a lease). Cannot
 		// safely complete; let the lease lapse.
@@ -582,6 +602,7 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bo
 		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
 		ResultURL:  resultURL,
 		Detail:     detail,
+		Abuse:      abuse,
 	})
 	if err != nil {
 		log.Printf("Failed to report result for task %s: %v", taskID, err)

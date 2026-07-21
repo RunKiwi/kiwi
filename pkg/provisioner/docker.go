@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+
+	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
 
 // DockerLauncher implements Launcher using the local docker daemon.
@@ -25,14 +27,22 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 
 	// kiwidaemon docker run command
-	cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+	args := []string{"run", "-d",
 		"--name", name,
-		"-e", "KIWI_JOIN_TOKEN="+joinToken,
-		// Using a volume so cache survives restart (assuming kiwi-cache-orgID exists or will be created by docker)
+		"-e", "KIWI_JOIN_TOKEN=" + joinToken,
+	}
+
+	if fleetID == auth.SharedFreeFleet {
+		args = append(args, "-e", "KIWI_SANDBOX_RUNTIME=runsc")
+	}
+
+	args = append(args,
 		"-v", fmt.Sprintf("kiwi-cache-%s:/tmp/kiwi-cache", orgID),
 		"kiwidaemon:latest",
 		"-api-url", apiURL,
 	)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to launch docker container %s: %w", name, err)

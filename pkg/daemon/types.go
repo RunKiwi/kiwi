@@ -56,6 +56,7 @@ type ResultReq struct {
 	SignPubKey string `json:"sign_pub_key"`
 	ResultURL  string `json:"result_url,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+	Abuse      bool   `json:"abuse,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.

@@ -87,7 +87,7 @@ func TestExecuteTaskEmptyDiscoveryHonestFailure(t *testing.T) {
 
 	// spec.File is empty, spec.Files is nil
 	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "fix it", File: "", TestCmd: "true"}
-	ok, _, detail := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	ok, _, detail, _ := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"})
 
 	if ok {
 		t.Fatal("expected failure when there is no target file")

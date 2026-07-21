@@ -118,6 +118,18 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, flee
 			return nil // Org at cap, refuse new lease
 		}
 
+		if limits.MaxAgentMinutesPerMonth > 0 {
+			var usedMinutes float64
+			now := time.Now().UTC()
+			monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			if err := tx.Model(&Job{}).Where("org_id = ? AND created_at >= ?", orgID, monthStart).Select("COALESCE(SUM(agent_minutes), 0)").Scan(&usedMinutes).Error; err != nil {
+				return err
+			}
+			if usedMinutes >= limits.MaxAgentMinutesPerMonth {
+				return nil // Org at compute cap, refuse new lease
+			}
+		}
+
 		// Fleet routing: a daemon leases work for its own fleet, plus unassigned
 		// work (fleet_id = '') that may run anywhere.
 		q := tx.Where("org_id = ? AND status = ? AND (fleet_id = ? OR fleet_id = ?)", orgID, TaskQueued, fleetID, "").
@@ -183,6 +195,7 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, flee
 					"leased_by":        leasedBy,
 					"lease_id":         leaseID,
 					"lease_expires_at": expires,
+					"started_at":       now,
 					"attempts":         gorm.Expr("attempts + 1"),
 					"updated_at":       now,
 				})
@@ -344,6 +357,11 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 			updates["result_detail"] = detail
 		}
 
+		var t QueuedTask
+		if err := tx.Select("job_id", "started_at").First(&t, "id = ?", taskID).Error; err != nil {
+			return err
+		}
+
 		res := tx.Model(&QueuedTask{}).
 			Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
 			Updates(updates)
@@ -352,9 +370,17 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 		}
 		rowsAffected = res.RowsAffected
 
-		if rowsAffected > 0 && finalStatus == TaskFailed {
-			var t QueuedTask
-			if err := tx.Select("job_id").First(&t, "id = ?", taskID).Error; err == nil && t.JobID != "" {
+		if rowsAffected > 0 && t.JobID != "" {
+			// Meter from StartedAt (set once at lease), not UpdatedAt: RenewLease
+			// bumps UpdatedAt every renewal, so a task longer than the renew
+			// interval would otherwise record only the time since its last renew.
+			if t.StartedAt != nil {
+				elapsed := time.Since(*t.StartedAt).Minutes()
+				if elapsed > 0 {
+					tx.Model(&Job{}).Where("id = ?", t.JobID).UpdateColumn("agent_minutes", gorm.Expr("agent_minutes + ?", elapsed))
+				}
+			}
+			if finalStatus == TaskFailed {
 				failJobAndQueuedTasks(tx, t.JobID, "Sibling task failed")
 			}
 		}

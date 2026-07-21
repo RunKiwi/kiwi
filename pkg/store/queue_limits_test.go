@@ -47,6 +47,47 @@ func TestLeaseEnforcesConcurrencyCap(t *testing.T) {
 	}
 }
 
+// TestAgentMinutesMeteredFromStartedAt is the regression test for the metering
+// bug: a task longer than the renew interval must record its FULL duration.
+// RenewLease bumps UpdatedAt on every renewal, so metering from UpdatedAt would
+// truncate to "time since last renew". Metering must use StartedAt, which is set
+// once at lease and never touched by renew.
+func TestAgentMinutesMeteredFromStartedAt(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	s.db.Create(&Job{ID: "j1", OrgID: "o1", UserID: "u1", Status: "RUNNING"})
+	enqueueTask(t, s, "t1", "o1", "j1")
+
+	leased, err := s.LeaseNextTask(ctx, "o1", "d1", "", time.Minute)
+	if err != nil || leased == nil {
+		t.Fatalf("lease failed: %v, %v", err, leased)
+	}
+
+	// Simulate a long-running, renewed task: StartedAt 10 min ago, but UpdatedAt
+	// just now (as the last RenewLease would have left it).
+	now := time.Now()
+	started := now.Add(-10 * time.Minute)
+	if err := s.db.Model(&QueuedTask{}).Where("id = ?", "t1").
+		UpdateColumns(map[string]interface{}{"started_at": started, "updated_at": now}).Error; err != nil {
+		t.Fatalf("backdate started_at: %v", err)
+	}
+
+	ok, err := s.CompleteTask(ctx, "t1", *leased.LeaseID, TaskSucceeded, "", "")
+	if err != nil || !ok {
+		t.Fatalf("CompleteTask failed: %v, %v", err, ok)
+	}
+
+	var job Job
+	if err := s.db.First(&job, "id = ?", "j1").Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	// Full duration (~10 min) must be metered, not the ~0 that UpdatedAt would give.
+	if job.AgentMinutes < 9.5 {
+		t.Errorf("expected ~10 agent-minutes metered from StartedAt, got %.2f (metering truncated to UpdatedAt?)", job.AgentMinutes)
+	}
+}
+
 func TestLeaseEnforcesBudgetCap(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
