@@ -51,35 +51,27 @@ export default function CommandCenter() {
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
 
-    // First-run redirect to onboarding and default model setup
-    if (!sessionStorage.getItem("onboarded")) {
-      Promise.all([client.listIntegrations(), client.listJobs()]).then(([ints, jbs]) => {
-        const hasInt = ints.integrations.some((i: any) => i.connected);
-        const hasJob = jbs.jobs.length > 0;
-        if (!hasInt && !hasJob) {
-          router.push("/onboarding");
-        }
-        sessionStorage.setItem("onboarded", "1");
-        
-        // M14: Default task-form models based on connected keys
-        const ant = ints.integrations.find((i: any) => i.key === "anthropic")?.connected;
-        const gem = ints.integrations.find((i: any) => i.key === "gemini")?.connected;
-        if (gem && !ant) {
+    // Load integrations once, then use them for two things: the first-run
+    // onboarding redirect, and the M14 model default (prefer the provider the
+    // org actually has a key for, so a BYOK user isn't defaulted to a model
+    // they can't call). Jobs are only needed for the first-run check.
+    const firstRun = !sessionStorage.getItem("onboarded");
+    Promise.all([client.listIntegrations(), firstRun ? client.listJobs() : Promise.resolve(null)])
+      .then(([ints, jbs]) => {
+        const connected = (key: string) =>
+          ints.integrations.some((i: Integration) => i.key === key && i.connected);
+        // Default to Gemini when it's the only model key connected.
+        if (connected("gemini") && !connected("anthropic")) {
           setPlannerModel("gemini-2.0-flash");
           setWorkerModel("gemini-flash-latest");
         }
-      }).catch(() => {});
-    } else {
-      // If already onboarded, just check for model defaults once on mount
-      client.listIntegrations().then(ints => {
-        const ant = ints.integrations.find((i: any) => i.key === "anthropic")?.connected;
-        const gem = ints.integrations.find((i: any) => i.key === "gemini")?.connected;
-        if (gem && !ant) {
-          setPlannerModel("gemini-2.0-flash");
-          setWorkerModel("gemini-flash-latest");
+        if (firstRun) {
+          const hasInt = ints.integrations.some((i: Integration) => i.connected);
+          const hasJob = (jbs?.jobs.length ?? 0) > 0;
+          if (!hasInt && !hasJob) router.push("/onboarding");
+          sessionStorage.setItem("onboarded", "1");
         }
       }).catch(() => {});
-    }
   }, [router]);
 
   // Show the fleet selector only once we positively know the org is not Free
@@ -173,7 +165,7 @@ export default function CommandCenter() {
   return (
     <div className="p-8 max-w-6xl mx-auto h-full flex flex-col">
       <div className="mb-8">
-        <p className="eyebrow mb-3"><span className="dot"></span> Command Center</p>
+        <p className="eyebrow mb-3"><span className="dot"></span> Tasks</p>
         <h1 className="text-[32px] font-semibold tracking-tight text-white mb-2">What should the swarm build?</h1>
         <p className="text-zinc-400 max-w-2xl">Describe the goal in plain English. Kiwi plans it, runs a swarm of agents, and opens one verified pull request — everything else is optional.</p>
       </div>
@@ -280,7 +272,10 @@ export default function CommandCenter() {
             {submitError && (
               <div className="flex items-center gap-2 text-red-400 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
-                {submitError.includes("402") || submitError.toLowerCase().includes("activate") || submitError.toLowerCase().includes("payment required") ? (
+                {/* Activation is a paid-tier concept; a Free org runs without it and
+                    never hits this gate, so only surface the "activate" nudge for a
+                    known non-Free plan — Free always sees the real server error. */}
+                {u?.plan !== "free" && (submitError.includes("402") || submitError.toLowerCase().includes("activate") || submitError.toLowerCase().includes("payment required")) ? (
                   <span>
                     Your organization is inactive. You can preview tasks, but you must
                     <a href="/settings#activation" className="underline ml-1 font-medium hover:text-white">activate to run</a>.
