@@ -20,7 +20,7 @@ func newDashTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.Fleet{}, &store.ModelEntry{}, &store.Credential{}); err != nil {
+	if err := db.AutoMigrate(&auth.Organization{}, &store.Fleet{}, &store.ModelEntry{}, &store.Credential{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return &Server{db: db, storage: store.NewPostgresStore(db)}
@@ -39,6 +39,14 @@ func authed(method, path, body, org string) *http.Request {
 func TestHandleFleets(t *testing.T) {
 	srv := newDashTestServer(t)
 
+	// Create an org with free plan and an org with pro plan for testing
+	if err := srv.db.Create(&auth.Organization{ID: "org-free", Name: "free-org", Plan: "free"}).Error; err != nil {
+		t.Fatalf("create free org: %v", err)
+	}
+	if err := srv.db.Create(&auth.Organization{ID: "org-pro", Name: "pro-org", Plan: "pro"}).Error; err != nil {
+		t.Fatalf("create pro org: %v", err)
+	}
+
 	// Unauthenticated -> 401.
 	rr := httptest.NewRecorder()
 	srv.handleFleets(rr, httptest.NewRequest(http.MethodGet, "/api/v1/fleets", nil))
@@ -46,27 +54,34 @@ func TestHandleFleets(t *testing.T) {
 		t.Fatalf("no claims should be 401, got %d", rr.Code)
 	}
 
-	// Create for org-1.
+	// Free org cannot create a fleet -> 403.
 	rr = httptest.NewRecorder()
-	srv.handleFleets(rr, authed(http.MethodPost, "/api/v1/fleets", `{"name":"prod","type":"byoc"}`, "org-1"))
+	srv.handleFleets(rr, authed(http.MethodPost, "/api/v1/fleets", `{"name":"free-fleet","type":"byoc"}`, "org-free"))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("free org create: expected 403, got %d body %s", rr.Code, rr.Body.String())
+	}
+
+	// Create for org-pro -> 201.
+	rr = httptest.NewRecorder()
+	srv.handleFleets(rr, authed(http.MethodPost, "/api/v1/fleets", `{"name":"prod","type":"byoc"}`, "org-pro"))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create: got %d body %s", rr.Code, rr.Body.String())
 	}
 
 	// A different org must not see it.
 	rr = httptest.NewRecorder()
-	srv.handleFleets(rr, authed(http.MethodGet, "/api/v1/fleets", "", "org-2"))
+	srv.handleFleets(rr, authed(http.MethodGet, "/api/v1/fleets", "", "org-free"))
 	var other struct {
 		Fleets []store.Fleet `json:"fleets"`
 	}
 	_ = json.NewDecoder(rr.Body).Decode(&other)
 	if len(other.Fleets) != 0 {
-		t.Errorf("org-2 must not see org-1's fleet, got %d", len(other.Fleets))
+		t.Errorf("org-free must not see org-pro's fleet, got %d", len(other.Fleets))
 	}
 
 	// Owner sees exactly one, of type byoc.
 	rr = httptest.NewRecorder()
-	srv.handleFleets(rr, authed(http.MethodGet, "/api/v1/fleets", "", "org-1"))
+	srv.handleFleets(rr, authed(http.MethodGet, "/api/v1/fleets", "", "org-pro"))
 	var mine struct {
 		Fleets []store.Fleet `json:"fleets"`
 	}

@@ -24,6 +24,16 @@ func (s *Server) handleFleets(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"fleets": fleets})
 	case http.MethodPost:
+		var org auth.Organization
+		if err := s.db.First(&org, "id = ?", claims.OrgID).Error; err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if org.Plan == "free" {
+			http.Error(w, "Free plan cannot create fleets. Upgrade to Pro for a dedicated fleet.", http.StatusForbidden)
+			return
+		}
+
 		var body struct {
 			Name string `json:"name"`
 			Type string `json:"type"`

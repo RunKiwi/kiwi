@@ -32,3 +32,8 @@ deploy/.env
 
 # stray compiled cmd binary
 kms-migrate
+
+# Local operator/deploy scripts — hold prod ids, private paths, and DB creds. Never commit.
+deploy.sh
+deploy-all.sh
+.claude/
