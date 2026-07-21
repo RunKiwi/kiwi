@@ -37,7 +37,7 @@ type ModelEntry struct {
 
 func (ModelEntry) TableName() string { return "org_models" }
 
-func newDashID(prefix string) string {
+func NewDashID(prefix string) string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
@@ -49,7 +49,7 @@ func (s *PostgresStore) CreateFleet(ctx context.Context, orgID, name, ftype stri
 	if ftype != FleetSelfManaged && ftype != FleetBYOC {
 		ftype = FleetSelfManaged
 	}
-	f := &Fleet{ID: newDashID("flt"), OrgID: orgID, Name: name, Type: ftype, CreatedAt: time.Now()}
+	f := &Fleet{ID: NewDashID("flt"), OrgID: orgID, Name: name, Type: ftype, CreatedAt: time.Now()}
 	if err := s.db.WithContext(ctx).Create(f).Error; err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (s *PostgresStore) ListFleets(ctx context.Context, orgID string) ([]Fleet, 
 // --- Models ---
 
 func (s *PostgresStore) CreateModel(ctx context.Context, orgID, name, provider string) (*ModelEntry, error) {
-	m := &ModelEntry{ID: newDashID("mdl"), OrgID: orgID, Name: name, Provider: provider, CreatedAt: time.Now()}
+	m := &ModelEntry{ID: NewDashID("mdl"), OrgID: orgID, Name: name, Provider: provider, CreatedAt: time.Now()}
 	if err := s.db.WithContext(ctx).Create(m).Error; err != nil {
 		return nil, err
 	}

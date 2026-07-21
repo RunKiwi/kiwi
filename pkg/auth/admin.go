@@ -246,6 +246,9 @@ func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if err := CreateDefaultFleet(tx, org.ID); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
