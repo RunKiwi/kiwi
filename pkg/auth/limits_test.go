@@ -41,25 +41,25 @@ func TestOrgLimitsDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrgLimits error: %v", err)
 	}
-	if limits.MaxConcurrentTasks != 5 {
-		t.Errorf("expected default concurrency 5, got %d", limits.MaxConcurrentTasks)
+	if limits.MaxConcurrentJobs != 10 {
+		t.Errorf("expected default concurrency 10, got %d", limits.MaxConcurrentJobs)
 	}
-	if limits.MaxBudgetPerTask != 1.00 {
-		t.Errorf("expected default budget per task 1.00, got %.2f", limits.MaxBudgetPerTask)
+	if limits.MaxBudgetPerJob != 5.00 {
+		t.Errorf("expected default budget per task 5.00, got %.2f", limits.MaxBudgetPerJob)
 	}
-	if limits.DockerImage != "golang:1.21-alpine" {
-		t.Errorf("expected default docker image golang:1.21-alpine, got %q", limits.DockerImage)
+	if limits.MaxSandboxDiskMB != 2048 {
+		t.Errorf("expected default sandbox disk 2048, got %d", limits.MaxSandboxDiskMB)
 	}
 
 	// 2. Set custom limits in DB and verify override
 	custom := OrgLimits{
 		OrgID:              orgID,
-		MaxConcurrentTasks: 2,
-		MaxBudgetPerTask:   2.50,
+		MaxConcurrentJobs:  2,
+		MaxBudgetPerJob:    2.50,
 		MaxBudgetPerMonth:  20.00,
 		MaxSandboxDiskMB:   100,
-		DockerImage:        "python:3.10-alpine",
-		TaskTimeoutMinutes: 15,
+		MaxWorkersPerJob:   4,
+		TaskTimeoutSeconds: 900,
 	}
 	if err := db.Create(&custom).Error; err != nil {
 		t.Fatalf("create custom limits: %v", err)
@@ -69,14 +69,14 @@ func TestOrgLimitsDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrgLimits custom error: %v", err)
 	}
-	if limits.MaxConcurrentTasks != 2 {
-		t.Errorf("expected custom concurrency 2, got %d", limits.MaxConcurrentTasks)
+	if limits.MaxConcurrentJobs != 2 {
+		t.Errorf("expected custom concurrency 2, got %d", limits.MaxConcurrentJobs)
 	}
-	if limits.MaxBudgetPerTask != 2.50 {
-		t.Errorf("expected custom budget per task 2.50, got %.2f", limits.MaxBudgetPerTask)
+	if limits.MaxBudgetPerJob != 2.50 {
+		t.Errorf("expected custom budget per task 2.50, got %.2f", limits.MaxBudgetPerJob)
 	}
-	if limits.DockerImage != "python:3.10-alpine" {
-		t.Errorf("expected custom docker image python:3.10-alpine, got %q", limits.DockerImage)
+	if limits.TaskTimeoutSeconds != 900 {
+		t.Errorf("expected custom task timeout 900, got %d", limits.TaskTimeoutSeconds)
 	}
 }
 
@@ -85,8 +85,8 @@ func TestOrgLimitsConcurrentLimitCheck(t *testing.T) {
 	orgID := "org-test"
 
 	limits := &OrgLimits{
-		OrgID:              orgID,
-		MaxConcurrentTasks: 2,
+		OrgID:             orgID,
+		MaxConcurrentJobs: 2,
 	}
 	db.Create(limits)
 

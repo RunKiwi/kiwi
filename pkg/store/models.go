@@ -23,13 +23,14 @@ func (o *Organization) CanRun() bool {
 
 // OrgLimits represents the resource limits and quotas for an organization.
 type OrgLimits struct {
-	OrgID              string  `gorm:"primaryKey" json:"org_id"`
-	MaxConcurrentJobs  int     `gorm:"not null;default:10" json:"max_concurrent_jobs"`
-	MaxBudgetPerJob    float64 `gorm:"not null;default:5.00" json:"max_budget_per_job"`
-	MaxBudgetPerMonth  float64 `gorm:"not null;default:500.00" json:"max_budget_per_month"`
-	MaxWorkersPerJob   int     `gorm:"not null;default:8" json:"max_workers_per_job"`
-	TaskTimeoutSeconds int     `gorm:"not null;default:1800" json:"task_timeout_seconds"`
-	MaxSandboxDiskMB   int     `gorm:"not null;default:2048" json:"max_sandbox_disk_mb"`
+	OrgID                   string  `gorm:"primaryKey" json:"org_id"`
+	MaxConcurrentJobs       int     `gorm:"not null;default:10" json:"max_concurrent_jobs"`
+	MaxWorkersPerJob        int     `gorm:"not null;default:8" json:"max_workers_per_job"`
+	MaxBudgetPerJob         float64 `json:"max_budget_per_job"`          // Hard cap on provider spend per task
+	MaxBudgetPerMonth       float64 `json:"max_budget_per_month"`        // Monthly ceiling across all tasks
+	MaxAgentMinutesPerMonth float64 `json:"max_agent_minutes_per_month"` // Monthly ceiling on compute duration
+	TaskTimeoutSeconds      int     `json:"task_timeout_seconds"`        // Wall-clock kill switch
+	MaxSandboxDiskMB        int     `json:"max_sandbox_disk_mb"`         // Ephemeral storage limit
 }
 
 // User represents an authenticated user belonging to an organization.
@@ -125,6 +126,7 @@ type Job struct {
 	Inputs         map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"inputs"`
 	SandboxRef     *string                `json:"sandbox_ref"`
 	CostUSD        float64                `gorm:"not null;default:0" json:"cost_usd"`
+	AgentMinutes   float64                `gorm:"not null;default:0" json:"agent_minutes"`
 	Error          *string                `json:"error"`
 	CreatedAt      time.Time              `gorm:"not null;default:current_timestamp" json:"created_at"`
 	UpdatedAt      time.Time              `gorm:"not null;default:current_timestamp" json:"updated_at"`

@@ -77,8 +77,9 @@ type WorkerSpec struct {
 	TestCmd string `json:"test_cmd"`
 	// DependsOn lists the IDs of workers that must complete before this one
 	// (the plan DAG produced by the planner).
-	DependsOn []string `json:"depends_on,omitempty"`
-	JobID     string   `json:"job_id"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	JobID          string   `json:"job_id"`
+	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
 }
 
 // WorkerResult is the outcome of one worker.

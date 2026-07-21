@@ -195,7 +195,7 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 			engine.Critic = provider.NewMockCritic()
 			engine.LLMMode = "mock"
 		}
-		engine.MaxBudget = limits.MaxBudgetPerTask
+		engine.MaxBudget = limits.MaxBudgetPerJob
 		engine.LogOut = logBuf
 		engine.StateCallback = func(newStatus string) {
 			s.db.Model(&TaskState{}).Where("id = ?", taskID).Update("status", newStatus)
@@ -245,7 +245,7 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 		// control plane through the Agent API for this job only (issue #34). The
 		// plaintext is available here to inject into the sandbox env; only its
 		// hash is persisted. TTL tracks the task timeout with headroom.
-		jobTokenTTL := time.Duration(limits.TaskTimeoutMinutes)*time.Minute + 5*time.Minute
+		jobTokenTTL := time.Duration(limits.TaskTimeoutSeconds)*time.Second + 5*time.Minute
 		jobToken, err := agentapi.MintJobToken(s.db, taskID, existing.OrgID, jobTokenTTL)
 		if err != nil {
 			fmt.Fprintf(logBuf, "[Orchestrator] Warning: could not mint job token: %v\n", err)
@@ -258,15 +258,15 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 			fmt.Fprintln(logBuf, "[Orchestrator] Minted scoped Agent-API token for this job.")
 		}
 
-		taskTimeoutVal := time.Duration(limits.TaskTimeoutMinutes) * time.Minute
+		taskTimeoutVal := time.Duration(limits.TaskTimeoutSeconds) * time.Second
 		ctx, cancel := context.WithTimeout(context.Background(), taskTimeoutVal)
 		defer cancel()
 
 		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
 			UseDocker:   os.Getenv("USE_DOCKER") == "true",
-			DockerImage: limits.DockerImage,
-			MemoryLimit: fmt.Sprintf("%dm", limits.MaxSandboxMemoryMB),
-			CPULimit:    fmt.Sprintf("%.1f", limits.MaxSandboxCPU),
+			DockerImage: "golang:1.21-alpine",
+			MemoryLimit: "512m",
+			CPULimit:    "1.0",
 			NetworkNone: true,
 		})
 
@@ -567,6 +567,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Note: free-tier daemon cold-start lives on the planner path
+	// (planner.HandlePlan), which is what `kiwi submit` posts to and what feeds
+	// the daemon lease queue. This /tasks path runs the loop CP-side and never
+	// hands work to a daemon, so it must not provision one.
+
 	// Parse multipart form
 	err := r.ParseMultipartForm(50 * 1024 * 1024) // 50MB max in memory
 	if err != nil {
@@ -597,7 +602,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		http.Error(w, fmt.Sprintf("Too Many Requests: Organization concurrent task limit (%d) reached", limits.MaxConcurrentTasks), http.StatusTooManyRequests)
+		http.Error(w, fmt.Sprintf("Too Many Requests: Organization concurrent task limit (%d) reached", limits.MaxConcurrentJobs), http.StatusTooManyRequests)
 		return
 	}
 

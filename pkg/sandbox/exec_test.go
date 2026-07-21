@@ -76,3 +76,44 @@ func TestSandboxDrivers(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildDockerArgs_Runtime(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *SandboxConfig
+		wantArg string
+	}{
+		{
+			name: "runsc requested",
+			cfg: &SandboxConfig{
+				Runtime: "runsc",
+			},
+			wantArg: "--runtime runsc",
+		},
+		{
+			name:    "no runtime requested",
+			cfg:     &SandboxConfig{},
+			wantArg: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, tt.cfg, "alpine")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if envFile != "" {
+				defer os.Remove(envFile)
+			}
+
+			argsStr := strings.Join(args, " ")
+			if tt.wantArg != "" && !strings.Contains(argsStr, tt.wantArg) {
+				t.Errorf("expected args to contain %q, got %q", tt.wantArg, argsStr)
+			}
+			if tt.wantArg == "" && strings.Contains(argsStr, "--runtime") {
+				t.Errorf("expected no --runtime flag, got %q", argsStr)
+			}
+		})
+	}
+}

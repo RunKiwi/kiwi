@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *store.PostgresStore {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}); err != nil {
+	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}, &auth.Organization{}, &store.Job{}, &auth.ProvisioningRequest{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return store.NewPostgresStore(db)
@@ -276,6 +276,7 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 
 func TestHandlePlan(t *testing.T) {
 	s := newTestStore(t)
+	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
 	svc := NewService(s, NewHeuristicPlanner())
 
 	body := `{"task":"add logging","repo_url":"https://github.com/x/y","ref":"main","max_workers":1}`
@@ -295,6 +296,55 @@ func TestHandlePlan(t *testing.T) {
 	if out.ManifestID == "" || len(out.TaskIDs) == 0 {
 		t.Errorf("unexpected response: %+v", out)
 	}
+
+	// Free work must be pinned to the shared-free fleet so only free daemons
+	// lease it.
+	var queued []store.QueuedTask
+	if err := s.DB().Where("org_id = ?", "o1").Find(&queued).Error; err != nil {
+		t.Fatalf("load queued tasks: %v", err)
+	}
+	if len(queued) == 0 {
+		t.Fatal("expected queued tasks for the free org")
+	}
+	for _, q := range queued {
+		if q.FleetID != auth.SharedFreeFleet {
+			t.Errorf("task %s: expected fleet %q, got %q", q.ID, auth.SharedFreeFleet, q.FleetID)
+		}
+	}
+
+	// Cold-start regression: a free submit on the daemon-fed planner path must
+	// enqueue a provision request so a per-org daemon spins up. (The bug this
+	// guards: the cold-start was originally on the CP-side /tasks path, which
+	// never feeds a daemon.)
+	var provCount int64
+	s.DB().Model(&auth.ProvisioningRequest{}).
+		Where("org_id = ? AND type = 'provision' AND status = 'pending'", "o1").
+		Count(&provCount)
+	if provCount != 1 {
+		t.Errorf("expected exactly 1 pending provision request from cold-start, got %d", provCount)
+	}
+}
+
+func TestHandlePlanRejectsSuspendedOrg(t *testing.T) {
+	s := newTestStore(t)
+	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free", ActivationState: "suspended"})
+	svc := NewService(s, NewHeuristicPlanner())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(`{"task":"x","max_workers":1}`))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "o1"}))
+	rec := httptest.NewRecorder()
+	svc.HandlePlan(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for a suspended org, got %d", rec.Code)
+	}
+	// No work and no cold-start should be enqueued for a suspended org.
+	var tasks, provs int64
+	s.DB().Model(&store.QueuedTask{}).Where("org_id = ?", "o1").Count(&tasks)
+	s.DB().Model(&auth.ProvisioningRequest{}).Where("org_id = ?", "o1").Count(&provs)
+	if tasks != 0 || provs != 0 {
+		t.Errorf("suspended org must enqueue nothing; got %d tasks, %d provision requests", tasks, provs)
+	}
 }
 
 func TestHandlePlanRejectsMissingClaims(t *testing.T) {
@@ -308,7 +358,9 @@ func TestHandlePlanRejectsMissingClaims(t *testing.T) {
 }
 
 func TestHandlePlanRejectsEmptyTask(t *testing.T) {
-	svc := NewService(newTestStore(t), NewHeuristicPlanner())
+	s := newTestStore(t)
+	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
+	svc := NewService(s, NewHeuristicPlanner())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(`{"task":""}`))
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "o1"}))
 	rec := httptest.NewRecorder()

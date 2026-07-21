@@ -25,6 +25,7 @@ type SandboxConfig struct {
 	DockerImage string
 	MemoryLimit string // e.g. "512m"
 	CPULimit    string // e.g. "1.0"
+	Runtime     string // e.g. "runc", "runsc"
 	NetworkNone bool   // e.g. --network=none
 }
 
@@ -91,40 +92,13 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 		dockerImage = cfg.DockerImage
 	}
 
-	// Run isolated command inside Docker container
-	args := []string{"run", "--rm", "-i"}
-	// Mount target directory to container workspace
-	args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
-
-	// Apply resource limits
-	if cfg.MemoryLimit != "" {
-		args = append(args, "--memory", cfg.MemoryLimit)
+	args, envFile, err := buildDockerArgs(dir, cmdStr, env, cfg, dockerImage)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.CPULimit != "" {
-		args = append(args, "--cpus", cfg.CPULimit)
+	if envFile != "" {
+		defer os.Remove(envFile)
 	}
-	if cfg.NetworkNone {
-		args = append(args, "--network", "none")
-	}
-
-	// Inject environment variables using --env-file to avoid leaking secrets in ps output
-	if len(env) > 0 {
-		envFile, err := os.CreateTemp("", "kiwi-env-*.env")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temp env file: %w", err)
-		}
-		defer os.Remove(envFile.Name())
-
-		for _, eVal := range env {
-			envFile.WriteString(eVal + "\n")
-		}
-		envFile.Close()
-
-		args = append(args, "--env-file", envFile.Name())
-	}
-
-	// Use configurable Docker image and execute command
-	args = append(args, dockerImage, "sh", "-c", cmdStr)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
@@ -132,7 +106,7 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := outBuf.String()
 
 	// Capture the current git diff to observe changes
@@ -147,4 +121,42 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 		Output:  output,
 		GitDiff: diffBuf.String(),
 	}, nil
+}
+
+// buildDockerArgs constructs the docker run arguments and optionally an env file path.
+func buildDockerArgs(dir string, cmdStr string, env []string, cfg *SandboxConfig, dockerImage string) ([]string, string, error) {
+	args := []string{"run", "--rm", "-i"}
+	args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
+
+	if cfg.MemoryLimit != "" {
+		args = append(args, "--memory", cfg.MemoryLimit)
+	}
+	if cfg.CPULimit != "" {
+		args = append(args, "--cpus", cfg.CPULimit)
+	}
+	if cfg.NetworkNone {
+		args = append(args, "--network", "none")
+	}
+	if cfg.Runtime != "" {
+		args = append(args, "--runtime", cfg.Runtime)
+	}
+
+	var envFilePath string
+	if len(env) > 0 {
+		envFile, err := os.CreateTemp("", "kiwi-env-*.env")
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create temp env file: %w", err)
+		}
+		envFilePath = envFile.Name()
+
+		for _, eVal := range env {
+			envFile.WriteString(eVal + "\n")
+		}
+		envFile.Close()
+
+		args = append(args, "--env-file", envFilePath)
+	}
+
+	args = append(args, dockerImage, "sh", "-c", cmdStr)
+	return args, envFilePath, nil
 }

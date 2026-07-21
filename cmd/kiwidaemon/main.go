@@ -22,6 +22,7 @@ func main() {
 	var maxCachedRepos int
 	var maxSteps int
 	var maxBudgetUSD float64
+	var sandboxRuntime string
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -37,6 +38,7 @@ func main() {
 	flag.IntVar(&maxCachedRepos, "max-cached-repos", 20, "Max bare repositories to keep in the git cache before evicting the least-frequently-used (0 = unbounded).")
 	flag.IntVar(&maxSteps, "max-steps", 6, "Max Actor iterations per task before giving up.")
 	flag.Float64Var(&maxBudgetUSD, "max-budget", 0.50, "Max provider spend (USD) per task before the loop halts.")
+	flag.StringVar(&sandboxRuntime, "sandbox-runtime", os.Getenv("KIWI_SANDBOX_RUNTIME"), "The OCI runtime to use for the docker sandbox (e.g. 'runsc').")
 	flag.Parse()
 
 	cfg := daemon.Config{
@@ -48,6 +50,7 @@ func main() {
 		MaxCachedRepos: maxCachedRepos,
 		MaxSteps:       maxSteps,
 		MaxBudgetUSD:   maxBudgetUSD,
+		SandboxRuntime: sandboxRuntime,
 	}
 
 	d, err := daemon.New(cfg)

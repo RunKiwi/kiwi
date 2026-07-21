@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/orchestrator"
+	"github.com/ibreakthecloud/kiwi/pkg/provisioner"
 	"github.com/ibreakthecloud/kiwi/pkg/queue"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/nats-io/nats.go"
@@ -87,8 +88,26 @@ func main() {
 	storage := store.NewPostgresStore(db)
 	server := orchestrator.NewServer(storage, cfg.Role)
 
+	// Ensure the provisioner's dedup index exists for every role: the api role
+	// serves the free-tier cold-start insert (which relies on it) even when the
+	// provisioner poller itself only runs in the orchestrator role.
+	if err := provisioner.EnsureSchema(db); err != nil {
+		slog.Warn("Failed to ensure provisioner schema", "err", err)
+	}
+
 	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		server.RecoverTasks()
+
+		apiURL := "http://127.0.0.1"
+		if cfg.Addr[0] == ':' {
+			apiURL += cfg.Addr
+		} else {
+			apiURL = "http://" + cfg.Addr
+		}
+		launcher := provisioner.NewDockerLauncher()
+		prov := provisioner.NewProvisioner(db, storage, launcher, apiURL)
+		prov.Start(ctx)
+		slog.Info("Provisioner started")
 
 		// How long a task may sit QUEUED before it's failed (e.g. no fleet ever
 		// connected to run it). Configurable via KIWI_QUEUE_TTL; default 30m.

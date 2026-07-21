@@ -8,6 +8,10 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// SharedFreeFleet is the well-known fleet id every free-tier daemon joins. Free
+// work is routed to it; see the Free Tier RFC.
+const SharedFreeFleet = "shared-free"
+
 // Organization represents a tenant in the multi-tenant system.
 type Organization struct {
 	ID              string    `json:"id" gorm:"primaryKey"`
