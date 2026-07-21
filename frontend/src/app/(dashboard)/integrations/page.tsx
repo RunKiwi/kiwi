@@ -48,7 +48,7 @@ export default function IntegrationsPage() {
     <div className="p-8 max-w-4xl mx-auto h-full flex flex-col text-white">
       <div className="mb-8">
         <h1 className="text-3xl font-light tracking-tight mb-2">Integrations</h1>
-        <p className="text-zinc-400">Connect your tools. Tokens are encrypted at rest and sealed to your daemons — never shown again.</p>
+        <p className="text-zinc-400">Connect your tools. Tokens are encrypted at rest and sealed to the runtime — never shown again.</p>
       </div>
 
       <div className="flex flex-col gap-4">
