@@ -2,12 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { client, type AdminStats, type AdminOrg, type UsageResponse } from "@/lib/api";
-import { Activity, Users, Database, ShieldAlert, Check, Plus, Loader2 } from "lucide-react";
+import { client, type AdminStats, type AdminOrg } from "@/lib/api";
+import { ShieldAlert, Loader2 } from "lucide-react";
 
 export default function AdminPage() {
   const router = useRouter();
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [orgs, setOrgs] = useState<AdminOrg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +18,6 @@ export default function AdminPage() {
         router.push("/");
         return;
       }
-      setUsage(u);
       return Promise.all([
         client.getAdminStats(),
         client.listAdminOrgs(),
@@ -43,8 +41,8 @@ export default function AdminPage() {
     try {
       await client.grantOrgMinutes(orgId, mins);
       alert(`Granted ${mins} minutes`);
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setBusy(null);
     }
@@ -58,8 +56,8 @@ export default function AdminPage() {
     try {
       await client.setOrgPlan(orgId, plan);
       setOrgs(orgs.map(o => o.id === orgId ? { ...o, plan } : o));
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setBusy(null);
     }
@@ -78,8 +76,8 @@ export default function AdminPage() {
         await client.suspendOrg(orgId);
         setOrgs(orgs.map(o => o.id === orgId ? { ...o, activation_state: "suspended" } : o));
       }
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setBusy(null);
     }
