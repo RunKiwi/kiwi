@@ -10,6 +10,12 @@ A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane
 
 The differentiation is the layer above the sandbox: **the planner and the swarm**, not the sandbox itself.
 
+## Try it
+
+**[Sign up or log in at app.runkiwi.dev →](https://app.runkiwi.dev)** — the fastest way to run Kiwi, no setup required. Sign in with GitHub or Google; every account starts on the **Free tier** (a Kiwi-operated shared fleet). Connect a repo, add your own model key, and submit a task — the swarm plans it, runs it, and opens a PR.
+
+Prefer to run it yourself? See the self-host [Quickstart](#quickstart) below.
+
 > [!NOTE]
 > **Live, still maturing.** A task flows **end-to-end** — submit one and get a real PR back (`make local`, below). The self-serve **Free tier is deployed to production**: a signup runs tasks on a Kiwi-operated **shared fleet** without contacting us (per-org daemon processes, gVisor sandbox, agent-minute metering), served from a Cloud Run control plane plus a Docker + gVisor free-fleet host (see [Deployment](#free-tier-deployment)). Still in progress: billing / **Pro** upgrade, hardened multi-tenant **egress** isolation, and the Firecracker managed-*dedicated* path.
 
