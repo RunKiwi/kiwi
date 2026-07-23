@@ -77,6 +77,35 @@ func TestSandboxDrivers(t *testing.T) {
 	}
 }
 
+// The sandbox that runs untrusted, model-generated code must have no network,
+// so that code can neither exfiltrate the repo nor reach the LLM key or the
+// host's cloud-metadata endpoint. This locks that invariant: NetworkNone must
+// translate to `--network none`, and its absence must never silently add
+// network access.
+func TestBuildDockerArgs_NetworkNone(t *testing.T) {
+	on, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{NetworkNone: true}, "alpine")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envFile != "" {
+		defer os.Remove(envFile)
+	}
+	if !strings.Contains(strings.Join(on, " "), "--network none") {
+		t.Errorf("NetworkNone=true must add `--network none`, got %q", strings.Join(on, " "))
+	}
+
+	off, envFile2, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{}, "alpine")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envFile2 != "" {
+		defer os.Remove(envFile2)
+	}
+	if strings.Contains(strings.Join(off, " "), "--network") {
+		t.Errorf("NetworkNone=false must not set any --network flag, got %q", strings.Join(off, " "))
+	}
+}
+
 func TestBuildDockerArgs_Runtime(t *testing.T) {
 	tests := []struct {
 		name    string
