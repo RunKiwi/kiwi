@@ -1,20 +1,22 @@
 package auth
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 
+	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"gorm.io/gorm"
 )
 
+// BillingWebhookHandler processes Stripe webhook events (checkout completed,
+// subscription created/deleted/paused) and moves the org's plan accordingly.
+// It verifies the Stripe-Signature header against STRIPE_WEBHOOK_SECRET, so an
+// unauthenticated caller can never upgrade an org.
 func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		secret := os.Getenv("BILLING_WEBHOOK_SECRET")
+		secret := os.Getenv("STRIPE_WEBHOOK_SECRET")
 		if secret == "" {
 			http.Error(w, "Billing webhooks disabled", http.StatusServiceUnavailable)
 			return
@@ -26,17 +28,7 @@ func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 			return
 		}
 
-		sig := r.Header.Get("X-Billing-Signature")
-		if sig == "" {
-			http.Error(w, "Missing signature", http.StatusUnauthorized)
-			return
-		}
-
-		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(body)
-		expectedSig := hex.EncodeToString(mac.Sum(nil))
-
-		if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
+		if err := billing.VerifyStripeSignature(body, r.Header.Get("Stripe-Signature"), secret); err != nil {
 			http.Error(w, "Invalid signature", http.StatusUnauthorized)
 			return
 		}
@@ -93,15 +85,16 @@ func UpdateOrgPlanAndLimits(db *gorm.DB, orgID, plan string) error {
 		}
 
 		updates := map[string]interface{}{}
-		if plan == "team" {
+		switch plan {
+		case "team":
 			updates["max_concurrent_jobs"] = 50
 			updates["max_budget_per_job"] = 20.0
 			updates["max_budget_per_month"] = 5000.0
-		} else if plan == "individual" {
-			updates["max_concurrent_jobs"] = 10
-			updates["max_budget_per_job"] = 5.0
-			updates["max_budget_per_month"] = 500.0
-		} else { // free
+		case "pro", "individual": // "pro" is the current paid tier; "individual" kept for back-compat
+			updates["max_concurrent_jobs"] = 20
+			updates["max_budget_per_job"] = 10.0
+			updates["max_budget_per_month"] = 1000.0
+		default: // free
 			updates["max_concurrent_jobs"] = 1
 			updates["max_budget_per_job"] = 1.0
 			updates["max_budget_per_month"] = 10.0

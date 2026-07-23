@@ -420,6 +420,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/models/", s.handleModels)
 	mux.HandleFunc("/api/v1/integrations", s.handleIntegrations)
 	mux.HandleFunc("/api/v1/usage", s.handleAccountUsage)
+	mux.HandleFunc("/api/v1/billing/checkout", s.handleBillingCheckout)
 	mux.HandleFunc("/api/v1/github/repos", s.handleGithubRepos)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)

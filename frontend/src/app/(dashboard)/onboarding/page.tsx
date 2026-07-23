@@ -49,6 +49,17 @@ export default function OnboardingPage() {
     }
   };
 
+  const handleUpgrade = async () => {
+    setBusy(true); setErr("");
+    try {
+      const { url } = await client.createCheckout();
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upgrade isn't available yet — try again shortly.");
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="p-8 max-w-3xl mx-auto min-h-[80vh] flex flex-col justify-center">
       <div className="text-center mb-12">
@@ -118,11 +129,12 @@ export default function OnboardingPage() {
                     <ChevronRight className="w-4 h-4" />
                   </button>
                   <button
-                    disabled
-                    title="Upgrade flow coming soon. Contact us to upgrade."
-                    className="flex items-center gap-2 bg-white/5 text-zinc-500 px-6 py-2.5 rounded-xl font-medium cursor-not-allowed transition-colors"
+                    onClick={handleUpgrade}
+                    disabled={busy}
+                    className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-zinc-200 px-6 py-2.5 rounded-xl font-medium disabled:opacity-50 transition-colors"
                   >
-                    Upgrade to Pro (Coming Soon)
+                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    Upgrade to Pro
                   </button>
                 </div>
               )}
