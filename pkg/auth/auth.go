@@ -35,6 +35,24 @@ func (c *UserClaims) IsAdmin() bool {
 	return c.Role == "admin"
 }
 
+// IsSuperAdmin returns true if the given email is in the KIWI_SUPER_ADMIN_EMAILS allowlist.
+func IsSuperAdmin(email string) bool {
+	allowlist := os.Getenv("KIWI_SUPER_ADMIN_EMAILS")
+	if allowlist == "" {
+		return false
+	}
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return false
+	}
+	for _, allowed := range strings.Split(allowlist, ",") {
+		if email == strings.TrimSpace(strings.ToLower(allowed)) {
+			return true
+		}
+	}
+	return false
+}
+
 // ClaimsFromContext retrieves the UserClaims from the request context,
 // or nil if no claims are present.
 func ClaimsFromContext(ctx context.Context) *UserClaims {
