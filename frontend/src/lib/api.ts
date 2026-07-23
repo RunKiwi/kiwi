@@ -182,7 +182,12 @@ export const client = {
   getAuthProviders: () => fetchApi<AuthProvidersResponse>("/auth/providers"),
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
-  
+
+  // Starts a Stripe Checkout Session for the Pro upgrade and returns the hosted
+  // checkout URL to redirect to. 503 when billing isn't configured.
+  createCheckout: () =>
+    fetchApi<{ url: string }>("/api/v1/billing/checkout", { method: "POST" }),
+
   submitPlan: (req: PlanRequest) => 
     fetchApi<PlanResponse>("/api/v1/planner/plan", {
       method: "POST",

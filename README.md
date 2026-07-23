@@ -17,7 +17,7 @@ The differentiation is the layer above the sandbox: **the planner and the swarm*
 Prefer to run it yourself? See the self-host [Quickstart](#quickstart) below.
 
 > [!NOTE]
-> **Live, still maturing.** A task flows **end-to-end** — submit one and get a real PR back (`make local`, below). The self-serve **Free tier is deployed to production**: a signup runs tasks on a Kiwi-operated **shared fleet** without contacting us (per-org daemon processes, gVisor sandbox, agent-minute metering), served from a Cloud Run control plane plus a Docker + gVisor free-fleet host (see [Deployment](#free-tier-deployment)). Still in progress: billing / **Pro** upgrade, hardened multi-tenant **egress** isolation, and the Firecracker managed-*dedicated* path.
+> **Live, still maturing.** A task flows **end-to-end** — submit one and get a real PR back (`make local`, below). The self-serve **Free tier is deployed to production**: a signup runs tasks on a Kiwi-operated **shared fleet** without contacting us (per-org daemon processes, gVisor sandbox, agent-minute metering), served from a Cloud Run control plane plus a Docker + gVisor free-fleet host (see [Deployment](#free-tier-deployment)). **Pro** upgrade billing is wired via Stripe Checkout (test mode). Still in progress: hardened multi-tenant **egress** isolation, and the Firecracker managed-*dedicated* path.
 
 ## Quickstart
 
@@ -56,7 +56,8 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | Shared context — plan with prior-job learnings (Auto pgvector search / Manual select), org-scoped, opt-in | ✅ |
 | **Free tier — live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed — Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
 | Control plane on GCP — Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
-| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live; billing / **Pro** upgrade still proposed |
+| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live |
+| Billing — Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
 | Managed-**dedicated** (Pro) — per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
 | Hardened multi-tenant egress isolation (default-deny on the free-fleet host) | 🚧 In progress |
 
