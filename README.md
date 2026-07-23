@@ -10,8 +10,8 @@ A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane
 
 The differentiation is the layer above the sandbox: **the planner and the swarm**, not the sandbox itself.
 
-> [!WARNING]
-> **Not production ready.** A task flows **end-to-end today** — you can submit one and get a real PR back (`make local`, below). A self-serve **Free tier** now lets a signup run tasks on a Kiwi-operated shared fleet without contacting us (per-org daemon processes, gVisor sandbox, agent-minute metering) — but it is **not yet deployed**: it needs a Docker + gVisor execution host, which the current Cloud Run control plane cannot provide (see [Deployment](#free-tier-deployment)). The managed-tier GCP rollout and hardened multi-tenant isolation (Firecracker/egress) are **still in progress** — see the RFCs. Positioning is **managed-first, BYOC as graduation** ([Managed Execution Tier RFC](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)).
+> [!NOTE]
+> **Live, still maturing.** A task flows **end-to-end** — submit one and get a real PR back (`make local`, below). The self-serve **Free tier is deployed to production**: a signup runs tasks on a Kiwi-operated **shared fleet** without contacting us (per-org daemon processes, gVisor sandbox, agent-minute metering), served from a Cloud Run control plane plus a Docker + gVisor free-fleet host (see [Deployment](#free-tier-deployment)). Still in progress: billing / **Pro** upgrade, hardened multi-tenant **egress** isolation, and the Firecracker managed-*dedicated* path.
 
 ## Quickstart
 
@@ -29,15 +29,11 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 - **Control Plane** (`cmd/kiwid`, `pkg/orchestrator`): API + auth, a planner that decomposes a task into a DAG of `worker-spec` payloads, a Postgres **lease queue** (`pkg/store/queue.go`) that releases a worker only once its DAG dependencies have succeeded, and encrypted credential storage. Runs as split roles (`-role api | orchestrator | migrate | all`).
 - **Data Plane** (`cmd/kiwidaemon`, `pkg/daemon`): a pull-model daemon that polls the Control Plane over HTTPS, opens its org's sealed credentials in memory, provisions instant workspaces via `git worktree` from a cached bare clone, and runs the Actor–Critic loop (`pkg/loop`). It can **discover the target file(s)** from the task and **edit multiple files**, so a task needs only a description and a repo.
 - **Isolation**: the LLM Actor/Critic run **in the daemon process**; only the test command runs in the sandbox, so model-generated code executes with **default-deny networking** and never sees the LLM key. The sandbox driver is pluggable (`pkg/sandbox`) — Docker for dev/BYOC, **gVisor (`runsc`) for the shared Free tier** (set per-daemon via `KIWI_SANDBOX_RUNTIME=runsc`), and a Firecracker microVM driver for hardened managed execution (`KIWI_SANDBOX=firecracker`).
-- **Tiers**: a **Free** tier runs every signup on a Kiwi-operated **shared fleet** — one lightweight daemon *process* per org (its own keypair, so the credential-sealing model is unchanged), packed onto shared hosts and scaled to zero when idle. Usage is bounded by per-org limits: one concurrent job, a per-task wall-clock cap, and a monthly **agent-minute** ceiling; a cryptomining heuristic auto-suspends abusive orgs. A per-org daemon is cold-started on submit by the **provisioner** (`pkg/provisioner`), which consumes `ProvisioningRequest`s and launches per-org `kiwidaemon` containers. **Pro** graduates to a dedicated fleet (managed-dedicated or BYOC). See the [Free Tier RFC](docs/rfcs/2026-07-21-free-tier-shared-fleet-rfc.md).
+- **Tiers**: a **Free** tier runs every signup on a Kiwi-operated **shared fleet** — one lightweight daemon *process* per org (its own keypair, so the credential-sealing model is unchanged), packed onto shared hosts and scaled to zero when idle. Usage is bounded by per-org limits: one concurrent job, a per-task wall-clock cap, and a monthly **agent-minute** ceiling; a cryptomining heuristic auto-suspends abusive orgs. A per-org daemon is cold-started on submit by the **provisioner** (`pkg/provisioner`), which consumes `ProvisioningRequest`s and launches per-org `kiwidaemon` containers. **Pro** graduates to a dedicated fleet (managed-dedicated or BYOC).
 - **Credentials**: the daemon generates an X25519 keypair (credential sealing) and an Ed25519 keypair (heartbeat signing) on boot. Customer credentials are stored by the SaaS **sealed to the daemon's X25519 public key**, and at rest are encrypted via the configured key manager (a static key for dev/BYOC, **Cloud KMS envelope encryption** for managed — `pkg/crypto`).
 - **Surfaces**: the `kiwi` CLI, a Next.js **dashboard** (`frontend/` — jobs, fleets, models, integrations, live topology, settings), Node/Python SDKs, and a Linear webhook receiver.
 
-> **Zero-knowledge is a BYOC property, not a managed one.** In BYOC the daemon runs in the customer's cloud and the Control Plane never sees plaintext credentials. In **managed**, Kiwi operates the daemon and holds the private key, so it *can* decrypt — **managed is not zero-knowledge** ([Managed RFC §4.1](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md)).
-
-**Design docs:** [BYOC Platform](docs/rfcs/2026-07-16-startup-byoc-platform-rfc.md) · [Managed Execution Tier](docs/rfcs/2026-07-17-managed-execution-tier-rfc.md) · [Execution & Isolation Model](docs/rfcs/2026-07-18-execution-and-isolation-model.md) · [Managed Tier on GCP](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md) · [Self-Serve Signup & Tenancy](docs/rfcs/2026-07-19-self-serve-signup-and-tenancy.md) · [Architecture Review](docs/design/2026-07-16-byoc-architecture-review.md) · [Phased Plan](docs/PHASED_PLAN.md)
-
-Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.com/RunKiwi/gtm). This repo holds engineering docs only.
+> **Zero-knowledge is a BYOC property, not a managed one.** In BYOC the daemon runs in the customer's cloud and the Control Plane never sees plaintext credentials. In **managed**, Kiwi operates the daemon and holds the private key, so it *can* decrypt — **managed is not zero-knowledge**.
 
 ## Status
 
@@ -50,10 +46,11 @@ Positioning, strategy, and market research live in [RunKiwi/gtm](https://github.
 | Provider robustness — key validation on save, quota/error surfacing | ✅ |
 | Fleet routing — tasks lease only their fleet's daemons | ✅ |
 | Integration layer — `kiwi` CLI, Node/Python SDKs, Linear webhook | ✅ |
-| Managed-tier foundation — KMS envelope crypto, per-org VM Terraform (`deploy/gcp/`), `opsctl` provisioner, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
-| Managed-tier deployment on GCP | 🚧 In progress ([RFC](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md)) |
-| Free tier — per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | 🚧 Built ([Free Tier RFC](docs/rfcs/2026-07-21-free-tier-shared-fleet-rfc.md)); needs a Docker + gVisor execution host, **not** Cloud Run (see [Deployment](#free-tier-deployment)) |
-| Self-serve signup & tenancy | 🚧 Free-tier path built (above); billing / Pro upgrade proposed ([RFC](docs/rfcs/2026-07-19-self-serve-signup-and-tenancy.md)) |
+| **Free tier — live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed — Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
+| Control plane on GCP — Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
+| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live; billing / **Pro** upgrade still proposed |
+| Managed-**dedicated** (Pro) — per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
+| Hardened multi-tenant egress isolation (default-deny on the free-fleet host) | 🚧 In progress |
 
 ## Building
 
@@ -151,13 +148,13 @@ The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` 
 
 ## Free-tier deployment
 
-The Free tier needs an execution host the control plane does **not** provide today. `kiwi-api` / `kiwi-orchestrator` run on **Cloud Run**, which cannot run the provisioner's `docker run` launches or a gVisor (`runsc`) sandbox. Deploying Free therefore requires:
+The Free tier is **live in production**, split across two execution substrates because `kiwi-api` / `kiwi-orchestrator` run on **Cloud Run**, which cannot run the provisioner's `docker run` launches or a gVisor (`runsc`) sandbox:
 
-1. A **Docker + gVisor GCE VM** ("free-fleet host") with `runsc` registered as a Docker runtime and the execution zone's default-deny egress (public API LB, model API, VCS only). Run the control-plane binary there with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), `KIWI_PUBLIC_API_URL=<public API>`, and `KIWI_DAEMON_IMAGE=<AR path>/kiwidaemon:latest`. The launcher bind-mounts the host `docker.sock` into each daemon so its test sandbox runs as a sibling container under `runsc`.
-2. The **`kiwidaemon` image** in Artifact Registry — `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets; `deploy.sh` pushes it).
-3. Cloud Run leaves `KIWI_PROVISIONER` unset, so its orchestrator keeps only the singleton sweepers and never attempts a `docker run`.
+1. **Control plane on Cloud Run** — `kiwi-api`, `kiwi-orchestrator`, `kiwi-frontend`, backed by Cloud SQL (private IP). Cloud Run leaves `KIWI_PROVISIONER` unset, so its orchestrator keeps only the singleton sweepers and never attempts a `docker run`.
+2. **A Docker + gVisor GCE VM** ("free-fleet host", `kiwi-free-fleet`) with `runsc` registered as a Docker runtime, on the same VPC as Cloud SQL. It runs the control-plane binary with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), `KIWI_PUBLIC_API_URL=https://api.runkiwi.dev`, and `KIWI_DAEMON_IMAGE=<AR path>/kiwidaemon:latest`. The provisioner cold-starts a per-org `kiwidaemon` container on submit; the launcher bind-mounts the host `docker.sock` so each daemon's test sandbox runs as a sibling container under `runsc`.
+3. The **`kiwidaemon` image** in Artifact Registry — `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets).
 
-The schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. Pro stays on per-org VMs ([Managed Tier on GCP RFC](docs/rfcs/2026-07-19-managed-tier-gcp-deployment.md) §5).
+Schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, the `fleets.type` `self-managed`→`managed` rename, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. **Pro** (dedicated) stays on per-org VMs.
 
 ## Operational notes
 
@@ -169,6 +166,10 @@ The schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits
 
 ## Contributing & context for AI
 
-For system context, the PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md) and the docs in [`docs/`](docs/).
+For build/test conventions, the PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md).
 
 Every PR modifying the codebase must keep this README current. If no update is needed, add the `skip-readme-check` label to the PR.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). Copyright © 2026 RunKiwi.
