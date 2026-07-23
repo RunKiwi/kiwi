@@ -103,6 +103,25 @@ export interface UsageResponse {
   agent_minutes_limit: number; // 0 = unlimited
   concurrent_jobs_running: number;
   max_concurrent_jobs: number;
+  is_super_admin?: boolean;
+}
+
+export interface AdminStats {
+  total_orgs: number;
+  orgs_by_plan: Record<string, number>;
+  orgs_by_activation_state: Record<string, number>;
+  signups_last_7_days: number;
+  signups_last_30_days: number;
+  total_agent_minutes: number;
+  tasks_by_status: Record<string, number>;
+}
+
+export interface AdminOrg {
+  id: string;
+  name: string;
+  plan: string;
+  activation_state: string;
+  created_at: string;
 }
 
 const getBaseUrl = () => {
@@ -182,6 +201,14 @@ export const client = {
   getAuthProviders: () => fetchApi<AuthProvidersResponse>("/auth/providers"),
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
+
+  // Admin APIs
+  getAdminStats: () => fetchApi<AdminStats>("/admin/stats"),
+  listAdminOrgs: () => fetchApi<AdminOrg[]>("/admin/orgs"),
+  setOrgPlan: (orgId: string, plan: string) => fetchApi<void>(`/admin/orgs/${orgId}/plan`, { method: "POST", body: JSON.stringify({ plan }) }),
+  grantOrgMinutes: (orgId: string, agent_minutes: number) => fetchApi<void>(`/admin/orgs/${orgId}/grant`, { method: "POST", body: JSON.stringify({ agent_minutes }) }),
+  activateOrg: (orgId: string) => fetchApi<void>(`/admin/orgs/${orgId}/activate`, { method: "POST" }),
+  suspendOrg: (orgId: string) => fetchApi<void>(`/admin/orgs/${orgId}/suspend`, { method: "POST" }),
 
   // Starts a Stripe Checkout Session for the Pro upgrade and returns the hosted
   // checkout URL to redirect to. 503 when billing isn't configured.

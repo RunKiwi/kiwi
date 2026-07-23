@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,9 +16,25 @@ import (
 	"gorm.io/gorm"
 )
 
-// AdminRouter registers admin-only API endpoints for managing orgs, users, and keys.
-// All endpoints require the caller to have the "admin" role.
+// AdminRouter registers admin-only API endpoints for managing orgs, users, and
+// keys. Every endpoint is gated by isAdminAuthorized, which grants access only
+// to a global super-admin (KIWI_SUPER_ADMIN_EMAILS) or the KIWI_SERVER_TOKEN —
+// never an org-scoped "admin" role.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
+	mux.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		if !isAdminAuthorized(r) {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		handleAdminStats(db, w, r)
+	})
+
 	mux.HandleFunc("/admin/orgs", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
 			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
@@ -118,6 +135,22 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
+		case len(parts) == 2 && parts[1] == "plan":
+			orgID := parts[0]
+			if r.Method == http.MethodPost {
+				handleUpdateOrgPlan(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 2 && parts[1] == "grant":
+			orgID := parts[0]
+			if r.Method == http.MethodPost {
+				handleGrantOrgMinutes(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
 		case len(parts) == 2 && parts[1] == "join_requests":
 			orgID := parts[0]
 			if r.Method == http.MethodGet {
@@ -196,10 +229,17 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 }
 
 func isAdminAuthorized(r *http.Request) bool {
-	// First check if there is a valid admin claim
 	claims := ClaimsFromContext(r.Context())
-	if claims != nil && claims.IsAdmin() {
-		return true
+	if claims != nil {
+		// Allow bootstrap server token
+		if claims.UserID == "system" {
+			return true
+		}
+
+		// Allow global super admins
+		if IsSuperAdmin(claims.Email) {
+			return true
+		}
 	}
 
 	// Fallback to KIWI_SERVER_TOKEN
@@ -584,4 +624,122 @@ func handleOrgAuditLogsAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
+}
+
+func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
+	var resp struct {
+		TotalOrgs             int64            `json:"total_orgs"`
+		OrgsByPlan            map[string]int64 `json:"orgs_by_plan"`
+		OrgsByActivationState map[string]int64 `json:"orgs_by_activation_state"`
+		SignupsLast7Days      int64            `json:"signups_last_7_days"`
+		SignupsLast30Days     int64            `json:"signups_last_30_days"`
+		TotalAgentMinutes     float64          `json:"total_agent_minutes"`
+		TasksByStatus         map[string]int64 `json:"tasks_by_status"`
+	}
+	resp.OrgsByPlan = make(map[string]int64)
+	resp.OrgsByActivationState = make(map[string]int64)
+	resp.TasksByStatus = make(map[string]int64)
+
+	db.Model(&Organization{}).Count(&resp.TotalOrgs)
+
+	var planCounts []struct {
+		Plan  string
+		Count int64
+	}
+	db.Model(&Organization{}).Select("plan, count(*) as count").Group("plan").Scan(&planCounts)
+	for _, pc := range planCounts {
+		resp.OrgsByPlan[pc.Plan] = pc.Count
+	}
+
+	var stateCounts []struct {
+		ActivationState string
+		Count           int64
+	}
+	db.Model(&Organization{}).Select("activation_state, count(*) as count").Group("activation_state").Scan(&stateCounts)
+	for _, sc := range stateCounts {
+		resp.OrgsByActivationState[sc.ActivationState] = sc.Count
+	}
+
+	now := time.Now()
+	db.Model(&Organization{}).Where("created_at >= ?", now.Add(-7*24*time.Hour)).Count(&resp.SignupsLast7Days)
+	db.Model(&Organization{}).Where("created_at >= ?", now.Add(-30*24*time.Hour)).Count(&resp.SignupsLast30Days)
+
+	db.Table("jobs").Select("COALESCE(SUM(agent_minutes), 0)").Scan(&resp.TotalAgentMinutes)
+
+	var taskCounts []struct {
+		Status string
+		Count  int64
+	}
+	db.Table("queued_tasks").Select("status, count(*) as count").Group("status").Scan(&taskCounts)
+	for _, tc := range taskCounts {
+		resp.TasksByStatus[tc.Status] = tc.Count
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleUpdateOrgPlan(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	var body struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Plan == "" {
+		http.Error(w, "Bad request: 'plan' is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := UpdateOrgPlanAndLimits(db, orgID, body.Plan); err != nil {
+		http.Error(w, "Failed to update plan: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = LogAuditEvent(db, r, "UPDATE", "ORG_PLAN", orgID, fmt.Sprintf("Admin manually updated org plan to %q", body.Plan))
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleGrantOrgMinutes(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	var body struct {
+		AgentMinutes float64 `json:"agent_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if body.AgentMinutes <= 0 {
+		http.Error(w, "Bad request: 'agent_minutes' must be positive", http.StatusBadRequest)
+		return
+	}
+
+	errNoLimits := errors.New("no limits row")
+	errUnlimited := errors.New("unlimited")
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var limits OrgLimits
+		if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errNoLimits
+			}
+			return err
+		}
+		// 0 means "unlimited"; adding a finite grant would silently DOWNGRADE an
+		// unlimited org to a cap. Refuse rather than reduce.
+		if limits.MaxAgentMinutesPerMonth == 0 {
+			return errUnlimited
+		}
+		limits.MaxAgentMinutesPerMonth += body.AgentMinutes
+		return tx.Save(&limits).Error
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, errNoLimits):
+		http.Error(w, "Org has no limits row to grant against", http.StatusNotFound)
+		return
+	case errors.Is(err, errUnlimited):
+		http.Error(w, "Org already has unlimited agent minutes", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "Failed to grant minutes: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_ = LogAuditEvent(db, r, "UPDATE", "ORG_GRANT", orgID, fmt.Sprintf("Admin granted %.2f agent minutes", body.AgentMinutes))
+	w.WriteHeader(http.StatusOK)
 }

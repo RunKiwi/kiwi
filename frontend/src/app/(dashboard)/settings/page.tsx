@@ -88,7 +88,7 @@ export default function SettingsPage() {
             <p className="text-red-300/80 text-sm mt-1">
               Running tasks is disabled. This can follow repeated abuse signals or exhausting your plan&apos;s limits.
               Contact{" "}
-              <a href={`mailto:support@runkiwi.com?subject=${encodeURIComponent(`Suspended org ${org?.org_id ?? ""}`)}`} className="underline hover:text-white">support</a>
+              <a href={`mailto:support@runkiwi.dev?subject=${encodeURIComponent(`Suspended org ${org?.org_id ?? ""}`)}`} className="underline hover:text-white">support</a>
               {" "}if you think this is a mistake.
             </p>
           </div>

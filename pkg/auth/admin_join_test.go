@@ -33,7 +33,7 @@ func TestAdminJoinRequests(t *testing.T) {
 
 	t.Run("list join requests", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/admin/orgs/org_1/join_requests", nil)
-		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{UserID: "system"}))
 		rr := httptest.NewRecorder()
 
 		mux.ServeHTTP(rr, req)
@@ -53,7 +53,7 @@ func TestAdminJoinRequests(t *testing.T) {
 
 	t.Run("approve join request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/admin/orgs/org_1/join_requests/req_1/approve", nil)
-		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{UserID: "system"}))
 		rr := httptest.NewRecorder()
 
 		mux.ServeHTTP(rr, req)
@@ -77,7 +77,7 @@ func TestAdminJoinRequests(t *testing.T) {
 
 	t.Run("deny join request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/admin/orgs/org_1/join_requests/req_2/deny", nil)
-		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{UserID: "system"}))
 		rr := httptest.NewRecorder()
 
 		mux.ServeHTTP(rr, req)
@@ -96,7 +96,7 @@ func TestAdminJoinRequests(t *testing.T) {
 	t.Run("toggle domain join", func(t *testing.T) {
 		body := []byte(`{"domain_join": true}`)
 		req := httptest.NewRequest(http.MethodPut, "/admin/orgs/org_1/domain_join", bytes.NewBuffer(body))
-		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), claimsKey, &UserClaims{UserID: "system"}))
 		rr := httptest.NewRecorder()
 
 		mux.ServeHTTP(rr, req)

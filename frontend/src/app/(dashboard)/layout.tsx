@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut } from "lucide-react";
+import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut, Shield } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { ActivationBanner } from "@/components/ActivationBanner";
+import { client } from "@/lib/api";
 
 export default function DashboardLayout({
   children,
@@ -20,12 +21,18 @@ export default function DashboardLayout({
   const { isAuthenticated, logout } = useAuth();
   const [orgName, setOrgName] = useState<string | null>("");
 
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+
   useEffect(() => {
     if (isAuthenticated === false) {
       router.push("/login");
+    } else if (isAuthenticated === true) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOrgName(auth.getOrgName());
+      client.getUsage().then(usage => {
+        setIsSuperAdmin(!!usage.is_super_admin);
+      }).catch(() => {});
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setOrgName(auth.getOrgName());
   }, [isAuthenticated, router]);
 
   // Don't render until we confirm authentication
@@ -41,6 +48,10 @@ export default function DashboardLayout({
     { name: "Integrations", href: "/integrations", icon: Link2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
+
+  if (isSuperAdmin) {
+    navItems.push({ name: "Admin", href: "/admin", icon: Shield });
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">

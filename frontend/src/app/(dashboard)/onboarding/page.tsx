@@ -50,14 +50,7 @@ export default function OnboardingPage() {
   };
 
   const handleUpgrade = async () => {
-    setBusy(true); setErr("");
-    try {
-      const { url } = await client.createCheckout();
-      window.location.href = url;
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Upgrade isn't available yet — try again shortly.");
-      setBusy(false);
-    }
+    window.location.href = "mailto:support@runkiwi.dev?subject=Upgrade%20to%20Pro";
   };
 
   return (
