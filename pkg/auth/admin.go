@@ -196,10 +196,17 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 }
 
 func isAdminAuthorized(r *http.Request) bool {
-	// First check if there is a valid admin claim
 	claims := ClaimsFromContext(r.Context())
-	if claims != nil && claims.IsAdmin() {
-		return true
+	if claims != nil {
+		// Allow bootstrap server token
+		if claims.UserID == "system" {
+			return true
+		}
+
+		// Allow global super admins
+		if IsSuperAdmin(claims.Email) {
+			return true
+		}
 	}
 
 	// Fallback to KIWI_SERVER_TOKEN
