@@ -86,7 +86,7 @@ func main() {
 	}
 
 	storage := store.NewPostgresStore(db)
-	server := orchestrator.NewServer(storage, cfg.Role)
+	server := orchestrator.NewServer(storage, cfg)
 
 	// Ensure the provisioner's dedup index exists for every role: the api role
 	// serves the free-tier cold-start insert (which relies on it) even when the

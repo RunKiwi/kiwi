@@ -45,7 +45,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 			&store.Daemon{}, &store.DaemonJoinToken{},
 			&store.PlanSubmission{},
 			&store.Fleet{}, &store.ModelEntry{},
-			&agentapi.JobToken{},
+			&agentapi.JobToken{}, &store.JobLearning{},
 		); err != nil {
 			return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
 		}

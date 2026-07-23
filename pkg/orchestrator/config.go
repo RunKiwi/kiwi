@@ -14,6 +14,7 @@ type Config struct {
 	EncryptionKey      string
 	ServerToken        string
 	CORSAllowedOrigins string
+	EmbedGoogleKey     string
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -36,6 +37,11 @@ func LoadAndValidateConfig(flagAddr, flagDSN, flagRole, flagNats string) (*Confi
 		EncryptionKey:      os.Getenv("KIWI_ENCRYPTION_KEY"),
 		ServerToken:        os.Getenv("KIWI_SERVER_TOKEN"),
 		CORSAllowedOrigins: os.Getenv("KIWI_CORS_ALLOWED_ORIGINS"),
+		EmbedGoogleKey:     os.Getenv("KIWI_EMBED_GOOGLE_KEY"),
+	}
+
+	if cfg.EmbedGoogleKey == "" {
+		cfg.EmbedGoogleKey = os.Getenv("GEMINI_API_KEY")
 	}
 
 	if cfg.Env == "production" {

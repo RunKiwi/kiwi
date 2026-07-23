@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -24,10 +26,15 @@ var ErrIdempotentConflict = errors.New("idempotent conflict")
 type Service struct {
 	store   store.Store
 	planner Planner
+	embed   provider.Embedder
+	// indexSync runs learning indexing inline instead of in a background
+	// goroutine. Production leaves it false (best-effort, non-blocking); tests
+	// set it true so the write is observable without racing a goroutine.
+	indexSync bool
 }
 
-func NewService(s store.Store, p Planner) *Service {
-	return &Service{store: s, planner: p}
+func NewService(s store.Store, p Planner, e provider.Embedder) *Service {
+	return &Service{store: s, planner: p, embed: e}
 }
 
 // SubmitResult reports what the planner generated.
@@ -64,6 +71,30 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			}, nil
 		}
 	}
+
+	// Resolve prior-work learnings before planning. Everything is org-scoped in
+	// the store queries — a caller can never reference another tenant's jobs.
+	// taskVec is captured so an "auto" submit reuses its query embedding for the
+	// post-plan indexing write instead of paying for a second embed call.
+	var resolved []store.JobLearning
+	var taskVec []float32
+	switch req.ReferenceMode {
+	case "manual":
+		if len(req.ReferenceJobIDs) > 0 {
+			resolved, _ = s.store.GetJobLearnings(ctx, req.OrgID, req.ReferenceJobIDs)
+			if len(resolved) > 3 {
+				resolved = resolved[:3]
+			}
+		}
+	case "auto":
+		if s.embed != nil {
+			if vec, err := s.embed.Embed(ctx, req.Task); err == nil {
+				taskVec = vec
+				resolved, _ = s.store.SearchJobLearnings(ctx, req.OrgID, vec, 3, "")
+			}
+		}
+	}
+	req.ResolvedLearnings = resolved
 
 	plan, err := s.planner.Plan(ctx, req)
 	if err != nil {
@@ -173,6 +204,47 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// Best-effort, non-fatal indexing of this job as a learning for future
+	// reference. It must never fail an already-accepted submission, so errors are
+	// swallowed and (in production) it runs off the request goroutine.
+	index := func(taskVec []float32) {
+		// A detached, bounded context: the request's context may already be
+		// canceled by the time this runs.
+		ictx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Reuse the auto-mode query embedding when we have it; only embed here
+		// when we don't (manual/off submits), so auto never embeds twice.
+		if taskVec == nil && s.embed != nil {
+			if v, err := s.embed.Embed(ictx, req.Task); err == nil {
+				taskVec = v
+			}
+		}
+		var vec *pgvector.Vector
+		if taskVec != nil {
+			pv := pgvector.NewVector(taskVec)
+			vec = &pv
+		}
+
+		// One learning per job: key the row on the job id so a re-index updates in
+		// place rather than duplicating (UpsertJobLearning conflicts on job_id).
+		learning := &store.JobLearning{
+			ID:        jobID,
+			JobID:     jobID,
+			OrgID:     req.OrgID,
+			Repo:      store.ShortRepo(req.RepoURL),
+			Task:      req.Task,
+			Summary:   plan.Summary,
+			Embedding: vec,
+		}
+		_ = s.store.UpsertJobLearning(ictx, learning)
+	}
+	if s.indexSync {
+		index(taskVec)
+	} else {
+		go index(taskVec)
 	}
 
 	return &SubmitResult{

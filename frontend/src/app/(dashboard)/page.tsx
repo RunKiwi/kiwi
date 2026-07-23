@@ -25,6 +25,10 @@ export default function CommandCenter() {
   const [testCmd, setTestCmd] = useState("");
   const [maxWorkers, setMaxWorkers] = useState(1);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Shared context off by default: it's opt-in, so a task never silently spends
+  // extra tokens on prior-work retrieval unless the user turns it on.
+  const [referenceMode, setReferenceMode] = useState("off");
+  const [referenceJobIds, setReferenceJobIds] = useState<string[]>([]);
 
   // Options loaded from the control plane.
   const [fleets, setFleets] = useState<Fleet[]>([]);
@@ -116,6 +120,8 @@ export default function CommandCenter() {
         planner_model: plannerModel,
         max_workers: maxWorkers,
         fleet_id: fleetId,
+        reference_mode: referenceMode,
+        reference_job_ids: referenceMode === "manual" ? referenceJobIds : undefined,
       });
       setSubmitSuccess(resp.job_id);
       setTask("");
@@ -263,6 +269,57 @@ export default function CommandCenter() {
               <label className={labelClass}>Max workers</label>
               <input type="number" min="1" max="10" value={maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} className={fieldClass} />
             </div>
+            <div>
+              <label className={labelClass}>Shared context</label>
+              <button
+                type="button" role="switch" aria-checked={referenceMode !== "off"}
+                aria-label="Use context from past jobs"
+                onClick={() => setReferenceMode(referenceMode === "off" ? "auto" : "off")}
+                className={`flex items-center gap-3 w-full h-[42px] px-3 rounded-lg border transition-colors ${referenceMode !== "off" ? "border-[#93C645]/40 bg-[#93C645]/10" : "border-white/10 bg-black/20"}`}
+              >
+                <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${referenceMode !== "off" ? "bg-[#93C645]" : "bg-white/15"}`}>
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${referenceMode !== "off" ? "left-4" : "left-0.5"}`} />
+                </span>
+                <span className="text-sm text-zinc-300">{referenceMode !== "off" ? "Using past jobs" : "Off"}</span>
+              </button>
+            </div>
+            {referenceMode !== "off" && (
+              <div>
+                <label className={labelClass}>Context source</label>
+                <Select
+                  ariaLabel="Context source" value={referenceMode} onChange={setReferenceMode}
+                  options={[{ value: "auto", label: "Auto — related past jobs" }, { value: "manual", label: "Manual — pick jobs" }]}
+                />
+                {referenceMode === "auto" && (
+                  <p className="text-xs text-amber-400/80 mt-1.5">Auto-selects related past jobs — may use extra tokens.</p>
+                )}
+              </div>
+            )}
+            {referenceMode === "manual" && (
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className={labelClass}>Reference Jobs</label>
+                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-2 border border-white/5 rounded-lg bg-black/20">
+                  {jobs.map(j => (
+                    <label key={j.job_id} className="flex items-start gap-3 cursor-pointer p-2 hover:bg-white/5 rounded-md">
+                      <input 
+                        type="checkbox" 
+                        checked={referenceJobIds.includes(j.job_id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setReferenceJobIds([...referenceJobIds, j.job_id]);
+                          else setReferenceJobIds(referenceJobIds.filter(id => id !== j.job_id));
+                        }}
+                        className="mt-1 accent-[#93C645]"
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-mono text-xs text-zinc-400">{shortId(j.job_id)}</span>
+                        <span className="text-sm text-zinc-200 line-clamp-1 truncate">{j.task}</span>
+                      </div>
+                    </label>
+                  ))}
+                  {jobs.length === 0 && <div className="text-zinc-500 text-sm p-2">No past jobs available.</div>}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

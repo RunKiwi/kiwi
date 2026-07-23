@@ -198,3 +198,58 @@ func (p *GeminiProvider) Complete(ctx context.Context, system, user string) (str
 	}
 	return text, nil
 }
+
+type geminiEmbedRequest struct {
+	Model   string        `json:"model"`
+	Content geminiContent `json:"content"`
+}
+
+type geminiEmbedResponse struct {
+	Embedding struct {
+		Values []float32 `json:"values"`
+	} `json:"embedding"`
+}
+
+func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	reqBody := geminiEmbedRequest{
+		Model: "models/text-embedding-004",
+		Content: geminiContent{
+			Parts: []geminiPart{{Text: text}},
+		},
+	}
+
+	b, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/models/text-embedding-004:embedContent", p.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", p.apiKey)
+
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini embed request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("gemini embed API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var gr geminiEmbedResponse
+	if err := json.Unmarshal(body, &gr); err != nil {
+		return nil, fmt.Errorf("decode gemini embed response: %w", err)
+	}
+
+	if len(gr.Embedding.Values) == 0 {
+		return nil, fmt.Errorf("gemini returned empty embedding")
+	}
+
+	return gr.Embedding.Values, nil
+}

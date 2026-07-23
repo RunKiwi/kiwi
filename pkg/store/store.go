@@ -105,4 +105,11 @@ type Store interface {
 
 	// DB Accessor for gradual migration of legacy endpoints
 	DB() *gorm.DB
+
+	// Learnings — cross-task shared context. UpsertJobLearning records a job's
+	// learning row; CompleteTask (not a standalone method) owns the terminal
+	// outcome/pr_url update so it stays atomic with task completion.
+	UpsertJobLearning(ctx context.Context, learning *JobLearning) error
+	GetJobLearnings(ctx context.Context, orgID string, jobIDs []string) ([]JobLearning, error)
+	SearchJobLearnings(ctx context.Context, orgID string, taskEmbedding []float32, limit int, excludeJobID string) ([]JobLearning, error)
 }

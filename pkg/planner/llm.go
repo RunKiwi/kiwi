@@ -56,8 +56,44 @@ func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	if model == nil {
 		return nil, fmt.Errorf("llm planner: no model configured")
 	}
-	user := fmt.Sprintf("Task: %s\nRepo: %s @ %s\nTarget file (if known): %s\nTest command (definition of done): %s\nMax workers: %d",
-		req.Task, req.RepoURL, req.Ref, req.File, req.TestCmd, req.MaxWorkers)
+	// Prepend distilled prior-work context to the planner prompt. The learnings
+	// are always same-org (resolved under req.OrgID in SubmitPlan), so this text
+	// is the tenant's own data — an org can only influence its own planning, not
+	// another's. Kept bounded (top 3, summaries and total both capped) so a large
+	// history can't blow up the prompt.
+	var contextBlock string
+	if len(req.ResolvedLearnings) > 0 {
+		var sb strings.Builder
+		sb.WriteString("# Prior related work (for context)\n\n")
+		for i, l := range req.ResolvedLearnings {
+			if i >= 3 {
+				break
+			}
+			outcome := "unknown"
+			if l.Outcome != nil && *l.Outcome != "" {
+				outcome = *l.Outcome
+			}
+			pr := "none"
+			if l.PRURL != nil && *l.PRURL != "" {
+				pr = *l.PRURL
+			}
+
+			summary := l.Summary
+			if len(summary) > 2000 {
+				summary = summary[:2000] + "..."
+			}
+
+			sb.WriteString(fmt.Sprintf("%s • %s • %s • %s • %s\n", l.Task, l.Repo, outcome, summary, pr))
+		}
+		contextBlock = sb.String()
+		if len(contextBlock) > 12000 {
+			contextBlock = contextBlock[:12000] + "\n...[truncated]\n"
+		}
+		contextBlock += "\n"
+	}
+
+	user := fmt.Sprintf("%sTask: %s\nRepo: %s @ %s\nTarget file (if known): %s\nTest command (definition of done): %s\nMax workers: %d",
+		contextBlock, req.Task, req.RepoURL, req.Ref, req.File, req.TestCmd, req.MaxWorkers)
 
 	raw, err := model.Complete(ctx, plannerSystem, user)
 	if err != nil {
