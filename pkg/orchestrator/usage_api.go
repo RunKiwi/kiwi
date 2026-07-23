@@ -19,6 +19,7 @@ type accountUsageResponse struct {
 	AgentMinutesLimit     float64 `json:"agent_minutes_limit"` // 0 = unlimited
 	ConcurrentJobsRunning int64   `json:"concurrent_jobs_running"`
 	MaxConcurrentJobs     int     `json:"max_concurrent_jobs"`
+	IsSuperAdmin          bool    `json:"is_super_admin"`
 }
 
 // handleAccountUsage serves GET /api/v1/usage: the caller org's plan, activation
@@ -74,5 +75,6 @@ func (s *Server) handleAccountUsage(w http.ResponseWriter, r *http.Request) {
 		AgentMinutesLimit:     limits.MaxAgentMinutesPerMonth,
 		ConcurrentJobsRunning: running,
 		MaxConcurrentJobs:     limits.MaxConcurrentJobs,
+		IsSuperAdmin:          auth.IsSuperAdmin(claims.Email),
 	})
 }

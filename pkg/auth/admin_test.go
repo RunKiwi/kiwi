@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -114,5 +115,55 @@ func TestAdminRouter_ClaimsAuth(t *testing.T) {
 				t.Errorf("Expected %d, got %d", tc.expectedCode, w.Code)
 			}
 		})
+	}
+}
+
+func TestAdminAPIEndpoints(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	// create an org
+	org := Organization{ID: "test-org-1", Name: "Test Org 1", Plan: "free"}
+	db.Create(&org)
+	db.Create(&OrgLimits{OrgID: org.ID, MaxAgentMinutesPerMonth: 100})
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// test stats
+	reqStats := httptest.NewRequest(http.MethodGet, "/admin/stats", nil).WithContext(ctx)
+	wStats := httptest.NewRecorder()
+	mux.ServeHTTP(wStats, reqStats)
+	if wStats.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", wStats.Code)
+	}
+
+	// test plan update
+	bodyPlan := bytes.NewReader([]byte(`{"plan":"pro"}`))
+	reqPlan := httptest.NewRequest(http.MethodPost, "/admin/orgs/test-org-1/plan", bodyPlan).WithContext(ctx)
+	wPlan := httptest.NewRecorder()
+	mux.ServeHTTP(wPlan, reqPlan)
+	if wPlan.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", wPlan.Code)
+	}
+	var updatedOrg Organization
+	db.First(&updatedOrg, "id = ?", "test-org-1")
+	if updatedOrg.Plan != "pro" {
+		t.Errorf("expected plan 'pro', got %s", updatedOrg.Plan)
+	}
+
+	// test grant
+	bodyGrant := bytes.NewReader([]byte(`{"agent_minutes":500}`))
+	reqGrant := httptest.NewRequest(http.MethodPost, "/admin/orgs/test-org-1/grant", bodyGrant).WithContext(ctx)
+	wGrant := httptest.NewRecorder()
+	mux.ServeHTTP(wGrant, reqGrant)
+	if wGrant.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", wGrant.Code)
+	}
+	var limits OrgLimits
+	db.First(&limits, "org_id = ?", "test-org-1")
+	if limits.MaxAgentMinutesPerMonth != 600 {
+		t.Errorf("expected 600 limits, got %f", limits.MaxAgentMinutesPerMonth)
 	}
 }
