@@ -29,7 +29,7 @@ export function ActivationBanner() {
         exhausting your plan&apos;s limits.
       </span>
       <a
-        href="mailto:support@runkiwi.com?subject=Suspended%20organization"
+        href="mailto:support@runkiwi.dev?subject=Suspended%20organization"
         className="font-semibold underline underline-offset-2 hover:text-white shrink-0"
       >
         Contact support

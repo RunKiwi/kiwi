@@ -128,7 +128,7 @@ export default function FleetPage() {
               {u.agent_minutes_used.toFixed(1)} {hasCap ? `/ ${u.agent_minutes_limit}` : ""} agent-min this month
             </div>
           )}
-          <a href="mailto:support@runkiwi.com?subject=Upgrade to Pro" className="text-sm text-blue-400 hover:text-blue-300 transition-colors inline-block mt-2 font-medium">
+          <a href="mailto:support@runkiwi.dev?subject=Upgrade%20to%20Pro" className="text-sm text-blue-400 hover:text-blue-300 transition-colors inline-block mt-2 font-medium">
             Upgrade for a dedicated fleet &rarr;
           </a>
         </div>

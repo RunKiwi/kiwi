@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,8 +16,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// AdminRouter registers admin-only API endpoints for managing orgs, users, and keys.
-// All endpoints require the caller to have the "admin" role.
+// AdminRouter registers admin-only API endpoints for managing orgs, users, and
+// keys. Every endpoint is gated by isAdminAuthorized, which grants access only
+// to a global super-admin (KIWI_SUPER_ADMIN_EMAILS) or the KIWI_SERVER_TOKEN —
+// never an org-scoped "admin" role.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	mux.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
@@ -706,15 +709,33 @@ func handleGrantOrgMinutes(db *gorm.DB, w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	errNoLimits := errors.New("no limits row")
+	errUnlimited := errors.New("unlimited")
 	err := db.Transaction(func(tx *gorm.DB) error {
 		var limits OrgLimits
 		if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errNoLimits
+			}
 			return err
+		}
+		// 0 means "unlimited"; adding a finite grant would silently DOWNGRADE an
+		// unlimited org to a cap. Refuse rather than reduce.
+		if limits.MaxAgentMinutesPerMonth == 0 {
+			return errUnlimited
 		}
 		limits.MaxAgentMinutesPerMonth += body.AgentMinutes
 		return tx.Save(&limits).Error
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, errNoLimits):
+		http.Error(w, "Org has no limits row to grant against", http.StatusNotFound)
+		return
+	case errors.Is(err, errUnlimited):
+		http.Error(w, "Org already has unlimited agent minutes", http.StatusBadRequest)
+		return
+	default:
 		http.Error(w, "Failed to grant minutes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
