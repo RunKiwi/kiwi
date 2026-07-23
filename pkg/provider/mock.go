@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"time"
@@ -79,4 +81,16 @@ func Divide(a, b int) (int, error) {
 	}
 
 	return "", errors.New("mock provider: unsupported file or no matching rules found")
+}
+
+func (m *MockProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	hash := sha256.Sum256([]byte(text))
+	vec := make([]float32, 768)
+	for i := 0; i < 768; i++ {
+		idx := (i * 2) % 31 // 31 since we read 2 bytes, and sha256 is 32 bytes
+		val := binary.BigEndian.Uint16(hash[idx : idx+2])
+		// Normalize to something deterministic
+		vec[i] = float32(val) / 65535.0
+	}
+	return vec, nil
 }

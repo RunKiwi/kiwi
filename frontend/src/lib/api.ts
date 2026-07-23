@@ -13,6 +13,8 @@ export interface PlanRequest {
   planner_model?: string;
   max_workers?: number;
   fleet_id?: string;
+  reference_mode?: string;
+  reference_job_ids?: string[];
 }
 
 export interface Fleet {

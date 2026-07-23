@@ -45,6 +45,11 @@ func shortRepo(url string) string {
 	return strings.Trim(s, "/")
 }
 
+// ShortRepo is the exported form of shortRepo, so packages outside store (e.g.
+// the planner, when it records a job learning) can derive the same "owner/name"
+// display without reimplementing — and mis-parsing — the URL handling.
+func ShortRepo(url string) string { return shortRepo(url) }
+
 // EnqueueTask adds a task to the queue in QUEUED state.
 func (s *PostgresStore) EnqueueTask(ctx context.Context, task *QueuedTask) error {
 	if task.Status == "" {
@@ -358,7 +363,7 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 		}
 
 		var t QueuedTask
-		if err := tx.Select("job_id", "started_at").First(&t, "id = ?", taskID).Error; err != nil {
+		if err := tx.Select("org_id", "job_id", "started_at").First(&t, "id = ?", taskID).Error; err != nil {
 			return err
 		}
 
@@ -383,6 +388,19 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 			if finalStatus == TaskFailed {
 				failJobAndQueuedTasks(tx, t.JobID, "Sibling task failed")
 			}
+			// Record the job's outcome on its learning row. A job's tasks complete
+			// independently and in any order, so "failed" must be sticky: any failed
+			// sibling fails the whole job, and a later success must not overwrite it.
+			// We therefore only let a success land while the row isn't already failed.
+			learningUpdates := map[string]interface{}{"outcome": strings.ToLower(finalStatus)}
+			if resultURL != "" {
+				learningUpdates["pr_url"] = resultURL
+			}
+			q := tx.Model(&JobLearning{}).Where("org_id = ? AND job_id = ?", t.OrgID, t.JobID)
+			if finalStatus == TaskSucceeded {
+				q = q.Where("outcome IS NULL OR outcome <> ?", strings.ToLower(TaskFailed))
+			}
+			_ = q.Updates(learningUpdates)
 		}
 		return nil
 	})

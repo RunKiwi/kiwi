@@ -3,7 +3,11 @@
 // workers onto the lease queue for BYOC daemons to execute.
 package planner
 
-import "context"
+import (
+	"context"
+
+	"github.com/ibreakthecloud/kiwi/pkg/store"
+)
 
 // PlanRequest is a high-level task to decompose. OrgID is set from auth, not the
 // request body.
@@ -30,6 +34,12 @@ type PlanRequest struct {
 	// produces. Threaded onto every worker spec so the daemon's loop can verify
 	// its work (the test is the definition of done).
 	TestCmd string `json:"test_cmd"`
+	// ReferenceMode determines how prior job learnings are injected (""|"off"|"manual"|"auto").
+	ReferenceMode string `json:"reference_mode"`
+	// ReferenceJobIDs specifies the jobs to inject when ReferenceMode is "manual".
+	ReferenceJobIDs []string `json:"reference_job_ids,omitempty"`
+	// ResolvedLearnings holds the learnings looked up during SubmitPlan, passed to the planner.
+	ResolvedLearnings []store.JobLearning `json:"-"`
 }
 
 // PlannedWorker is one node in the plan DAG.

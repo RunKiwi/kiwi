@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *store.PostgresStore {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}, &auth.Organization{}, &store.Job{}, &auth.ProvisioningRequest{}); err != nil {
+	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}, &auth.Organization{}, &store.Job{}, &auth.ProvisioningRequest{}, &store.JobLearning{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return store.NewPostgresStore(db)
@@ -60,7 +60,7 @@ func TestHeuristicPlannerRequiresTask(t *testing.T) {
 
 func TestIdempotentPlanSubmission(t *testing.T) {
 	st := newTestStore(t)
-	s := NewService(st, NewHeuristicPlanner())
+	s := NewService(st, NewHeuristicPlanner(), nil)
 
 	req := PlanRequest{
 		OrgID:          "org1",
@@ -201,7 +201,7 @@ func TestLLMPlannerDefaultsScopeFromRequest(t *testing.T) {
 
 func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	s := newTestStore(t)
-	svc := NewService(s, NewHeuristicPlanner())
+	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
 	res, err := svc.SubmitPlan(ctx, PlanRequest{
@@ -238,7 +238,7 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 
 func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 	s := newTestStore(t)
-	svc := NewService(s, NewHeuristicPlanner())
+	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
 	// The MVP path: one worker whose enqueued spec carries everything the daemon
@@ -277,7 +277,7 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 func TestHandlePlan(t *testing.T) {
 	s := newTestStore(t)
 	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
-	svc := NewService(s, NewHeuristicPlanner())
+	svc := NewService(s, NewHeuristicPlanner(), nil)
 
 	body := `{"task":"add logging","repo_url":"https://github.com/x/y","ref":"main","max_workers":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(body))
@@ -328,7 +328,7 @@ func TestHandlePlan(t *testing.T) {
 func TestHandlePlanRejectsSuspendedOrg(t *testing.T) {
 	s := newTestStore(t)
 	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free", ActivationState: "suspended"})
-	svc := NewService(s, NewHeuristicPlanner())
+	svc := NewService(s, NewHeuristicPlanner(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(`{"task":"x","max_workers":1}`))
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "o1"}))
@@ -348,7 +348,7 @@ func TestHandlePlanRejectsSuspendedOrg(t *testing.T) {
 }
 
 func TestHandlePlanRejectsMissingClaims(t *testing.T) {
-	svc := NewService(newTestStore(t), NewHeuristicPlanner())
+	svc := NewService(newTestStore(t), NewHeuristicPlanner(), nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(`{"task":"x"}`))
 	rec := httptest.NewRecorder()
 	svc.HandlePlan(rec, req)
@@ -360,7 +360,7 @@ func TestHandlePlanRejectsMissingClaims(t *testing.T) {
 func TestHandlePlanRejectsEmptyTask(t *testing.T) {
 	s := newTestStore(t)
 	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
-	svc := NewService(s, NewHeuristicPlanner())
+	svc := NewService(s, NewHeuristicPlanner(), nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/planner/plan", strings.NewReader(`{"task":""}`))
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "o1"}))
 	rec := httptest.NewRecorder()

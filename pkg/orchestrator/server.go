@@ -98,11 +98,17 @@ func selectPlanner() planner.Planner {
 	}, model)
 }
 
-func NewServer(storage store.Store, role string) *Server {
+func NewServer(storage store.Store, cfg *Config) *Server {
 	root := os.Getenv("KIWI_SNAPSHOT_DIR")
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "kiwi-snapshots")
 	}
+
+	var embedder provider.Embedder
+	if cfg.EmbedGoogleKey != "" {
+		embedder = provider.NewGeminiProviderWithModels(cfg.EmbedGoogleKey, "", "")
+	}
+
 	s := &Server{
 		db:           storage.DB(),
 		storage:      storage,
@@ -110,7 +116,7 @@ func NewServer(storage store.Store, role string) *Server {
 		snapshotRoot: root,
 		// Planner defaults to the deterministic HeuristicPlanner; the
 		// frontier-model LLMPlanner is selected via env (see selectPlanner).
-		planner:       planner.NewService(storage, selectPlanner()),
+		planner:       planner.NewService(storage, selectPlanner(), embedder),
 		credValidator: defaultCredValidator,
 	}
 	// Sandbox-facing Agent API: scoped-token authorized, secrets bridged to the
@@ -120,7 +126,7 @@ func NewServer(storage store.Store, role string) *Server {
 		Events:  checkpoint.NewService(storage, checkpoint.NewLocalSnapshotter(root)),
 		Secrets: tunnelSecrets{},
 	})
-	if role == "all" || role == "orchestrator" {
+	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		s.launchFn = s.LaunchTask
 	} else {
 		s.launchFn = nil // No orchestrator consumer in 'api' mode yet
