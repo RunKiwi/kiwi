@@ -2,6 +2,7 @@
 
 import { useFleetStore } from "@/store/useFleetStore";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Server, Activity, Clock, Plus, Cloud, Building2, Loader2, KeyRound, Copy, Check, AlertCircle } from "lucide-react";
 import { client, type Fleet, type UsageResponse } from "@/lib/api";
 
@@ -128,9 +129,9 @@ export default function FleetPage() {
               {u.agent_minutes_used.toFixed(1)} {hasCap ? `/ ${u.agent_minutes_limit}` : ""} agent-min this month
             </div>
           )}
-          <a href="mailto:support@runkiwi.dev?subject=Upgrade%20to%20Pro" className="text-sm text-blue-400 hover:text-blue-300 transition-colors inline-block mt-2 font-medium">
+          <Link href="/settings" className="text-sm text-blue-400 hover:text-blue-300 transition-colors inline-block mt-2 font-medium">
             Upgrade for a dedicated fleet &rarr;
-          </a>
+          </Link>
         </div>
       ) : showPro && fleets.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

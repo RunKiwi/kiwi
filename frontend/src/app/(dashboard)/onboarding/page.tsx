@@ -50,7 +50,7 @@ export default function OnboardingPage() {
   };
 
   const handleUpgrade = async () => {
-    window.location.href = "mailto:support@runkiwi.dev?subject=Upgrade%20to%20Pro";
+    router.push("/settings");
   };
 
   return (

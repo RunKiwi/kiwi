@@ -304,3 +304,6 @@ export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
 export function providerOf(id: string): string {
   return id.startsWith("gemini") ? "gemini" : "anthropic";
 }
+
+export const SUPPORT_EMAIL = "support@runkiwi.dev";
+export const PRO_UPGRADE_MAILTO = "mailto:" + SUPPORT_EMAIL + "?subject=" + encodeURIComponent("Kiwi Pro upgrade");
