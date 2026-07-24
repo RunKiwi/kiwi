@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
-import { client, type UsageResponse, PRO_UPGRADE_MAILTO } from "@/lib/api";
+import { client, type UsageResponse } from "@/lib/api";
 
 // Plan + current-month usage panel: an agent-minutes meter against the plan's
 // monthly allowance, plus concurrency. Backed by GET /api/v1/usage. The backend
@@ -55,7 +55,7 @@ export function PlanUsage() {
         ) : (
           <p className="text-xs text-zinc-500">No monthly cap on this plan.</p>
         )}
-        {over && u.plan !== "free" && (
+        {over && (
           <p className="text-xs text-red-300 mt-1.5">
             You&apos;ve reached your monthly allowance — new tasks won&apos;t start until it resets.
           </p>
@@ -72,35 +72,6 @@ export function PlanUsage() {
           {u.concurrent_jobs_running} / {u.max_concurrent_jobs} running
         </span>
       </div>
-
-      {u.plan === "free" && (
-        <div className="mt-6 pt-5 border-t border-white/5">
-          <div className="mb-4">
-            <h3 className="text-sm font-medium text-white mb-1.5">You&apos;re on the Free plan.</h3>
-            <p className="text-xs text-zinc-400 mb-2">Pro unlocks:</p>
-            <ul className="text-xs text-zinc-300 space-y-1 ml-4 list-disc marker:text-zinc-600">
-              <li>Dedicated BYOC or managed fleet</li>
-              <li>Higher concurrency limits</li>
-              <li>More agent-minutes</li>
-              <li>Priority support</li>
-            </ul>
-            <p className="text-[10px] text-zinc-500 mt-2">from $39/user/mo</p>
-          </div>
-          
-          {over && (
-            <p className="text-xs text-red-400 mb-3">
-              You&apos;ve reached your monthly allowance. Upgrade to start new tasks immediately.
-            </p>
-          )}
-
-          <a 
-            href={PRO_UPGRADE_MAILTO} 
-            className="flex items-center justify-center w-full btn-primary px-4 py-2 text-sm font-medium rounded-lg"
-          >
-            Upgrade to Pro
-          </a>
-        </div>
-      )}
     </div>
   );
 }

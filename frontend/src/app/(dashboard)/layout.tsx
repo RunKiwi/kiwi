@@ -8,6 +8,7 @@ import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { ActivationBanner } from "@/components/ActivationBanner";
+import { FreePlanBanner } from "@/components/FreePlanBanner";
 import { client } from "@/lib/api";
 
 export default function DashboardLayout({
@@ -130,6 +131,7 @@ export default function DashboardLayout({
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <ActivationBanner />
+        <FreePlanBanner plan={plan} />
         <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
     </div>
