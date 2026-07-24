@@ -300,3 +300,7 @@ export const RECOMMENDED_MODELS: RecommendedModel[] = [
 // A sensible default split for the task form: a strong planner, a fast worker.
 export const DEFAULT_PLANNER_MODEL = "claude-opus-4-8";
 export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
+
+export function providerOf(id: string): string {
+  return id.startsWith("gemini") ? "gemini" : "anthropic";
+}

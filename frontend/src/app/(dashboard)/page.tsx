@@ -6,7 +6,8 @@ import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, A
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter } from "next/navigation";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration } from "@/lib/api";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration } from "@/lib/api";
+import Link from "next/link";
 
 export default function CommandCenter() {
   const { jobs, loadJobs } = useFleetStore();
@@ -35,6 +36,7 @@ export default function CommandCenter() {
   const [customModels, setCustomModels] = useState<ModelEntry[]>([]);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [u, setU] = useState<UsageResponse | null>(null);
+  const [integrations, setIntegrations] = useState<Integration[] | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -62,6 +64,7 @@ export default function CommandCenter() {
     const firstRun = !sessionStorage.getItem("onboarded");
     Promise.all([client.listIntegrations(), firstRun ? client.listJobs() : Promise.resolve(null)])
       .then(([ints, jbs]) => {
+        setIntegrations(ints.integrations);
         const connected = (key: string) =>
           ints.integrations.some((i: Integration) => i.key === key && i.connected);
         // Default to Gemini when it's the only model key connected.
@@ -99,7 +102,28 @@ export default function CommandCenter() {
     };
   }, [openPrJob]);
 
-  const modelOptions = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
+  const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
+  // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
+  // its options are NOT gated by which keys the org has connected.
+  const plannerOptions = allModels;
+  // The worker runs on the org's own provider key — only offer models it can
+  // actually reach, so a task can't be launched with an unrunnable worker model.
+  let workerOptions = allModels;
+  let showIntegrationsHint = false;
+
+  if (integrations !== null) {
+    const connected = (prov: string) => integrations.some(i => i.key === prov && i.connected);
+    const filteredOptions = allModels.filter(m => {
+      const isCustom = customModels.find(cm => cm.name === m);
+      const prov = (isCustom && isCustom.provider && isCustom.provider !== "auto") ? isCustom.provider : providerOf(m);
+      return connected(prov);
+    });
+    if (filteredOptions.length > 0) {
+      workerOptions = filteredOptions;
+    } else {
+      showIntegrationsHint = true;
+    }
+  }
 
   const handleSubmit = async () => {
     setSubmitError("");
@@ -210,7 +234,7 @@ export default function CommandCenter() {
             variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
             icon={<span className="pdot" style={{ background: "#93C645" }} />}
             value={plannerModel} onChange={setPlannerModel}
-            options={modelOptions.map(m => ({ value: m, label: m }))}
+            options={plannerOptions.map(m => ({ value: m, label: m }))}
           />
 
           {/* Worker */}
@@ -218,7 +242,7 @@ export default function CommandCenter() {
             variant="chip" searchable label="Work" ariaLabel="Worker model"
             icon={<span className="pdot" style={{ background: "#E8A153" }} />}
             value={workerModel} onChange={setWorkerModel}
-            options={modelOptions.map(m => ({ value: m, label: m }))}
+            options={workerOptions.map(m => ({ value: m, label: m }))}
           />
 
           {/* Advanced toggle */}
@@ -227,6 +251,12 @@ export default function CommandCenter() {
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
             <span className="text-xs">Advanced</span>
           </button>
+
+          {showIntegrationsHint && (
+            <Link href="/integrations" className="text-xs text-amber-500/90 hover:text-amber-400 ml-2 transition-colors">
+              Connect a provider key in Integrations to run tasks.
+            </Link>
+          )}
 
           <div className="flex-1" />
 
