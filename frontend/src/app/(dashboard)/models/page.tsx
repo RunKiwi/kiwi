@@ -1,19 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { client, BUILTIN_MODELS, RECOMMENDED_MODELS, type ModelEntry, type RecommendedModel } from "@/lib/api";
+import { client, BUILTIN_MODELS, RECOMMENDED_MODELS, providerOf, type ModelEntry, type RecommendedModel, type Integration } from "@/lib/api";
 import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles } from "lucide-react";
 import { Select } from "@/components/Select";
+import Link from "next/link";
 
 export default function ModelsPage() {
   const [models, setModels] = useState<ModelEntry[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [name, setName] = useState("");
   const [provider, setProvider] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => client.listModels().then(r => setModels(r.models)).catch(() => {});
+  const load = () => {
+    client.listModels().then(r => setModels(r.models)).catch(() => {});
+    client.listIntegrations().then(r => setIntegrations(r.integrations)).catch(() => {});
+  };
   useEffect(() => { load(); }, []);
+
+  const connected = (prov: string) => integrations.some(i => i.key === prov && i.connected);
 
   const add = async () => {
     setError("");
@@ -55,26 +62,38 @@ export default function ModelsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {RECOMMENDED_MODELS.map(rec => {
             const added = existing.has(rec.id);
+            const isConnected = connected(rec.provider);
             return (
               <div key={rec.id} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm text-white truncate">{rec.label}</div>
                   <div className="text-xs text-zinc-500 truncate">
                     <span className="capitalize">{rec.provider}</span>{rec.note ? ` · ${rec.note}` : ""}
+                    {!isConnected && <span className="ml-1 text-amber-500/80">(needs {rec.provider} key)</span>}
                   </div>
                 </div>
-                <button
-                  onClick={() => addRecommended(rec)}
-                  disabled={added || busy}
-                  className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${added ? "border-green-500/20 bg-green-500/10 text-green-400 cursor-default" : "border-white/10 bg-white/5 text-white hover:bg-white/10"}`}
-                >
-                  {added ? <><Check className="w-3.5 h-3.5" /> Added</> : <><Plus className="w-3.5 h-3.5" /> Add</>}
-                </button>
+                {added ? (
+                  <button disabled className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors border-green-500/20 bg-green-500/10 text-green-400 cursor-default">
+                    <Check className="w-3.5 h-3.5" /> Added
+                  </button>
+                ) : !isConnected ? (
+                  <Link href="/integrations" className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-white/5 bg-white/5 text-zinc-500 hover:text-zinc-300 transition-colors">
+                    Connect {rec.provider.charAt(0).toUpperCase() + rec.provider.slice(1)} key &rarr;
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => addRecommended(rec)}
+                    disabled={busy}
+                    className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors border-white/10 bg-white/5 text-white hover:bg-white/10"
+                  >
+                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Add
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
-        <p className="text-xs text-zinc-600 mt-3">Automatic discovery from your stored provider key is coming soon.</p>
+        <p className="text-xs text-zinc-600 mt-3">Models you can run are based on your connected provider keys — connect more under <Link href="/integrations" className="underline hover:text-zinc-400">Integrations</Link>.</p>
       </div>
 
       <div className="glass-panel border border-white/10 rounded-2xl p-5 mb-8">
@@ -105,14 +124,26 @@ export default function ModelsPage() {
       </div>
 
       <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Built-in</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        {BUILTIN_MODELS.map(m => (
-          <div key={m} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center gap-3">
-            <Cpu className="w-5 h-5 text-zinc-400" />
-            <span className="font-mono text-sm">{m}</span>
+      {(() => {
+        const builtins = BUILTIN_MODELS.filter(m => connected(providerOf(m)));
+        if (builtins.length === 0) {
+          return (
+            <div className="mb-8 p-4 glass-panel border border-white/10 rounded-xl text-zinc-500 text-sm">
+              Connect a provider key in <Link href="/integrations" className="underline hover:text-white">Integrations</Link> to enable models.
+            </div>
+          );
+        }
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            {builtins.map(m => (
+              <div key={m} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center gap-3">
+                <Cpu className="w-5 h-5 text-zinc-400" />
+                <span className="font-mono text-sm">{m}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Custom</h2>
       {models.length === 0 ? (
