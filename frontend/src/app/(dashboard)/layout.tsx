@@ -22,6 +22,7 @@ export default function DashboardLayout({
   const [orgName, setOrgName] = useState<string | null>("");
 
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const [plan, setPlan] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated === false) {
@@ -31,6 +32,7 @@ export default function DashboardLayout({
       setOrgName(auth.getOrgName());
       client.getUsage().then(usage => {
         setIsSuperAdmin(!!usage.is_super_admin);
+        setPlan(usage.plan);
       }).catch(() => {});
     }
   }, [isAuthenticated, router]);
@@ -109,7 +111,16 @@ export default function DashboardLayout({
             {!isCollapsed && (
               <div className="flex flex-col whitespace-nowrap overflow-hidden">
                 <span className="text-sm font-medium text-white truncate">{orgName || "Unknown Org"}</span>
-                <span className="text-[11px] text-zinc-500">API key session</span>
+                {plan === "free" ? (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">Free</span>
+                    <Link href="/settings" className="text-[10px] text-blue-400 hover:text-blue-300">Upgrade &rarr;</Link>
+                  </div>
+                ) : plan ? (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-[#93C645] bg-[#93C645]/10 px-1.5 py-0.5 rounded">Pro</span>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
