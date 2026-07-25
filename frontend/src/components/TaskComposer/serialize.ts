@@ -47,22 +47,18 @@ export function serializeTask(doc: JSONContent): Partial<PlanRequest> {
         text += `#${attrs.label || val}`;
       }
     } else if (node.type === "actionMention") {
+      // Actions are directives, not references — they're captured as structured
+      // fields, so we deliberately don't echo them into the task prose the planner reads.
       const attrs = node.attrs || {};
       const val = attrs.value || attrs.label;
       if (attrs.kind === "test") {
         result.test_cmd = val;
-        text += `/${attrs.label || val}`;
       } else if (attrs.kind === "model") {
         result.model = val;
-        text += `/${attrs.label || val}`;
       } else if (attrs.kind === "workers") {
         result.max_workers = parseInt(val, 10);
-        text += `/${attrs.label || val}`;
-      } else if (attrs.kind === "post" || attrs.kind === "notify") {
-        text += `/${attrs.label || val}`;
-      } else {
-        text += `/${attrs.label || val}`;
       }
+      // post/notify are no-ops in v1 (backend TODO).
     } else if (node.content) {
       text += node.content.map(walk).join("");
     }
@@ -77,6 +73,10 @@ export function serializeTask(doc: JSONContent): Partial<PlanRequest> {
     }
   }
 
-  result.task = paragraphs.join("\n\n").trim();
+  // Collapse the runs of whitespace left where action markers were removed.
+  result.task = paragraphs
+    .map((p) => p.replace(/[ \t]{2,}/g, " ").trim())
+    .join("\n\n")
+    .trim();
   return result;
 }

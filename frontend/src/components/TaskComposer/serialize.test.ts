@@ -75,8 +75,9 @@ describe("serializeTask", () => {
     assert.strictEqual(result.model, "claude-opus-4-8");
     assert.strictEqual(result.max_workers, 3);
 
-    // Check task string
-    const expectedTask = `Please fix @src/main.go in branch @feature/auth and update @AuthHandler\n\nReference job #job_123 and issue #15\n\nRun /go test ./... using model /claude-opus-4-8 with workers /3 workers`;
+    // Check task string — @ and # references stay inline; / actions are captured
+    // as structured fields and deliberately not echoed into the prose.
+    const expectedTask = `Please fix @src/main.go in branch @feature/auth and update @AuthHandler\n\nReference job #job_123 and issue #15\n\nRun using model with workers`;
     assert.strictEqual(result.task, expectedTask);
   });
 });
