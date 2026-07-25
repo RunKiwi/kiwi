@@ -6,8 +6,9 @@ import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, A
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter } from "next/navigation";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration } from "@/lib/api";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
 import Link from "next/link";
+import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 
 export default function CommandCenter() {
   const { jobs, loadJobs } = useFleetStore();
@@ -30,6 +31,7 @@ export default function CommandCenter() {
   // extra tokens on prior-work retrieval unless the user turns it on.
   const [referenceMode, setReferenceMode] = useState("off");
   const [referenceJobIds, setReferenceJobIds] = useState<string[]>([]);
+  const [inlineData, setInlineData] = useState<Partial<PlanRequest>>({});
 
   // Options loaded from the control plane.
   const [fleets, setFleets] = useState<Fleet[]>([]);
@@ -137,15 +139,15 @@ export default function CommandCenter() {
       const resp = await client.submitPlan({
         task,
         repo_url: repoUrl,
-        ref: ref || "main",
-        file,
-        test_cmd: testCmd,
-        model: workerModel,
+        ref: inlineData.ref || ref || "main",
+        file: (inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file,
+        test_cmd: inlineData.test_cmd || testCmd,
+        model: inlineData.model || workerModel,
         planner_model: plannerModel,
-        max_workers: maxWorkers,
+        max_workers: inlineData.max_workers || maxWorkers,
         fleet_id: fleetId,
-        reference_mode: referenceMode,
-        reference_job_ids: referenceMode === "manual" ? referenceJobIds : undefined,
+        reference_mode: inlineData.reference_mode || referenceMode,
+        reference_job_ids: inlineData.reference_mode === "manual" ? inlineData.reference_job_ids : (referenceMode === "manual" ? referenceJobIds : undefined),
       });
       setSubmitSuccess(resp.job_id);
       setTask("");
@@ -202,12 +204,16 @@ export default function CommandCenter() {
 
       {/* Composer — one compact input with an inline control rail underneath. */}
       <div className="glass-panel mb-6 flex flex-col relative z-20 overflow-visible p-4">
-        <textarea
-          id="task"
+        <TaskComposer
           value={task}
-          onChange={(e) => setTask(e.target.value)}
-          placeholder="Describe what to build or fix, e.g. “The /api/report endpoint returns stale data — fix it and add a test.”"
-          className="field border-0 bg-transparent rounded-lg px-2 py-1.5 resize-none min-h-[76px] text-base leading-relaxed focus:shadow-none"
+          onChange={(p) => {
+            setTask(p.task ?? "");
+            setInlineData(p);
+          }}
+          repos={repos}
+          jobs={jobs}
+          models={allModels}
+          repoSelected={!!repoUrl}
         />
 
         {/* Control rail: repo · plan · worker chips, then Launch. */}
@@ -284,28 +290,29 @@ export default function CommandCenter() {
               </div>
             )}
             <div>
-              <label className={labelClass}>Git ref</label>
-              <input type="text" value={ref} onChange={e => setRef(e.target.value)} placeholder="main" className={fieldClass} />
+              <label className={labelClass}>Git ref {inlineData.ref && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
+              <input type="text" value={inlineData.ref || ref} onChange={e => setRef(e.target.value)} disabled={!!inlineData.ref} placeholder="main" className={`${fieldClass} ${inlineData.ref ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
             <div>
-              <label className={labelClass}>Target file <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
-              <input type="text" value={file} onChange={e => setFile(e.target.value)} placeholder="let the agent decide" className={fieldClass} />
+              <label className={labelClass}>Target file <span className="text-zinc-600 normal-case font-normal">(optional)</span> {(inlineData.files && inlineData.files.length > 0) && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
+              <input type="text" value={(inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file} onChange={e => setFile(e.target.value)} disabled={!!(inlineData.files && inlineData.files.length > 0)} placeholder="let the agent decide" className={`${fieldClass} ${(inlineData.files && inlineData.files.length > 0) ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
             <div>
-              <label className={labelClass}>Test command <span className="text-zinc-600 normal-case font-normal">(optional)</span></label>
-              <input type="text" value={testCmd} onChange={e => setTestCmd(e.target.value)} placeholder="e.g. go test ./..." className={fieldClass} />
+              <label className={labelClass}>Test command <span className="text-zinc-600 normal-case font-normal">(optional)</span> {inlineData.test_cmd && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
+              <input type="text" value={inlineData.test_cmd || testCmd} onChange={e => setTestCmd(e.target.value)} disabled={!!inlineData.test_cmd} placeholder="e.g. go test ./..." className={`${fieldClass} ${inlineData.test_cmd ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
             <div>
-              <label className={labelClass}>Max workers</label>
-              <input type="number" min="1" max="10" value={maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} className={fieldClass} />
+              <label className={labelClass}>Max workers {inlineData.max_workers && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
+              <input type="number" min="1" max="10" value={inlineData.max_workers || maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} disabled={!!inlineData.max_workers} className={`${fieldClass} ${inlineData.max_workers ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
             <div>
-              <label className={labelClass}>Shared context</label>
+              <label className={labelClass}>Shared context {inlineData.reference_mode && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
               <button
-                type="button" role="switch" aria-checked={referenceMode !== "off"}
+                type="button" role="switch" aria-checked={(inlineData.reference_mode || referenceMode) !== "off"}
                 aria-label="Use context from past jobs"
-                onClick={() => setReferenceMode(referenceMode === "off" ? "auto" : "off")}
-                className={`flex items-center gap-3 w-full h-[42px] px-3 rounded-lg border transition-colors ${referenceMode !== "off" ? "border-[#93C645]/40 bg-[#93C645]/10" : "border-white/10 bg-black/20"}`}
+                onClick={() => !inlineData.reference_mode && setReferenceMode(referenceMode === "off" ? "auto" : "off")}
+                disabled={!!inlineData.reference_mode}
+                className={`flex items-center gap-3 w-full h-[42px] px-3 rounded-lg border transition-colors ${(inlineData.reference_mode || referenceMode) !== "off" ? "border-[#93C645]/40 bg-[#93C645]/10" : "border-white/10 bg-black/20"} ${inlineData.reference_mode ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${referenceMode !== "off" ? "bg-[#93C645]" : "bg-white/15"}`}>
                   <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${referenceMode !== "off" ? "left-4" : "left-0.5"}`} />
@@ -313,19 +320,20 @@ export default function CommandCenter() {
                 <span className="text-sm text-zinc-300">{referenceMode !== "off" ? "Using past jobs" : "Off"}</span>
               </button>
             </div>
-            {referenceMode !== "off" && (
+            {(inlineData.reference_mode || referenceMode) !== "off" && (
               <div>
                 <label className={labelClass}>Context source</label>
                 <Select
-                  ariaLabel="Context source" value={referenceMode} onChange={setReferenceMode}
+                  ariaLabel="Context source" value={inlineData.reference_mode || referenceMode} onChange={setReferenceMode}
                   options={[{ value: "auto", label: "Auto — related past jobs" }, { value: "manual", label: "Manual — pick jobs" }]}
+                  className={inlineData.reference_mode ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}
                 />
-                {referenceMode === "auto" && (
+                {(inlineData.reference_mode || referenceMode) === "auto" && (
                   <p className="text-xs text-amber-400/80 mt-1.5">Auto-selects related past jobs — may use extra tokens.</p>
                 )}
               </div>
             )}
-            {referenceMode === "manual" && (
+            {referenceMode === "manual" && !inlineData.reference_mode && (
               <div className="md:col-span-2 lg:col-span-3">
                 <label className={labelClass}>Reference Jobs</label>
                 <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-2 border border-white/5 rounded-lg bg-black/20">
