@@ -151,6 +151,7 @@ export default function CommandCenter() {
       });
       setSubmitSuccess(resp.job_id);
       setTask("");
+      setInlineData({});
       loadJobs();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to submit plan");
