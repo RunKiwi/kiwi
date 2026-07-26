@@ -307,3 +307,4 @@ export function providerOf(id: string): string {
 
 export const SUPPORT_EMAIL = "support@runkiwi.dev";
 export const PRO_UPGRADE_MAILTO = "mailto:" + SUPPORT_EMAIL + "?subject=" + encodeURIComponent("Kiwi Pro upgrade");
+export const ENTERPRISE_MAILTO = "mailto:" + SUPPORT_EMAIL + "?subject=" + encodeURIComponent("Kiwi Enterprise");

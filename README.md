@@ -4,11 +4,14 @@
 
 # Kiwi
 
-**Kiwi turns a task into a swarm of coding agents that fix your code and open a pull request.**
+**Kiwi runs coding agents inside infrastructure you control, and shows its work.**
 
 A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane** runs each worker in an isolated sandbox through an **Actor–Critic loop** — editing files and re-running your test command until it passes — then opens a PR. Run it **managed** (Kiwi operates the execution) or **BYOC** (the Data Plane runs in your own cloud, where code and credentials never leave your VPC).
 
-The differentiation is the layer above the sandbox: **the planner and the swarm**, not the sandbox itself.
+Two properties hold on every task, in both modes:
+
+- **The execution is contained.** Model-generated code only ever runs as your test command, inside a sandbox with default-deny networking, and never sees an API key — the Actor and Critic run in the daemon process, not in the sandbox.
+- **The execution is on the record.** Every proposed edit, every Critic verdict and its reasons, and every test run is persisted per phase with its model, token counts, cost and duration — so a merged diff can be traced back to what produced it and what proved it.
 
 ## Try it
 
