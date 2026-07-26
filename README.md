@@ -4,11 +4,14 @@
 
 # Kiwi
 
-**Kiwi turns a task into a swarm of coding agents that fix your code and open a pull request.**
+**Kiwi runs coding agents inside infrastructure you control, and shows its work.**
 
 A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane** runs each worker in an isolated sandbox through an **Actor–Critic loop** — editing files and re-running your test command until it passes — then opens a PR. Run it **managed** (Kiwi operates the execution) or **BYOC** (the Data Plane runs in your own cloud, where code and credentials never leave your VPC).
 
-The differentiation is the layer above the sandbox: **the planner and the swarm**, not the sandbox itself.
+Two properties hold on every task, in both modes:
+
+- **The execution is contained.** Model-generated code only ever runs as your test command, inside a sandbox with default-deny networking, and never sees an API key — the Actor and Critic run in the daemon process, not in the sandbox.
+- **The execution is on the record.** Every proposed edit, every Critic verdict and its reasons, and every test run is persisted per phase with its model, token counts, cost and duration — so a merged diff can be traced back to what produced it and what proved it.
 
 ## Try it
 
@@ -38,6 +41,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 - **Tiers**: a **Free** tier runs every signup on a Kiwi-operated **shared fleet** — one lightweight daemon *process* per org (its own keypair, so the credential-sealing model is unchanged), packed onto shared hosts and scaled to zero when idle. Usage is bounded by per-org limits: one concurrent job, a per-task wall-clock cap, and a monthly **agent-minute** ceiling; a cryptomining heuristic auto-suspends abusive orgs. A per-org daemon is cold-started on submit by the **provisioner** (`pkg/provisioner`), which consumes `ProvisioningRequest`s and launches per-org `kiwidaemon` containers. **Pro** graduates to a dedicated fleet (managed-dedicated or BYOC).
 - **Credentials**: the daemon generates an X25519 keypair (credential sealing) and an Ed25519 keypair (heartbeat signing) on boot. Customer credentials are stored by the SaaS **sealed to the daemon's X25519 public key**, and at rest are encrypted via the configured key manager (a static key for dev/BYOC, **Cloud KMS envelope encryption** for managed — `pkg/crypto`).
 - **Shared context** (opt-in): when submitting a task, the planner can draw on your org's **prior jobs** so related work informs how the new task is decomposed. Choose **Auto** (semantic nearest-neighbour over past jobs via pgvector embeddings) or **Manual** (pick specific jobs). It is **off by default**, strictly **org-scoped** (you only ever reference your own jobs), and injected at **plan time only**; Auto may use extra tokens.
+- **Execution telemetry**: each iteration of the loop writes a structured `TaskEvent` (`pkg/orchestrator/events.go`) — step, phase (`initial_test` | `actor` | `critic` | `test`), outcome (`pass` | `fail` | `proposed` | `approved` | `rejected` | `error`), a truncated detail, duration, input/output tokens and cost — keyed by task and org. A rejected Critic verdict is recorded with its reasons, so a run that took three attempts shows why the first two were turned down.
 - **Surfaces**: the `kiwi` CLI, a Next.js **dashboard** (`frontend/` — jobs, fleets, models, integrations, live topology, settings), Node/Python SDKs, and a Linear webhook receiver.
 
 > **Zero-knowledge is a BYOC property, not a managed one.** In BYOC the daemon runs in the customer's cloud and the Control Plane never sees plaintext credentials. In **managed**, Kiwi operates the daemon and holds the private key, so it *can* decrypt — **managed is not zero-knowledge**.
@@ -54,6 +58,8 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | Fleet routing — tasks lease only their fleet's daemons | ✅ |
 | Integration layer — `kiwi` CLI, Node/Python SDKs, Linear webhook | ✅ |
 | Shared context — plan with prior-job learnings (Auto pgvector search / Manual select), org-scoped, opt-in | ✅ |
+| Per-phase execution telemetry — Actor/Critic/test events with verdicts, tokens and cost (`TaskEvent`) | ✅ |
+| Signed **execution record** — per-job provenance export (plan hash, models, Critic verdicts, test result, approver), daemon-attested and hash-chained | 🚧 Designed; not implemented |
 | **Free tier — live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed — Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
 | Control plane on GCP — Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
 | Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live |
