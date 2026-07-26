@@ -101,6 +101,25 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		return nil, err
 	}
 
+	// A missing limits row, or one written before MaxWorkersPerJob existed,
+	// leaves the field at zero. Treating that as a real cap would reject every
+	// plan (1 > 0), so the default applies to any non-positive value — matching
+	// how LeaseNextTask defaults the same limit.
+	var limits store.OrgLimits
+	if err := s.store.DB().WithContext(ctx).Where("org_id = ?", req.OrgID).First(&limits).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	maxWorkers := limits.MaxWorkersPerJob
+	if maxWorkers <= 0 {
+		maxWorkers = defaultMaxWorkersPerJob
+	}
+
+	if err := plan.Validate(maxWorkers); err != nil {
+		return nil, fmt.Errorf("invalid plan: %w", err)
+	}
+
 	workers := make([]map[string]interface{}, 0, len(plan.Workers))
 	for _, w := range plan.Workers {
 		workers = append(workers, map[string]interface{}{
