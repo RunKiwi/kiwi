@@ -79,6 +79,15 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 .field::placeholder { color: var(--tx-dim); }
+/* Tiptap placeholder: contenteditable has no native placeholder, so the
+   Placeholder extension exposes the text via data-placeholder on the empty node. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--tx-dim);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
 .field:hover { border-color: var(--line-hi); }
 .field:focus,
 .field:focus-visible {

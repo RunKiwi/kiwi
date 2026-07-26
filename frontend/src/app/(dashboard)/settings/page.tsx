@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle } from "lucide-react";
 import { client, type Integration } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
+import { PlanComparison } from "@/components/PlanComparison";
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
@@ -97,6 +98,7 @@ export default function SettingsPage() {
 
       {/* Plan & usage */}
       <PlanUsage />
+      <PlanComparison currentPlan={org?.plan} />
 
       {/* Overview stats (real data) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
