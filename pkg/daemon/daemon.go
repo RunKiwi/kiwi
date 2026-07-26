@@ -21,7 +21,16 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/loop"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
+
+// signExecution attests this task's telemetry with the daemon's own signing
+// identity. The key ID is the daemon's public key, so a verifier resolves the
+// signer without a registry lookup.
+func signExecution(priv ed25519.PrivateKey, taskID, status string, events []ver.TaskEvent) (*ver.Signature, error) {
+	keyID := base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey))
+	return ver.SignExecution(priv, keyID, taskID, status, events)
+}
 
 // Config holds the configuration for the KiwiDaemon.
 type Config struct {
@@ -242,7 +251,7 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		// Without credentials the agent cannot reach its LLM/Git provider. Do
 		// not silently run a half-configured task; fail the lease so it requeues.
 		for _, spec := range res.Specs {
-			d.reportResult(ctx, spec.ID, res.LeaseID, false, "", "failed to open sealed credentials", false)
+			d.reportResult(ctx, spec.ID, res.LeaseID, taskResult{detail: "failed to open sealed credentials"})
 		}
 		return true
 	}
@@ -279,10 +288,10 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 			}
 		}(spec.ID)
 
-		ok, prURL, detail, abuse := d.executeTask(ctx, spec, creds)
+		out := d.executeTask(ctx, spec, creds)
 		renewCancel() // Stop the renewal timer
 
-		d.reportResult(ctx, spec.ID, res.LeaseID, ok, prURL, detail, abuse)
+		d.reportResult(ctx, spec.ID, res.LeaseID, out)
 	}
 
 	return true
@@ -327,23 +336,35 @@ func isLLMKey(name string) bool {
 // the sandbox. That split means the sandbox executes model-generated code with
 // a default-deny network and without the LLM key, while the daemon holds the
 // the key and reaches the provider itself.
-func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) (bool, string, string, bool) {
+// taskResult is everything executeTask observed about one worker run. It
+// carries the loop telemetry because the daemon is the only component that
+// sees the Actor–Critic loop; the Control Plane learns what happened solely
+// from what is reported here.
+type taskResult struct {
+	ok     bool
+	prURL  string
+	detail string
+	abuse  bool
+	events []ver.TaskEvent
+}
+
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) taskResult {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
 	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
 		log.Printf("Invalid task ID format: %s", spec.ID)
-		return false, "", "invalid task ID format", false
+		return taskResult{detail: "invalid task ID format"}
 	}
 
 	if spec.File != "" && !filepath.IsLocal(spec.File) {
 		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
-		return false, "", "file path escapes worktree", false
+		return taskResult{detail: "file path escapes worktree"}
 	}
 	for _, f := range spec.Files {
 		if !filepath.IsLocal(f) {
 			log.Printf("Task %s: file path %q escapes worktree", spec.ID, f)
-			return false, "", "file path escapes worktree", false
+			return taskResult{detail: "file path escapes worktree"}
 		}
 	}
 
@@ -353,7 +374,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// the task rather than reward that (Execution Model RFC §8; issue #132).
 	if looksLikeTestFile(spec.File) {
 		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
-		return false, "", fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File), false
+		return taskResult{detail: fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)}
 	}
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
@@ -367,7 +388,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		log.Printf("Provisioning worktree for %s (ref: %s, job branch: %s)...", spec.ID, spec.Ref, jobBranch)
 		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-			return false, "", "failed to provision worktree", false
+			return taskResult{detail: "failed to provision worktree"}
 		}
 		defer func(url, path string) {
 			log.Printf("Cleaning up worktree: %s", path)
@@ -379,7 +400,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
 		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 			log.Printf("Failed to create fallback sandbox dir: %v", err)
-			return false, "", "failed to create fallback sandbox dir", false
+			return taskResult{detail: "failed to create fallback sandbox dir"}
 		}
 	}
 
@@ -424,7 +445,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		reason := fmt.Sprintf("no API key configured for the %s provider that model %q needs — add it under Integrations",
 			providerNameForModel(spec.Model), spec.Model)
 		log.Printf("Task %s: %s", spec.ID, reason)
-		return false, "", reason, false
+		return taskResult{detail: reason}
 	}
 
 	// test_cmd is optional. When the submitter did not supply one, infer it from
@@ -455,15 +476,18 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			targetFiles = discovered
 			isMulti = true
 		} else {
-			return false, "", "could not identify a file to change from the task description — set one under Advanced options", false
+			return taskResult{detail: "could not identify a file to change from the task description — set one under Advanced options"}
 		}
 	}
 
 	if testCmd == "" {
-		return false, "", "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", false
+		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
 	}
 
 	log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
+	// Collected synchronously: Runner.Run calls OnEvent inline on this
+	// goroutine, so no lock is needed and ordering matches execution order.
+	var events []ver.TaskEvent
 	runner := &loop.Runner{
 		Provider: actor,
 		Critic:   critic,
@@ -471,6 +495,18 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			MaxSteps:     d.config.MaxSteps,
 			MaxBudgetUSD: d.config.MaxBudgetUSD,
 			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
+			OnEvent: func(e loop.Event) {
+				events = append(events, ver.TaskEvent{
+					Step:         e.Step,
+					Phase:        e.Phase,
+					Outcome:      e.Outcome,
+					Detail:       e.Detail,
+					DurationMs:   e.DurationMs,
+					InputTokens:  e.InputTokens,
+					OutputTokens: e.OutputTokens,
+					CostUSD:      e.CostUSD,
+				})
+			},
 		},
 	}
 	// Inject the repo's AGENT.md (if any) as per-repo context for the Actor —
@@ -554,7 +590,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	return ok, prURL, detail, abuse
+	return taskResult{ok: ok, prURL: prURL, detail: detail, abuse: abuse, events: events}
 }
 
 // maxDetailLen bounds the result detail stored on a task so a verbose provider
@@ -583,27 +619,44 @@ func dockerEnabled() bool {
 // reportResult closes the lease for a task by reporting its terminal status.
 // Failures here are logged, not fatal: if the report is lost, the lease simply
 // expires and the task is retried.
-func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, ok bool, resultURL, detail string, abuse bool) {
+func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out taskResult) {
 	if leaseID == "" {
 		// No fencing token (older CP, or a spec surfaced without a lease). Cannot
 		// safely complete; let the lease lapse.
 		return
 	}
 	status := "SUCCEEDED"
-	if !ok {
+	if !out.ok {
 		status = "FAILED"
 	}
+	sandboxRT := d.config.SandboxRuntime
+	if sandboxRT == "" {
+		sandboxRT = "docker"
+	}
+	req := ResultReq{
+		TaskID:         taskID,
+		LeaseID:        leaseID,
+		Status:         status,
+		SignPubKey:     base64.StdEncoding.EncodeToString(d.signPubKey),
+		ResultURL:      out.prURL,
+		Detail:         out.detail,
+		Abuse:          out.abuse,
+		Events:         out.events,
+		SandboxRuntime: sandboxRT,
+	}
+	// Attest the telemetry with the daemon's own signing key. In BYOC this key
+	// lives only in the customer's cloud, so the execution half of the record is
+	// signed by something the Control Plane never holds. Best-effort: a signing
+	// failure must not cost us the result itself.
+	if sig, err := signExecution(d.signPrivKey, taskID, status, out.events); err != nil {
+		log.Printf("Failed to sign execution telemetry for task %s: %v", taskID, err)
+	} else {
+		req.ExecSignature = sig
+	}
+
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err := d.client.ReportResult(reqCtx, ResultReq{
-		TaskID:     taskID,
-		LeaseID:    leaseID,
-		Status:     status,
-		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
-		ResultURL:  resultURL,
-		Detail:     detail,
-		Abuse:      abuse,
-	})
+	err := d.client.ReportResult(reqCtx, req)
 	if err != nil {
 		log.Printf("Failed to report result for task %s: %v", taskID, err)
 	}

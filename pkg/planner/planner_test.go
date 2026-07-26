@@ -29,7 +29,7 @@ func newTestStore(t *testing.T) *store.PostgresStore {
 
 func TestHeuristicPlannerDAG(t *testing.T) {
 	p := NewHeuristicPlanner()
-	plan, err := p.Plan(context.Background(), PlanRequest{Task: "fix the flaky test", MaxWorkers: 2})
+	plan, err := p.Plan(context.Background(), PlanRequest{Task: "fix the flaky test", MaxWorkers: 2, Files: []string{"a", "b"}})
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	ctx := context.Background()
 
 	res, err := svc.SubmitPlan(ctx, PlanRequest{
-		OrgID: "o1", Task: "fix bug", RepoURL: "https://github.com/x/y", Ref: "main", MaxWorkers: 2,
+		OrgID: "o1", Task: "fix bug", RepoURL: "https://github.com/x/y", Ref: "main", MaxWorkers: 2, Files: []string{"a", "b"},
 	})
 	if err != nil {
 		t.Fatalf("SubmitPlan: %v", err)

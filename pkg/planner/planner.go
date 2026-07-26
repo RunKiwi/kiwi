@@ -5,6 +5,7 @@ package planner
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
@@ -64,4 +65,128 @@ type Plan struct {
 // frontier-model-backed LLMPlanner (production).
 type Planner interface {
 	Plan(ctx context.Context, req PlanRequest) (*Plan, error)
+}
+
+// defaultMaxWorkersPerJob mirrors the fallback in LeaseNextTask, so a plan is
+// never rejected by a limit the queue itself would not have enforced.
+const defaultMaxWorkersPerJob = 8
+
+// Validate rejects a plan the queue could not execute correctly. A cyclic or
+// dangling dependency currently manifests as tasks that simply never become
+// leasable — an undiagnosable hang — so catching it at submit time is the
+// difference between a clear error and a stuck job.
+func (p *Plan) Validate(maxWorkers int) error {
+	if len(p.Workers) == 0 {
+		return fmt.Errorf("plan has no workers")
+	}
+	if len(p.Workers) > maxWorkers {
+		return fmt.Errorf("plan exceeds maximum workers limit: %d > %d", len(p.Workers), maxWorkers)
+	}
+
+	workerMap := make(map[string]PlannedWorker)
+	for _, w := range p.Workers {
+		if _, exists := workerMap[w.ID]; exists {
+			return fmt.Errorf("duplicate worker id: %s", w.ID)
+		}
+		workerMap[w.ID] = w
+	}
+
+	adj := make(map[string][]string)
+	inDegree := make(map[string]int)
+
+	for _, w := range p.Workers {
+		inDegree[w.ID] = len(w.DependsOn)
+		for _, dep := range w.DependsOn {
+			if _, exists := workerMap[dep]; !exists {
+				return fmt.Errorf("worker %s depends on unknown worker %s", w.ID, dep)
+			}
+			adj[dep] = append(adj[dep], w.ID)
+		}
+	}
+
+	// Kahn's algorithm for topological sort (cycle detection)
+	var queue []string
+	for id, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, id)
+		}
+	}
+
+	visited := 0
+	topOrder := []string{}
+	for len(queue) > 0 {
+		u := queue[0]
+		queue = queue[1:]
+		topOrder = append(topOrder, u)
+		visited++
+
+		for _, v := range adj[u] {
+			inDegree[v]--
+			if inDegree[v] == 0 {
+				queue = append(queue, v)
+			}
+		}
+	}
+
+	if visited != len(p.Workers) {
+		return fmt.Errorf("plan contains a cycle in dependencies")
+	}
+
+	// Reachability matrix for overlapping files check
+	// reachable[u][v] = true if there is a path from u to v
+	reachable := make(map[string]map[string]bool)
+	for _, w := range p.Workers {
+		reachable[w.ID] = make(map[string]bool)
+		reachable[w.ID][w.ID] = true
+	}
+
+	// Process in reverse topological order or just transitive closure since DAG is small.
+	// Since N is small (e.g. <= 20), Floyd-Warshall or simple DFS is fine.
+	// Using the topological order to build reachability efficiently:
+	for i := len(topOrder) - 1; i >= 0; i-- {
+		u := topOrder[i]
+		for _, v := range adj[u] {
+			reachable[u][v] = true
+			for k := range reachable[v] {
+				reachable[u][k] = true
+			}
+		}
+	}
+
+	// Check overlapping files
+	for i := 0; i < len(p.Workers); i++ {
+		w1 := p.Workers[i]
+		files1 := append([]string{}, w1.Files...)
+		if w1.File != "" {
+			files1 = append(files1, w1.File)
+		}
+		for j := i + 1; j < len(p.Workers); j++ {
+			w2 := p.Workers[j]
+			files2 := append([]string{}, w2.Files...)
+			if w2.File != "" {
+				files2 = append(files2, w2.File)
+			}
+
+			hasOverlap := false
+			for _, f1 := range files1 {
+				for _, f2 := range files2 {
+					if f1 == f2 {
+						hasOverlap = true
+						break
+					}
+				}
+				if hasOverlap {
+					break
+				}
+			}
+
+			if hasOverlap {
+				if !reachable[w1.ID][w2.ID] && !reachable[w2.ID][w1.ID] {
+					return fmt.Errorf("workers %s and %s overlap on files but have no dependency path", w1.ID, w2.ID)
+				}
+			}
+		}
+	}
+
+	return nil
 }

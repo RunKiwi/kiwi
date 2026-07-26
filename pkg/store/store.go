@@ -73,6 +73,14 @@ type Store interface {
 	ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)
 
+	// Execution records (provenance). AppendExecutionRecord builds and inserts
+	// under one transaction so the chain head cannot race; see pkg/store/ver.go.
+	AppendExecutionRecord(ctx context.Context, orgID, jobID string, build func(prevHash string) (*ExecutionRecord, error)) (*ExecutionRecord, error)
+	GetExecutionRecordChainHead(ctx context.Context, orgID string) (string, error)
+	GetExecutionRecord(ctx context.Context, orgID, jobID string) (*ExecutionRecord, error)
+	GetQueuedTask(ctx context.Context, taskID string) (*QueuedTask, error)
+	GetManifest(ctx context.Context, id string) (*Manifest, error)
+
 	// Fleets & models (dashboard).
 	CreateFleet(ctx context.Context, orgID, name, ftype string) (*Fleet, error)
 	ListFleets(ctx context.Context, orgID string) ([]Fleet, error)
