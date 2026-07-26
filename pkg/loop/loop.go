@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 )
@@ -49,6 +51,70 @@ type Config struct {
 	MaxBudgetUSD float64
 	// Log receives human-readable progress lines. nil discards them.
 	Log func(format string, a ...any)
+	// OnEvent receives a structured record of every loop phase, in order. It is
+	// how a caller that persists telemetry (the daemon, reporting back to the
+	// Control Plane) learns what the Actor proposed and what the Critic ruled —
+	// the log lines above are for humans and are not parseable. nil discards
+	// them, so a caller that wants no telemetry pays nothing.
+	OnEvent func(Event)
+}
+
+// Event is one structured phase of a loop run. It deliberately carries no task
+// or org identity: the loop does not know them, and the caller that persists an
+// Event is the one that can attribute it.
+type Event struct {
+	// Step is 0 for the initial test and 1..N for each Actor iteration.
+	Step int
+	// Phase ∈ initial_test | actor | critic | test.
+	Phase string
+	// Outcome ∈ pass | fail | proposed | approved | rejected | error.
+	Outcome string
+	// Detail is human-readable context: the Critic's reasons, or truncated test
+	// output. Never assume it is safe to publish verbatim — test output can
+	// carry secrets, so consumers that export it should hash rather than copy.
+	Detail       string
+	DurationMs   int64
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+}
+
+// detailCap bounds how much of a Detail string an Event carries. Recent output
+// is the useful part of a failing test, so we keep the tail.
+const detailCap = 2000
+
+func tailOf(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	// Trim on a rune boundary so the result is always valid UTF-8.
+	cut := s[len(s)-n:]
+	for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
+		cut = cut[1:]
+	}
+	return cut
+}
+
+// emit reports one phase to the caller, attributing token/cost usage to the
+// provider that performed it. A nil OnEvent makes this a no-op.
+func (r *Runner) emit(step int, phase, outcome, detail string, start time.Time, caller any) {
+	if r.Config.OnEvent == nil {
+		return
+	}
+	ev := Event{
+		Step:       step,
+		Phase:      phase,
+		Outcome:    outcome,
+		Detail:     tailOf(detail, detailCap),
+		DurationMs: time.Since(start).Milliseconds(),
+	}
+	if u, ok := caller.(provider.UsageReporter); ok {
+		ev.CostUSD = u.LastCostUSD()
+	}
+	if t, ok := caller.(provider.TokenReporter); ok {
+		ev.InputTokens, ev.OutputTokens = t.LastUsage()
+	}
+	r.Config.OnEvent(ev)
 }
 
 // Result reports the outcome of a loop run.
@@ -105,10 +171,13 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 
 	// Initial test: the task may already be satisfied, in which case editing
 	// anything would be wrong.
+	initStart := time.Now()
 	output, passed, err := runTest(ctx)
 	if err != nil {
+		r.emit(0, "initial_test", "error", err.Error(), initStart, nil)
 		return Result{}, fmt.Errorf("loop: initial test run failed: %w", err)
 	}
+	r.emit(0, "initial_test", outcomeOf(passed), output, initStart, nil)
 	if passed {
 		r.logf("[loop] initial test already passes; nothing to do\n")
 		return Result{Success: true, Steps: 0, FinalOutput: output}, nil
@@ -144,28 +213,35 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 			}
 
 			r.logf("[loop] step %d: Actor proposing edit\n", step)
+			actorStart := time.Now()
 			proposed, err := r.Provider.GetCodeEdit(ctx, task.Description, task.FilePath, string(content),
 				composeActorInput(lastOutput, criticReasons))
 			if err != nil {
+				r.emit(step, "actor", "error", err.Error(), actorStart, r.Provider)
 				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
 					fmt.Errorf("loop: actor failed: %w", err)
 			}
+			r.emit(step, "actor", "proposed", "", actorStart, r.Provider)
 			cost += callCost(r.Provider, nominalActorCost)
 			criticReasons = ""
 
 			// Optional Critic gate before we touch the file.
 			if r.Critic != nil {
+				criticStart := time.Now()
 				verdict, err := r.Critic.ReviewEdit(ctx, task.Description, task.FilePath, string(content), proposed, lastOutput)
 				if err != nil {
+					r.emit(step, "critic", "error", err.Error(), criticStart, r.Critic)
 					return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
 						fmt.Errorf("loop: critic failed: %w", err)
 				}
 				cost += callCost(r.Critic, nominalCriticCost)
 				if !verdict.Approved {
+					r.emit(step, "critic", "rejected", verdict.Reasons, criticStart, r.Critic)
 					r.logf("[loop] step %d: Critic rejected: %s\n", step, verdict.Reasons)
 					criticReasons = verdict.Reasons
 					continue // Actor retries with feedback; nothing applied, no test
 				}
+				r.emit(step, "critic", "approved", verdict.Reasons, criticStart, r.Critic)
 			}
 
 			if err := os.WriteFile(task.FilePath, []byte(proposed), 0o644); err != nil {
@@ -174,11 +250,14 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 			}
 		}
 
+		testStart := time.Now()
 		output, passed, err := runTest(ctx)
 		if err != nil {
+			r.emit(step, "test", "error", err.Error(), testStart, nil)
 			return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
 				fmt.Errorf("loop: test run failed: %w", err)
 		}
+		r.emit(step, "test", outcomeOf(passed), output, testStart, nil)
 		if passed {
 			r.logf("[loop] step %d: test passed\n", step)
 			return Result{Success: true, Steps: step, CostUSD: cost, FinalOutput: output}, nil
@@ -208,6 +287,14 @@ func composeActorInput(buildOutput, criticReasons string) string {
 		return buildOutput
 	}
 	return buildOutput + "\n\n[Critic feedback on your previous attempt]: " + criticReasons
+}
+
+// outcomeOf maps a test result to the Event outcome vocabulary.
+func outcomeOf(passed bool) string {
+	if passed {
+		return "pass"
+	}
+	return "fail"
 }
 
 // callCost returns the provider's reported cost for its last call, falling back
@@ -246,10 +333,13 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 	system := "You are an expert software engineer in an automated fix loop. Make the SMALLEST changes to make the tests pass. Return ONLY JSON in this format: {\"files\":[{\"path\":\"<matching-input-path>\",\"content\":\"<full new file>\"}]}"
 	user := fmt.Sprintf("Task: %s\n\nFiles:\n%s\nBuild/test output:\n%s", task.Description, sb.String(), lastOutput)
 
+	actorStart := time.Now()
 	resp, err := r.Provider.Complete(ctx, system, user)
 	if err != nil {
+		r.emit(step, "actor", "error", err.Error(), actorStart, r.Provider)
 		return fmt.Errorf("actor complete failed: %w", err)
 	}
+	r.emit(step, "actor", "proposed", "", actorStart, r.Provider)
 	*cost += callCost(r.Provider, nominalActorCost)
 
 	start := strings.IndexByte(resp, '{')
@@ -299,15 +389,19 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 
 		if r.Critic != nil {
 			oldC := validFiles[match]
+			criticStart := time.Now()
 			verdict, err := r.Critic.ReviewEdit(ctx, task.Description, match, oldC, f.Content, lastOutput)
 			if err != nil {
+				r.emit(step, "critic", "error", err.Error(), criticStart, r.Critic)
 				return fmt.Errorf("critic failed: %w", err)
 			}
 			*cost += callCost(r.Critic, nominalCriticCost)
 			if !verdict.Approved {
+				r.emit(step, "critic", "rejected", verdict.Reasons, criticStart, r.Critic)
 				r.logf("[loop] step %d: Critic rejected edit for %s: %s\n", step, match, verdict.Reasons)
 				continue
 			}
+			r.emit(step, "critic", "approved", verdict.Reasons, criticStart, r.Critic)
 		}
 
 		if err := os.WriteFile(match, []byte(f.Content), 0o644); err != nil {

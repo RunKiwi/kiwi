@@ -22,25 +22,29 @@ func (h *HeuristicPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, er
 	if model == "" {
 		model = "sonnet"
 	}
-	n := req.MaxWorkers
-	if n <= 0 {
-		n = 1
-	}
-
-	// Single-worker fast path (the MVP default): one directly-executable node
-	// carrying the target file. No analyze/verify scaffolding — with today's
-	// daemon those extra nodes have no file and only smoke-run, adding queue
-	// churn without doing work. This yields one task → one worktree → one PR.
-	if n == 1 {
+	// Fan out only when there are at least two distinct target files to split
+	// across. Without disjoint scope, N workers would carry the same task and
+	// the same file — duplicated work racing on one worktree, at N times the
+	// cost. A single worker is the correct plan, not a degraded one.
+	if len(req.Files) < 2 {
 		return &Plan{
 			Summary: "single worker: " + req.Task,
 			Workers: []PlannedWorker{{
 				ID:    "impl",
 				Task:  req.Task,
 				File:  req.File,
+				Files: req.Files,
 				Model: model,
 			}},
 		}, nil
+	}
+
+	n := req.MaxWorkers
+	if n <= 0 {
+		n = len(req.Files)
+	}
+	if n > len(req.Files) {
+		n = len(req.Files)
 	}
 
 	workers := []PlannedWorker{{
@@ -56,7 +60,8 @@ func (h *HeuristicPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, er
 		workers = append(workers, PlannedWorker{
 			ID:        id,
 			Task:      req.Task,
-			File:      req.File,
+			File:      req.Files[i],
+			Files:     []string{req.Files[i]},
 			Model:     model,
 			DependsOn: []string{"analyze"},
 		})

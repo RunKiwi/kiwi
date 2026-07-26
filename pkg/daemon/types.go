@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
 // RegisterReq is the one-time join handshake. The daemon presents a join token
@@ -57,6 +58,18 @@ type ResultReq struct {
 	ResultURL  string `json:"result_url,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	Abuse      bool   `json:"abuse,omitempty"`
+	// Events is the ordered Actor–Critic telemetry for this task. The daemon is
+	// the only component that observes the loop, so without this the Control
+	// Plane has no evidence of what was proposed, reviewed or rejected.
+	Events []ver.TaskEvent `json:"events,omitempty"`
+	// ExecSignature is the daemon's Ed25519 attestation over the execution and
+	// verification subtrees. Optional: an older daemon omits it and the record
+	// is persisted as unsigned rather than rejected.
+	ExecSignature *ver.Signature `json:"exec_signature,omitempty"`
+	// SandboxRuntime records which isolator actually ran the test command
+	// ("docker" | "runsc" | "firecracker"), so the record states what was
+	// observed instead of assuming a default.
+	SandboxRuntime string `json:"sandbox_runtime,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.
