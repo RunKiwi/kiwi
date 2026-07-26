@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -466,6 +468,8 @@ func (s *Server) Start(addr string) error {
 		_, _ = w.Write([]byte("OK"))
 	})
 
+	root.HandleFunc("/.well-known/kiwi-signing-keys.json", s.handleSigningKeys)
+
 	auth.OAuthRouter(s.db, root)
 
 	root.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -794,6 +798,34 @@ func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(state)
+}
+
+// handleSigningKeys publishes the Control Plane's record-signing public key as
+// a JWK set, so an execution record can be verified offline by anyone holding
+// it — including after they stop being a customer. It is unauthenticated by
+// design: this is public key material.
+//
+// When no key is configured the set is empty rather than fabricated. An empty
+// set correctly tells a verifier "this deployment does not sign records", which
+// matches the unsigned records it will find.
+func (s *Server) handleSigningKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	keys := []map[string]interface{}{}
+	if k, err := ver.CPSigningKey(); err == nil {
+		keys = append(keys, map[string]interface{}{
+			"kid": k.ID,
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(k.Pub),
+			"use": "sig",
+			"alg": "EdDSA",
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"keys": keys})
 }
 
 // handleTaskEvents serves the structured telemetry timeline for a task,

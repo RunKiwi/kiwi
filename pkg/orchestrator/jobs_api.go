@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -64,6 +65,11 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jobID := filepath.Base(r.URL.Path)
+	if strings.HasSuffix(r.URL.Path, "/record") {
+		jobID = filepath.Base(filepath.Dir(r.URL.Path))
+		s.handleJobRecord(w, r, claims.OrgID, jobID)
+		return
+	}
 
 	tasks, err := s.storage.GetJobTasks(r.Context(), claims.OrgID, jobID)
 	if err != nil {
@@ -101,4 +107,20 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleJobRecord serves a job's execution record. The lookup is org-scoped, so
+// another tenant's job ID is indistinguishable from one that does not exist —
+// a 403 here would confirm the record's existence.
+func (s *Server) handleJobRecord(w http.ResponseWriter, r *http.Request, orgID, jobID string) {
+	rec, err := s.storage.GetExecutionRecord(r.Context(), orgID, jobID)
+	if err != nil {
+		http.Error(w, "Record not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// The chain link, so a caller can verify continuity without re-canonicalizing.
+	w.Header().Set("X-Kiwi-Record-Hash", rec.RecordHash)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(rec.Body)
 }

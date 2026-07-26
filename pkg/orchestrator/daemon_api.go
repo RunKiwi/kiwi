@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -16,6 +18,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
 // The daemon API is the Data Plane <-> Control Plane seam (issue #115).
@@ -400,7 +403,52 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[daemon] task %s reported %s", req.TaskID, req.Status)
+
+	// Persist the loop telemetry the daemon observed, and verify the daemon's
+	// attestation over it before storing anything derived from it. A bad
+	// signature means the events are not provably from this daemon, so they are
+	// recorded without the attestation rather than treated as attested.
+	execSig := req.ExecSignature
+	if execSig != nil {
+		pub, err := base64.StdEncoding.DecodeString(d.SignPubKey)
+		if err != nil || ver.VerifyExecution(ed25519.PublicKey(pub), execSig, req.TaskID, req.Status, req.Events) != nil {
+			log.Printf("[daemon] task %s: execution attestation did not verify; recording unattested", req.TaskID)
+			execSig = nil
+		}
+	}
+	s.recordTaskEvents(r.Context(), d.OrgID, req.TaskID, req.Events)
+
 	w.WriteHeader(http.StatusNoContent)
+
+	// Assembly is a side-effect of reporting, not part of it: the result is
+	// already committed and must not be rolled back if provenance fails. Run it
+	// detached, with its own timeout so a slow query cannot leak a goroutine.
+	ec := execContext{
+		FleetID:        d.FleetID,
+		DaemonID:       d.ID,
+		DaemonPubKey:   decodeDaemonPubKey(d.SignPubKey),
+		SandboxRuntime: req.SandboxRuntime,
+		Mode:           s.executionMode(),
+		ExecSignature:  execSig,
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.maybeAssembleRecord(ctx, d.OrgID, req.TaskID, ec)
+	}()
+}
+
+// executionMode reports whether this Control Plane operates the data plane
+// ("managed") or the customer does ("byoc"). It is recorded per job because it
+// is exactly the distinction that decides whether zero-knowledge holds.
+func (s *Server) executionMode() string {
+	if os.Getenv("KIWI_EXECUTION_MODE") != "" {
+		return os.Getenv("KIWI_EXECUTION_MODE")
+	}
+	if os.Getenv("KIWI_PROVISIONER") != "" {
+		return "managed"
+	}
+	return "byoc"
 }
 
 // decodeX25519 turns the base64(raw 32-byte) wire form of an X25519 public key
