@@ -60,6 +60,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | Shared context — plan with prior-job learnings (Auto pgvector search / Manual select), org-scoped, opt-in | ✅ |
 | Execution record — per-job provenance, daemon-attested + CP-signed, hash-chained per org (`pkg/ver`) | ✅ Records assemble and sign; set `KIWI_VER_SIGNING_KEY` or they persist `unsigned` |
 | Plan validation — reject cyclic/dangling dependencies, duplicate IDs, and undeclared file conflicts at submit time | ✅ |
+| Merge provenance — GitHub PR-merge webhook appends a signed `kiwi.ver/merge/v1` link capturing the approver | ✅ Set `GITHUB_WEBHOOK_SECRET` |
 | **Free tier — live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed — Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
 | Control plane on GCP — Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
 | Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live |
@@ -157,9 +158,11 @@ client = KiwiClient("http://localhost:8080", token)
 client.submit_task("Fix flaky test", "pkg/foo/foo.go", "go test ./...", "./codebase.zip")
 ```
 
-## Linear webhook
+## Webhooks
 
-The Control Plane exposes `POST /api/v1/webhooks/linear`. Issues labeled `kiwi` (or moved to **In Progress**) are converted into planner jobs.
+The Control Plane exposes webhooks for third-party integrations:
+- `POST /api/v1/webhooks/linear`: Issues labeled `kiwi` (or moved to **In Progress**) are converted into planner jobs. Requires `LINEAR_WEBHOOK_SECRET` to be set.
+- `POST /api/v1/webhooks/github`: on a PR `closed` event where `merged` is true, Kiwi appends a `kiwi.ver/merge/v1` record to the org's chain, capturing **who approved the merge**, when, and the merge commit. A sealed record is never edited, so the approver arrives as a new link rather than a change to the execution record. Requires `GITHUB_WEBHOOK_SECRET`; without it the endpoint fails closed (503). Deliveries that are not a merged PR return 200 and do nothing, and a redelivery is a no-op. `GET /api/v1/jobs/{id}/record` continues to return the **execution** record — the merge record is a separate link in the same chain.
 
 ## Free-tier deployment
 

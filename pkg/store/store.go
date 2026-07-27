@@ -75,9 +75,11 @@ type Store interface {
 
 	// Execution records (provenance). AppendExecutionRecord builds and inserts
 	// under one transaction so the chain head cannot race; see pkg/store/ver.go.
-	AppendExecutionRecord(ctx context.Context, orgID, jobID string, build func(prevHash string) (*ExecutionRecord, error)) (*ExecutionRecord, error)
+	AppendExecutionRecord(ctx context.Context, orgID, jobID, ver string, build func(prevHash string) (*ExecutionRecord, error)) (*ExecutionRecord, error)
 	GetExecutionRecordChainHead(ctx context.Context, orgID string) (string, error)
 	GetExecutionRecord(ctx context.Context, orgID, jobID string) (*ExecutionRecord, error)
+	GetExecutionRecordByVer(ctx context.Context, orgID, jobID, ver string) (*ExecutionRecord, error)
+	GetJobExecutionRecords(ctx context.Context, orgID, jobID string) ([]ExecutionRecord, error)
 	GetQueuedTask(ctx context.Context, taskID string) (*QueuedTask, error)
 	GetManifest(ctx context.Context, id string) (*Manifest, error)
 
