@@ -64,6 +64,19 @@ type Server struct {
 	// directly so they make no external calls); NewServer wires the real one.
 	credValidator func(ctx context.Context, name, value string) error
 	httpServer    *http.Server
+	// signingKeyFn resolves the Control Plane's record-signing identity. nil uses
+	// the process-wide configured key. It is injectable so a test can supply its
+	// own key without a global reset — production must not be able to swap the
+	// signing identity at runtime.
+	signingKeyFn func() (*ver.SigningKey, error)
+}
+
+// cpSigningKey resolves the record-signing identity for this server.
+func (s *Server) cpSigningKey() (*ver.SigningKey, error) {
+	if s.signingKeyFn != nil {
+		return s.signingKeyFn()
+	}
+	return ver.CPSigningKey()
 }
 
 // selectPlanner chooses the planner from the environment. With
@@ -455,6 +468,7 @@ func (s *Server) Start(addr string) error {
 		root.Handle("/agent/", s.agentAPI.Handler())
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
+	root.HandleFunc("/api/v1/webhooks/github", s.handleGithubWebhook)
 	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
 	// The daemon API authenticates by Ed25519 request signature, not an org API
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.

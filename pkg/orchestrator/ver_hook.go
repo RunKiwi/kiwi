@@ -142,9 +142,9 @@ func (s *Server) maybeAssembleRecord(ctx context.Context, orgID, taskID string, 
 
 	in := s.buildAssembleInput(ctx, orgID, jobID, job, manifest, tasks, ec)
 
-	cpKey, keyErr := ver.CPSigningKey()
+	cpKey, keyErr := s.cpSigningKey()
 
-	_, err = s.storage.AppendExecutionRecord(ctx, orgID, jobID, func(prevHash string) (*store.ExecutionRecord, error) {
+	_, err = s.storage.AppendExecutionRecord(ctx, orgID, jobID, ver.SchemaVersion, func(prevHash string) (*store.ExecutionRecord, error) {
 		in.PrevRecordHash = prevHash
 		rec, err := ver.AssembleRecord(in)
 		if err != nil {

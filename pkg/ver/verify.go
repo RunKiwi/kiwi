@@ -50,6 +50,36 @@ func RecordHash(rec *Record) (string, error) {
 	return hashBytes(b), nil
 }
 
+// signBytes and verifyBytes are the ONLY places this package produces or checks
+// a signature. Every record type routes through them, so a second record type
+// cannot quietly adopt a different construction — signing a digest instead of
+// the message, say, which would still be labelled "ed25519" and would silently
+// fail for any verifier that guessed the other one.
+func signBytes(b []byte, keyID string, priv ed25519.PrivateKey) *Signature {
+	return &Signature{
+		Alg: "ed25519",
+		Key: keyID,
+		Sig: base64.StdEncoding.EncodeToString(crypto.Sign(priv, b)),
+	}
+}
+
+func verifyBytes(b []byte, sig *Signature, pub ed25519.PublicKey) error {
+	if sig == nil {
+		return errors.New("ver: missing signature")
+	}
+	if len(pub) == 0 {
+		return errors.New("ver: no public key")
+	}
+	raw, err := base64.StdEncoding.DecodeString(sig.Sig)
+	if err != nil {
+		return errors.New("ver: malformed base64 signature")
+	}
+	if !crypto.Verify(pub, b, raw) {
+		return errors.New("ver: invalid signature")
+	}
+	return nil
+}
+
 // SignRecord counter-signs a record with the Control Plane key and marks it
 // attested, in that order.
 //
@@ -66,33 +96,63 @@ func SignRecord(rec *Record, keyID string, priv ed25519.PrivateKey) (*Signature,
 	if err != nil {
 		return nil, err
 	}
-	return &Signature{
-		Alg: "ed25519",
-		Key: keyID,
-		Sig: base64.StdEncoding.EncodeToString(crypto.Sign(priv, b)),
-	}, nil
+	return signBytes(b, keyID, priv), nil
 }
 
 // VerifyRecord checks a signature over the record's canonical signing payload.
 func VerifyRecord(rec *Record, sig *Signature, pub ed25519.PublicKey) error {
-	if sig == nil {
-		return errors.New("ver: missing signature")
-	}
-	if len(pub) == 0 {
-		return errors.New("ver: no public key")
-	}
 	b, err := signingPayload(rec)
 	if err != nil {
 		return err
 	}
-	raw, err := base64.StdEncoding.DecodeString(sig.Sig)
+	return verifyBytes(b, sig, pub)
+}
+
+// mergeSigningPayload is the merge record's equivalent of signingPayload: the
+// record with its signature cleared. Same invariant, same reason — attaching a
+// signature must not change what the signature covers, or what was chained.
+func mergeSigningPayload(rec *MergeRecord) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New("ver: nil merge record")
+	}
+	clone := *rec
+	clone.RecordSignature = nil
+	return Canonicalize(&clone)
+}
+
+// MergeRecordHash is the chain link for a merge record. It uses the same
+// "sha256:<hex>" form as RecordHash, because a merge record's hash becomes the
+// next record's prev_record_hash and the chain must not mix formats.
+func MergeRecordHash(rec *MergeRecord) (string, error) {
+	b, err := mergeSigningPayload(rec)
 	if err != nil {
-		return errors.New("ver: malformed base64 signature")
+		return "", err
 	}
-	if !crypto.Verify(pub, b, raw) {
-		return errors.New("ver: invalid signature")
+	return hashBytes(b), nil
+}
+
+// SignMergeRecord counter-signs a merge record and marks it attested, mirroring
+// SignRecord exactly.
+func SignMergeRecord(rec *MergeRecord, keyID string, priv ed25519.PrivateKey) (*Signature, error) {
+	if len(priv) == 0 {
+		return nil, ErrNoSigningKey
 	}
-	return nil
+	rec.Attestation = AttestationSigned
+	b, err := mergeSigningPayload(rec)
+	if err != nil {
+		return nil, err
+	}
+	return signBytes(b, keyID, priv), nil
+}
+
+// VerifyMergeRecord checks a merge record's signature over its canonical
+// signing payload.
+func VerifyMergeRecord(rec *MergeRecord, sig *Signature, pub ed25519.PublicKey) error {
+	b, err := mergeSigningPayload(rec)
+	if err != nil {
+		return err
+	}
+	return verifyBytes(b, sig, pub)
 }
 
 // ExecutionAttestation is the exact payload a daemon signs when it reports a
@@ -114,34 +174,17 @@ func SignExecution(priv ed25519.PrivateKey, keyID, taskID, status string, events
 	if err != nil {
 		return nil, err
 	}
-	return &Signature{
-		Alg: "ed25519",
-		Key: keyID,
-		Sig: base64.StdEncoding.EncodeToString(crypto.Sign(priv, b)),
-	}, nil
+	return signBytes(b, keyID, priv), nil
 }
 
 // VerifyExecution re-derives the attestation payload and checks the daemon's
 // signature over it.
 func VerifyExecution(pub ed25519.PublicKey, sig *Signature, taskID, status string, events []TaskEvent) error {
-	if sig == nil {
-		return errors.New("ver: missing execution signature")
-	}
-	if len(pub) == 0 {
-		return errors.New("ver: no daemon public key")
-	}
 	b, err := Canonicalize(ExecutionAttestation{TaskID: taskID, Status: status, Events: events})
 	if err != nil {
 		return err
 	}
-	raw, err := base64.StdEncoding.DecodeString(sig.Sig)
-	if err != nil {
-		return errors.New("ver: malformed base64 signature")
-	}
-	if !crypto.Verify(pub, b, raw) {
-		return errors.New("ver: invalid execution signature")
-	}
-	return nil
+	return verifyBytes(b, sig, pub)
 }
 
 // SigningKey is the Control Plane's configured signing identity.
@@ -157,40 +200,49 @@ var (
 	cpKeyErr  error
 )
 
+// ParseSigningKey builds a signing identity from a base64 Ed25519 seed (32
+// bytes) or full private key (64 bytes). Exported and pure so a caller — or a
+// test in another package — can construct a key without going through process
+// environment or the memoized global.
+func ParseSigningKey(raw, id string) (*SigningKey, error) {
+	if raw == "" {
+		return nil, ErrNoSigningKey
+	}
+	b, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("ver: signing key is not valid base64: %w", err)
+	}
+	var priv ed25519.PrivateKey
+	switch len(b) {
+	case ed25519.SeedSize:
+		priv = ed25519.NewKeyFromSeed(b)
+	case ed25519.PrivateKeySize:
+		priv = ed25519.PrivateKey(b)
+	default:
+		return nil, fmt.Errorf("ver: signing key must decode to %d or %d bytes, got %d",
+			ed25519.SeedSize, ed25519.PrivateKeySize, len(b))
+	}
+	if id == "" {
+		id = "cp-default"
+	}
+	return &SigningKey{ID: id, Priv: priv, Pub: priv.Public().(ed25519.PublicKey)}, nil
+}
+
 // CPSigningKey loads the Control Plane signing key from the environment, once.
 //
 // KIWI_VER_SIGNING_KEY is a base64 Ed25519 seed (32 bytes) or full private key
 // (64 bytes); KIWI_VER_SIGNING_KEY_ID names it so a record stays verifiable
 // across a future rotation. When unset, this returns ErrNoSigningKey and the
 // caller must persist the record unsigned rather than inventing a key.
+//
+// There is deliberately no reset: production code must not be able to swap the
+// signing identity at runtime. Tests inject a key instead of mutating this.
 func CPSigningKey() (*SigningKey, error) {
 	cpKeyOnce.Do(func() {
-		raw := os.Getenv("KIWI_VER_SIGNING_KEY")
-		if raw == "" {
-			cpKeyErr = ErrNoSigningKey
-			return
-		}
-		b, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			cpKeyErr = fmt.Errorf("ver: KIWI_VER_SIGNING_KEY is not valid base64: %w", err)
-			return
-		}
-		var priv ed25519.PrivateKey
-		switch len(b) {
-		case ed25519.SeedSize:
-			priv = ed25519.NewKeyFromSeed(b)
-		case ed25519.PrivateKeySize:
-			priv = ed25519.PrivateKey(b)
-		default:
-			cpKeyErr = fmt.Errorf("ver: KIWI_VER_SIGNING_KEY must decode to %d or %d bytes, got %d",
-				ed25519.SeedSize, ed25519.PrivateKeySize, len(b))
-			return
-		}
-		id := os.Getenv("KIWI_VER_SIGNING_KEY_ID")
-		if id == "" {
-			id = "cp-default"
-		}
-		cpKey = &SigningKey{ID: id, Priv: priv, Pub: priv.Public().(ed25519.PublicKey)}
+		cpKey, cpKeyErr = ParseSigningKey(
+			os.Getenv("KIWI_VER_SIGNING_KEY"),
+			os.Getenv("KIWI_VER_SIGNING_KEY_ID"),
+		)
 	})
 	if cpKeyErr != nil {
 		return nil, cpKeyErr
