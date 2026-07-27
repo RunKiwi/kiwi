@@ -2,7 +2,10 @@ package ver
 
 // SchemaVersion gates the canonicalization and signing rules. A verifier that
 // does not recognise the version must fail closed rather than guess.
-const SchemaVersion = "kiwi.ver/v1"
+const (
+	SchemaVersion      = "kiwi.ver/v1"
+	MergeSchemaVersion = "kiwi.ver/merge/v1"
+)
 
 // Attestation states. Both are inside the signing payload, so they can only be
 // set before signing — SignRecord owns that transition.
@@ -112,6 +115,27 @@ type Delivery struct {
 	ApprovedBy  string `json:"approved_by"`
 	MergedAt    string `json:"merged_at"`
 	MergeCommit string `json:"merge_commit"`
+}
+
+// MergeRecord is an append-only record created when a job's PR is merged.
+//
+// It exists because a sealed record is never mutated: the approver is not known
+// until after the execution record is signed, so it arrives as a new link in
+// the same per-org chain rather than an edit to the original.
+type MergeRecord struct {
+	Ver              string `json:"ver"`
+	RecordID         string `json:"record_id"`          // new ID for this merge record
+	OriginalRecordID string `json:"original_record_id"` // points to the original kiwi.ver/v1 record
+	OrgID            string `json:"org_id"`
+	JobID            string `json:"job_id"`
+	PrevRecordHash   string `json:"prev_record_hash"`
+	// Attestation mirrors Record: "signed" or "unsigned", set by SignMergeRecord
+	// because it is inside the signed payload.
+	Attestation     string     `json:"attestation"`
+	ApprovedBy      string     `json:"approved_by"`
+	MergedAt        string     `json:"merged_at"`
+	MergeCommit     string     `json:"merge_commit"`
+	RecordSignature *Signature `json:"record_signature,omitempty"`
 }
 
 type Signature struct {
