@@ -12,10 +12,14 @@ import (
 
 // ExecutionRecord is one signed, chained provenance record for a job.
 type ExecutionRecord struct {
-	RecordID        string `gorm:"primaryKey"`
-	OrgID           string `gorm:"index:idx_exec_records_org_job,unique,priority:1"`
-	JobID           string `gorm:"index:idx_exec_records_org_job,unique,priority:2"`
-	Ver             string
+	RecordID string `gorm:"primaryKey"`
+	// A job has at most one record of each kind: the execution record, and later
+	// the merge record. The uniqueness is what actually prevents a duplicate
+	// append — the existence check inside AppendExecutionRecord is advisory,
+	// since two concurrent transactions cannot see each other's pending insert.
+	OrgID           string `gorm:"index:idx_exec_records_org_job_ver,unique,priority:1"`
+	JobID           string `gorm:"index:idx_exec_records_org_job_ver,unique,priority:2"`
+	Ver             string `gorm:"index:idx_exec_records_org_job_ver,unique,priority:3"`
 	PrevRecordHash  string
 	RecordHash      string
 	Body            json.RawMessage `gorm:"type:jsonb"`
@@ -36,10 +40,15 @@ type ExecutionRecordHead struct {
 
 func (ExecutionRecordHead) TableName() string { return "execution_record_heads" }
 
-// ErrRecordExists reports that a record for this job was already appended. It
-// is not a failure: assembly is triggered per reported task, so a multi-worker
-// job attempts it more than once and all but the first must no-op.
+// ErrRecordExists reports that a record of this kind was already appended for
+// the job. It is not a failure: assembly is triggered per reported task, so a
+// multi-worker job attempts it more than once and all but the first must no-op.
 var ErrRecordExists = errors.New("store: execution record already exists for job")
+
+// ExecutionRecordVer is the schema version of the per-job execution record. It
+// is duplicated from pkg/ver rather than imported so pkg/store keeps no
+// dependency on the record package.
+const ExecutionRecordVer = "kiwi.ver/v1"
 
 // AppendExecutionRecord atomically appends one record to an org's chain.
 //
@@ -54,7 +63,7 @@ var ErrRecordExists = errors.New("store: execution record already exists for job
 // the record to insert, whose PrevRecordHash must equal that head.
 func (s *PostgresStore) AppendExecutionRecord(
 	ctx context.Context,
-	orgID, jobID string,
+	orgID, jobID, ver string,
 	build func(prevHash string) (*ExecutionRecord, error),
 ) (*ExecutionRecord, error) {
 	var out *ExecutionRecord
@@ -62,7 +71,7 @@ func (s *PostgresStore) AppendExecutionRecord(
 		// Idempotency inside the same transaction that inserts, so a concurrent
 		// duplicate cannot slip between the check and the write.
 		var existing ExecutionRecord
-		err := tx.Where("org_id = ? AND job_id = ?", orgID, jobID).First(&existing).Error
+		err := tx.Where("org_id = ? AND job_id = ? AND ver = ?", orgID, jobID, ver).First(&existing).Error
 		if err == nil {
 			return ErrRecordExists
 		}
@@ -137,15 +146,48 @@ func (s *PostgresStore) GetExecutionRecordChainHead(ctx context.Context, orgID s
 	return head.HeadHash, nil
 }
 
-// GetExecutionRecord returns an org's record for a job. It is scoped by org so
-// a job ID from another tenant can never resolve.
+// GetExecutionRecord returns an org's *execution* record for a job — the
+// kiwi.ver/v1 document, never a merge record.
+//
+// The `ver` filter is load-bearing. A job can now hold several records, and an
+// unfiltered First() orders by the primary key, where a merge record's
+// "rec_<uuid>" sorts before the execution record's "ver_<job>". Without it the
+// job-record endpoint silently returns the merge stub instead of the record.
+//
+// Scoped by org so a job ID from another tenant can never resolve.
 func (s *PostgresStore) GetExecutionRecord(ctx context.Context, orgID, jobID string) (*ExecutionRecord, error) {
 	var rec ExecutionRecord
 	if err := s.db.WithContext(ctx).
-		Where("org_id = ? AND job_id = ?", orgID, jobID).First(&rec).Error; err != nil {
+		Where("org_id = ? AND job_id = ? AND ver = ?", orgID, jobID, ExecutionRecordVer).
+		First(&rec).Error; err != nil {
 		return nil, err
 	}
 	return &rec, nil
+}
+
+// GetExecutionRecordByVer returns a specific kind of record for a job (e.g. the
+// merge record), org-scoped.
+func (s *PostgresStore) GetExecutionRecordByVer(ctx context.Context, orgID, jobID, ver string) (*ExecutionRecord, error) {
+	var rec ExecutionRecord
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND job_id = ? AND ver = ?", orgID, jobID, ver).
+		First(&rec).Error; err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// GetJobExecutionRecords returns every record for a job in chain order, so a
+// caller can present the execution record together with the merge that
+// followed it.
+func (s *PostgresStore) GetJobExecutionRecords(ctx context.Context, orgID, jobID string) ([]ExecutionRecord, error) {
+	var recs []ExecutionRecord
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND job_id = ?", orgID, jobID).
+		Order("created_at ASC").Find(&recs).Error; err != nil {
+		return nil, err
+	}
+	return recs, nil
 }
 
 // GetQueuedTask returns one task by ID. The caller must check OrgID before

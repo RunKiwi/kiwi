@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -127,5 +128,137 @@ func TestCPSigningKeyFromSeed(t *testing.T) {
 	}
 	if err := VerifyRecord(rec, sig, priv.Public().(ed25519.PublicKey)); err != nil {
 		t.Fatalf("seed-derived key must sign verifiably: %v", err)
+	}
+}
+
+func mergeRecord() *MergeRecord {
+	return &MergeRecord{
+		Ver:              MergeSchemaVersion,
+		RecordID:         "rec_1",
+		OriginalRecordID: "ver_job_1",
+		OrgID:            "org_1",
+		JobID:            "job_1",
+		PrevRecordHash:   "sha256:abc",
+		Attestation:      AttestationUnsigned,
+		ApprovedBy:       "gh:someuser",
+		MergedAt:         "2026-07-27T10:00:00Z",
+		MergeCommit:      "d4e5f6",
+	}
+}
+
+// The merge record must obey the same invariant as the execution record:
+// attaching the signature cannot change what the signature covers.
+func TestMergeSignatureVerifiesAfterBeingAttached(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := mergeRecord()
+	sig, err := SignMergeRecord(rec, "cp", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.RecordSignature = sig
+
+	if err := VerifyMergeRecord(rec, sig, pub); err != nil {
+		t.Fatalf("merge signature must verify on the record that carries it: %v", err)
+	}
+	if rec.Attestation != AttestationSigned {
+		t.Errorf("Attestation = %q, want %q", rec.Attestation, AttestationSigned)
+	}
+}
+
+func TestMergeRecordHashUnchangedBySignature(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := mergeRecord()
+	sig, err := SignMergeRecord(rec, "cp", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := MergeRecordHash(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.RecordSignature = sig
+	after, err := MergeRecordHash(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("attaching a signature changed the merge hash: %s -> %s", before, after)
+	}
+}
+
+func TestTamperedMergeRecordFailsVerification(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := mergeRecord()
+	sig, err := SignMergeRecord(rec, "cp", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.RecordSignature = sig
+	rec.ApprovedBy = "gh:someone-else"
+	if err := VerifyMergeRecord(rec, sig, pub); err == nil {
+		t.Fatal("a rewritten approver must not verify")
+	}
+}
+
+// Both record kinds must produce chain links in the same "sha256:<hex>" form: a
+// merge record's hash becomes the next record's prev_record_hash, so a bare-hex
+// link would silently break continuity checks.
+func TestChainHashFormatIsConsistentAcrossRecordKinds(t *testing.T) {
+	rec, err := AssembleRecord(baseInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execHash, err := RecordHash(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergeHash, err := MergeRecordHash(mergeRecord())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{execHash, mergeHash} {
+		if !strings.HasPrefix(h, "sha256:") {
+			t.Errorf("chain hash %q lacks the sha256: prefix", h)
+		}
+		if len(h) != len("sha256:")+64 {
+			t.Errorf("chain hash %q is not a 32-byte hex digest", h)
+		}
+	}
+}
+
+// Every signature this package emits must be the same construction, so a
+// verifier holding the published key never has to guess which one was used.
+func TestAllSignersUseTheSameConstruction(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := mergeRecord()
+	sig, err := SignMergeRecord(rec, "cp", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify by hand against the raw canonical payload — the same thing
+	// VerifyRecord does for an execution record. A signer that hashed first
+	// would fail here.
+	payload, err := mergeSigningPayload(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(sig.Sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(pub, payload, raw) {
+		t.Fatal("merge signature is not over the raw canonical payload, unlike every other signer")
 	}
 }
