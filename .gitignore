@@ -37,3 +37,13 @@ kms-migrate
 deploy.sh
 deploy-all.sh
 .claude/
+
+# Python SDK build artifacts (setup.py sdist / pip install -e leaves these)
+sdk/python/build/
+sdk/python/dist/
+sdk/python/*.egg-info/
+__pycache__/
+*.py[cod]
+
+# Node SDK pack output
+sdk/node/*.tgz
