@@ -77,6 +77,12 @@ type Store interface {
 	// dependency, ...). Read-only; it never affects scheduling.
 	DiagnoseQueuedTasks(ctx context.Context, orgID string, tasks []QueuedTask) (map[string]TaskDiagnosis, error)
 
+	// Job lifecycle, driven by the user rather than by execution.
+	CancelJob(ctx context.Context, orgID, jobID, reason string) (int, error)
+	RetryJob(ctx context.Context, orgID, jobID string) (int, error)
+	DeleteJob(ctx context.Context, orgID, jobID string) (int, error)
+	HasActiveTasks(ctx context.Context, orgID string) (bool, error)
+
 	// Execution records (provenance). AppendExecutionRecord builds and inserts
 	// under one transaction so the chain head cannot race; see pkg/store/ver.go.
 	AppendExecutionRecord(ctx context.Context, orgID, jobID, ver string, build func(prevHash string) (*ExecutionRecord, error)) (*ExecutionRecord, error)

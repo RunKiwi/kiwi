@@ -69,6 +69,7 @@ func (s *Service) HandlePlan(w http.ResponseWriter, r *http.Request) {
 	// cold-start belongs here, not on the CP-side /tasks path.
 	if org.Plan == "free" {
 		s.ensureFreeDaemon(r.Context(), claims.OrgID)
+		s.wakeFleetHost()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -82,6 +83,31 @@ func (s *Service) HandlePlan(w http.ResponseWriter, r *http.Request) {
 // submits: a racing insert hits ON CONFLICT DO NOTHING. Best-effort and
 // non-fatal — a failure here must not fail an already-accepted submission; the
 // provisioner also retries nothing, so the next submit re-attempts.
+// wakeFleetHost asks the cloud API to start the machine the free-tier
+// provisioner runs on, if it is stopped.
+//
+// It runs detached with its own timeout, and never blocks the response: a VM
+// takes tens of seconds to boot, so waiting would turn every submit into a
+// minute-long request for no benefit — the task is already queued and will be
+// leased whenever the host arrives. A failure here is logged, not fatal; the
+// task simply waits, and the queue diagnosis reports it as awaiting a runner.
+//
+// Note this does NOT violate the pull model: nothing dials the daemon. The
+// Control Plane talks to the cloud API, and the daemon still initiates every
+// connection to us once it boots.
+func (s *Service) wakeFleetHost() {
+	if s.fleetHost == nil || !s.fleetHost.Enabled() {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := s.fleetHost.Ensure(ctx); err != nil {
+			log.Printf("[coldstart] wake fleet host: %v", err)
+		}
+	}()
+}
+
 func (s *Service) ensureFreeDaemon(ctx context.Context, orgID string) {
 	idBytes := make([]byte, 8)
 	rand.Read(idBytes)

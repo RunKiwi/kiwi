@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -257,9 +259,14 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 	}
 
 	for _, spec := range res.Specs {
-		// Start a lease renewal goroutine that ticks at half the lease TTL
-		// to ensure the task isn't reclaimed by the CP while we work on it.
-		renewCtx, renewCancel := context.WithCancel(ctx)
+		// taskCtx governs the run itself. The renewal goroutine cancels it when
+		// the Control Plane says the lease is gone, which is how a user-requested
+		// cancel actually stops the work: the CP cannot reach this process, so
+		// revoking the lease is the only signal it has, and the renewal is where
+		// we listen for it.
+		taskCtx, taskCancel := context.WithCancel(ctx)
+		var leaseLost atomic.Bool
+
 		go func(specID string) {
 			interval := d.config.RenewInterval
 			if interval <= 0 {
@@ -270,27 +277,45 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 
 			for {
 				select {
-				case <-renewCtx.Done():
+				case <-taskCtx.Done():
 					return
 				case <-ticker.C:
-					err := d.client.RenewLease(renewCtx, RenewReq{
+					err := d.client.RenewLease(taskCtx, RenewReq{
 						TaskID:     specID,
 						LeaseID:    res.LeaseID,
 						SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
 					})
-					if err != nil {
-						// A 409 means the lease was lost; we just log it here.
-						log.Printf("Failed to renew lease for task %s: %v", specID, err)
-					} else {
+					switch {
+					case err == nil:
 						log.Printf("Successfully renewed lease for task %s", specID)
+					case errors.Is(err, ErrLeaseLost):
+						// Definitive: the task is no longer ours. Abandon it rather
+						// than burn metered agent-minutes on work whose result the
+						// Control Plane will reject anyway (CompleteTask requires the
+						// task to still be LEASED under our fencing token).
+						log.Printf("Lease lost for task %s; aborting run: %v", specID, err)
+						leaseLost.Store(true)
+						taskCancel()
+						return
+					default:
+						// Transient — a network blip must not throw away a good run.
+						// The lease still has time on it; the next tick retries.
+						log.Printf("Failed to renew lease for task %s: %v", specID, err)
 					}
 				}
 			}
 		}(spec.ID)
 
-		out := d.executeTask(ctx, spec, creds)
-		renewCancel() // Stop the renewal timer
+		out := d.executeTask(taskCtx, spec, creds)
+		taskCancel() // Stop the renewal timer
 
+		// Reporting a result for a task we no longer hold is pointless — the CP
+		// rejects it on the fencing token — and actively misleading in the logs.
+		// The cancel already recorded the terminal state.
+		if leaseLost.Load() {
+			log.Printf("Skipping result report for task %s: lease was revoked", spec.ID)
+			continue
+		}
 		d.reportResult(ctx, spec.ID, res.LeaseID, out)
 	}
 
