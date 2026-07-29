@@ -10,10 +10,16 @@ import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, pr
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
+import { usePolling } from "@/hooks/usePolling";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
 const PAGE_SIZE = 60;
+
+// Job statuses that cannot change on their own. Kept in step with the drawer's
+// task-level TERMINAL set — a cancelled job is finished, and treating it as
+// live would keep the board polling forever.
+const TERMINAL_JOB_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 
 function CommandCenterContent() {
   const { jobs, loadJobs } = useFleetStore();
@@ -104,11 +110,22 @@ function CommandCenterContent() {
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
+  // Idle means nothing can change without a user action, so the board can back
+  // off. An empty board counts as idle: there is nothing to watch.
+  const allJobsTerminal = useMemo(
+    () => jobs.every(j => TERMINAL_JOB_STATUSES.has(j.status)),
+    [jobs],
+  );
+
   useEffect(() => {
     loadJobs();
-    const interval = setInterval(() => loadJobs(), 3000);
-    return () => clearInterval(interval);
   }, [loadJobs]);
+
+  usePolling(loadJobs, {
+    activeIntervalMs: 2500,
+    idleIntervalMs: 15000,
+    isIdle: allJobsTerminal,
+  });
 
   useEffect(() => {
     client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
