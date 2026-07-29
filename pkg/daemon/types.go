@@ -1,9 +1,18 @@
 package daemon
 
 import (
+	"errors"
+
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
+
+// ErrLeaseLost reports that the Control Plane has taken a task away from this
+// daemon — the user cancelled it, or the lease expired and was reassigned. It is
+// returned only for an explicit 409, never for a transport failure, because the
+// daemon abandons in-flight work on it: treating a network blip the same way
+// would throw away a run that was going fine.
+var ErrLeaseLost = errors.New("lease lost")
 
 // RegisterReq is the one-time join handshake. The daemon presents a join token
 // (delivered out of band) plus both public keys; the body is signed with the

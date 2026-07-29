@@ -142,5 +142,12 @@ func (c *Client) RenewLease(ctx context.Context, req RenewReq) error {
 		return nil
 	}
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if resp.StatusCode == http.StatusConflict {
+		// 409 is the Control Plane stating the task is no longer ours: cancelled,
+		// reassigned after expiry, or already completed. Unlike a network error
+		// this is definitive, so it is typed — the caller aborts the run on this
+		// and only this, and keeps working through transient failures.
+		return fmt.Errorf("%w: %s", ErrLeaseLost, strings.TrimSpace(string(msg)))
+	}
 	return fmt.Errorf("renew lease failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }

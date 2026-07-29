@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/pgvector/pgvector-go"
@@ -27,6 +28,9 @@ type Service struct {
 	store   store.Store
 	planner Planner
 	embed   provider.Embedder
+	// fleetHost wakes the machine the free-tier provisioner runs on. Nil is
+	// valid and means "no host to manage" (BYOC, local dev).
+	fleetHost fleethost.Controller
 	// indexSync runs learning indexing inline instead of in a background
 	// goroutine. Production leaves it false (best-effort, non-blocking); tests
 	// set it true so the write is observable without racing a goroutine.
@@ -35,6 +39,12 @@ type Service struct {
 
 func NewService(s store.Store, p Planner, e provider.Embedder) *Service {
 	return &Service{store: s, planner: p, embed: e}
+}
+
+// WithFleetHost attaches the fleet-host controller woken on free-tier submit.
+func (s *Service) WithFleetHost(c fleethost.Controller) *Service {
+	s.fleetHost = c
+	return s
 }
 
 // SubmitResult reports what the planner generated.

@@ -23,6 +23,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
+	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/infra"
 	"github.com/ibreakthecloud/kiwi/pkg/planner"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -63,7 +64,11 @@ type Server struct {
 	// saved. nil skips validation (kept nil in unit tests that construct Server
 	// directly so they make no external calls); NewServer wires the real one.
 	credValidator func(ctx context.Context, name, value string) error
-	httpServer    *http.Server
+	// fleetHost starts/stops the machine the free-tier provisioner runs on.
+	// Always non-nil; a no-op when no host is configured.
+	fleetHost    fleethost.Controller
+	fleetHostCfg fleethost.Config
+	httpServer   *http.Server
 	// signingKeyFn resolves the Control Plane's record-signing identity. nil uses
 	// the process-wide configured key. It is injectable so a test can supply its
 	// own key without a global reset — production must not be able to swap the
@@ -134,6 +139,13 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		planner:       planner.NewService(storage, selectPlanner(), embedder),
 		credValidator: defaultCredValidator,
 	}
+	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
+	// controller, so the submit path needs no special-casing. The api role wakes
+	// the host on submit; the orchestrator role owns the idle stop (see cmd/kiwid)
+	// because it is a singleton and must not race a second stopper.
+	s.fleetHost = fleethost.New(context.Background(), fleethost.ConfigFromEnv())
+	s.planner = s.planner.WithFleetHost(s.fleetHost)
+	s.fleetHostCfg = fleethost.ConfigFromEnv()
 	// Sandbox-facing Agent API: scoped-token authorized, secrets bridged to the
 	// reverse tunnel, events into the durable log (issue #34).
 	s.agentAPI = agentapi.NewServer(agentapi.Deps{
@@ -141,6 +153,8 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		Events:  checkpoint.NewService(storage, checkpoint.NewLocalSnapshotter(root)),
 		Secrets: tunnelSecrets{},
 	})
+	// StartFleetHostSweeper is driven from cmd/kiwid rather than here so it binds
+	// to the process lifetime context, like the other orchestrator sweepers.
 	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		s.launchFn = s.LaunchTask
 	} else {
@@ -984,4 +998,14 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// StartFleetHostSweeper begins the idle sweep that stops the free-fleet host
+// once the queue has been quiet for the configured TTL. It is a no-op when no
+// host is configured.
+//
+// Only the orchestrator role should call it: it is a singleton sweeper, and two
+// processes racing to stop the same machine would fight over it.
+func (s *Server) StartFleetHostSweeper(ctx context.Context) {
+	fleethost.NewSweeper(s.fleetHost, s.storage, s.fleetHostCfg).Start(ctx)
 }

@@ -306,6 +306,63 @@ func callCost(caller any, fallback float64) float64 {
 	return fallback
 }
 
+// escapeControlCharsInStrings rewrites raw control characters that appear
+// *inside* JSON string literals into their escape sequences, leaving the
+// structural parts of the document untouched.
+//
+// It exists because an LLM asked for {"files":[{"content":"..."}]} will happily
+// paste a source file in verbatim, newlines and tabs and all. JSON forbids
+// unescaped control characters in strings (RFC 8259 §7), so the response is
+// syntactically invalid even though the content it carries is exactly right.
+// Escaping is a pure encoding repair: it changes no character the model chose,
+// only how that character is spelled.
+//
+// It deliberately does not try to fix unescaped quotes — where a string ends
+// would be a guess, and a wrong guess silently corrupts file content rather
+// than failing loudly. Input it cannot help is returned unchanged, so the
+// caller can report the model's original parse error.
+func escapeControlCharsInStrings(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			// This byte is the target of a preceding backslash; copy verbatim so
+			// a legitimate \" or \\ cannot flip our in-string state.
+			escaped = false
+			b.WriteByte(c)
+		case c == '\\' && inString:
+			escaped = true
+			b.WriteByte(c)
+		case c == '"':
+			inString = !inString
+			b.WriteByte(c)
+		case inString && c < 0x20:
+			switch c {
+			case '\n':
+				b.WriteString(`\n`)
+			case '\r':
+				b.WriteString(`\r`)
+			case '\t':
+				b.WriteString(`\t`)
+			case '\b':
+				b.WriteString(`\b`)
+			case '\f':
+				b.WriteString(`\f`)
+			default:
+				fmt.Fprintf(&b, `\u%04x`, c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *float64, lastOutput string, step int) error {
 	var sb strings.Builder
 	validFiles := make(map[string]string)
@@ -355,8 +412,22 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 		} `json:"files"`
 	}
 
-	if err := json.Unmarshal([]byte(resp[start:end+1]), &edit); err != nil {
-		return fmt.Errorf("parse json: %w", err)
+	raw := resp[start : end+1]
+	if err := json.Unmarshal([]byte(raw), &edit); err != nil {
+		// Models routinely emit file content with *literal* newlines inside the
+		// JSON string rather than \n escapes, which is invalid JSON ("invalid
+		// character '\n' in string literal") and failed the whole step. The
+		// content is recoverable — only its encoding is wrong — so escape the
+		// stray control characters and retry once before giving up.
+		repaired := escapeControlCharsInStrings(raw)
+		if repaired == raw {
+			return fmt.Errorf("parse json: %w", err)
+		}
+		if err2 := json.Unmarshal([]byte(repaired), &edit); err2 != nil {
+			// Report the original error: it describes what the model actually
+			// produced, which is the more useful thing to debug from.
+			return fmt.Errorf("parse json: %w", err)
+		}
 	}
 
 	for _, f := range edit.Files {

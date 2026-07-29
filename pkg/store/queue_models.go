@@ -8,7 +8,18 @@ const (
 	TaskLeased    = "LEASED"
 	TaskSucceeded = "SUCCEEDED"
 	TaskFailed    = "FAILED"
+	// TaskCancelled is a user-requested stop. It is terminal and deliberately
+	// distinct from FAILED: a job you called off did not fail, and folding the
+	// two together would make the failure rate unreadable. Nothing retries a
+	// cancelled task automatically — RetryJob is an explicit act.
+	TaskCancelled = "CANCELLED"
 )
+
+// IsTerminal reports whether a task status is final. Terminal tasks are never
+// leased, swept, or diagnosed.
+func IsTerminal(status string) bool {
+	return status == TaskSucceeded || status == TaskFailed || status == TaskCancelled
+}
 
 // MaxLeaseAttempts bounds how many times a task may be leased before it is
 // treated as a poison pill. A task whose lease expires after this many attempts
