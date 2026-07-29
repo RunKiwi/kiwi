@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useState, useRef, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
@@ -12,6 +12,7 @@ import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
+import { sendJobCompletionNotification } from "@/lib/notifications";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
@@ -140,6 +141,28 @@ function CommandCenterContent() {
   useEffect(() => {
     loadJobs();
   }, [loadJobs]);
+
+  // Track job transitions to trigger completion notifications
+  const prevJobsRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!jobs || jobs.length === 0) return;
+    const prevMap = prevJobsRef.current;
+    const nextMap = new Map<string, string>();
+
+    for (const j of jobs) {
+      nextMap.set(j.job_id, j.status);
+      const prevStatus = prevMap.get(j.job_id);
+
+      if (prevStatus && (prevStatus === "QUEUED" || prevStatus === "RUNNING")) {
+        if (j.status === "SUCCEEDED" || j.status === "FAILED") {
+          sendJobCompletionNotification(j.job_id, j.status, j.task);
+        }
+      }
+    }
+
+    prevJobsRef.current = nextMap;
+  }, [jobs]);
 
   usePolling(loadJobs, {
     activeIntervalMs: 2500,
