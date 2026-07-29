@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle } from "lucide-react";
+import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle, Bell, BellOff } from "lucide-react";
 import { client, type Integration } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
 import { PlanComparison } from "@/components/PlanComparison";
+import { isNotificationEnabled, setNotificationEnabled, requestNotificationPermission, getNotificationPermission } from "@/lib/notifications";
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
@@ -146,6 +147,48 @@ export default function SettingsPage() {
           ))}
         </div>
         <p className="text-xs text-zinc-500 mt-4">Keys are encrypted at rest and never shown again. Manage all connections under Integrations.</p>
+      </div>
+
+      {/* Desktop Notifications Preference */}
+      <div className="glass-panel p-6">
+        <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-2">
+          <Bell className="w-5 h-5 text-amber-400" /> Desktop Completion Alerts
+        </h2>
+        <p className="text-sm text-zinc-400 mb-4">
+          Receive a browser completion alert when background jobs finish processing.
+        </p>
+
+        <div className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-black/20">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-white">Browser Desktop Alerts</span>
+            <span className="text-xs text-zinc-500">
+              Permission status: <strong className="text-zinc-300 capitalize">{getNotificationPermission()}</strong>
+            </span>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isNotificationEnabled()}
+            onClick={async () => {
+              if (!isNotificationEnabled()) {
+                await requestNotificationPermission();
+              } else {
+                setNotificationEnabled(false);
+              }
+              // Force re-render by updating dummy state or reloading window location
+              window.dispatchEvent(new Event("storage"));
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
+              isNotificationEnabled()
+                ? "border-green-500/40 bg-green-500/20 text-green-300"
+                : "border-white/10 bg-white/5 text-zinc-400 hover:text-white"
+            }`}
+          >
+            {isNotificationEnabled() ? <Bell className="w-4 h-4 text-green-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
+            <span>{isNotificationEnabled() ? "Enabled" : "Enable Notifications"}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
