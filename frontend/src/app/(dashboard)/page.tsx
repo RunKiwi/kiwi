@@ -84,17 +84,20 @@ function CommandCenterContent() {
   }
 
   // Form State — only task + repo are required. Everything else is a hint.
-  const [task, setTask] = useState(() => {
-    if (typeof window !== "undefined") {
-      const starter = localStorage.getItem("kiwi_starter_task");
-      if (starter) {
-        localStorage.removeItem("kiwi_starter_task");
-        return starter;
-      }
-    }
-    return "";
-  });
-  const [repoUrl, setRepoUrl] = useState("");
+  // Hand-off from onboarding. The initializers only read — clearing happens in
+  // the effect below. Consuming inside an initializer would break under
+  // StrictMode, which invokes it twice in development: the first pass would
+  // take and delete the value, the second would find nothing, and the starter
+  // task would silently vanish.
+  const starterOf = (key: string) =>
+    typeof window === "undefined" ? "" : localStorage.getItem(key) ?? "";
+  const [task, setTask] = useState(() => starterOf("kiwi_starter_task"));
+  const [repoUrl, setRepoUrl] = useState(() => starterOf("kiwi_starter_repo"));
+
+  useEffect(() => {
+    localStorage.removeItem("kiwi_starter_task");
+    localStorage.removeItem("kiwi_starter_repo");
+  }, []);
   const [fleetId, setFleetId] = useState("");
   const [plannerModel, setPlannerModel] = useState(DEFAULT_PLANNER_MODEL);
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
@@ -617,7 +620,9 @@ function CommandCenterContent() {
         {(submitError || submitSuccess) && (
           <div className="pt-3 mt-1">
             {submitError && (() => {
-              const err = parseActionableError(submitError);
+              // Plan matters: a Free org never goes through paid activation, so
+              // it must never be told to activate.
+              const err = parseActionableError(submitError, { plan: u?.plan });
               return (
                 <div className="flex items-center gap-2 text-red-400 text-sm">
                   <AlertCircle className="w-4 h-4 shrink-0" />
