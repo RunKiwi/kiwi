@@ -84,7 +84,16 @@ function CommandCenterContent() {
   }
 
   // Form State — only task + repo are required. Everything else is a hint.
-  const [task, setTask] = useState("");
+  const [task, setTask] = useState(() => {
+    if (typeof window !== "undefined") {
+      const starter = localStorage.getItem("kiwi_starter_task");
+      if (starter) {
+        localStorage.removeItem("kiwi_starter_task");
+        return starter;
+      }
+    }
+    return "";
+  });
   const [repoUrl, setRepoUrl] = useState("");
   const [fleetId, setFleetId] = useState("");
   const [plannerModel, setPlannerModel] = useState(DEFAULT_PLANNER_MODEL);
@@ -139,7 +148,7 @@ function CommandCenterContent() {
     // onboarding redirect, and the M14 model default (prefer the provider the
     // org actually has a key for, so a BYOK user isn't defaulted to a model
     // they can't call). Jobs are only needed for the first-run check.
-    const firstRun = !sessionStorage.getItem("onboarded");
+    const firstRun = typeof window !== "undefined" && !localStorage.getItem("onboarded");
     Promise.all([client.listIntegrations(), firstRun ? client.listJobs() : Promise.resolve(null)])
       .then(([ints, jbs]) => {
         setIntegrations(ints.integrations);
@@ -154,7 +163,7 @@ function CommandCenterContent() {
           const hasInt = ints.integrations.some((i: Integration) => i.connected);
           const hasJob = (jbs?.jobs.length ?? 0) > 0;
           if (!hasInt && !hasJob) router.push("/onboarding");
-          sessionStorage.setItem("onboarded", "1");
+          localStorage.setItem("onboarded", "1");
         }
       }).catch(() => {});
   }, [router]);
