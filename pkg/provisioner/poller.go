@@ -127,11 +127,13 @@ func (p *Provisioner) PollOnce(ctx context.Context) (bool, error) {
 	// Side effects run OUTSIDE any transaction: no row lock is held across a
 	// docker launch, and the settle below cannot be rolled back by a failure here.
 	status, sideErr := p.execute(ctx, req)
+	var settleErr string
 	if sideErr != nil {
 		slog.Error("provisioner: request failed", "id", req.ID, "org", req.OrgID, "type", req.Type, "err", sideErr)
+		settleErr = sideErr.Error()
 	}
 
-	if err := p.settle(ctx, req.ID, status); err != nil {
+	if err := p.settle(ctx, req.ID, status, settleErr); err != nil {
 		// The work is done (or failed) but we couldn't record it. Report the
 		// settle error so the caller logs it; the row stays in_progress and is
 		// recoverable by a sweep (see reclaimStale, follow-up work).
@@ -206,10 +208,12 @@ func (p *Provisioner) execute(ctx context.Context, req auth.ProvisioningRequest)
 	}
 }
 
-// settle records a request's terminal status in its own transaction, so it is
-// durable independent of whatever happened during execute.
-func (p *Provisioner) settle(ctx context.Context, id, status string) error {
+// settle records a request's terminal status — and, on failure, why — in its own
+// transaction, so both are durable independent of whatever happened during
+// execute. The error text is what the stranded org's tasks cite as their blocked
+// reason, so it must survive the process that produced it.
+func (p *Provisioner) settle(ctx context.Context, id, status, errText string) error {
 	return p.db.WithContext(ctx).Model(&auth.ProvisioningRequest{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{"status": status}).Error
+		Updates(map[string]interface{}{"status": status, "error": errText}).Error
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
@@ -72,9 +73,12 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 		"-api-url", apiURL,
 	)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to launch docker container %s: %w", name, err)
+	// CombinedOutput, not Run: docker reports *why* a launch failed on stderr
+	// ("manifest unknown", "no such image", a denied pull), and Run discards it,
+	// leaving only "exit status 125" to diagnose from.
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to launch docker container %s: %w: %s", name, err, firstLine(out))
 	}
 
 	return Handle(name), nil
@@ -82,9 +86,27 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 
 func (d *DockerLauncher) Stop(ctx context.Context, orgID string) error {
 	name := d.containerName(orgID)
-	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", name)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop/remove docker container %s: %w", name, err)
+	out, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to stop/remove docker container %s: %w: %s", name, err, firstLine(out))
 	}
 	return nil
+}
+
+// firstLine reduces command output to its first non-empty line, capped so a
+// verbose failure cannot balloon the error text that gets persisted and shown to
+// the user. Docker puts the actionable message on the first line.
+func firstLine(out []byte) string {
+	const maxLen = 300
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "no output"
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > maxLen {
+		s = s[:maxLen] + "…"
+	}
+	return s
 }
