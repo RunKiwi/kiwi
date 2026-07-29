@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask } from "@/lib/api";
 import {
@@ -114,6 +114,73 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  const isOpen = !!taskId;
+
+  // onClose is typically redefined on every parent render, so it cannot sit in a
+  // dependency array here: the dashboard re-renders on each poll, which would
+  // re-run the focus effect every few seconds — stealing focus back to the drawer
+  // mid-interaction and overwriting the element we promised to restore focus to.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  // Capture and restore focus across the open/close transition only. Keyed on
+  // isOpen rather than taskId so switching between jobs does not bounce focus
+  // out to the card and back.
+  useEffect(() => {
+    if (!isOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    drawerRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus?.();
+    };
+  }, [isOpen]);
+
+  // Escape to close, Tab to cycle within the dialog.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (e.key === "Tab" && drawerRef.current) {
+        // Disabled controls are not focusable, so including them would hand the
+        // trap a first/last element that silently refuses focus and let Tab
+        // escape the dialog. Stop/Retry/Delete are all conditionally disabled.
+        const focusables = Array.from(
+          drawerRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter(el => el.offsetParent !== null || el === document.activeElement);
+        if (focusables.length === 0) return;
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
   // Reset transient UI when the drawer switches jobs, so a notice or a primed
   // delete confirmation cannot leak onto a different job. Adjusting during
   // render rather than in an effect is React's documented pattern for
@@ -161,9 +228,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     };
   }, [taskId, loadJob]);
 
-  if (!taskId && !currentJob) return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
-  );
+  if (!taskId && !currentJob) return null;
 
   const getPhaseIcon = (task: JobTask) => {
     switch (task.status) {
@@ -210,22 +275,38 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   };
 
   return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col ${taskId ? 'translate-x-0' : 'translate-x-full'}`}>
-      
-      {/* Drawer Header */}
-      <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
-        <div className="flex items-center gap-4">
-          <div>
-            <h2 className="text-xl font-medium text-white flex items-center gap-3">
-              {/* The goal, not the id — an opaque job id says nothing about what
-                  is running, which is the first thing anyone opening this wants. */}
-              {currentJob?.task || "Job Details"}
-              {currentJob && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
-                  {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
-                </span>
-              )}
-            </h2>
+    <>
+      {/* Backdrop */}
+      {taskId && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 transition-opacity"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      {/* Drawer */}
+      <div
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-heading"
+        tabIndex={-1}
+        className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
+          <div className="flex items-center gap-4">
+            <div>
+              <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
+                {/* The goal, not the id — an opaque job id says nothing about what
+                    is running, which is the first thing anyone opening this wants. */}
+                {currentJob?.task || "Job Details"}
+                {currentJob && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
+                    {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
+                  </span>
+                )}
+              </h2>
             <p className="text-sm text-zinc-400 font-mono mt-1">
               {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
               {taskId}
@@ -336,5 +417,6 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
          )}
       </div>
     </div>
-  );
+  </>
+);
 }
