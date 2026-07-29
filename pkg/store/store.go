@@ -72,6 +72,10 @@ type Store interface {
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 	ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)
+	// DiagnoseQueuedTasks explains why each QUEUED task among the given tasks has
+	// not started (no runner, cold-start in flight, at a cap, blocked on a
+	// dependency, ...). Read-only; it never affects scheduling.
+	DiagnoseQueuedTasks(ctx context.Context, orgID string, tasks []QueuedTask) (map[string]TaskDiagnosis, error)
 
 	// Execution records (provenance). AppendExecutionRecord builds and inserts
 	// under one transaction so the chain head cannot race; see pkg/store/ver.go.

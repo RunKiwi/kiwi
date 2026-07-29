@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -98,25 +97,13 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, flee
 	var leased *QueuedTask
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Enforce OrgLimits for concurrency cap
-		var limits OrgLimits
-		if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				limits = OrgLimits{
-					OrgID:              orgID,
-					MaxConcurrentJobs:  10,
-					MaxBudgetPerJob:    5.00,
-					MaxBudgetPerMonth:  500.00,
-					MaxWorkersPerJob:   8,
-					TaskTimeoutSeconds: 1800,
-					MaxSandboxDiskMB:   2048,
-				}
-			} else {
-				return err
-			}
+		limits, err := effectiveOrgLimits(tx, orgID)
+		if err != nil {
+			return err
 		}
 
-		var inFlight int64
-		if err := tx.Model(&QueuedTask{}).Where("org_id = ? AND status = ?", orgID, TaskLeased).Count(&inFlight).Error; err != nil {
+		inFlight, err := countLeased(tx, orgID)
+		if err != nil {
 			return err
 		}
 		if inFlight >= int64(limits.MaxConcurrentJobs) {
@@ -124,10 +111,8 @@ func (s *PostgresStore) LeaseNextTask(ctx context.Context, orgID, leasedBy, flee
 		}
 
 		if limits.MaxAgentMinutesPerMonth > 0 {
-			var usedMinutes float64
-			now := time.Now().UTC()
-			monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-			if err := tx.Model(&Job{}).Where("org_id = ? AND created_at >= ?", orgID, monthStart).Select("COALESCE(SUM(agent_minutes), 0)").Scan(&usedMinutes).Error; err != nil {
+			usedMinutes, err := agentMinutesThisMonth(tx, orgID)
+			if err != nil {
 				return err
 			}
 			if usedMinutes >= limits.MaxAgentMinutesPerMonth {
