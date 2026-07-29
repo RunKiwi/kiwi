@@ -97,6 +97,32 @@ export interface JobLifecycleResult {
   message?: string;
 }
 
+/**
+ * A job's signed execution record. `recordHash` comes from the X-Kiwi-Record-Hash
+ * response header rather than the body, so a caller can verify chain continuity
+ * without re-canonicalizing the record.
+ */
+export interface ExecutionRecordResponse {
+  recordHash: string | null;
+  data: unknown;
+}
+
+/**
+ * The subset of ver.Record the receipt panel reads. `attestation` is the
+ * backend's own word for whether a Control-Plane signature is present
+ * ("signed" | "unsigned"); it is not a claim that the client verified anything.
+ */
+export interface ExecutionRecordBody {
+  ver?: string;
+  record_id?: string;
+  job_id?: string;
+  prev_record_hash?: string;
+  attestation?: string;
+  record_signature?: { alg?: string; key?: string; sig?: string };
+  verification?: { test_cmd?: string; final_outcome?: string; duration_ms?: number };
+  intent?: { submitted_at?: string };
+}
+
 export interface JobSummary {
   job_id: string;
   created_at: string;
@@ -256,6 +282,29 @@ export const client = {
     
   getJob: (jobId: string) => 
     fetchApi<Job>(`/api/v1/jobs/${jobId}`),
+
+  // The one endpoint whose response header carries meaning, so it cannot go
+  // through fetchApi (which returns only the parsed body). It still has to
+  // resolve against the control-plane origin and send the bearer token like
+  // every other call — a bare relative fetch would hit the dashboard's own
+  // origin unauthenticated.
+  getJobRecord: async (jobId: string): Promise<ExecutionRecordResponse> => {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    const res = await fetch(
+      `${getBaseUrl()}/api/v1/jobs/${encodeURIComponent(jobId)}/record`,
+      { headers },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError((text || res.statusText || "Record not found").trim());
+    }
+    const recordHash = res.headers.get("X-Kiwi-Record-Hash");
+    const data = await res.json();
+    return { recordHash, data };
+  },
     
   listJobs: () =>
     fetchApi<JobsListResponse>("/api/v1/jobs"),
