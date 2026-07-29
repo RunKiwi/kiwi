@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { serializeTask } from "./serialize";
+import { serializeTask } from "./serialize.ts";
 
 describe("serializeTask", () => {
   it("serializes plain prose correctly", () => {
