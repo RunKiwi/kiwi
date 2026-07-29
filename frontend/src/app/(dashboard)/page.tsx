@@ -15,7 +15,7 @@ function CommandCenterContent() {
   const { jobs, loadJobs } = useFleetStore();
   const searchParams = useSearchParams();
 
-  const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
+  const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(searchParams.get("job") || null);
   // Which job's PR list popover is open (job_id), if any.
   const [openPrJob, setOpenPrJob] = useState<string | null>(null);
 
@@ -32,18 +32,27 @@ function CommandCenterContent() {
   const [sortBy, setSortBy] = useState<JobSortOption>((searchParams.get("sort") as JobSortOption) || "newest");
   const [displayLimit, setDisplayLimit] = useState(60);
 
-  // Synchronize filter parameters with URL query string
+  const openJobDrawer = (jobId: string) => {
+    setActiveDrawerTaskId(jobId);
+  };
+
+  const closeJobDrawer = () => {
+    setActiveDrawerTaskId(null);
+  };
+
+  // Synchronize filter parameters and open job drawer with URL query string
   useEffect(() => {
     const params = new URLSearchParams();
     if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
     if (repoFilter && repoFilter !== "all") params.set("repo", repoFilter);
     if (searchQuery.trim()) params.set("q", searchQuery.trim());
     if (sortBy && sortBy !== "newest") params.set("sort", sortBy);
+    if (activeDrawerTaskId) params.set("job", activeDrawerTaskId);
 
     const queryString = params.toString();
     const url = queryString ? `/?${queryString}` : "/";
     window.history.replaceState(null, "", url);
-  }, [statusFilter, repoFilter, searchQuery, sortBy]);
+  }, [statusFilter, repoFilter, searchQuery, sortBy, activeDrawerTaskId]);
 
   // Form State — only task + repo are required. Everything else is a hint.
   const [task, setTask] = useState("");
@@ -657,155 +666,170 @@ function CommandCenterContent() {
                     const m = statusOf(job.status);
                     const Icon = m.Icon;
                     return (
-                      <div key={job.job_id} role="button" tabIndex={0}
-                        onClick={() => setActiveDrawerTaskId(job.job_id)}
-                        onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
+                      <div
+                        key={job.job_id}
                         style={{
                           background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
                           borderColor: m.border,
                           boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
                         }}
-                        className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">{shortId(job.job_id)}</span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
-                              style={{ color: m.color, borderColor: m.border, background: m.wash }}>
-                              <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                              {m.label}
+                        className="group relative text-left rounded-2xl p-4 border flex flex-col h-full card-hover"
+                      >
+                        {/* Stretched click target overlay (valid HTML5 semantics, no button nesting) */}
+                        <button
+                          type="button"
+                          aria-label={`View details for job ${shortId(job.job_id)}`}
+                          onClick={() => openJobDrawer(job.job_id)}
+                          className="absolute inset-0 z-0 rounded-2xl cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        />
+
+                        {/* Card inner content sitting above click overlay */}
+                        <div className="relative z-10 pointer-events-none flex flex-col h-full">
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">
+                              {shortId(job.job_id)}
+                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <div
+                                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
+                                style={{ color: m.color, borderColor: m.border, background: m.wash }}
+                              >
+                                <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
+                                {m.label}
+                              </div>
+                              <div className="flex items-center gap-1 pointer-events-auto" onClick={e => e.stopPropagation()}>
+                                {cardBusyJob === job.job_id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                                ) : (
+                                  <>
+                                    {(job.status === "QUEUED" || job.status === "RUNNING") && (
+                                      <button
+                                        type="button"
+                                        onClick={e => handleCardCancel(e, job.job_id)}
+                                        onBlur={() => setConfirmCancelJob(null)}
+                                        title="Cancel job"
+                                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                          confirmCancelJob === job.job_id
+                                            ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
+                                            : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
+                                        }`}
+                                      >
+                                        <Ban className="w-3 h-3 shrink-0" />
+                                        {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
+                                      </button>
+                                    )}
+                                    {job.status === "FAILED" && (
+                                      <button
+                                        type="button"
+                                        onClick={e => handleCardRetry(e, job.job_id)}
+                                        title="Retry job"
+                                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
+                                      >
+                                        <RotateCcw className="w-3 h-3 shrink-0" />
+                                        Retry
+                                      </button>
+                                    )}
+                                    {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
+                                      <button
+                                        type="button"
+                                        onClick={e => handleCardDelete(e, job.job_id)}
+                                        onBlur={() => setConfirmDeleteJob(null)}
+                                        title="Delete job"
+                                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                          confirmDeleteJob === job.job_id
+                                            ? "border-red-500/50 bg-red-500/20 text-red-300"
+                                            : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
+                                        }`}
+                                      >
+                                        <Trash2 className="w-3 h-3 shrink-0" />
+                                        {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                              {cardBusyJob === job.job_id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                          </div>
+
+                          <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
+                            {job.task?.trim() || `Job ${shortId(job.job_id)}`}
+                          </h3>
+
+                          {cardNotice?.jobId === job.job_id && (
+                            <div
+                              className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border pointer-events-auto ${
+                                cardNotice.tasksAffected === 0
+                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
+                                  : "bg-green-500/10 border-green-500/20 text-green-300"
+                              }`}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {cardNotice.tasksAffected === 0 ? (
+                                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                               ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                              )}
+                              <span className="leading-tight">{cardNotice.message}</span>
+                            </div>
+                          )}
+
+                          <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
+                            {/* Left: compact PR count popover or repo or time */}
+                            <div className="min-w-0 relative pointer-events-auto">
+                              {job.pr_urls && job.pr_urls.length > 0 ? (
                                 <>
-                                  {(job.status === "QUEUED" || job.status === "RUNNING") && (
-                                    <button
-                                      type="button"
-                                      onClick={e => handleCardCancel(e, job.job_id)}
-                                      onBlur={() => setConfirmCancelJob(null)}
-                                      title="Cancel job"
-                                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                                        confirmCancelJob === job.job_id
-                                          ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-                                          : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                                      }`}
+                                  <button
+                                    data-pr-trigger
+                                    onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
+                                    className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
+                                    title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
+                                    aria-expanded={openPrJob === job.job_id}
+                                  >
+                                    <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
+                                    <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
+                                    <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
+                                  </button>
+                                  {openPrJob === job.job_id && (
+                                    <div
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
                                     >
-                                      <Ban className="w-3 h-3 shrink-0" />
-                                      {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
-                                    </button>
-                                  )}
-                                  {job.status === "FAILED" && (
-                                    <button
-                                      type="button"
-                                      onClick={e => handleCardRetry(e, job.job_id)}
-                                      title="Retry job"
-                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
-                                    >
-                                      <RotateCcw className="w-3 h-3 shrink-0" />
-                                      Retry
-                                    </button>
-                                  )}
-                                  {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
-                                    <button
-                                      type="button"
-                                      onClick={e => handleCardDelete(e, job.job_id)}
-                                      onBlur={() => setConfirmDeleteJob(null)}
-                                      title="Delete job"
-                                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                                        confirmDeleteJob === job.job_id
-                                          ? "border-red-500/50 bg-red-500/20 text-red-300"
-                                          : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
-                                      }`}
-                                    >
-                                      <Trash2 className="w-3 h-3 shrink-0" />
-                                      {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
-                                    </button>
+                                      <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
+                                        <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                                        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
+                                        <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
+                                      </div>
+                                      <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+                                        {job.pr_urls.map((url) => (
+                                          <a key={url} href={url} target="_blank" rel="noreferrer"
+                                            onClick={() => setOpenPrJob(null)}
+                                            className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
+                                            <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                                              <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
+                                            </span>
+                                            <span className="font-mono truncate flex-1">{prLabel(url)}</span>
+                                            <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
+                                          </a>
+                                        ))}
+                                      </div>
+                                    </div>
                                   )}
                                 </>
+                              ) : job.repo ? (
+                                <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
+                                  <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5 text-zinc-500">
+                                  <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
+                                </span>
                               )}
                             </div>
-                          </div>
-                        </div>
-
-                        <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
-                          {job.task?.trim() || `Job ${shortId(job.job_id)}`}
-                        </h3>
-
-                        {cardNotice?.jobId === job.job_id && (
-                          <div
-                            className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border ${
-                              cardNotice.tasksAffected === 0
-                                ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
-                                : "bg-green-500/10 border-green-500/20 text-green-300"
-                            }`}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            {cardNotice.tasksAffected === 0 ? (
-                              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                            ) : (
-                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                            )}
-                            <span className="leading-tight">{cardNotice.message}</span>
-                          </div>
-                        )}
-
-                        <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
-                          {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
-                          <div className="min-w-0 relative">
-                            {job.pr_urls && job.pr_urls.length > 0 ? (
-                              <>
-                                <button
-                                  data-pr-trigger
-                                  onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
-                                  className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
-                                  title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
-                                  aria-expanded={openPrJob === job.job_id}
-                                >
-                                  <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
-                                  <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
-                                  <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
-                                </button>
-                                {openPrJob === job.job_id && (
-                                  <div
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
-                                  >
-                                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
-                                      <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
-                                      <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
-                                    </div>
-                                    <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
-                                      {job.pr_urls.map((url) => (
-                                        <a key={url} href={url} target="_blank" rel="noreferrer"
-                                          onClick={() => setOpenPrJob(null)}
-                                          className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
-                                          <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
-                                            <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
-                                          </span>
-                                          <span className="font-mono truncate flex-1">{prLabel(url)}</span>
-                                          <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
-                                        </a>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </>
-                            ) : job.repo ? (
-                              <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
-                                <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5 text-zinc-500">
-                                <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
-                              </span>
-                            )}
-                          </div>
-                          {/* Right: task count. */}
-                          <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
-                            <Bot className="w-3.5 h-3.5 text-zinc-500" />
-                            <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
+                            {/* Right: task count */}
+                            <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
+                              <Bot className="w-3.5 h-3.5 text-zinc-500" />
+                              <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -830,7 +854,7 @@ function CommandCenterContent() {
         </div>
       )}
 
-      <TaskDrawer taskId={activeDrawerTaskId} onClose={() => setActiveDrawerTaskId(null)} />
+      <TaskDrawer taskId={activeDrawerTaskId} onClose={closeJobDrawer} />
     </div>
   );
 }

@@ -1,6 +1,4 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask } from "@/lib/api";
 import {
@@ -114,11 +112,60 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
-  // Reset transient UI when the drawer switches jobs, so a notice or a primed
-  // delete confirmation cannot leak onto a different job. Adjusting during
-  // render rather than in an effect is React's documented pattern for
-  // prop-derived state: it re-renders before committing, so the stale notice is
-  // never painted at all.
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Focus restoration & keydown listener for Escape and Tab trap
+  useEffect(() => {
+    if (!taskId) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+
+    if (drawerRef.current) {
+      drawerRef.current.focus();
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === "Tab" && drawerRef.current) {
+        const focusables = drawerRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
+        previousFocusRef.current.focus();
+      }
+    };
+  }, [taskId, onClose]);
+
+  // Reset transient UI when the drawer switches jobs
   const [prevTaskId, setPrevTaskId] = useState(taskId);
   if (taskId !== prevTaskId) {
     setPrevTaskId(taskId);
@@ -161,18 +208,13 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     };
   }, [taskId, loadJob]);
 
-  if (!taskId && !currentJob) return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
-  );
+  if (!taskId && !currentJob) return null;
 
   const getPhaseIcon = (task: JobTask) => {
     switch (task.status) {
       case 'RUNNING':
       case 'LEASED': return <Activity className="w-4 h-4 text-blue-400" />;
       case 'QUEUED':
-        // A task nobody can run is not "in progress". Swapping the spinner for a
-        // static warning is the difference between the UI implying work is
-        // happening and admitting that none is.
         return BLOCKED_PRESENTATION[task.blocked_reason!]?.tone === "problem"
           ? <ServerCrash className="w-4 h-4 text-red-400" />
           : <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
@@ -184,8 +226,6 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   };
 
   const tasks = currentJob?.tasks ?? [];
-  // What is actionable depends on where the job is. Offering "stop" on a
-  // finished job or "retry" on a running one invites a click that does nothing.
   const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED");
   const canRetry = tasks.some(t => t.status === "FAILED" || t.status === "CANCELLED");
 
@@ -210,22 +250,36 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   };
 
   return (
-    <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col ${taskId ? 'translate-x-0' : 'translate-x-full'}`}>
-      
-      {/* Drawer Header */}
-      <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
-        <div className="flex items-center gap-4">
-          <div>
-            <h2 className="text-xl font-medium text-white flex items-center gap-3">
-              {/* The goal, not the id — an opaque job id says nothing about what
-                  is running, which is the first thing anyone opening this wants. */}
-              {currentJob?.task || "Job Details"}
-              {currentJob && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
-                  {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
-                </span>
-              )}
-            </h2>
+    <>
+      {/* Backdrop */}
+      {taskId && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 transition-opacity"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      {/* Drawer */}
+      <div
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-heading"
+        tabIndex={-1}
+        className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
+          <div className="flex items-center gap-4">
+            <div>
+              <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
+                {currentJob?.task || "Job Details"}
+                {currentJob && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
+                    {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
+                  </span>
+                )}
+              </h2>
             <p className="text-sm text-zinc-400 font-mono mt-1">
               {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
               {taskId}
@@ -336,5 +390,6 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
          )}
       </div>
     </div>
-  );
+  </>
+);
 }
