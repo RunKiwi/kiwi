@@ -1,21 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle } from "lucide-react";
+import Link from "next/link";
+import { Key, CheckCircle2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle } from "lucide-react";
 import { client, type Integration } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
 import { PlanComparison } from "@/components/PlanComparison";
+
+// Mirrors the Integrations catalog. Listed here for status only — Settings does
+// not write credentials.
+const PROVIDER_CREDENTIALS = [
+  { key: "anthropic", label: "Anthropic", name: "ANTHROPIC_API_KEY" },
+  { key: "gemini", label: "Gemini", name: "GEMINI_API_KEY" },
+  { key: "git", label: "Git push token", name: "GIT_TOKEN" },
+];
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [stats, setStats] = useState({ fleets: 0, daemons: 0, daemonsOnline: 0, jobs: 0, models: 0 });
 
-  const [anthropicKey, setAnthropicKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [gitToken, setGitToken] = useState("");
-  const [saving, setSaving] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
     client.validate().then(setOrg).catch(() => {});
@@ -28,14 +32,6 @@ export default function SettingsPage() {
     ]).then(([fleets, daemons, jobs, models]) =>
       setStats({ fleets, daemons: daemons.total, daemonsOnline: daemons.online, jobs, models }));
   }, []);
-
-  const save = async (label: string, name: string, kind: string, value: string, clear: (v: string) => void) => {
-    if (!value.trim()) return;
-    setSaving(label); setSaved(null);
-    try { await client.setCredential(name, kind, value); setSaved(label); clear(""); setTimeout(() => setSaved(null), 3000); }
-    catch { alert("Failed to save credential"); }
-    finally { setSaving(null); }
-  };
 
   const statCards = [
     { label: "Fleets", value: stats.fleets, icon: Layers },
@@ -123,29 +119,32 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Provider credentials */}
+      {/* Provider credentials — read-only here. Integrations owns the one write
+          path, so the same key is not enterable from three different screens
+          with three different forms. */}
       <div className="glass-panel p-6">
-        <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-5"><Key className="w-5 h-5 text-blue-400" /> Provider Credentials</h2>
-        <div className="space-y-5">
-          {([
-            { label: "Anthropic", name: "ANTHROPIC_API_KEY", kind: "llm", ph: "sk-ant-…", val: anthropicKey, set: setAnthropicKey },
-            { label: "Gemini", name: "GEMINI_API_KEY", kind: "llm", ph: "AIza…", val: geminiKey, set: setGeminiKey },
-            { label: "GitHub token", name: "GIT_TOKEN", kind: "git", ph: "github_pat_…", val: gitToken, set: setGitToken },
-          ]).map(row => (
-            <div key={row.label}>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">{row.label}</label>
-              <div className="flex gap-2">
-                <input type="password" value={row.val} onChange={e => row.set(e.target.value)} placeholder={row.ph}
-                  className="flex-1 field text-sm" />
-                <button onClick={() => save(row.label, row.name, row.kind, row.val, row.set)} disabled={saving === row.label || !row.val.trim()}
-                  className="btn-primary px-4 py-2 text-sm disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center">
-                  {saving === row.label ? <Loader2 className="w-4 h-4 animate-spin" /> : saved === row.label ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save'}
-                </button>
+        <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-5"><Key className="w-5 h-5 text-blue-400" /> Provider credentials</h2>
+        <div className="space-y-3">
+          {PROVIDER_CREDENTIALS.map(row => {
+            const isConnected = integrations.some(i => i.key === row.key && i.connected);
+            return (
+              <div key={row.key} className="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+                <div className="min-w-0">
+                  <div className="text-sm text-zinc-200">{row.label}</div>
+                  <div className="font-mono text-[11px] text-zinc-500">{row.name}</div>
+                </div>
+                <span className={`flex items-center gap-1.5 text-xs shrink-0 ${isConnected ? "text-green-400" : "text-zinc-500"}`}>
+                  {isConnected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  {isConnected ? "Connected" : "Not connected"}
+                </span>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        <p className="text-xs text-zinc-500 mt-4">Keys are encrypted at rest and never shown again. Manage all connections under Integrations.</p>
+        <p className="text-xs text-zinc-500 mt-4">
+          Keys are encrypted at rest and never shown again.
+          <Link href="/integrations" className="underline ml-1 hover:text-zinc-300">Add or replace a key in Integrations</Link>.
+        </p>
       </div>
     </div>
   );

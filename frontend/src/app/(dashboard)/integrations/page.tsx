@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { client, type Integration } from "@/lib/api";
-import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, CheckCircle2 } from "lucide-react";
+import { CredentialField } from "@/components/CredentialField";
+import { parseActionableError } from "@/lib/errors";
 
 // UI catalog: which integrations we surface and how to connect them. `credName`
 // is the credential the backend stores; `kind` classifies it.
@@ -23,6 +25,7 @@ export default function IntegrationsPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
+  const [isErr, setIsErr] = useState<Record<string, boolean>>({});
 
   const load = () => client.listIntegrations()
     .then(r => setStatus(Object.fromEntries(r.integrations.map((i: Integration) => [i.key, i.connected]))))
@@ -32,16 +35,28 @@ export default function IntegrationsPage() {
   const connect = async (key: string) => {
     const meta = CATALOG[key];
     const val = (values[key] || "").trim();
-    if (!val) { setMsg(m => ({ ...m, [key]: "Paste a token first." })); return; }
-    setBusy(key); setMsg(m => ({ ...m, [key]: "" }));
+    if (!val) {
+      setMsg(m => ({ ...m, [key]: "Paste a token first." }));
+      setIsErr(e => ({ ...e, [key]: true }));
+      return;
+    }
+    setBusy(key);
+    setMsg(m => ({ ...m, [key]: "Verifying reachability…" }));
+    setIsErr(e => ({ ...e, [key]: false }));
+
     try {
       await client.setCredential(meta.credName, meta.kind, val);
       setValues(v => ({ ...v, [key]: "" }));
-      setMsg(m => ({ ...m, [key]: "Connected." }));
+      setMsg(m => ({ ...m, [key]: "Connected and verified ✓" }));
+      setIsErr(e => ({ ...e, [key]: false }));
       await load();
     } catch (e) {
-      setMsg(m => ({ ...m, [key]: e instanceof Error ? e.message : "Failed" }));
-    } finally { setBusy(null); }
+      const parsed = parseActionableError(e);
+      setMsg(m => ({ ...m, [key]: parsed.message }));
+      setIsErr(e => ({ ...e, [key]: true }));
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -58,7 +73,7 @@ export default function IntegrationsPage() {
           const connected = status[key];
           return (
             <div key={key} className="glass-panel border border-white/10 rounded-2xl p-5">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start justify-between gap-4 mb-4">
                 <div className="flex items-start gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
                     <Icon className="w-5 h-5 text-zinc-200" />
@@ -66,27 +81,29 @@ export default function IntegrationsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium">{meta.title}</h3>
-                      {connected && <span className="flex items-center gap-1 text-[11px] text-green-400"><CheckCircle2 className="w-3.5 h-3.5" /> Connected</span>}
+                      {connected && (
+                        <span className="flex items-center gap-1 text-[11px] text-green-400 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Connected
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-zinc-400">{meta.blurb}</p>
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 mt-4">
-                <input type="password" value={values[key] || ""} onChange={e => setValues(v => ({ ...v, [key]: e.target.value }))}
-                  placeholder={connected ? "•••••••• (paste to replace)" : meta.placeholder}
-                  className="flex-1 field text-sm" />
-                <button onClick={() => connect(key)} disabled={busy === key}
-                  className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50">
-                  {busy === key ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {connected ? "Update" : "Connect"}
-                </button>
-              </div>
-              {msg[key] && (
-                <div className={`flex items-center gap-2 text-sm mt-2 ${msg[key] === "Connected." ? "text-green-400" : "text-red-400"}`}>
-                  {msg[key] === "Connected." ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}{msg[key]}
-                </div>
-              )}
+
+              <CredentialField
+                id={`cred-${key}`}
+                value={values[key] || ""}
+                onChange={(v) => setValues(prev => ({ ...prev, [key]: v }))}
+                placeholder={meta.placeholder}
+                connected={connected}
+                busy={busy === key}
+                onSubmit={() => connect(key)}
+                submitLabel={connected ? "Update" : "Connect"}
+                statusMessage={msg[key]}
+                isError={isErr[key]}
+              />
             </div>
           );
         })}
