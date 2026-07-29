@@ -13,8 +13,11 @@ import (
 )
 
 type JobTaskResponse struct {
-	ID           string  `json:"id"`
-	Status       string  `json:"status"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	// Task is this worker's own goal, from its spec — the drawer showed only
+	// opaque ids like "job_1ec…-impl", which say nothing about what is running.
+	Task         string  `json:"task,omitempty"`
 	ResultURL    *string `json:"result_url,omitempty"`
 	ResultDetail *string `json:"result_detail,omitempty"`
 
@@ -36,7 +39,11 @@ type JobTaskResponse struct {
 }
 
 type JobStatusResponse struct {
-	JobID string            `json:"job_id"`
+	JobID string `json:"job_id"`
+	// Task is the overall goal that produced this job (the planner stamps it on
+	// every worker spec as job_task), so the drawer can name what it is showing.
+	Task  string            `json:"task,omitempty"`
+	Repo  string            `json:"repo,omitempty"`
 	Tasks []JobTaskResponse `json:"tasks"`
 }
 
@@ -71,14 +78,25 @@ func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Lifecycle sub-routes are mounted under the job path rather than as separate
+	// top-level handlers, so they inherit this handler's org scoping by
+	// construction and cannot be reached without it.
+	if action, ok := jobAction(r.URL.Path); ok {
+		s.handleJobLifecycle(w, r, claims.OrgID, filepath.Base(filepath.Dir(r.URL.Path)), action)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		s.handleJobLifecycle(w, r, claims.OrgID, filepath.Base(r.URL.Path), "delete")
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -131,12 +149,21 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Tasks[i] = JobTaskResponse{
 			ID:           t.ID,
 			Status:       t.Status,
+			Task:         specString(t.Spec, "task"),
 			ResultURL:    resultURL,
 			ResultDetail: resultDetail,
 			QueuedAt:     t.CreatedAt,
 			StartedAt:    t.StartedAt,
 			Attempts:     t.Attempts,
 			LeasedBy:     leasedBy,
+		}
+		// The job-level goal and repo are stamped on every worker spec; take them
+		// from the first task that carries them.
+		if resp.Task == "" {
+			resp.Task = specString(t.Spec, "job_task")
+		}
+		if resp.Repo == "" {
+			resp.Repo = store.ShortRepo(specString(t.Spec, "repo_url"))
 		}
 		if d, ok := diagnoses[t.ID]; ok {
 			resp.Tasks[i].BlockedReason = d.Reason

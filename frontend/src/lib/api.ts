@@ -66,6 +66,8 @@ export type BlockedReason =
 export interface JobTask {
   id: string;
   status: string;
+  /** This worker's own goal, from its spec. */
+  task?: string;
   result_url?: string;
   result_detail?: string;
   queued_at: string;
@@ -79,7 +81,17 @@ export interface JobTask {
 
 export interface Job {
   job_id: string;
+  /** The overall goal that produced this job, and the repo it targets. */
+  task?: string;
+  repo?: string;
   tasks: JobTask[];
+}
+
+export interface JobLifecycleResult {
+  job_id: string;
+  action: string;
+  tasks_affected: number;
+  message?: string;
 }
 
 export interface JobSummary {
@@ -242,8 +254,21 @@ export const client = {
   getJob: (jobId: string) => 
     fetchApi<Job>(`/api/v1/jobs/${jobId}`),
     
-  listJobs: () => 
+  listJobs: () =>
     fetchApi<JobsListResponse>("/api/v1/jobs"),
+
+  /** Stop a job. Queued tasks stop at once; a running task stops at its next
+   * lease renewal, since the daemon is a separate process the CP cannot reach. */
+  cancelJob: (jobId: string) =>
+    fetchApi<JobLifecycleResult>(`/api/v1/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  /** Requeue a job's failed and cancelled tasks. Succeeded tasks are left alone. */
+  retryJob: (jobId: string) =>
+    fetchApi<JobLifecycleResult>(`/api/v1/jobs/${jobId}/retry`, { method: "POST" }),
+
+  /** Remove a job. Cancels first, so no daemon is left working on a deleted row. */
+  deleteJob: (jobId: string) =>
+    fetchApi<JobLifecycleResult>(`/api/v1/jobs/${jobId}`, { method: "DELETE" }),
     
   listDaemons: () => 
     fetchApi<Daemon[]>("/api/v1/daemons"),
