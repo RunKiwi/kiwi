@@ -8,6 +8,28 @@ export interface JobFilterOptions {
 
 export type JobSortOption = "newest" | "oldest" | "status";
 
+/**
+ * The job statuses the board can filter by, in the order they are offered.
+ * CANCELLED belongs here: a cancelled job is reachable from the queue and from
+ * the card actions, and leaving it out of the filter set would make every job a
+ * user called off findable only under "All".
+ */
+export const FILTERABLE_STATUSES = ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const;
+
+const SORT_OPTIONS: readonly JobSortOption[] = ["newest", "oldest", "status"];
+
+/** Coerce a `?status=` value to a filter the UI can render, else "all". */
+export function parseStatusParam(raw: string | null | undefined): string {
+  if (!raw) return "all";
+  const upper = raw.toUpperCase();
+  return (FILTERABLE_STATUSES as readonly string[]).includes(upper) ? upper : "all";
+}
+
+/** Coerce a `?sort=` value to a known sort, else the default. */
+export function parseSortParam(raw: string | null | undefined): JobSortOption {
+  return SORT_OPTIONS.includes(raw as JobSortOption) ? (raw as JobSortOption) : "newest";
+}
+
 export interface JobGroups {
   today: JobSummary[];
   yesterday: JobSummary[];
