@@ -110,6 +110,26 @@ export default function CommandCenter() {
     };
   }, [openPrJob]);
 
+  // Stand a primed confirm down on Escape or any click outside the primed button.
+  // This deliberately does not use onBlur: clicking a <button> does not focus it
+  // in every browser, so a blur-based reset can leave a destructive action armed
+  // indefinitely after the pointer has moved on.
+  useEffect(() => {
+    if (!confirmCancelJob && !confirmDeleteJob) return;
+    const standDown = () => { setConfirmCancelJob(null); setConfirmDeleteJob(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") standDown(); };
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("[data-confirm-action]")) return;
+      standDown();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [confirmCancelJob, confirmDeleteJob]);
+
   const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
   // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
   // its options are NOT gated by which keys the org has connected.
@@ -239,7 +259,9 @@ export default function CommandCenter() {
     RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
     SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
     FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
-    CANCELLED: { label: "Cancelled", Icon: XCircle, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(0,0,0,0)" },
+    // Cancelled is deliberately the quietest state on the board: it is not a
+    // failure, and it should not compete for attention with one.
+    CANCELLED: { label: "Cancelled", Icon: Ban, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(160,160,160,0.06)" },
   };
   // Neutral near-black card base — lets the status wash read as true colour.
   const CARD_BASE = "#0C0D10";
@@ -493,7 +515,7 @@ export default function CommandCenter() {
                           <button
                             type="button"
                             onClick={e => handleCardCancel(e, job.job_id)}
-                            onBlur={() => setConfirmCancelJob(null)}
+                            data-confirm-action
                             title="Cancel job"
                             className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                               confirmCancelJob === job.job_id
@@ -505,7 +527,10 @@ export default function CommandCenter() {
                             {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
                           </button>
                         )}
-                        {job.status === "FAILED" && (
+                        {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
+                            so a job you called off is resumable straight from the card
+                            rather than only from the drawer. */}
+                        {(job.status === "FAILED" || job.status === "CANCELLED") && (
                           <button
                             type="button"
                             onClick={e => handleCardRetry(e, job.job_id)}
@@ -520,7 +545,7 @@ export default function CommandCenter() {
                           <button
                             type="button"
                             onClick={e => handleCardDelete(e, job.job_id)}
-                            onBlur={() => setConfirmDeleteJob(null)}
+                            data-confirm-action
                             title="Delete job"
                             className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                               confirmDeleteJob === job.job_id
@@ -544,6 +569,8 @@ export default function CommandCenter() {
 
               {cardNotice?.jobId === job.job_id && (
                 <div
+                  role="status"
+                  aria-live="polite"
                   className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border ${
                     cardNotice.tasksAffected === 0
                       ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
