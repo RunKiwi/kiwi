@@ -1,0 +1,8 @@
+README.md
+setup.py
+kiwi/__init__.py
+kiwi_sdk.egg-info/PKG-INFO
+kiwi_sdk.egg-info/SOURCES.txt
+kiwi_sdk.egg-info/dependency_links.txt
+kiwi_sdk.egg-info/requires.txt
+kiwi_sdk.egg-info/top_level.txt

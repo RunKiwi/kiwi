@@ -142,11 +142,11 @@ npm ci && npm run dev                               # http://localhost:3000
 
 ## SDKs
 
-Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`:
+Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`, published as `@runkiwi/sdk` on npm and `kiwi-sdk` on PyPI. Each directory carries its own README, which is what the registry renders as the package page.
 
 ```js
 // Node (sdk/node)
-const { KiwiClient } = require('kiwi-sdk');
+const { KiwiClient } = require('@runkiwi/sdk');
 const client = new KiwiClient('http://localhost:8080', process.env.KIWI_TOKEN);
 await client.submitTask('Fix flaky test', 'pkg/foo/foo.go', 'go test ./...', './codebase.zip');
 ```
@@ -157,6 +157,8 @@ from kiwi import KiwiClient
 client = KiwiClient("http://localhost:8080", token)
 client.submit_task("Fix flaky test", "pkg/foo/foo.go", "go test ./...", "./codebase.zip")
 ```
+
+Both constructors refuse to send a token over cleartext HTTP to a non-local host.
 
 ## Webhooks
 
