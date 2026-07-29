@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { CheckCircle2, ChevronRight, Loader2, AlertCircle, Key, FolderGit2, Rocket, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { client, type Integration } from "@/lib/api";
+import { client, type Integration, type GithubRepo } from "@/lib/api";
 
 const STARTER_TASKS = [
   {
@@ -44,6 +44,21 @@ export default function OnboardingPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [selectedStarter, setSelectedStarter] = useState(STARTER_TASKS[0].id);
+  // A prefilled task with no repository cannot be launched — the composer
+  // requires one — so step 3 picks the repo here rather than dropping the user
+  // on the dashboard with a half-filled form.
+  const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [starterRepo, setStarterRepo] = useState("");
+
+  useEffect(() => {
+    if (step !== 3) return;
+    client.listGithubRepos()
+      .then(r => {
+        setRepos(r.repos);
+        setStarterRepo(prev => prev || r.repos[0]?.url || "");
+      })
+      .catch(() => {});
+  }, [step]);
 
   // Persist step to localStorage whenever it changes
   useEffect(() => {
@@ -105,8 +120,11 @@ export default function OnboardingPage() {
     setBusy(true);
     setErr("");
     try {
-      const secretName = modelProvider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
-      await client.setCredential(secretName, modelProvider, val);
+      // Name and kind must match the Integrations catalog exactly, or the key is
+      // stored under something the backend never looks up. Both model providers
+      // are kind "llm"; the provider is carried by the credential name.
+      const secretName = modelProvider === "gemini" ? "GEMINI_API_KEY" : "ANTHROPIC_API_KEY";
+      await client.setCredential(secretName, "llm", val);
       setStep(3);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to save model credential");
@@ -115,9 +133,10 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleLaunchStarter = (taskText: string) => {
+  const handleLaunchStarter = (taskText: string, repoUrl = "") => {
     if (typeof window !== "undefined") {
       localStorage.setItem("kiwi_starter_task", taskText);
+      localStorage.setItem("kiwi_starter_repo", repoUrl);
       localStorage.setItem("onboarded", "1");
       localStorage.removeItem("kiwi_onboarding_step");
     }
@@ -228,7 +247,7 @@ export default function OnboardingPage() {
                 )}
               </div>
               <p className="text-zinc-400 text-sm mb-4">
-                Kiwi is BYOC (Bring Your Own Keys). Enter your Anthropic or OpenAI API key to power planner and worker agents.
+                Kiwi runs on your own model key. Add an Anthropic or Gemini key to power the planner and worker agents.
               </p>
               {step === 2 && (
                 <div className="flex flex-col gap-3 max-w-md pt-2">
@@ -239,13 +258,13 @@ export default function OnboardingPage() {
                       className="field text-sm w-36 py-2"
                     >
                       <option value="anthropic">Anthropic</option>
-                      <option value="openai">OpenAI / Codex</option>
+                      <option value="gemini">Gemini</option>
                     </select>
                     <input
                       type="password"
                       value={modelKey}
                       onChange={(e) => setModelKey(e.target.value)}
-                      placeholder={modelProvider === "anthropic" ? "sk-ant-..." : "sk-..."}
+                      placeholder={modelProvider === "anthropic" ? "sk-ant-…" : "AIza…"}
                       className="flex-1 field text-sm"
                     />
                   </div>
@@ -323,22 +342,44 @@ export default function OnboardingPage() {
                     })}
                   </div>
 
+                  {repos.length > 0 ? (
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                        Repository
+                      </span>
+                      <select
+                        value={starterRepo}
+                        onChange={e => setStarterRepo(e.target.value)}
+                        className="field text-sm max-w-md"
+                      >
+                        {repos.map(r => (
+                          <option key={r.full_name} value={r.url}>{r.full_name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="text-xs text-amber-400/90">
+                      No repositories yet. Connect GitHub in step 1, then pick one here.
+                    </p>
+                  )}
+
                   <div className="flex items-center gap-3 pt-3">
                     <button
                       onClick={() => {
                         const starterObj = STARTER_TASKS.find((s) => s.id === selectedStarter);
-                        handleLaunchStarter(starterObj?.task || STARTER_TASKS[0].task);
+                        handleLaunchStarter(starterObj?.task || STARTER_TASKS[0].task, starterRepo);
                       }}
-                      className="flex items-center gap-2 btn-primary px-6 py-2.5 transition-colors"
+                      disabled={!starterRepo}
+                      className="flex items-center gap-2 btn-primary px-6 py-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <span>Launch Selected Goal</span>
+                      <span>Open in composer</span>
                       <ChevronRight className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleLaunchStarter("")}
                       className="text-xs text-zinc-400 hover:text-white transition-colors"
                     >
-                      Go to Dashboard (Blank)
+                      Skip to dashboard
                     </button>
                   </div>
                 </div>
