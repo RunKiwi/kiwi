@@ -87,14 +87,15 @@ export interface Job {
   tasks: JobTask[];
 }
 
-export interface JobLifecycleResponse {
+// Mirrors orchestrator.JobLifecycleResponse. tasks_affected is load-bearing: a
+// cancel on a job whose tasks all finished a moment earlier succeeds and changes
+// nothing, and the caller has to be able to tell the difference.
+export interface JobLifecycleResult {
   job_id: string;
   action: string;
   tasks_affected: number;
   message?: string;
 }
-
-export type JobLifecycleResult = JobLifecycleResponse;
 
 export interface JobSummary {
   job_id: string;
