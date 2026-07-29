@@ -112,6 +112,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // Reset transient UI when the drawer switches jobs, so a notice or a primed
   // delete confirmation cannot leak onto a different job. Adjusting during
@@ -123,6 +124,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     setPrevTaskId(taskId);
     setNotice(null);
     setConfirmDelete(false);
+    setConfirmCancel(false);
     setBusy(null);
   }
 
@@ -197,11 +199,13 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       const res = await fn();
       setNotice(res.message ?? `${label}: ${res.tasks_affected} task(s)`);
       if (taskId) await loadJob(taskId);
+      await useFleetStore.getState().loadJobs();
     } catch (e) {
       setNotice(e instanceof Error ? e.message : `${label} failed`);
     } finally {
       setBusy(null);
       setConfirmDelete(false);
+      setConfirmCancel(false);
     }
   };
 
@@ -237,11 +241,23 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       {currentJob && (
         <div className="flex items-center gap-2 px-6 py-3 border-b border-white/5 bg-black/20">
           <button
-            onClick={() => act("Stopped", () => client.cancelJob(currentJob.job_id))}
+            onClick={() => {
+              if (!confirmCancel) {
+                setConfirmCancel(true);
+                return;
+              }
+              act("Stopped", () => client.cancelJob(currentJob.job_id));
+            }}
+            onBlur={() => setConfirmCancel(false)}
             disabled={!canCancel || busy !== null}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              confirmCancel
+                ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
+                : "border-white/10 text-zinc-300 hover:bg-white/10"
+            }`}
           >
-            <Ban className="w-3.5 h-3.5" /> Stop
+            <Ban className="w-3.5 h-3.5" />
+            {confirmCancel ? "Click again to confirm" : "Stop"}
           </button>
           <button
             onClick={() => act("Retried", () => client.retryJob(currentJob.job_id))}
