@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,12 @@ export default function CommandCenter() {
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
   // Which job's PR list popover is open (job_id), if any.
   const [openPrJob, setOpenPrJob] = useState<string | null>(null);
+
+  // Job lifecycle action states
+  const [confirmCancelJob, setConfirmCancelJob] = useState<string | null>(null);
+  const [confirmDeleteJob, setConfirmDeleteJob] = useState<string | null>(null);
+  const [cardNotice, setCardNotice] = useState<{ jobId: string; message: string; tasksAffected: number } | null>(null);
+  const [cardBusyJob, setCardBusyJob] = useState<string | null>(null);
 
   // Form State — only task + repo are required. Everything else is a hint.
   const [task, setTask] = useState("");
@@ -104,6 +110,26 @@ export default function CommandCenter() {
     };
   }, [openPrJob]);
 
+  // Stand a primed confirm down on Escape or any click outside the primed button.
+  // This deliberately does not use onBlur: clicking a <button> does not focus it
+  // in every browser, so a blur-based reset can leave a destructive action armed
+  // indefinitely after the pointer has moved on.
+  useEffect(() => {
+    if (!confirmCancelJob && !confirmDeleteJob) return;
+    const standDown = () => { setConfirmCancelJob(null); setConfirmDeleteJob(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") standDown(); };
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("[data-confirm-action]")) return;
+      standDown();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [confirmCancelJob, confirmDeleteJob]);
+
   const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
   // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
   // its options are NOT gated by which keys the org has connected.
@@ -168,6 +194,63 @@ export default function CommandCenter() {
     }
   };
 
+  const handleCardCancel = async (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    if (confirmCancelJob !== jobId) {
+      setConfirmCancelJob(jobId);
+      setConfirmDeleteJob(null);
+      return;
+    }
+    setConfirmCancelJob(null);
+    setCardBusyJob(jobId);
+    setCardNotice(null);
+    try {
+      const res = await client.cancelJob(jobId);
+      setCardNotice({ jobId, message: res.message || "Cancelled", tasksAffected: res.tasks_affected });
+      await loadJobs();
+    } catch (err) {
+      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Cancel failed", tasksAffected: 0 });
+    } finally {
+      setCardBusyJob(null);
+    }
+  };
+
+  const handleCardRetry = async (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    setCardBusyJob(jobId);
+    setCardNotice(null);
+    try {
+      const res = await client.retryJob(jobId);
+      setCardNotice({ jobId, message: res.message || "Retried", tasksAffected: res.tasks_affected });
+      await loadJobs();
+    } catch (err) {
+      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Retry failed", tasksAffected: 0 });
+    } finally {
+      setCardBusyJob(null);
+    }
+  };
+
+  const handleCardDelete = async (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    if (confirmDeleteJob !== jobId) {
+      setConfirmDeleteJob(jobId);
+      setConfirmCancelJob(null);
+      return;
+    }
+    setConfirmDeleteJob(null);
+    setCardBusyJob(jobId);
+    setCardNotice(null);
+    try {
+      const res = await client.deleteJob(jobId);
+      setCardNotice({ jobId, message: res.message || "Deleted", tasksAffected: res.tasks_affected });
+      await loadJobs();
+    } catch (err) {
+      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Delete failed", tasksAffected: 0 });
+    } finally {
+      setCardBusyJob(null);
+    }
+  };
+
   // The 4 job states. Like the earlier design, each card sits on a neutral
   // near-black base (not navy — navy muddies the tint into grey) so a flat
   // whole-card colour wash reads true. Plus a matching border, badge, and glow.
@@ -176,6 +259,9 @@ export default function CommandCenter() {
     RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
     SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
     FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
+    // Cancelled is deliberately the quietest state on the board: it is not a
+    // failure, and it should not compete for attention with one.
+    CANCELLED: { label: "Cancelled", Icon: Ban, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(160,160,160,0.06)" },
   };
   // Neutral near-black card base — lets the status wash read as true colour.
   const CARD_BASE = "#0C0D10";
@@ -414,16 +500,92 @@ export default function CommandCenter() {
               className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">{shortId(job.job_id)}</span>
-                <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
-                  style={{ color: m.color, borderColor: m.border, background: m.wash }}>
-                  <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                  {m.label}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
+                    style={{ color: m.color, borderColor: m.border, background: m.wash }}>
+                    <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
+                    {m.label}
+                  </div>
+                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                    {cardBusyJob === job.job_id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                    ) : (
+                      <>
+                        {(job.status === "QUEUED" || job.status === "RUNNING") && (
+                          <button
+                            type="button"
+                            onClick={e => handleCardCancel(e, job.job_id)}
+                            data-confirm-action
+                            title="Cancel job"
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                              confirmCancelJob === job.job_id
+                                ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
+                                : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
+                            }`}
+                          >
+                            <Ban className="w-3 h-3 shrink-0" />
+                            {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
+                          </button>
+                        )}
+                        {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
+                            so a job you called off is resumable straight from the card
+                            rather than only from the drawer. */}
+                        {(job.status === "FAILED" || job.status === "CANCELLED") && (
+                          <button
+                            type="button"
+                            onClick={e => handleCardRetry(e, job.job_id)}
+                            title="Retry job"
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
+                          >
+                            <RotateCcw className="w-3 h-3 shrink-0" />
+                            Retry
+                          </button>
+                        )}
+                        {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
+                          <button
+                            type="button"
+                            onClick={e => handleCardDelete(e, job.job_id)}
+                            data-confirm-action
+                            title="Delete job"
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                              confirmDeleteJob === job.job_id
+                                ? "border-red-500/50 bg-red-500/20 text-red-300"
+                                : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
+                            }`}
+                          >
+                            <Trash2 className="w-3 h-3 shrink-0" />
+                            {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <h3 className="text-sm font-medium text-white mb-5 line-clamp-2 leading-snug flex-1">
+              <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
                 {job.task?.trim() || `Job ${shortId(job.job_id)}`}
               </h3>
+
+              {cardNotice?.jobId === job.job_id && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border ${
+                    cardNotice.tasksAffected === 0
+                      ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
+                      : "bg-green-500/10 border-green-500/20 text-green-300"
+                  }`}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {cardNotice.tasksAffected === 0 ? (
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  )}
+                  <span className="leading-tight">{cardNotice.message}</span>
+                </div>
+              )}
 
               <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
                 {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
