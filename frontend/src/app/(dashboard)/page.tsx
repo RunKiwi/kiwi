@@ -586,7 +586,9 @@ function CommandCenterContent() {
         {(submitError || submitSuccess) && (
           <div className="pt-3 mt-1">
             {submitError && (() => {
-              const err = parseActionableError(submitError);
+              // Plan matters: a Free org never goes through paid activation, so
+              // it must never be told to activate.
+              const err = parseActionableError(submitError, { plan: u?.plan });
               return (
                 <div className="flex items-center gap-2 text-red-400 text-sm">
                   <AlertCircle className="w-4 h-4 shrink-0" />
