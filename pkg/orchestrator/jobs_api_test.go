@@ -223,3 +223,38 @@ func TestHandleJobsList(t *testing.T) {
 		t.Errorf("expected j1 (FAILED), got %s (%s)", resp.Jobs[3].JobID, resp.Jobs[3].Status)
 	}
 }
+
+func TestSpecStrings(t *testing.T) {
+	// missing key -> nil
+	spec := map[string]interface{}{"other": "value"}
+	if got := specStrings(spec, "deps"); got != nil {
+		t.Errorf("expected nil for missing key, got %v", got)
+	}
+
+	// well-formed list round-trips
+	spec = map[string]interface{}{
+		"deps": []interface{}{"a", "b", "c"},
+	}
+	got := specStrings(spec, "deps")
+	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("expected [a b c], got %v", got)
+	}
+
+	// list containing a non-string -> only valid entries
+	spec = map[string]interface{}{
+		"deps": []interface{}{"a", 42, "b", map[string]interface{}{}},
+	}
+	got = specStrings(spec, "deps")
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("expected [a b], got %v", got)
+	}
+
+	// value that is a string rather than an array -> nil, no panic
+	spec = map[string]interface{}{
+		"deps": "not an array",
+	}
+	got = specStrings(spec, "deps")
+	if got != nil {
+		t.Errorf("expected nil for string value, got %v", got)
+	}
+}
