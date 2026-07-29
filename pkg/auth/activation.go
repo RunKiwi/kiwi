@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ActivateOrg activates the organization and enqueues a provisioning request.
@@ -34,7 +35,14 @@ func ActivateOrg(db *gorm.DB, orgID string) error {
 			Status:    "pending",
 			CreatedAt: time.Now(),
 		}
-		if err := tx.Create(&req).Error; err != nil {
+		// An org can already have a pending provision request — a submit enqueues
+		// one via the free-tier cold start. The idx_prov_one_pending_provision
+		// partial unique index then rejects this insert, and because the insert
+		// shares the transaction with the status change, the activation rolls back
+		// with it: the org stays inactive and the admin UI reports a duplicate-key
+		// error. A second request would be redundant anyway, so skip it.
+		// Matches planner.ensureFreeDaemon, which already inserts this way.
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&req).Error; err != nil {
 			return err
 		}
 
