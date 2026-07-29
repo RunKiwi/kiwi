@@ -96,6 +96,11 @@ export interface JobLifecycleResponse {
 
 export type JobLifecycleResult = JobLifecycleResponse;
 
+export interface ExecutionRecordResponse {
+  recordHash: string | null;
+  data: unknown;
+}
+
 export interface JobSummary {
   job_id: string;
   created_at: string;
@@ -255,6 +260,17 @@ export const client = {
     
   getJob: (jobId: string) => 
     fetchApi<Job>(`/api/v1/jobs/${jobId}`),
+
+  getJobRecord: async (jobId: string): Promise<ExecutionRecordResponse> => {
+    const res = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/record`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(text || res.statusText || "Record not found");
+    }
+    const recordHash = res.headers.get("X-Kiwi-Record-Hash");
+    const data = await res.json();
+    return { recordHash, data };
+  },
     
   listJobs: () =>
     fetchApi<JobsListResponse>("/api/v1/jobs"),
