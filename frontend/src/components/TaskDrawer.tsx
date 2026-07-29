@@ -1,6 +1,8 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import {
   X,
@@ -120,27 +122,47 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus restoration & keydown listener for Escape and Tab trap
+  const isOpen = !!taskId;
+
+  // onClose is typically redefined on every parent render, so it cannot sit in a
+  // dependency array here: the dashboard re-renders on each poll, which would
+  // re-run the focus effect every few seconds — stealing focus back to the drawer
+  // mid-interaction and overwriting the element we promised to restore focus to.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  // Capture and restore focus across the open/close transition only. Keyed on
+  // isOpen rather than taskId so switching between jobs does not bounce focus
+  // out to the card and back.
   useEffect(() => {
-    if (!taskId) return;
-
+    if (!isOpen) return;
     previousFocusRef.current = document.activeElement as HTMLElement | null;
+    drawerRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus?.();
+    };
+  }, [isOpen]);
 
-    if (drawerRef.current) {
-      drawerRef.current.focus();
-    }
+  // Escape to close, Tab to cycle within the dialog.
+  useEffect(() => {
+    if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
       if (e.key === "Tab" && drawerRef.current) {
-        const focusables = drawerRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
+        // Disabled controls are not focusable, so including them would hand the
+        // trap a first/last element that silently refuses focus and let Tab
+        // escape the dialog. Stop/Retry/Delete are all conditionally disabled.
+        const focusables = Array.from(
+          drawerRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter(el => el.offsetParent !== null || el === document.activeElement);
         if (focusables.length === 0) return;
 
         const first = focusables[0];
@@ -161,24 +183,27 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     };
 
     window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
-        previousFocusRef.current.focus();
-      }
-    };
-  }, [taskId, onClose]);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
 
   const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
-  const [recordLoading, setRecordLoading] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
 
-  // Fetch execution record when taskId changes
+  // A record is only assembled once a job reaches a terminal state, so asking
+  // for one mid-run just buys a guaranteed 404 on every drawer open. Wait until
+  // the job has actually finished.
+  const jobFinished =
+    !!currentJob && currentJob.tasks.length > 0 && currentJob.tasks.every(t => TERMINAL.has(t.status));
+
+  // Derived rather than held in state: the fetch is in flight exactly while the
+  // job is finished and neither a record nor an error has landed. Holding a
+  // separate flag would mean setting state from inside the effect body.
+  const recordPending = jobFinished && !record && !recordError;
+
   useEffect(() => {
-    if (!taskId) return;
+    if (!taskId || !jobFinished) return;
     let isSubscribed = true;
 
     client.getJobRecord(taskId)
@@ -191,21 +216,22 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       .catch(err => {
         if (isSubscribed) {
           setRecord(null);
+          // A job with no record is the normal case, not a failure worth
+          // reporting — the panel simply does not appear.
           setRecordError(err instanceof Error ? err.message : "No record available");
         }
       })
-      .finally(() => {
-        if (isSubscribed) {
-          setRecordLoading(false);
-        }
-      });
 
     return () => {
       isSubscribed = false;
     };
-  }, [taskId]);
+  }, [taskId, jobFinished]);
 
-  // Reset transient UI when the drawer switches jobs
+  // Reset transient UI when the drawer switches jobs, so a notice or a primed
+  // delete confirmation cannot leak onto a different job. Adjusting during
+  // render rather than in an effect is React's documented pattern for
+  // prop-derived state: it re-renders before committing, so the stale notice is
+  // never painted at all.
   const [prevTaskId, setPrevTaskId] = useState(taskId);
   if (taskId !== prevTaskId) {
     setPrevTaskId(taskId);
@@ -214,11 +240,10 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     setConfirmCancel(false);
     setBusy(null);
     setRecord(null);
+    setRecordError(null);
     setShowJson(false);
     setCopiedHash(false);
   }
-
-  const isCurrentJobTerminal = !!(currentJob?.tasks && currentJob.tasks.length > 0 && currentJob.tasks.every(t => TERMINAL.has(t.status)));
 
   usePolling(
     async () => {
@@ -230,7 +255,9 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       enabled: !!taskId,
       activeIntervalMs: 2500,
       idleIntervalMs: 15000,
-      isIdle: isCurrentJobTerminal,
+      // A finished job still gets an occasional check rather than none: the PR
+      // URL and result detail can land moments after the last task reports.
+      isIdle: jobFinished,
     }
   );
 
@@ -241,6 +268,9 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       case 'RUNNING':
       case 'LEASED': return <Activity className="w-4 h-4 text-blue-400" />;
       case 'QUEUED':
+        // A task nobody can run is not "in progress". Swapping the spinner for a
+        // static warning is the difference between the UI implying work is
+        // happening and admitting that none is.
         return BLOCKED_PRESENTATION[task.blocked_reason!]?.tone === "problem"
           ? <ServerCrash className="w-4 h-4 text-red-400" />
           : <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
@@ -252,6 +282,8 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   };
 
   const tasks = currentJob?.tasks ?? [];
+  // What is actionable depends on where the job is. Offering "stop" on a
+  // finished job or "retry" on a running one invites a click that does nothing.
   const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED");
   const canRetry = tasks.some(t => t.status === "FAILED" || t.status === "CANCELLED");
 
@@ -299,6 +331,8 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
           <div className="flex items-center gap-4">
             <div>
               <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
+                {/* The goal, not the id — an opaque job id says nothing about what
+                    is running, which is the first thing anyone opening this wants. */}
                 {currentJob?.task || "Job Details"}
                 {currentJob && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
@@ -382,7 +416,10 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       )}
 
       <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
-        {/* Execution Record Panel ("Verified receipt") */}
+        {/* Execution record. A record exists only for a finished job, and not
+            every finished job has one, so the panel appears when there is
+            something to show rather than advertising an absence. */}
+        {jobFinished && (recordPending || record) && (
         <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -397,7 +434,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
                   type="button"
                   onClick={() => {
                     if (record.recordHash) {
-                      navigator.clipboard.writeText(record.recordHash);
+                      navigator.clipboard?.writeText(record.recordHash);
                       setCopiedHash(true);
                       setTimeout(() => setCopiedHash(false), 2000);
                     }
@@ -411,48 +448,61 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
             )}
           </div>
 
-          {recordLoading ? (
+          {recordPending ? (
             <div className="flex items-center gap-2 text-xs text-zinc-500 py-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching provenance record…
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
             </div>
-          ) : recordError ? (
-            <p className="text-xs text-zinc-500 italic py-1">
-              Execution record pending — will be generated once all tasks complete.
-            </p>
           ) : record ? (
             <div className="flex flex-col gap-2.5">
-              {/* Summary Definition List */}
-              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-lg bg-black/30 border border-white/5 font-mono">
-                <div>
-                  <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">Hash</dt>
-                  <dd className="text-zinc-300 truncate" title={record.recordHash ?? "Unsigned"}>
-                    {record.recordHash ? record.recordHash.slice(0, 12) + "…" : "Unsigned"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">Status</dt>
-                  <dd className="text-green-400 font-semibold">Verified ✓</dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">Chain</dt>
-                  <dd className="text-zinc-300">Chained</dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">Payload</dt>
-                  <dd className="text-zinc-300">
-                    {typeof record.data === "object" && record.data ? `${Object.keys(record.data).length} fields` : "Valid JSON"}
-                  </dd>
-                </div>
-              </dl>
+              {/* What the record actually says. Every cell is read from the
+                  record itself — the panel reports the chain, it does not
+                  validate it, and must not imply otherwise. */}
+              {(() => {
+                const body = (record.data ?? {}) as ExecutionRecordBody;
+                const signed = body.attestation === "signed";
+                const cells: [string, string, string?][] = [
+                  ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
+                  [
+                    "Previous hash",
+                    body.prev_record_hash ? body.prev_record_hash : "genesis — first record for this org",
+                    body.prev_record_hash,
+                  ],
+                  ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", body.attestation],
+                  ["Signing key", body.record_signature?.key ?? "—", body.record_signature?.key],
+                ];
+                return (
+                  <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-lg bg-black/30 border border-white/5 font-mono">
+                    {cells.map(([label, value, full]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</dt>
+                        <dd
+                          className={`truncate ${label === "Attestation" && signed ? "text-green-400" : "text-zinc-300"}`}
+                          title={full ?? value}
+                        >
+                          {value.length > 14 ? value.slice(0, 12) + "…" : value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                );
+              })()}
+
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                A tamper-evident record of what ran: the plan, the commit, the test command
+                and its outcome, linked to the previous record in your organization&apos;s
+                chain. It attests to the execution, not to the correctness of the resulting
+                code.
+              </p>
 
               {/* Disclosure JSON toggle */}
               <button
                 type="button"
                 onClick={() => setShowJson(v => !v)}
+                aria-expanded={showJson}
                 className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors w-fit pt-0.5"
               >
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
-                <span>{showJson ? "Hide Raw Record JSON" : "View Raw Record JSON"}</span>
+                <span>{showJson ? "Hide raw record" : "View raw record"}</span>
               </button>
 
               {showJson && (
@@ -463,6 +513,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
             </div>
           ) : null}
         </div>
+        )}
 
         {currentJob ? (
           <div className="w-full flex flex-col gap-4">
