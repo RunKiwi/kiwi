@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useId } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 export interface SelectOption {
@@ -44,16 +44,18 @@ export function Select({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
-  const selected = options.find(o => o.value === value);
+  const selected = options.find((o) => o.value === value);
   const display = selected?.label ?? placeholder;
 
   const filtered = useMemo(() => {
     if (!searchable || !query.trim()) return options;
     const q = query.toLowerCase();
-    return options.filter(o => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
+    return options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
   }, [options, query, searchable]);
 
   // Close on outside click / Escape; focus the search field on open.
@@ -62,7 +64,12 @@ export function Select({
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     if (searchable) requestAnimationFrame(() => searchRef.current?.focus());
@@ -72,9 +79,9 @@ export function Select({
     };
   }, [open, searchable]);
 
-  // Open with the highlight already on the current selection (no effect setState).
+  // Open with the highlight already on the current selection.
   const openMenu = () => {
-    const idx = options.findIndex(o => o.value === value);
+    const idx = options.findIndex((o) => o.value === value);
     setActive(idx >= 0 ? idx : 0);
     setQuery("");
     setOpen(true);
@@ -87,31 +94,72 @@ export function Select({
     listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active, open]);
 
-  const pick = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
-
-  const onListKey = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive(a => Math.min(a + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(a => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) pick(filtered[active].value); }
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+    triggerRef.current?.focus();
   };
 
-  const chevron = <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />;
+  const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openMenu();
+    }
+  };
+
+  const onListKey = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((a) => Math.min(a + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((a) => Math.max(a - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[active]) pick(filtered[active].value);
+    }
+  };
+
+  const chevron = (
+    <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+  );
 
   return (
     <div ref={rootRef} className={`relative ${variant === "field" ? "w-full" : "inline-flex"}`}>
       {variant === "chip" ? (
-        <button type="button" aria-label={ariaLabel} aria-expanded={open}
+        <button
+          ref={triggerRef}
+          type="button"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
-          className={`chip cursor-pointer ${className}`}>
+          onKeyDown={onTriggerKeyDown}
+          className={`chip cursor-pointer ${className}`}
+        >
           {icon}
           {label && <span className="k">{label}</span>}
-          <span className="v truncate max-w-[170px]" style={{ color: selected ? undefined : "var(--tx-dim)" }}>{display}</span>
+          <span className="v truncate max-w-[170px]" style={{ color: selected ? undefined : "var(--tx-dim)" }}>
+            {display}
+          </span>
           {chevron}
         </button>
       ) : (
-        <button type="button" aria-label={ariaLabel} aria-expanded={open}
+        <button
+          ref={triggerRef}
+          type="button"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
-          className={`field flex items-center justify-between gap-2 text-left ${className}`}>
+          onKeyDown={onTriggerKeyDown}
+          className={`field flex items-center justify-between gap-2 text-left ${className}`}
+        >
           <span className="flex items-center gap-2 min-w-0">
             {icon}
             <span className={`truncate ${selected ? "text-[var(--tx)]" : "text-[var(--tx-dim)]"}`}>{display}</span>
@@ -122,6 +170,9 @@ export function Select({
 
       {open && (
         <div
+          id={listboxId}
+          role="listbox"
+          aria-label={ariaLabel || label || placeholder}
           onKeyDown={onListKey}
           className="pr-popover absolute top-full left-0 mt-2 z-50 min-w-[240px] w-max max-w-[340px] rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
         >
@@ -131,7 +182,10 @@ export function Select({
               <input
                 ref={searchRef}
                 value={query}
-                onChange={e => { setQuery(e.target.value); setActive(0); }}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setActive(0);
+                }}
                 placeholder="Search…"
                 className="bg-transparent outline-none border-0 text-sm text-white placeholder:text-zinc-600 w-full"
               />
@@ -147,10 +201,14 @@ export function Select({
                   <button
                     key={o.value || "__empty"}
                     type="button"
+                    role="option"
+                    aria-selected={isSel}
                     data-idx={i}
                     onMouseEnter={() => setActive(i)}
                     onClick={() => pick(o.value)}
-                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left transition-colors ${i === active ? "bg-white/[0.07]" : ""}`}
+                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left transition-colors ${
+                      i === active ? "bg-white/[0.07]" : ""
+                    }`}
                   >
                     <Check className={`w-3.5 h-3.5 shrink-0 ${isSel ? "text-[var(--green)]" : "text-transparent"}`} />
                     <span className={`truncate flex-1 ${isSel ? "text-white font-medium" : "text-zinc-200"}`}>{o.label}</span>

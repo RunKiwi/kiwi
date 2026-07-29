@@ -18,7 +18,23 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("kiwi_sidebar_collapsed");
+      if (saved !== null) return saved === "true";
+    }
+    return false; // Default open
+  });
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("kiwi_sidebar_collapsed", String(next));
+      }
+      return next;
+    });
+  };
   const { isAuthenticated, logout } = useAuth();
   const [orgName, setOrgName] = useState<string | null>("");
 
@@ -91,7 +107,7 @@ export default function DashboardLayout({
 
         <div className="pt-3 mt-2 border-t border-white/[0.06] flex flex-col gap-1">
           <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={toggleCollapse}
             className="w-full flex items-center justify-center gap-2 p-2 text-zinc-500 hover:text-white hover:bg-white/[0.04] rounded-xl transition-colors"
           >
             {isCollapsed ? <ChevronRight className="w-[18px] h-[18px]" /> : <><ChevronLeft className="w-[18px] h-[18px] shrink-0" /><span className="text-sm">Collapse</span></>}
