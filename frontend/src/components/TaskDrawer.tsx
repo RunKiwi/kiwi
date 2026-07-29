@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import {
@@ -109,12 +109,13 @@ function BlockedBanner({ task }: { task: JobTask }) {
 interface TaskDrawerProps {
   taskId: string | null;
   onClose: () => void;
+  onRerunWithEdits?: (job: Job) => void;
 }
 
 /** Terminal statuses — polling stops once every task reaches one of these. */
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 
-export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
+export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProps) {
   const { currentJob, loadJob } = useFleetStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -381,6 +382,19 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Retry
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (onRerunWithEdits && currentJob) {
+                onRerunWithEdits(currentJob);
+                onClose();
+              }
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5 text-[#93C645]" /> Re-run with edits
           </button>
 
           <div className="flex-1" />
