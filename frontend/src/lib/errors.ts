@@ -5,11 +5,27 @@ export interface ActionableError {
   code?: string;
 }
 
+/** What the caller knows about the org, where it changes the right advice. */
+export interface ErrorContext {
+  /** "free" | "pro" | … — a Free org never goes through paid activation. */
+  plan?: string;
+}
+
 /**
- * Maps raw server error codes, API error tracebacks, or HTTP status messages into
- * user-friendly error objects with actionable next steps and direct links.
+ * Status codes are matched on word boundaries, never as bare substrings. Job ids
+ * are `job_` + hex and routinely appear inside error text, so a naive
+ * `includes("402")` reports "your organization is inactive" for any unrelated
+ * failure on a job whose id happens to contain those digits.
  */
-export function parseActionableError(rawError: unknown): ActionableError {
+const has = (s: string, ...needles: (string | RegExp)[]) =>
+  needles.some(n => (typeof n === "string" ? s.includes(n) : n.test(s)));
+
+/**
+ * Turns a raw server error into something a user can act on. Anything we do not
+ * recognise falls through with the server's own words intact — an error we
+ * cannot explain is still more useful than one we have paraphrased away.
+ */
+export function parseActionableError(rawError: unknown, ctx: ErrorContext = {}): ActionableError {
   const errString =
     typeof rawError === "string"
       ? rawError
@@ -19,62 +35,119 @@ export function parseActionableError(rawError: unknown): ActionableError {
 
   const lower = errString.toLowerCase();
 
-  // 1. Payment required / 402 / inactive org
-  if (
-    lower.includes("402") ||
-    lower.includes("inactive") ||
-    lower.includes("activate to run") ||
-    lower.includes("payment required") ||
-    lower.includes("org is inactive")
-  ) {
+  // Suspended is checked before activation: both are activation_state values,
+  // but a suspended org is not one activation away from running.
+  if (has(lower, "suspended")) {
     return {
-      message: "Your organization is inactive. You can preview tasks, but you must activate to run tasks.",
+      message: "This organization is suspended, so tasks cannot run.",
+      actionLabel: "See details",
+      actionHref: "/settings#activation",
+      code: "SUSPENDED",
+    };
+  }
+
+  // Paid-plan activation. A Free org runs on the shared fleet without ever
+  // activating, so telling one to "activate" sends it somewhere with nothing
+  // to do — fall through to the server's own message instead.
+  if (has(lower, /\b402\b/, "payment required", "activate to run", "org is inactive", "organization is inactive")) {
+    if (ctx.plan === "free") {
+      return { message: errString };
+    }
+    return {
+      message: "This organization is inactive. You can plan tasks, but activating is required to run them.",
       actionLabel: "Activate in Settings",
       actionHref: "/settings#activation",
       code: "INACTIVE_ORG",
     };
   }
 
-  // 2. Provider credential errors (Anthropic / Codex / OpenAI / GitHub)
+  // Out of agent-minutes: a hard stop needing either a new month or a bigger
+  // plan. Distinct from the concurrency cap below, which clears on its own.
+  if (has(lower, "compute_cap", "compute cap", "out of agent-minutes", "agent-minutes", "agent minutes")) {
+    return {
+      message: "This organization is out of agent-minutes for the month, so new tasks will not start.",
+      actionLabel: "Review plan and usage",
+      actionHref: "/settings#plan",
+      code: "COMPUTE_CAP",
+    };
+  }
+
+  // Concurrency is a queue, not a wall. Sending someone to the pricing page for
+  // a limit that clears by itself in a minute is the wrong instruction.
+  if (has(lower, "concurrency_cap", "concurrency cap", "concurrent-task limit", "concurrent job")) {
+    return {
+      message: "This task is queued behind others — it starts as soon as a slot frees up.",
+      code: "CONCURRENCY_CAP",
+    };
+  }
+
+  // No runner / runner offline / provisioning failure all mean the same thing to
+  // the user: nothing is going to pick this up right now.
   if (
-    lower.includes("anthropic") ||
-    lower.includes("openai") ||
-    lower.includes("codex") ||
-    lower.includes("api key") ||
-    lower.includes("invalid key") ||
-    lower.includes("unauthorized") ||
-    lower.includes("401") ||
-    lower.includes("integration") ||
-    lower.includes("provider key")
+    has(
+      lower,
+      "no_runner",
+      "no runner",
+      "runner_offline",
+      "runner offline",
+      "no daemon",
+      "provision_failed",
+      "provisioning failed",
+      "runner failed to start",
+    )
+  ) {
+    return {
+      message: "No runner is available to pick up this work.",
+      actionLabel: "Check fleets",
+      actionHref: "/fleet",
+      code: "NO_RUNNER",
+    };
+  }
+
+  // Repository access — a token scope problem far more often than a typo.
+  if (
+    has(
+      lower,
+      "repository not found",
+      "repo not found",
+      "not accessible",
+      "could not clone",
+      "failed to clone",
+    )
+  ) {
+    return {
+      message: "That repository could not be reached. Check the URL, and that the connected GitHub token can read it.",
+      actionLabel: "Manage integrations",
+      actionHref: "/integrations",
+      code: "REPO_UNREACHABLE",
+    };
+  }
+
+  // Provider credentials. Deliberately narrow: matching a bare provider name
+  // would capture any error that merely mentions the provider, including a
+  // transient 500 that has nothing to do with the key.
+  if (
+    has(
+      lower,
+      /\b401\b/,
+      "unauthorized",
+      "invalid api key",
+      "invalid key",
+      "api key",
+      "rejected this credential",
+      "no provider key",
+      "provider key",
+      "missing credential",
+    )
   ) {
     return {
       message: errString,
-      actionLabel: "Manage Integrations",
+      actionLabel: "Manage integrations",
       actionHref: "/integrations",
       code: "CREDENTIAL_ERROR",
     };
   }
 
-  // 3. Compute cap / concurrency cap
-  if (
-    lower.includes("compute cap") ||
-    lower.includes("compute_cap") ||
-    lower.includes("out of agent-minutes") ||
-    lower.includes("agent minutes") ||
-    lower.includes("concurrency_cap") ||
-    lower.includes("concurrency cap") ||
-    lower.includes("concurrent-task limit")
-  ) {
-    return {
-      message: errString,
-      actionLabel: "Upgrade Plan",
-      actionHref: "/settings#plan",
-      code: "CAP_EXCEEDED",
-    };
-  }
-
-  // 4. Default fallback
-  return {
-    message: errString,
-  };
+  // Unrecognised: hand back exactly what the server said.
+  return { message: errString };
 }
