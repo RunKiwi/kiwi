@@ -32,9 +32,12 @@ export function setNotificationEnabled(enabled: boolean) {
 export function sendJobCompletionNotification(jobId: string, status: "SUCCEEDED" | "FAILED", taskGoal?: string) {
   if (!isNotificationEnabled()) return;
 
-  const isSuccess = status === "SUCCEEDED";
-  const title = isSuccess ? `Job Completed Successfully 🎉` : `Job Failed ❌`;
-  const body = taskGoal ? `Task: "${taskGoal.slice(0, 60)}${taskGoal.length > 60 ? "…" : ""}"` : `Job ${jobId.slice(0, 8)} is ${status.toLowerCase()}.`;
+  // Sentence case, no emoji — the rest of the interface uses neither, and a
+  // failure is not an occasion for decoration.
+  const title = status === "SUCCEEDED" ? "Job succeeded" : "Job failed";
+  const body = taskGoal
+    ? `${taskGoal.slice(0, 80)}${taskGoal.length > 80 ? "…" : ""}`
+    : `Job ${jobId.slice(0, 10)}`;
 
   try {
     const notification = new Notification(title, {
@@ -48,7 +51,8 @@ export function sendJobCompletionNotification(jobId: string, status: "SUCCEEDED"
         window.location.href = `/?job=${encodeURIComponent(jobId)}`;
       }
     };
-  } catch (err) {
-    console.error("Failed to send notification:", err);
+  } catch {
+    // Some browsers refuse construction outside a service worker. Nothing the
+    // user can act on, and the job outcome is already on screen.
   }
 }

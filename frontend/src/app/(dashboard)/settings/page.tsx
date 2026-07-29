@@ -1,24 +1,38 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Key, CheckCircle2, Loader2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle, Bell, BellOff } from "lucide-react";
+import Link from "next/link";
+import { Key, CheckCircle2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle, Bell, BellOff } from "lucide-react";
 import { client, type Integration } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
 import { PlanComparison } from "@/components/PlanComparison";
 import { isNotificationEnabled, setNotificationEnabled, requestNotificationPermission, getNotificationPermission } from "@/lib/notifications";
 
+// Mirrors the Integrations catalog. Listed here for status only — Settings does
+// not write credentials.
+const PROVIDER_CREDENTIALS = [
+  { key: "anthropic", label: "Anthropic", name: "ANTHROPIC_API_KEY" },
+  { key: "gemini", label: "Gemini", name: "GEMINI_API_KEY" },
+  { key: "git", label: "Git push token", name: "GIT_TOKEN" },
+];
+
 export default function SettingsPage() {
   const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [stats, setStats] = useState({ fleets: 0, daemons: 0, daemonsOnline: 0, jobs: 0, models: 0 });
+  // Notification state is read after mount: Notification.permission does not
+  // exist during prerender, so reading it in render would disagree with the
+  // server-rendered markup and hydrate wrong.
+  const [notifyOn, setNotifyOn] = useState(false);
+  const [permission, setPermission] = useState<string>("default");
 
-  const [anthropicKey, setAnthropicKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [gitToken, setGitToken] = useState("");
-  const [saving, setSaving] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
+    // Browser-only values, so they can only be read once mounted — the same
+    // reason the dashboard layout reads its org name this way.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNotifyOn(isNotificationEnabled());
+    setPermission(getNotificationPermission());
     client.validate().then(setOrg).catch(() => {});
     client.listIntegrations().then(r => setIntegrations(r.integrations)).catch(() => {});
     Promise.all([
@@ -29,14 +43,6 @@ export default function SettingsPage() {
     ]).then(([fleets, daemons, jobs, models]) =>
       setStats({ fleets, daemons: daemons.total, daemonsOnline: daemons.online, jobs, models }));
   }, []);
-
-  const save = async (label: string, name: string, kind: string, value: string, clear: (v: string) => void) => {
-    if (!value.trim()) return;
-    setSaving(label); setSaved(null);
-    try { await client.setCredential(name, kind, value); setSaved(label); clear(""); setTimeout(() => setSaved(null), 3000); }
-    catch { alert("Failed to save credential"); }
-    finally { setSaving(null); }
-  };
 
   const statCards = [
     { label: "Fleets", value: stats.fleets, icon: Layers },
@@ -124,69 +130,82 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Provider credentials */}
+      {/* Provider credentials — read-only here. Integrations owns the one write
+          path, so the same key is not enterable from three different screens
+          with three different forms. */}
       <div className="glass-panel p-6">
-        <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-5"><Key className="w-5 h-5 text-blue-400" /> Provider Credentials</h2>
-        <div className="space-y-5">
-          {([
-            { label: "Anthropic", name: "ANTHROPIC_API_KEY", kind: "llm", ph: "sk-ant-…", val: anthropicKey, set: setAnthropicKey },
-            { label: "Gemini", name: "GEMINI_API_KEY", kind: "llm", ph: "AIza…", val: geminiKey, set: setGeminiKey },
-            { label: "GitHub token", name: "GIT_TOKEN", kind: "git", ph: "github_pat_…", val: gitToken, set: setGitToken },
-          ]).map(row => (
-            <div key={row.label}>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">{row.label}</label>
-              <div className="flex gap-2">
-                <input type="password" value={row.val} onChange={e => row.set(e.target.value)} placeholder={row.ph}
-                  className="flex-1 field text-sm" />
-                <button onClick={() => save(row.label, row.name, row.kind, row.val, row.set)} disabled={saving === row.label || !row.val.trim()}
-                  className="btn-primary px-4 py-2 text-sm disabled:opacity-50 flex items-center gap-2 min-w-[80px] justify-center">
-                  {saving === row.label ? <Loader2 className="w-4 h-4 animate-spin" /> : saved === row.label ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : 'Save'}
-                </button>
+        <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-5"><Key className="w-5 h-5 text-blue-400" /> Provider credentials</h2>
+        <div className="space-y-3">
+          {PROVIDER_CREDENTIALS.map(row => {
+            const isConnected = integrations.some(i => i.key === row.key && i.connected);
+            return (
+              <div key={row.key} className="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+                <div className="min-w-0">
+                  <div className="text-sm text-zinc-200">{row.label}</div>
+                  <div className="font-mono text-[11px] text-zinc-500">{row.name}</div>
+                </div>
+                <span className={`flex items-center gap-1.5 text-xs shrink-0 ${isConnected ? "text-green-400" : "text-zinc-500"}`}>
+                  {isConnected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  {isConnected ? "Connected" : "Not connected"}
+                </span>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        <p className="text-xs text-zinc-500 mt-4">Keys are encrypted at rest and never shown again. Manage all connections under Integrations.</p>
+        <p className="text-xs text-zinc-500 mt-4">
+          Keys are encrypted at rest and never shown again.
+          <Link href="/integrations" className="underline ml-1 hover:text-zinc-300">Add or replace a key in Integrations</Link>.
+        </p>
       </div>
 
-      {/* Desktop Notifications Preference */}
+      {/* Desktop notifications */}
       <div className="glass-panel p-6">
         <h2 className="text-lg font-medium text-white flex items-center gap-2 mb-2">
-          <Bell className="w-5 h-5 text-amber-400" /> Desktop Completion Alerts
+          <Bell className="w-5 h-5 text-amber-400" /> Job notifications
         </h2>
         <p className="text-sm text-zinc-400 mb-4">
-          Receive a browser completion alert when background jobs finish processing.
+          Get a desktop notification when a job finishes, so you do not have to watch the tab.
         </p>
 
-        <div className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-black/20">
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-white">Browser Desktop Alerts</span>
-            <span className="text-xs text-zinc-500">
-              Permission status: <strong className="text-zinc-300 capitalize">{getNotificationPermission()}</strong>
-            </span>
+        <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-white/10 bg-black/20">
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium text-white">Notify me when a job finishes</span>
+            {permission === "denied" ? (
+              <span className="text-xs text-amber-400/90">
+                Blocked by your browser. Allow notifications for this site in the address bar, then switch this on.
+              </span>
+            ) : permission === "unsupported" ? (
+              <span className="text-xs text-zinc-500">This browser does not support notifications.</span>
+            ) : (
+              <span className="text-xs text-zinc-500">
+                {notifyOn ? "On — sent once per job, when it reaches a final state." : "Off"}
+              </span>
+            )}
           </div>
 
           <button
             type="button"
             role="switch"
-            aria-checked={isNotificationEnabled()}
+            aria-checked={notifyOn}
+            disabled={permission === "denied" || permission === "unsupported"}
             onClick={async () => {
-              if (!isNotificationEnabled()) {
-                await requestNotificationPermission();
-              } else {
+              if (notifyOn) {
                 setNotificationEnabled(false);
+                setNotifyOn(false);
+                return;
               }
-              // Force re-render by updating dummy state or reloading window location
-              window.dispatchEvent(new Event("storage"));
+              const granted = await requestNotificationPermission();
+              setNotifyOn(granted);
+              setPermission(getNotificationPermission());
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${
-              isNotificationEnabled()
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
+              notifyOn
                 ? "border-green-500/40 bg-green-500/20 text-green-300"
                 : "border-white/10 bg-white/5 text-zinc-400 hover:text-white"
             }`}
           >
-            {isNotificationEnabled() ? <Bell className="w-4 h-4 text-green-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
-            <span>{isNotificationEnabled() ? "Enabled" : "Enable Notifications"}</span>
+            {notifyOn ? <Bell className="w-4 h-4 text-green-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
+            <span>{notifyOn ? "On" : "Turn on"}</span>
           </button>
         </div>
       </div>

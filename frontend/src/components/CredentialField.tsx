@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Copy, Check, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 
 export interface CredentialFieldProps {
   id: string;
@@ -29,14 +29,6 @@ export function CredentialField({
   isError = false,
 }: CredentialFieldProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (!value) return;
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div className="flex flex-col gap-2 w-full">
@@ -48,19 +40,13 @@ export function CredentialField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={connected ? "•••••••• (paste to replace)" : placeholder}
-            className="w-full field text-sm pr-16"
+            className="w-full field text-sm pr-10"
           />
+          {/* No copy control here by design. This field takes a secret in; the
+              user already holds it. Offering to copy it would put a live API key
+              on the system clipboard, readable by anything else running, for no
+              benefit. Reveal is kept so a mistyped key can be checked. */}
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-            {value && (
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="p-1 text-zinc-400 hover:text-white transition-colors"
-                title="Copy token"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
