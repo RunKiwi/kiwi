@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { KIWI_MARK_PATH } from "@/components/Logo";
 
 // Branded social-card image for link unfurls (Slack, Twitter, etc.). Next wires
 // this to og:image and twitter:image automatically.
@@ -34,14 +35,12 @@ export default function OpengraphImage() {
               boxShadow: "0 0 48px rgba(147,198,69,0.35)",
             }}
           >
-            {/* Kiwi-bird mark, inline so Satori renders it natively. The eye is
-                an overpainted navy dot (no <mask>, which the rasterizer rejects). */}
-            <svg width={72} height={72} viewBox="0 0 128 128" fill="#93C645">
-              <path d="M46,40 C58,28 82,26 96,42 C112,52 110,66 104,74 C98,90 80,100 60,98 C46,96 36,86 34,74 C31,64 34,50 46,40 Z" />
-              <path d="M36,60 C25,68 16,80 8,94 C19,85 30,79 40,72 Z" />
-              <path d="M60,96 L60,112" stroke="#93C645" strokeWidth={6} strokeLinecap="round" fill="none" />
-              <path d="M76,98 L76,112" stroke="#93C645" strokeWidth={6} strokeLinecap="round" fill="none" />
-              <circle cx={54} cy={52} r={4.2} fill="#0E1A24" />
+            {/* Kiwi mark, inline so Satori renders it natively. The shared path
+                punches the eye with fill-rule evenodd; Satori honours it, and
+                unlike a <mask> — which the rasterizer rejects — it needs no
+                overpainted dot in the tile colour to fake the counter. */}
+            <svg width={76} height={76} viewBox="0 0 128 128" fill="#93C645" fillRule="evenodd">
+              <path d={KIWI_MARK_PATH} />
             </svg>
           </div>
           <div style={{ fontSize: "56px", fontWeight: 700, letterSpacing: "-1px" }}>Kiwi</div>
