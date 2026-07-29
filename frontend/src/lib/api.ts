@@ -87,12 +87,14 @@ export interface Job {
   tasks: JobTask[];
 }
 
-export interface JobLifecycleResult {
+export interface JobLifecycleResponse {
   job_id: string;
   action: string;
   tasks_affected: number;
   message?: string;
 }
+
+export type JobLifecycleResult = JobLifecycleResponse;
 
 export interface JobSummary {
   job_id: string;
