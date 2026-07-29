@@ -84,17 +84,20 @@ function CommandCenterContent() {
   }
 
   // Form State — only task + repo are required. Everything else is a hint.
-  const [task, setTask] = useState(() => {
-    if (typeof window !== "undefined") {
-      const starter = localStorage.getItem("kiwi_starter_task");
-      if (starter) {
-        localStorage.removeItem("kiwi_starter_task");
-        return starter;
-      }
-    }
-    return "";
-  });
-  const [repoUrl, setRepoUrl] = useState("");
+  // Hand-off from onboarding. The initializers only read — clearing happens in
+  // the effect below. Consuming inside an initializer would break under
+  // StrictMode, which invokes it twice in development: the first pass would
+  // take and delete the value, the second would find nothing, and the starter
+  // task would silently vanish.
+  const starterOf = (key: string) =>
+    typeof window === "undefined" ? "" : localStorage.getItem(key) ?? "";
+  const [task, setTask] = useState(() => starterOf("kiwi_starter_task"));
+  const [repoUrl, setRepoUrl] = useState(() => starterOf("kiwi_starter_repo"));
+
+  useEffect(() => {
+    localStorage.removeItem("kiwi_starter_task");
+    localStorage.removeItem("kiwi_starter_repo");
+  }, []);
   const [fleetId, setFleetId] = useState("");
   const [plannerModel, setPlannerModel] = useState(DEFAULT_PLANNER_MODEL);
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
@@ -119,6 +122,13 @@ function CommandCenterContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+
+  // Two different ceilings with two different meanings. Running out of
+  // agent-minutes stops work until the month rolls over or the plan changes;
+  // hitting the concurrency limit only means the next task waits its turn.
+  const outOfMinutes = !!u && u.agent_minutes_limit > 0 && u.agent_minutes_used >= u.agent_minutes_limit;
+  const atConcurrencyLimit =
+    !!u && u.max_concurrent_jobs > 0 && u.concurrent_jobs_running >= u.max_concurrent_jobs;
 
   // Idle means nothing can change without a user action, so the board can back
   // off. An empty board counts as idle: there is nothing to watch.
@@ -255,6 +265,9 @@ function CommandCenterContent() {
         reference_job_ids: inlineData.reference_mode === "manual" ? inlineData.reference_job_ids : (referenceMode === "manual" ? referenceJobIds : undefined),
       });
       setSubmitSuccess(resp.job_id);
+      // The launch just spent budget; refresh so the meter beside this button
+      // reflects it rather than the figure from page load.
+      client.getUsage().then(setU).catch(() => {});
       setTask("");
       setInlineData({});
       loadJobs();
@@ -500,10 +513,11 @@ function CommandCenterContent() {
                     ? "border-amber-500/40 text-amber-300"
                     : "border-white/10 text-zinc-300"
                 }`}
-                title={`${u.agent_minutes_used} of ${u.agent_minutes_limit} agent minutes used (${usagePct}%)`}
+                title={`${u.agent_minutes_used.toFixed(1)} of ${u.agent_minutes_limit} agent-minutes used this month (${usagePct}%)`}
               >
                 <Gauge className={`w-3.5 h-3.5 ${isOverCap ? "text-red-400" : usagePct > 80 ? "text-amber-400" : "text-green-400"}`} />
-                <span>{u.agent_minutes_used}/{u.agent_minutes_limit}m</span>
+                {/* Metered as a float; unrounded it renders as 12.333333333. */}
+                <span>{u.agent_minutes_used.toFixed(1)}/{u.agent_minutes_limit}m</span>
                 <div className="w-10 h-1.5 rounded-full bg-white/10 overflow-hidden">
                   <div
                     className={`h-full transition-all ${isOverCap ? "bg-red-500" : usagePct > 80 ? "bg-amber-500" : "bg-green-500"}`}
@@ -516,7 +530,10 @@ function CommandCenterContent() {
 
           <button
             onClick={handleSubmit}
-            disabled={isSubmitting || (!!u && u.agent_minutes_limit > 0 && u.agent_minutes_used >= u.agent_minutes_limit)}
+            disabled={isSubmitting || outOfMinutes}
+            // A control that refuses to work has to say so. Without this the
+            // button just goes dim and the reason lives only in a colour.
+            title={outOfMinutes ? "Out of agent-minutes for this month" : undefined}
             className="btn-primary px-5 py-2 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Launching…</> : <>Launch <ArrowRight className="w-4 h-4" /></>}
@@ -613,11 +630,38 @@ function CommandCenterContent() {
           </div>
         )}
 
+        {/* Why Launch will not do what you expect, stated before you press it. */}
+        {(outOfMinutes || atConcurrencyLimit) && (
+          <div className="pt-3 mt-1">
+            {outOfMinutes ? (
+              <div className="flex items-center gap-2 text-sm text-red-400">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>
+                  Out of agent-minutes for this month, so new tasks will not start.
+                  <Link href="/settings#plan" className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
+                    Review plan and usage →
+                  </Link>
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-amber-400/90">
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>
+                  {u?.concurrent_jobs_running} of {u?.max_concurrent_jobs} concurrent
+                  {" "}job{u?.max_concurrent_jobs === 1 ? "" : "s"} running — this task will queue until one finishes.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Status line */}
         {(submitError || submitSuccess) && (
           <div className="pt-3 mt-1">
             {submitError && (() => {
-              const err = parseActionableError(submitError);
+              // Plan matters: a Free org never goes through paid activation, so
+              // it must never be told to activate.
+              const err = parseActionableError(submitError, { plan: u?.plan });
               return (
                 <div className="flex items-center gap-2 text-red-400 text-sm">
                   <AlertCircle className="w-4 h-4 shrink-0" />
