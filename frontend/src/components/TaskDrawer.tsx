@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse } from "@/lib/api";
+import { usePolling } from "@/hooks/usePolling";
 import {
   X,
   Activity,
@@ -217,38 +218,21 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     setCopiedHash(false);
   }
 
-  useEffect(() => {
-    if (!taskId) return;
+  const isCurrentJobTerminal = !!(currentJob?.tasks && currentJob.tasks.length > 0 && currentJob.tasks.every(t => TERMINAL.has(t.status)));
 
-    let isPolling = true;
-
-    const fetchAndCheck = async () => {
-      if (!isPolling) return;
-      await loadJob(taskId);
-      const state = useFleetStore.getState();
-      if (state.currentJob && state.currentJob.tasks && state.currentJob.tasks.length > 0) {
-        const isTerminal = state.currentJob.tasks.every(t => TERMINAL.has(t.status));
-        if (isTerminal) {
-          isPolling = false;
-        }
+  usePolling(
+    async () => {
+      if (taskId) {
+        await loadJob(taskId);
       }
-    };
-
-    fetchAndCheck();
-    
-    const interval = setInterval(() => {
-      if (isPolling) {
-        fetchAndCheck();
-      } else {
-        clearInterval(interval);
-      }
-    }, 2500);
-
-    return () => {
-      isPolling = false;
-      clearInterval(interval);
-    };
-  }, [taskId, loadJob]);
+    },
+    {
+      enabled: !!taskId,
+      activeIntervalMs: 2500,
+      idleIntervalMs: 15000,
+      isIdle: isCurrentJobTerminal,
+    }
+  );
 
   if (!taskId && !currentJob) return null;
 

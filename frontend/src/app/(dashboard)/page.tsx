@@ -10,6 +10,7 @@ import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, pr
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, type JobSortOption } from "@/lib/jobFilters";
+import { usePolling } from "@/hooks/usePolling";
 
 function CommandCenterContent() {
   const { jobs, loadJobs } = useFleetStore();
@@ -84,11 +85,20 @@ function CommandCenterContent() {
 
   const router = useRouter();
 
+  const allJobsTerminal = useMemo(() => {
+    if (jobs.length === 0) return true;
+    return jobs.every(j => j.status === "SUCCEEDED" || j.status === "FAILED" || j.status === "CANCELLED");
+  }, [jobs]);
+
   useEffect(() => {
     loadJobs();
-    const interval = setInterval(() => loadJobs(), 3000);
-    return () => clearInterval(interval);
   }, [loadJobs]);
+
+  usePolling(loadJobs, {
+    activeIntervalMs: 2500,
+    idleIntervalMs: 15000,
+    isIdle: allJobsTerminal,
+  });
 
   useEffect(() => {
     client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
