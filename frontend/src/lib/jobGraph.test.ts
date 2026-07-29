@@ -97,6 +97,44 @@ describe("buildJobGraph", () => {
     assert.equal(graph.height, 3);
   });
 
+  // A running worker reports LEASED, not RUNNING. Nothing here depends on the
+  // presentation layer, but the graph must still treat it as unfinished: an
+  // edge out of a leased task is not satisfied, because the queue will not
+  // lease its dependents until it SUCCEEDEDs.
+  it("treats a LEASED dependency as unsatisfied", () => {
+    const tasks = [
+      mockTask("job1-A", [], "LEASED"),
+      mockTask("job1-B", ["A"]),
+    ];
+    const graph = buildJobGraph("job1", tasks);
+    assert.equal(graph.edges.length, 1);
+    assert.equal(graph.edges[0].satisfied, false);
+  });
+
+  it("marks an edge satisfied only when the dependency SUCCEEDED", () => {
+    for (const status of ["QUEUED", "LEASED", "FAILED", "CANCELLED"]) {
+      const graph = buildJobGraph("job1", [
+        mockTask("job1-A", [], status),
+        mockTask("job1-B", ["A"]),
+      ]);
+      assert.equal(graph.edges[0].satisfied, false, `${status} must not satisfy`);
+    }
+    const done = buildJobGraph("job1", [
+      mockTask("job1-A", [], "SUCCEEDED"),
+      mockTask("job1-B", ["A"]),
+    ]);
+    assert.equal(done.edges[0].satisfied, true);
+  });
+
+  it("collapses a dependency named twice into one edge", () => {
+    const tasks = [
+      mockTask("job1-A"),
+      mockTask("job1-B", ["A", "A"]),
+    ];
+    const graph = buildJobGraph("job1", tasks);
+    assert.equal(graph.edges.length, 1);
+  });
+
   it("produces stable ordering with shuffled input", () => {
     const tasks1 = [
       mockTask("job1-Z", ["A"]),

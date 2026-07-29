@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
+import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -13,7 +13,7 @@ import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import { sendJobCompletionNotification } from "@/lib/notifications";
-import { STATUS, statusOf } from "@/lib/statusColors";
+import { statusOf, CARD_BASE } from "@/lib/statusColors";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
