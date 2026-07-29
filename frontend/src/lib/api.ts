@@ -68,6 +68,9 @@ export interface JobTask {
   status: string;
   /** This worker's own goal, from its spec. */
   task?: string;
+  depends_on?: string[];
+  model?: string;
+  files?: string[];
   result_url?: string;
   result_detail?: string;
   queued_at: string;

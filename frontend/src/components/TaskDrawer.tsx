@@ -23,6 +23,7 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
+import { JobGraph } from "@/components/JobGraph";
 
 /**
  * How each blocked reason is presented. The split that matters is severity:
@@ -541,9 +542,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
 
         {currentJob ? (
           <div className="w-full flex flex-col gap-4">
+            <JobGraph jobId={currentJob.job_id} tasks={currentJob.tasks} />
             <h3 className="text-lg font-semibold">Tasks</h3>
             {currentJob.tasks.map(task => (
-              <div key={task.id} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl">
+              <div key={task.id} id={`task-${task.id}`} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl scroll-mt-24 target:ring-2 target:ring-white/20 target:bg-white/5 transition-all">
                 <div className="flex justify-between gap-4">
                   <div className="min-w-0">
                     {task.task && <div className="text-sm text-white">{task.task}</div>}
