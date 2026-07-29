@@ -98,10 +98,15 @@ func (OrgJoinRequest) TableName() string { return "org_join_requests" }
 
 // ProvisioningRequest represents a request to provision or reclaim a per-org daemon VM.
 type ProvisioningRequest struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	OrgID     string    `json:"org_id" gorm:"index;not null"`
-	Type      string    `json:"type" gorm:"not null"`                   // "provision" or "reclaim"
-	Status    string    `json:"status" gorm:"not null;default:pending"` // pending, in_progress, completed, failed
+	ID     string `json:"id" gorm:"primaryKey"`
+	OrgID  string `json:"org_id" gorm:"index;not null"`
+	Type   string `json:"type" gorm:"not null"`                   // "provision" or "reclaim"
+	Status string `json:"status" gorm:"not null;default:pending"` // pending, in_progress, completed, failed
+	// Error records why a failed request failed. A failed request is terminal and
+	// is never retried, so without this the reason exists only in a log line on
+	// the provisioning host — and the org whose runner never started has no way to
+	// see it. It is surfaced as the blocked reason on the tasks left stranded.
+	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is GORM-managed (bumped on every Update), so it marks when a row
 	// was last claimed/settled. The stale-in_progress sweep uses it to find rows

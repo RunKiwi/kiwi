@@ -52,11 +52,29 @@ export interface PlanResponse {
   summary: string;
 }
 
+/** Why a QUEUED task has not started. Mirrors store.Block* in the Go backend. */
+export type BlockedReason =
+  | "awaiting_runner"
+  | "provisioning"
+  | "provision_failed"
+  | "no_runner"
+  | "runner_offline"
+  | "concurrency_cap"
+  | "compute_cap"
+  | "waiting_on_dependencies";
+
 export interface JobTask {
   id: string;
   status: string;
   result_url?: string;
   result_detail?: string;
+  queued_at: string;
+  started_at?: string;
+  attempts: number;
+  leased_by?: string;
+  /** Set only while the task is QUEUED; blocked_detail is the sentence to show. */
+  blocked_reason?: BlockedReason;
+  blocked_detail?: string;
 }
 
 export interface Job {

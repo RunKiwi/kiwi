@@ -2,7 +2,99 @@
 
 import { useEffect } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { X, Activity, Loader2, CheckCircle2, GitPullRequest } from "lucide-react";
+import type { BlockedReason, JobTask } from "@/lib/api";
+import {
+  X,
+  Activity,
+  Loader2,
+  CheckCircle2,
+  GitPullRequest,
+  AlertTriangle,
+  Clock,
+  ServerCrash,
+} from "lucide-react";
+
+/**
+ * How each blocked reason is presented. The split that matters is severity:
+ * `waiting` reasons resolve on their own and should read as patience, while
+ * `problem` reasons will never resolve without someone acting, and must not be
+ * dressed up as progress — that ambiguity is exactly what made a job with no
+ * runner look identical to one about to start.
+ */
+const BLOCKED_PRESENTATION: Record<
+  BlockedReason,
+  { label: string; tone: "waiting" | "problem" }
+> = {
+  awaiting_runner: { label: "Waiting for a runner", tone: "waiting" },
+  provisioning: { label: "Starting your runner", tone: "waiting" },
+  waiting_on_dependencies: { label: "Waiting on earlier tasks", tone: "waiting" },
+  concurrency_cap: { label: "At your concurrent-task limit", tone: "waiting" },
+  compute_cap: { label: "Out of agent-minutes this month", tone: "problem" },
+  provision_failed: { label: "Runner failed to start", tone: "problem" },
+  no_runner: { label: "No runner connected", tone: "problem" },
+  runner_offline: { label: "Runner offline", tone: "problem" },
+};
+
+/** Compact age of an ISO timestamp: "12s", "4m", "2h", "3d". */
+function since(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+/** The one-line timing summary under a task: how long it has been where it is. */
+function timingLabel(task: JobTask): string {
+  const parts: string[] = [];
+  if (task.status === "QUEUED" && task.queued_at) {
+    parts.push(`queued ${since(task.queued_at)}`);
+  } else if (task.status === "LEASED" && task.started_at) {
+    parts.push(`running ${since(task.started_at)}`);
+  }
+  if (task.attempts > 1) parts.push(`attempt ${task.attempts}`);
+  if (task.leased_by) parts.push(task.leased_by);
+  return parts.join(" · ");
+}
+
+function BlockedBanner({ task }: { task: JobTask }) {
+  if (!task.blocked_reason) return null;
+  const p = BLOCKED_PRESENTATION[task.blocked_reason];
+  // An unrecognised code (a newer backend) still shows its detail rather than
+  // silently rendering nothing.
+  const label = p?.label ?? "Not started";
+  const problem = p?.tone === "problem";
+
+  return (
+    <div
+      className={`mt-1 flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+        problem
+          ? "border-red-500/30 bg-red-500/10"
+          : "border-amber-500/25 bg-amber-500/5"
+      }`}
+    >
+      {problem ? (
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+      ) : (
+        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+      )}
+      <div className="min-w-0">
+        <div
+          className={`text-xs font-medium ${problem ? "text-red-300" : "text-amber-300"}`}
+        >
+          {label}
+        </div>
+        {task.blocked_detail && (
+          <div className="mt-0.5 text-xs text-zinc-400">{task.blocked_detail}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface TaskDrawerProps {
   taskId: string | null;
@@ -51,12 +143,19 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     <div className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col translate-x-full`}></div>
   );
 
-  const getPhaseIcon = (phase: string) => {
-    switch (phase) {
+  const getPhaseIcon = (task: JobTask) => {
+    switch (task.status) {
       case 'RUNNING':
       case 'LEASED': return <Activity className="w-4 h-4 text-blue-400" />;
-      case 'QUEUED': return <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
+      case 'QUEUED':
+        // A task nobody can run is not "in progress". Swapping the spinner for a
+        // static warning is the difference between the UI implying work is
+        // happening and admitting that none is.
+        return BLOCKED_PRESENTATION[task.blocked_reason!]?.tone === "problem"
+          ? <ServerCrash className="w-4 h-4 text-red-400" />
+          : <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
       case 'SUCCEEDED': return <CheckCircle2 className="w-4 h-4 text-green-400" />;
+      case 'FAILED': return <AlertTriangle className="w-4 h-4 text-red-400" />;
       default: return null;
     }
   };
@@ -93,9 +192,13 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
                  <div className="flex justify-between">
                    <span className="font-mono text-sm">{task.id}</span>
                    <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2">
-                     {getPhaseIcon(task.status)} {task.status}
+                     {getPhaseIcon(task)} {task.status}
                    </span>
                  </div>
+                 {timingLabel(task) && (
+                   <div className="text-xs text-zinc-500 font-mono">{timingLabel(task)}</div>
+                 )}
+                 <BlockedBanner task={task} />
                  {task.result_url && (
                    <a href={task.result_url} target="_blank" rel="noreferrer" className="text-blue-400 text-sm hover:underline flex items-center gap-2 mt-2">
                      <GitPullRequest className="w-4 h-4" /> View PR
