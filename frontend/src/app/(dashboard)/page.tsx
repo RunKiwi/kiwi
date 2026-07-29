@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -231,6 +231,16 @@ function CommandCenterContent() {
       document.removeEventListener("mousedown", onDown);
     };
   }, [confirmCancelJob, confirmDeleteJob]);
+
+  const handleRerunWithEdits = (job: { task?: string; repo?: string; fleet_id?: string }) => {
+    setTask(job.task || "");
+    if (job.repo) setRepoUrl(job.repo);
+    if (job.fleet_id) setFleetId(job.fleet_id);
+
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
   // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
@@ -848,15 +858,29 @@ function CommandCenterContent() {
                                         so a job you called off is resumable straight from the card
                                         rather than only from the drawer. */}
                                     {(job.status === "FAILED" || job.status === "CANCELLED") && (
-                                      <button
-                                        type="button"
-                                        onClick={e => handleCardRetry(e, job.job_id)}
-                                        title="Retry job"
-                                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
-                                      >
-                                        <RotateCcw className="w-3 h-3 shrink-0" />
-                                        Retry
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={e => handleCardRetry(e, job.job_id)}
+                                          title="Retry job"
+                                          className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
+                                        >
+                                          <RotateCcw className="w-3 h-3 shrink-0" />
+                                          Retry
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            handleRerunWithEdits(job);
+                                          }}
+                                          title="Re-run with edits"
+                                          className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-[#93C645] hover:border-[#93C645]/30 hover:bg-[#93C645]/10 transition-colors"
+                                        >
+                                          <Copy className="w-3 h-3 shrink-0" />
+                                          Re-run
+                                        </button>
+                                      </>
                                     )}
                                     {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
                                       <button
@@ -985,7 +1009,7 @@ function CommandCenterContent() {
         </div>
       )}
 
-      <TaskDrawer taskId={activeDrawerTaskId} onClose={closeJobDrawer} />
+      <TaskDrawer taskId={activeDrawerTaskId} onClose={closeJobDrawer} onRerunWithEdits={handleRerunWithEdits} />
     </div>
   );
 }

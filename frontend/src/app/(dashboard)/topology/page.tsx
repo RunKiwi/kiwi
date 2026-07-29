@@ -11,8 +11,9 @@ const nodeBase = {
   borderRadius: 12,
   fontSize: 12,
   color: "#fff",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(20,20,25,0.9)",
+  border: "1px solid var(--line, rgba(255,255,255,0.12))",
+  background: "var(--panel, rgba(14,26,36,0.95))",
+  boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
   width: 170,
   textAlign: "center" as const,
 };
@@ -45,7 +46,7 @@ export default function TopologyPage() {
 
     computedNodes.push({
       id: "cp", position: { x: 420, y: 0 }, data: { label: "Control Plane" },
-      style: { ...nodeBase, background: "rgba(147,198,69,0.15)", border: "1px solid #93C645", width: 190 },
+      style: { ...nodeBase, background: "rgba(147,198,69,0.15)", border: "1px solid var(--green, #93C645)", width: 190 },
       sourcePosition: "bottom" as never, targetPosition: "top" as never,
     });
     meta["cp"] = { kind: "Control Plane", title: "Control Plane", lines: [["Role", "Plans tasks & hands out work"]] };
