@@ -32,8 +32,5 @@
       "Bash(pkill -f '/tmp/kiwid ')",
       "Bash(rm -rf /tmp/kiwid /tmp/kiwidaemon /tmp/kiwid.log /tmp/kiwidaemon*.log /tmp/kiwi-verify* /tmp/kiwi-bogus* /tmp/kiwi-sandbox)"
     ]
-  },
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
   }
 }
