@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import type { BlockedReason, JobTask } from "@/lib/api";
+import { client, type BlockedReason, type JobTask } from "@/lib/api";
 import {
   X,
   Activity,
@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   Clock,
   ServerCrash,
+  Ban,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 
 /**
@@ -101,9 +104,28 @@ interface TaskDrawerProps {
   onClose: () => void;
 }
 
+/** Terminal statuses — polling stops once every task reaches one of these. */
+const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
+
 export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const { currentJob, loadJob } = useFleetStore();
-  
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Reset transient UI when the drawer switches jobs, so a notice or a primed
+  // delete confirmation cannot leak onto a different job. Adjusting during
+  // render rather than in an effect is React's documented pattern for
+  // prop-derived state: it re-renders before committing, so the stale notice is
+  // never painted at all.
+  const [prevTaskId, setPrevTaskId] = useState(taskId);
+  if (taskId !== prevTaskId) {
+    setPrevTaskId(taskId);
+    setNotice(null);
+    setConfirmDelete(false);
+    setBusy(null);
+  }
+
   useEffect(() => {
     if (!taskId) return;
 
@@ -114,9 +136,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       await loadJob(taskId);
       const state = useFleetStore.getState();
       if (state.currentJob && state.currentJob.tasks && state.currentJob.tasks.length > 0) {
-        const isTerminal = state.currentJob.tasks.every(
-          t => t.status === 'SUCCEEDED' || t.status === 'FAILED'
-        );
+        const isTerminal = state.currentJob.tasks.every(t => TERMINAL.has(t.status));
         if (isTerminal) {
           isPolling = false;
         }
@@ -156,7 +176,32 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
           : <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
       case 'SUCCEEDED': return <CheckCircle2 className="w-4 h-4 text-green-400" />;
       case 'FAILED': return <AlertTriangle className="w-4 h-4 text-red-400" />;
+      case 'CANCELLED': return <Ban className="w-4 h-4 text-zinc-400" />;
       default: return null;
+    }
+  };
+
+  const tasks = currentJob?.tasks ?? [];
+  // What is actionable depends on where the job is. Offering "stop" on a
+  // finished job or "retry" on a running one invites a click that does nothing.
+  const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED");
+  const canRetry = tasks.some(t => t.status === "FAILED" || t.status === "CANCELLED");
+
+  const act = async (
+    label: string,
+    fn: () => Promise<{ message?: string; tasks_affected: number }>,
+  ) => {
+    setBusy(label);
+    setNotice(null);
+    try {
+      const res = await fn();
+      setNotice(res.message ?? `${label}: ${res.tasks_affected} task(s)`);
+      if (taskId) await loadJob(taskId);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : `${label} failed`);
+    } finally {
+      setBusy(null);
+      setConfirmDelete(false);
     }
   };
 
@@ -168,14 +213,19 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
         <div className="flex items-center gap-4">
           <div>
             <h2 className="text-xl font-medium text-white flex items-center gap-3">
-              Job Details
+              {/* The goal, not the id — an opaque job id says nothing about what
+                  is running, which is the first thing anyone opening this wants. */}
+              {currentJob?.task || "Job Details"}
               {currentJob && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white">
-                  {currentJob.tasks.length} tasks
+                <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
+                  {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
                 </span>
               )}
             </h2>
-            <p className="text-sm text-zinc-400 font-mono mt-1">Job ID: {taskId}</p>
+            <p className="text-sm text-zinc-400 font-mono mt-1">
+              {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
+              {taskId}
+            </p>
           </div>
         </div>
         <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
@@ -183,15 +233,70 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
         </button>
       </div>
 
+      {/* Job actions */}
+      {currentJob && (
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-white/5 bg-black/20">
+          <button
+            onClick={() => act("Stopped", () => client.cancelJob(currentJob.job_id))}
+            disabled={!canCancel || busy !== null}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Ban className="w-3.5 h-3.5" /> Stop
+          </button>
+          <button
+            onClick={() => act("Retried", () => client.retryJob(currentJob.job_id))}
+            disabled={!canRetry || busy !== null}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Retry
+          </button>
+
+          <div className="flex-1" />
+
+          {/* Delete is irreversible, so it takes two clicks rather than a modal:
+              the second click is the confirmation. */}
+          <button
+            onClick={() => {
+              if (!confirmDelete) {
+                setConfirmDelete(true);
+                return;
+              }
+              act("Deleted", () => client.deleteJob(currentJob.job_id)).then(onClose);
+            }}
+            onBlur={() => setConfirmDelete(false)}
+            disabled={busy !== null}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
+              confirmDelete
+                ? "border-red-500/50 bg-red-500/20 text-red-300"
+                : "border-white/10 text-zinc-400 hover:bg-red-500/10 hover:text-red-300"
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {confirmDelete ? "Click again to confirm" : "Delete"}
+          </button>
+
+          {busy && <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />}
+        </div>
+      )}
+
+      {notice && (
+        <div className="px-6 py-2 text-xs text-zinc-300 bg-white/5 border-b border-white/5">
+          {notice}
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden p-6 text-white overflow-y-auto">
          {currentJob ? (
            <div className="w-full flex flex-col gap-4">
              <h3 className="text-lg font-semibold">Tasks</h3>
              {currentJob.tasks.map(task => (
                <div key={task.id} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl">
-                 <div className="flex justify-between">
-                   <span className="font-mono text-sm">{task.id}</span>
-                   <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2">
+                 <div className="flex justify-between gap-4">
+                   <div className="min-w-0">
+                     {task.task && <div className="text-sm text-white">{task.task}</div>}
+                     <span className="font-mono text-xs text-zinc-500 break-all">{task.id}</span>
+                   </div>
+                   <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2 h-fit shrink-0">
                      {getPhaseIcon(task)} {task.status}
                    </span>
                  </div>

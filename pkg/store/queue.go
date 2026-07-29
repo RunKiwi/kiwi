@@ -534,6 +534,7 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		Failed    int
 		Succeeded int
 		Leased    int
+		Cancelled int
 		PRURLs    []string
 		Task      string
 		Repo      string
@@ -583,6 +584,9 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		if t.Status == TaskLeased {
 			agg.Leased++
 		}
+		if t.Status == TaskCancelled {
+			agg.Cancelled++
+		}
 		if t.ResultURL != nil && *t.ResultURL != "" {
 			agg.PRURLs = append(agg.PRURLs, *t.ResultURL)
 		}
@@ -590,12 +594,19 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 
 	var summaries []JobSummary
 	for _, agg := range jobMap {
+		// A real failure outranks a cancellation (something went wrong, and that is
+		// the more important thing to surface), but a cancellation outranks the
+		// benign states: a job the user stopped is not "queued" or "succeeded"
+		// just because some of its tasks got that far before the stop landed.
 		status := "QUEUED"
-		if agg.Failed > 0 {
+		switch {
+		case agg.Failed > 0:
 			status = "FAILED"
-		} else if agg.Succeeded == agg.TaskCount {
+		case agg.Cancelled > 0:
+			status = "CANCELLED"
+		case agg.Succeeded == agg.TaskCount:
 			status = "SUCCEEDED"
-		} else if agg.Leased > 0 {
+		case agg.Leased > 0:
 			status = "RUNNING"
 		}
 

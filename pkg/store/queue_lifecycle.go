@@ -1,0 +1,160 @@
+package store
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// CancelJob stops a job: every task of it that is not already terminal moves to
+// CANCELLED. Returns how many tasks were affected.
+//
+// A QUEUED task stops immediately — nothing will ever lease it again. A LEASED
+// task is a different matter: the daemon executing it is a separate process we
+// cannot reach, so cancellation here is a *revocation of its lease*, not a kill.
+// The daemon discovers this on its next RenewLease, which now fails with 409
+// because the task is no longer LEASED, and aborts its run. Until then it keeps
+// working; the fencing token means the result it eventually reports is rejected
+// (CompleteTask requires status = LEASED), so a cancelled task can never be
+// resurrected by a late completion.
+//
+// Scoped by org: another tenant's job id is a no-op, not an error, so this
+// cannot be used to probe which job ids exist.
+func (s *PostgresStore) CancelJob(ctx context.Context, orgID, jobID, reason string) (int, error) {
+	if reason == "" {
+		reason = "cancelled by user"
+	}
+	now := time.Now()
+
+	res := s.db.WithContext(ctx).Model(&QueuedTask{}).
+		Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskQueued, TaskLeased}).
+		Updates(map[string]interface{}{
+			"status": TaskCancelled,
+			// Clear the lease so the expiry sweeper cannot pick this row up and
+			// requeue it — RequeueExpiredLeases keys off LEASED, but leaving a
+			// stale fencing token on a terminal row invites confusion.
+			"leased_by":        nil,
+			"lease_id":         nil,
+			"lease_expires_at": nil,
+			"result_detail":    reason,
+			"updated_at":       now,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+
+	if res.RowsAffected > 0 {
+		s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND org_id = ?", jobID, orgID).
+			Updates(map[string]interface{}{"status": "CANCELLED", "updated_at": now})
+	}
+	return int(res.RowsAffected), nil
+}
+
+// RetryJob returns a job's unsuccessful tasks to the queue so they run again.
+// Returns how many tasks were requeued.
+//
+// Only FAILED and CANCELLED tasks are retried. A SUCCEEDED task is left alone —
+// re-running it would redo work that already produced a PR — and QUEUED/LEASED
+// tasks are already on their way. Attempts is reset to zero: the retry is a
+// deliberate human act, and carrying the old count forward would let the
+// poison-pill guard (MaxLeaseAttempts) dead-letter the task almost immediately.
+//
+// The previous result is cleared rather than kept, so a stale failure reason or
+// PR link cannot be read as belonging to the new run.
+func (s *PostgresStore) RetryJob(ctx context.Context, orgID, jobID string) (int, error) {
+	now := time.Now()
+
+	var affected int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&QueuedTask{}).
+			Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskFailed, TaskCancelled}).
+			Updates(map[string]interface{}{
+				"status":           TaskQueued,
+				"leased_by":        nil,
+				"lease_id":         nil,
+				"lease_expires_at": nil,
+				"started_at":       nil,
+				"attempts":         0,
+				"result_url":       nil,
+				"result_detail":    nil,
+				"created_at":       now,
+				"updated_at":       now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		affected = res.RowsAffected
+
+		if affected > 0 {
+			// The job is running again, so its terminal status and error must not
+			// linger — the dashboard reads the job row, and a QUEUED task under a
+			// FAILED job is a contradiction.
+			tx.Model(&Job{}).Where("id = ? AND org_id = ?", jobID, orgID).
+				Updates(map[string]interface{}{"status": "PENDING", "error": nil, "updated_at": now})
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
+}
+
+// DeleteJob removes a job's tasks so it disappears from the dashboard. Returns
+// how many tasks were deleted.
+//
+// It deletes only the queue rows (and the job row), NOT the job's execution
+// record. Those records are hash-chained per org via prev_record_hash — deleting
+// a link would break the chain's verifiability for every record after it, which
+// is the one property the provenance feature exists to provide. A deleted job
+// therefore leaves its attestation behind by design.
+//
+// Cancels nothing: a LEASED task whose row is deleted leaves its daemon working
+// with no row to report against. Callers should cancel first; CancelJob then
+// DeleteJob is the safe order, and the HTTP handler enforces it.
+func (s *PostgresStore) DeleteJob(ctx context.Context, orgID, jobID string) (int, error) {
+	var deleted int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("org_id = ? AND job_id = ?", orgID, jobID).Delete(&QueuedTask{})
+		if res.Error != nil {
+			return res.Error
+		}
+		deleted = res.RowsAffected
+
+		return tx.Where("id = ? AND org_id = ?", jobID, orgID).Delete(&Job{}).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	// The job's learning row is ancillary — it feeds future planning, nothing the
+	// user can see. Removing it is best-effort and deliberately outside the
+	// transaction above: a learnings table that is missing (BYOC without
+	// pgvector) or unhappy must not be able to block deleting a job, which is the
+	// part the user actually asked for.
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND job_id = ?", orgID, jobID).
+		Delete(&JobLearning{}).Error; err != nil {
+		slog.Warn("delete job learnings", "org", orgID, "job", jobID, "err", err)
+	}
+
+	return int(deleted), nil
+}
+
+// HasActiveTasks reports whether an org has any task still QUEUED or LEASED.
+// Used by the fleet-host autoscaler to decide whether it is safe to stop a
+// machine, and by DeleteJob callers to decide whether a cancel must come first.
+func (s *PostgresStore) HasActiveTasks(ctx context.Context, orgID string) (bool, error) {
+	var n int64
+	q := s.db.WithContext(ctx).Model(&QueuedTask{}).
+		Where("status IN ?", []string{TaskQueued, TaskLeased})
+	if orgID != "" {
+		q = q.Where("org_id = ?", orgID)
+	}
+	if err := q.Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}

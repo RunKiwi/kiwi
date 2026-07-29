@@ -98,6 +98,11 @@ func main() {
 	if cfg.Role == "all" || cfg.Role == "orchestrator" {
 		server.RecoverTasks()
 
+		// Stop the free-fleet host once the queue goes quiet. Singleton work, so
+		// it belongs to the orchestrator role; a no-op unless KIWI_FLEET_HOST_* is
+		// configured. The matching wake-up happens on submit, in the api role.
+		server.StartFleetHostSweeper(ctx)
+
 		// How long a task may sit QUEUED before it's failed (e.g. no fleet ever
 		// connected to run it). Configurable via KIWI_QUEUE_TTL; default 30m.
 		queueTTL := 30 * time.Minute
