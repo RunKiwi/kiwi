@@ -1,16 +1,39 @@
 {
-  "name": "@kiwi/sdk",
+  "name": "@runkiwi/sdk",
   "version": "1.0.0",
-  "description": "Kiwi BYOC SDK for Node.js",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"No tests specified yet\""
+  "description": "Node.js client for Kiwi — coding agents that run in infrastructure you control.",
+  "keywords": [
+    "kiwi",
+    "runkiwi",
+    "coding-agent",
+    "ai-agent",
+    "agent-sandbox",
+    "byoc",
+    "code-review",
+    "automation"
+  ],
+  "homepage": "https://runkiwi.dev",
+  "bugs": {
+    "url": "https://github.com/RunKiwi/kiwi/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/RunKiwi/kiwi.git"
+    "url": "git+https://github.com/RunKiwi/kiwi.git",
+    "directory": "sdk/node"
   },
   "license": "MIT",
+  "author": "RunKiwi",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "echo \"No tests specified yet\""
+  },
   "dependencies": {
     "axios": "^1.4.0",
     "form-data": "^4.0.0"
