@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody } from "@/lib/api";
 import {
   X,
   Activity,
@@ -15,6 +15,10 @@ import {
   Ban,
   RotateCcw,
   Trash2,
+  ShieldCheck,
+  Copy,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 
 /**
@@ -181,6 +185,47 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  const [showJson, setShowJson] = useState(false);
+  const [copiedHash, setCopiedHash] = useState(false);
+
+  // A record is only assembled once a job reaches a terminal state, so asking
+  // for one mid-run just buys a guaranteed 404 on every drawer open. Wait until
+  // the job has actually finished.
+  const jobFinished =
+    !!currentJob && currentJob.tasks.length > 0 && currentJob.tasks.every(t => TERMINAL.has(t.status));
+
+  // Derived rather than held in state: the fetch is in flight exactly while the
+  // job is finished and neither a record nor an error has landed. Holding a
+  // separate flag would mean setting state from inside the effect body.
+  const recordPending = jobFinished && !record && !recordError;
+
+  useEffect(() => {
+    if (!taskId || !jobFinished) return;
+    let isSubscribed = true;
+
+    client.getJobRecord(taskId)
+      .then(res => {
+        if (isSubscribed) {
+          setRecord(res);
+          setRecordError(null);
+        }
+      })
+      .catch(err => {
+        if (isSubscribed) {
+          setRecord(null);
+          // A job with no record is the normal case, not a failure worth
+          // reporting — the panel simply does not appear.
+          setRecordError(err instanceof Error ? err.message : "No record available");
+        }
+      })
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [taskId, jobFinished]);
+
   // Reset transient UI when the drawer switches jobs, so a notice or a primed
   // delete confirmation cannot leak onto a different job. Adjusting during
   // render rather than in an effect is React's documented pattern for
@@ -193,6 +238,10 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     setConfirmDelete(false);
     setConfirmCancel(false);
     setBusy(null);
+    setRecord(null);
+    setRecordError(null);
+    setShowJson(false);
+    setCopiedHash(false);
   }
 
   useEffect(() => {
@@ -382,39 +431,138 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden p-6 text-white overflow-y-auto">
-         {currentJob ? (
-           <div className="w-full flex flex-col gap-4">
-             <h3 className="text-lg font-semibold">Tasks</h3>
-             {currentJob.tasks.map(task => (
-               <div key={task.id} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl">
-                 <div className="flex justify-between gap-4">
-                   <div className="min-w-0">
-                     {task.task && <div className="text-sm text-white">{task.task}</div>}
-                     <span className="font-mono text-xs text-zinc-500 break-all">{task.id}</span>
-                   </div>
-                   <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2 h-fit shrink-0">
-                     {getPhaseIcon(task)} {task.status}
-                   </span>
-                 </div>
-                 {timingLabel(task) && (
-                   <div className="text-xs text-zinc-500 font-mono">{timingLabel(task)}</div>
-                 )}
-                 <BlockedBanner task={task} />
-                 {task.result_url && (
-                   <a href={task.result_url} target="_blank" rel="noreferrer" className="text-blue-400 text-sm hover:underline flex items-center gap-2 mt-2">
-                     <GitPullRequest className="w-4 h-4" /> View PR
-                   </a>
-                 )}
-                 {task.result_detail && (
-                   <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-red-400' : 'text-zinc-400'}`}>{task.result_detail}</div>
-                 )}
-               </div>
-             ))}
-           </div>
-         ) : (
-           <div className="text-zinc-500">Loading...</div>
-         )}
+      <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
+        {/* Execution record. A record exists only for a finished job, and not
+            every finished job has one, so the panel appears when there is
+            something to show rather than advertising an absence. */}
+        {jobFinished && (recordPending || record) && (
+        <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-green-400" />
+              <h3 className="text-sm font-semibold text-white">Execution Record (Verified Receipt)</h3>
+            </div>
+            {record?.recordHash && (
+              <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 px-2 py-0.5 rounded-md text-[11px] font-mono text-zinc-300">
+                <span className="text-zinc-500">Hash:</span>
+                <span className="truncate max-w-[120px]" title={record.recordHash}>{record.recordHash}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (record.recordHash) {
+                      navigator.clipboard?.writeText(record.recordHash);
+                      setCopiedHash(true);
+                      setTimeout(() => setCopiedHash(false), 2000);
+                    }
+                  }}
+                  className="hover:text-white text-zinc-400 p-0.5 transition-colors"
+                  title="Copy hash"
+                >
+                  {copiedHash ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {recordPending ? (
+            <div className="flex items-center gap-2 text-xs text-zinc-500 py-1">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
+            </div>
+          ) : record ? (
+            <div className="flex flex-col gap-2.5">
+              {/* What the record actually says. Every cell is read from the
+                  record itself — the panel reports the chain, it does not
+                  validate it, and must not imply otherwise. */}
+              {(() => {
+                const body = (record.data ?? {}) as ExecutionRecordBody;
+                const signed = body.attestation === "signed";
+                const cells: [string, string, string?][] = [
+                  ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
+                  [
+                    "Previous hash",
+                    body.prev_record_hash ? body.prev_record_hash : "genesis — first record for this org",
+                    body.prev_record_hash,
+                  ],
+                  ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", body.attestation],
+                  ["Signing key", body.record_signature?.key ?? "—", body.record_signature?.key],
+                ];
+                return (
+                  <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-lg bg-black/30 border border-white/5 font-mono">
+                    {cells.map(([label, value, full]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</dt>
+                        <dd
+                          className={`truncate ${label === "Attestation" && signed ? "text-green-400" : "text-zinc-300"}`}
+                          title={full ?? value}
+                        >
+                          {value.length > 14 ? value.slice(0, 12) + "…" : value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                );
+              })()}
+
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                A tamper-evident record of what ran: the plan, the commit, the test command
+                and its outcome, linked to the previous record in your organization&apos;s
+                chain. It attests to the execution, not to the correctness of the resulting
+                code.
+              </p>
+
+              {/* Disclosure JSON toggle */}
+              <button
+                type="button"
+                onClick={() => setShowJson(v => !v)}
+                aria-expanded={showJson}
+                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors w-fit pt-0.5"
+              >
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
+                <span>{showJson ? "Hide raw record" : "View raw record"}</span>
+              </button>
+
+              {showJson && (
+                <pre className="text-[11px] font-mono p-3 rounded-lg bg-black/60 border border-white/10 text-zinc-300 overflow-x-auto max-h-64 leading-relaxed">
+                  {JSON.stringify(record.data, null, 2)}
+                </pre>
+              )}
+            </div>
+          ) : null}
+        </div>
+        )}
+
+        {currentJob ? (
+          <div className="w-full flex flex-col gap-4">
+            <h3 className="text-lg font-semibold">Tasks</h3>
+            {currentJob.tasks.map(task => (
+              <div key={task.id} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl">
+                <div className="flex justify-between gap-4">
+                  <div className="min-w-0">
+                    {task.task && <div className="text-sm text-white">{task.task}</div>}
+                    <span className="font-mono text-xs text-zinc-500 break-all">{task.id}</span>
+                  </div>
+                  <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2 h-fit shrink-0">
+                    {getPhaseIcon(task)} {task.status}
+                  </span>
+                </div>
+                {timingLabel(task) && (
+                  <div className="text-xs text-zinc-500 font-mono">{timingLabel(task)}</div>
+                )}
+                <BlockedBanner task={task} />
+                {task.result_url && (
+                  <a href={task.result_url} target="_blank" rel="noreferrer" className="text-blue-400 text-sm hover:underline flex items-center gap-2 mt-2">
+                    <GitPullRequest className="w-4 h-4" /> View PR
+                  </a>
+                )}
+                {task.result_detail && (
+                  <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-red-400' : 'text-zinc-400'}`}>{task.result_detail}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-zinc-500">Loading...</div>
+        )}
       </div>
     </div>
   </>
