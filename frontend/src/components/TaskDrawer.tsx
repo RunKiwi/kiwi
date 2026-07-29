@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
+import { parseActionableError } from "@/lib/errors";
 import {
   X,
   Activity,
@@ -409,11 +411,19 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
         </div>
       )}
 
-      {notice && (
-        <div className="px-6 py-2 text-xs text-zinc-300 bg-white/5 border-b border-white/5">
-          {notice}
-        </div>
-      )}
+      {notice && (() => {
+        const err = parseActionableError(notice);
+        return (
+          <div className="px-6 py-2 text-xs text-zinc-300 bg-white/5 border-b border-white/5 flex items-center justify-between gap-2">
+            <span>{err.message}</span>
+            {err.actionHref && err.actionLabel && (
+              <Link href={err.actionHref} className="underline font-semibold text-amber-300 hover:text-white shrink-0">
+                {err.actionLabel} →
+              </Link>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
         {/* Execution record. A record exists only for a finished job, and not

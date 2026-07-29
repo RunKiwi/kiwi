@@ -11,6 +11,7 @@ import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
 import { usePolling } from "@/hooks/usePolling";
+import { parseActionableError } from "@/lib/errors";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
@@ -575,22 +576,22 @@ function CommandCenterContent() {
         {/* Status line */}
         {(submitError || submitSuccess) && (
           <div className="pt-3 mt-1">
-            {submitError && (
-              <div className="flex items-center gap-2 text-red-400 text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                {/* Activation is a paid-tier concept; a Free org runs without it and
-                    never hits this gate, so only surface the "activate" nudge for a
-                    known non-Free plan — Free always sees the real server error. */}
-                {u?.plan !== "free" && (submitError.includes("402") || submitError.toLowerCase().includes("activate") || submitError.toLowerCase().includes("payment required")) ? (
+            {submitError && (() => {
+              const err = parseActionableError(submitError);
+              return (
+                <div className="flex items-center gap-2 text-red-400 text-sm">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>
-                    Your organization is inactive. You can preview tasks, but you must
-                    <a href="/settings#activation" className="underline ml-1 font-medium hover:text-white">activate to run</a>.
+                    {err.message}
+                    {err.actionHref && err.actionLabel && (
+                      <Link href={err.actionHref} className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
+                        {err.actionLabel} →
+                      </Link>
+                    )}
                   </span>
-                ) : (
-                  <span>{submitError}</span>
-                )}
-              </div>
-            )}
+                </div>
+              );
+            })()}
             {submitSuccess && (
               <div className="flex items-center gap-2 text-green-400 text-sm">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
