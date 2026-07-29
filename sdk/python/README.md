@@ -1,0 +1,54 @@
+# kiwi-sdk
+
+Python client for [Kiwi](https://runkiwi.dev) — coding agents that run in infrastructure you control.
+
+You give Kiwi a task, a codebase and the test command that proves the task is done. Kiwi plans the work into a graph of scoped workers, runs each one in a sandbox with default-deny networking, and returns a pull request only once your test passes. Model-generated code never holds your provider key.
+
+- **Docs:** https://docs.runkiwi.dev
+- **Dashboard:** https://app.runkiwi.dev
+- **Source:** https://github.com/RunKiwi/kiwi
+
+## Install
+
+```bash
+pip install kiwi-sdk
+```
+
+## Usage
+
+```python
+import os
+from kiwi import KiwiClient
+
+client = KiwiClient("https://api.runkiwi.dev", os.environ["KIWI_SERVER_TOKEN"])
+
+result = client.submit_task(
+    task="Fix the division by zero panic in Divide()",
+    file="math_utils.go",
+    test_cmd="go test ./...",
+    codebase_zip_path="./codebase.zip",
+)
+
+print(result)
+```
+
+### `KiwiClient(server, token=None)`
+
+| Argument | Type | Notes |
+| :--- | :--- | :--- |
+| `server` | `str` | Base URL of the Control Plane. |
+| `token` | `str` | Optional. Falls back to `KIWI_SERVER_TOKEN`. |
+
+The constructor raises `ValueError` if you pass an `http://` URL for a non-local host, rather than sending your token in cleartext.
+
+### `submit_task(task, file, test_cmd, codebase_zip_path)`
+
+Submits a task with a zipped codebase and returns the created job as a dict. Raises for non-2xx responses. The test command is the definition of done — the agent loop keeps going until it passes.
+
+## Getting a token
+
+Sign in at [app.runkiwi.dev](https://app.runkiwi.dev) and create an API key. The free tier runs on a Kiwi-operated shared fleet with no setup.
+
+## License
+
+MIT
