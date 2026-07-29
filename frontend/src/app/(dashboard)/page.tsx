@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -487,7 +487,38 @@ function CommandCenterContent() {
 
           <div className="flex-1" />
 
-          <button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary px-5 py-2 shrink-0">
+          {/* Usage Meter next to Launch button */}
+          {u && u.agent_minutes_limit > 0 && (() => {
+            const isOverCap = u.agent_minutes_used >= u.agent_minutes_limit;
+            const usagePct = Math.min(100, Math.round((u.agent_minutes_used / u.agent_minutes_limit) * 100));
+            return (
+              <div
+                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl bg-black/40 border text-xs font-mono shrink-0 ${
+                  isOverCap
+                    ? "border-red-500/40 text-red-300 bg-red-950/20"
+                    : usagePct > 80
+                    ? "border-amber-500/40 text-amber-300"
+                    : "border-white/10 text-zinc-300"
+                }`}
+                title={`${u.agent_minutes_used} of ${u.agent_minutes_limit} agent minutes used (${usagePct}%)`}
+              >
+                <Gauge className={`w-3.5 h-3.5 ${isOverCap ? "text-red-400" : usagePct > 80 ? "text-amber-400" : "text-green-400"}`} />
+                <span>{u.agent_minutes_used}/{u.agent_minutes_limit}m</span>
+                <div className="w-10 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${isOverCap ? "bg-red-500" : usagePct > 80 ? "bg-amber-500" : "bg-green-500"}`}
+                    style={{ width: `${usagePct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting || (!!u && u.agent_minutes_limit > 0 && u.agent_minutes_used >= u.agent_minutes_limit)}
+            className="btn-primary px-5 py-2 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Launching…</> : <>Launch <ArrowRight className="w-4 h-4" /></>}
           </button>
         </div>
