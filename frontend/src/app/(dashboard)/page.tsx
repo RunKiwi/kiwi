@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info } from "lucide-react";
+import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
+import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
 
-export default function CommandCenter() {
+// How many jobs render before "Show more". Sized so a normal week fits in one
+// screenful of scrolling rather than to any rendering limit.
+const PAGE_SIZE = 60;
+
+function CommandCenterContent() {
   const { jobs, loadJobs } = useFleetStore();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(null);
   // Which job's PR list popover is open (job_id), if any.
   const [openPrJob, setOpenPrJob] = useState<string | null>(null);
@@ -21,6 +29,41 @@ export default function CommandCenter() {
   const [confirmDeleteJob, setConfirmDeleteJob] = useState<string | null>(null);
   const [cardNotice, setCardNotice] = useState<{ jobId: string; message: string; tasksAffected: number } | null>(null);
   const [cardBusyJob, setCardBusyJob] = useState<string | null>(null);
+
+  // Filter & Sort state initialized from URL query params. The URL is user-editable
+  // input, so each value is validated against what the control can actually render —
+  // an unchecked cast would leave a Select displaying a value absent from its options.
+  const [statusFilter, setStatusFilter] = useState(() => parseStatusParam(searchParams.get("status")));
+  const [repoFilter, setRepoFilter] = useState(searchParams.get("repo") || "all");
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
+  const [sortBy, setSortBy] = useState<JobSortOption>(() => parseSortParam(searchParams.get("sort")));
+  const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE);
+
+  // Synchronize filter parameters with URL query string. This goes through the Next
+  // router rather than window.history so the router's own view of the URL stays in
+  // step — useSearchParams does not observe a raw history.replaceState, which would
+  // leave route state and the address bar disagreeing.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
+    if (repoFilter && repoFilter !== "all") params.set("repo", repoFilter);
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (sortBy && sortBy !== "newest") params.set("sort", sortBy);
+
+    const queryString = params.toString();
+    router.replace(queryString ? `/?${queryString}` : "/", { scroll: false });
+  }, [statusFilter, repoFilter, searchQuery, sortBy, router]);
+
+  // A narrowed result set should start from the top of the page, not inherit an
+  // expansion the user requested for a different set of jobs. Adjusted during
+  // render rather than in an effect so the first paint after a filter change is
+  // already correct — the same pattern TaskDrawer uses to reset per-job state.
+  const filterSignature = `${statusFilter}|${repoFilter}|${searchQuery.trim()}`;
+  const [prevFilterSignature, setPrevFilterSignature] = useState(filterSignature);
+  if (prevFilterSignature !== filterSignature) {
+    setPrevFilterSignature(filterSignature);
+    setDisplayLimit(PAGE_SIZE);
+  }
 
   // Form State — only task + repo are required. Everything else is a hint.
   const [task, setTask] = useState("");
@@ -49,8 +92,6 @@ export default function CommandCenter() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  const router = useRouter();
 
   useEffect(() => {
     loadJobs();
@@ -250,6 +291,61 @@ export default function CommandCenter() {
       setCardBusyJob(null);
     }
   };
+
+  // Derived filter calculations
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: jobs.length };
+    for (const s of FILTERABLE_STATUSES) c[s] = 0;
+    for (const j of jobs) {
+      const s = j.status?.toUpperCase();
+      if (s && s in c) {
+        c[s]++;
+      }
+    }
+    return c;
+  }, [jobs]);
+
+  const availableRepos = useMemo(() => {
+    const set = new Set<string>();
+    for (const j of jobs) {
+      if (j.repo) set.add(j.repo);
+    }
+    return Array.from(set);
+  }, [jobs]);
+
+  const repoOptions = useMemo(() => {
+    return [
+      { value: "all", label: "All repositories" },
+      ...availableRepos.map(r => ({ value: r, label: r })),
+    ];
+  }, [availableRepos]);
+
+  const filteredJobs = useMemo(() => {
+    return filterJobs(jobs, {
+      status: statusFilter,
+      repo: repoFilter,
+      query: searchQuery,
+    });
+  }, [jobs, statusFilter, repoFilter, searchQuery]);
+
+  const sortedJobs = useMemo(() => {
+    return sortJobs(filteredJobs, sortBy);
+  }, [filteredJobs, sortBy]);
+
+  const displayedJobs = useMemo(() => {
+    return sortedJobs.slice(0, displayLimit);
+  }, [sortedJobs, displayLimit]);
+
+  const groupedJobs = useMemo(() => {
+    return groupJobsByDate(displayedJobs);
+  }, [displayedJobs]);
+
+  const dateGroups = [
+    { label: "Today", items: groupedJobs.today },
+    { label: "Yesterday", items: groupedJobs.yesterday },
+    { label: "This Week", items: groupedJobs.thisWeek },
+    { label: "Older", items: groupedJobs.older },
+  ];
 
   // The 4 job states. Like the earlier design, each card sits on a neutral
   // near-black base (not navy — navy muddies the tint into grey) so a flat
@@ -477,181 +573,320 @@ export default function CommandCenter() {
         )}
       </div>
 
+      {/* Filter Bar */}
+      {jobs.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/[0.03] border border-white/5 relative z-20">
+          {/* Status filter chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { key: "all", label: "All", count: counts.all },
+              ...FILTERABLE_STATUSES.map(s => ({
+                key: s,
+                // "QUEUED" -> "Queued": the chips read as words, not enum values.
+                label: s.charAt(0) + s.slice(1).toLowerCase(),
+                count: counts[s],
+              })),
+            ].map(chip => {
+              const isActive = statusFilter.toLowerCase() === chip.key.toLowerCase();
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => setStatusFilter(chip.key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    isActive
+                      ? "bg-white/15 text-white border border-white/20 shadow-sm"
+                      : "text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent"
+                  }`}
+                >
+                  <span>{chip.label}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${isActive ? "bg-white/20 text-white" : "bg-white/5 text-zinc-500"}`}>
+                    {chip.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search, Repo, and Sort controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Filter jobs…"
+                className="field text-xs pl-8 pr-7 py-1.5 h-8 w-44 md:w-56"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Repo Select */}
+            {availableRepos.length > 0 && (
+              <Select
+                variant="chip"
+                searchable
+                label="Repo"
+                ariaLabel="Filter by repo"
+                value={repoFilter}
+                onChange={setRepoFilter}
+                options={repoOptions}
+              />
+            )}
+
+            {/* Sort Select */}
+            <Select
+              variant="chip"
+              label="Sort"
+              ariaLabel="Sort jobs"
+              value={sortBy}
+              onChange={(v) => setSortBy(v as JobSortOption)}
+              options={[
+                { value: "newest", label: "Newest first" },
+                { value: "oldest", label: "Oldest first" },
+                { value: "status", label: "By status" },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Grid of Jobs */}
       {jobs.length === 0 ? (
         <div className="flex flex-col items-center justify-center text-center py-20 text-zinc-500">
           <Server className="w-10 h-10 mb-3 text-zinc-700" />
           No jobs yet — describe a goal above and launch your first one.
         </div>
+      ) : sortedJobs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center py-16 text-zinc-400 bg-white/[0.02] border border-white/5 rounded-2xl">
+          <Filter className="w-8 h-8 mb-3 text-zinc-600" />
+          <p className="text-sm font-medium text-zinc-300">No jobs match these filters</p>
+          <p className="text-xs text-zinc-500 mt-1 max-w-sm">Try searching for a different term or clearing active status and repository filters.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setRepoFilter("all");
+              setSearchQuery("");
+              setSortBy("newest");
+            }}
+            className="btn-ghost mt-4"
+          >
+            Clear filters
+          </button>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-32 relative z-10">
-          {jobs.map(job => {
-            const m = statusOf(job.status);
-            const Icon = m.Icon;
+        <div className="flex flex-col gap-8 pb-32 relative z-10">
+          {dateGroups.map(group => {
+            if (group.items.length === 0) return null;
             return (
-            <div key={job.job_id} role="button" tabIndex={0}
-              onClick={() => setActiveDrawerTaskId(job.job_id)}
-              onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
-              style={{
-                background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
-                borderColor: m.border,
-                boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
-              }}
-              className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">{shortId(job.job_id)}</span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
-                    style={{ color: m.color, borderColor: m.border, background: m.wash }}>
-                    <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                    {m.label}
-                  </div>
-                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                    {cardBusyJob === job.job_id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
-                    ) : (
-                      <>
-                        {(job.status === "QUEUED" || job.status === "RUNNING") && (
-                          <button
-                            type="button"
-                            onClick={e => handleCardCancel(e, job.job_id)}
-                            data-confirm-action
-                            title="Cancel job"
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                              confirmCancelJob === job.job_id
-                                ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-                                : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                            }`}
-                          >
-                            <Ban className="w-3 h-3 shrink-0" />
-                            {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
-                          </button>
-                        )}
-                        {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
-                            so a job you called off is resumable straight from the card
-                            rather than only from the drawer. */}
-                        {(job.status === "FAILED" || job.status === "CANCELLED") && (
-                          <button
-                            type="button"
-                            onClick={e => handleCardRetry(e, job.job_id)}
-                            title="Retry job"
-                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
-                          >
-                            <RotateCcw className="w-3 h-3 shrink-0" />
-                            Retry
-                          </button>
-                        )}
-                        {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
-                          <button
-                            type="button"
-                            onClick={e => handleCardDelete(e, job.job_id)}
-                            data-confirm-action
-                            title="Delete job"
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                              confirmDeleteJob === job.job_id
-                                ? "border-red-500/50 bg-red-500/20 text-red-300"
-                                : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
-                            }`}
-                          >
-                            <Trash2 className="w-3 h-3 shrink-0" />
-                            {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
+              <div key={group.label} className="flex flex-col">
+                <div className="sticky top-0 z-20 py-2 bg-[var(--background)]/90 backdrop-blur-md mb-3 flex items-center gap-2 border-b border-white/5">
+                  <p className="eyebrow"><span className="dot"></span> {group.label}</p>
+                  <span className="text-[10px] font-mono text-zinc-500 bg-white/5 rounded-full px-2 py-0.5">{group.items.length}</span>
                 </div>
-              </div>
-
-              <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
-                {job.task?.trim() || `Job ${shortId(job.job_id)}`}
-              </h3>
-
-              {cardNotice?.jobId === job.job_id && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border ${
-                    cardNotice.tasksAffected === 0
-                      ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
-                      : "bg-green-500/10 border-green-500/20 text-green-300"
-                  }`}
-                  onClick={e => e.stopPropagation()}
-                >
-                  {cardNotice.tasksAffected === 0 ? (
-                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  )}
-                  <span className="leading-tight">{cardNotice.message}</span>
-                </div>
-              )}
-
-              <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
-                {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
-                <div className="min-w-0 relative">
-                  {job.pr_urls && job.pr_urls.length > 0 ? (
-                    <>
-                      <button
-                        data-pr-trigger
-                        onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
-                        className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
-                        title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
-                        aria-expanded={openPrJob === job.job_id}
-                      >
-                        <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
-                        <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
-                        <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
-                      </button>
-                      {openPrJob === job.job_id && (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
-                        >
-                          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
-                            <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
-                            <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
-                          </div>
-                          <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
-                            {job.pr_urls.map((url) => (
-                              <a key={url} href={url} target="_blank" rel="noreferrer"
-                                onClick={() => setOpenPrJob(null)}
-                                className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
-                                <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
-                                  <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
-                                </span>
-                                <span className="font-mono truncate flex-1">{prLabel(url)}</span>
-                                <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
-                              </a>
-                            ))}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {group.items.map(job => {
+                    const m = statusOf(job.status);
+                    const Icon = m.Icon;
+                    return (
+                      <div key={job.job_id} role="button" tabIndex={0}
+                        onClick={() => setActiveDrawerTaskId(job.job_id)}
+                        onKeyDown={(e) => { if (e.key === "Enter") setActiveDrawerTaskId(job.job_id); }}
+                        style={{
+                          background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
+                          borderColor: m.border,
+                          boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
+                        }}
+                        className="group relative text-left rounded-2xl p-4 border flex flex-col h-full cursor-pointer card-hover">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">{shortId(job.job_id)}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
+                              style={{ color: m.color, borderColor: m.border, background: m.wash }}>
+                              <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
+                              {m.label}
+                            </div>
+                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                              {cardBusyJob === job.job_id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                              ) : (
+                                <>
+                                  {(job.status === "QUEUED" || job.status === "RUNNING") && (
+                                    <button
+                                      type="button"
+                                      onClick={e => handleCardCancel(e, job.job_id)}
+                                      data-confirm-action
+                                      title="Cancel job"
+                                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                        confirmCancelJob === job.job_id
+                                          ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
+                                          : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
+                                      }`}
+                                    >
+                                      <Ban className="w-3 h-3 shrink-0" />
+                                      {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
+                                    </button>
+                                  )}
+                                  {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
+                                      so a job you called off is resumable straight from the card
+                                      rather than only from the drawer. */}
+                                  {(job.status === "FAILED" || job.status === "CANCELLED") && (
+                                    <button
+                                      type="button"
+                                      onClick={e => handleCardRetry(e, job.job_id)}
+                                      title="Retry job"
+                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
+                                    >
+                                      <RotateCcw className="w-3 h-3 shrink-0" />
+                                      Retry
+                                    </button>
+                                  )}
+                                  {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
+                                    <button
+                                      type="button"
+                                      onClick={e => handleCardDelete(e, job.job_id)}
+                                      data-confirm-action
+                                      title="Delete job"
+                                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                        confirmDeleteJob === job.job_id
+                                          ? "border-red-500/50 bg-red-500/20 text-red-300"
+                                          : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
+                                      }`}
+                                    >
+                                      <Trash2 className="w-3 h-3 shrink-0" />
+                                      {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </>
-                  ) : job.repo ? (
-                    <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
-                      <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-zinc-500">
-                      <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
-                    </span>
-                  )}
-                </div>
-                {/* Right: task count. */}
-                <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
-                  <Bot className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
+
+                        <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
+                          {job.task?.trim() || `Job ${shortId(job.job_id)}`}
+                        </h3>
+
+                        {cardNotice?.jobId === job.job_id && (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border ${
+                              cardNotice.tasksAffected === 0
+                                ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
+                                : "bg-green-500/10 border-green-500/20 text-green-300"
+                            }`}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {cardNotice.tasksAffected === 0 ? (
+                              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            )}
+                            <span className="leading-tight">{cardNotice.message}</span>
+                          </div>
+                        )}
+
+                        <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
+                          {/* Left: a compact PR count that opens a polished popover; else repo, else time. */}
+                          <div className="min-w-0 relative">
+                            {job.pr_urls && job.pr_urls.length > 0 ? (
+                              <>
+                                <button
+                                  data-pr-trigger
+                                  onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
+                                  className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
+                                  title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
+                                  aria-expanded={openPrJob === job.job_id}
+                                >
+                                  <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
+                                  <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
+                                  <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
+                                </button>
+                                {openPrJob === job.job_id && (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
+                                  >
+                                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
+                                      <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
+                                      <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+                                      {job.pr_urls.map((url) => (
+                                        <a key={url} href={url} target="_blank" rel="noreferrer"
+                                          onClick={() => setOpenPrJob(null)}
+                                          className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
+                                          <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
+                                            <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
+                                          </span>
+                                          <span className="font-mono truncate flex-1">{prLabel(url)}</span>
+                                          <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
+                                        </a>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            ) : job.repo ? (
+                              <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
+                                <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-zinc-500">
+                                <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
+                              </span>
+                            )}
+                          </div>
+                          {/* Right: task count. */}
+                          <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
+                            <Bot className="w-3.5 h-3.5 text-zinc-500" />
+                            <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            </div>
             );
           })}
+
+          {sortedJobs.length > displayLimit && (
+            <div className="flex justify-center pt-4">
+              <button
+                type="button"
+                onClick={() => setDisplayLimit(l => l + 60)}
+                className="px-6 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-semibold text-zinc-300 transition-colors"
+              >
+                Show more ({sortedJobs.length - displayLimit} remaining)
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       <TaskDrawer taskId={activeDrawerTaskId} onClose={() => setActiveDrawerTaskId(null)} />
     </div>
+  );
+}
+
+export default function CommandCenter() {
+  return (
+    <Suspense fallback={<div className="p-8 text-zinc-500 font-mono text-sm">Loading command center…</div>}>
+      <CommandCenterContent />
+    </Suspense>
   );
 }
