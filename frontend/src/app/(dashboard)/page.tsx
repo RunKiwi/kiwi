@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef, Suspense } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
-import { Activity, Clock, CheckCircle2, XCircle, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
+import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -13,6 +13,7 @@ import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import { sendJobCompletionNotification } from "@/lib/notifications";
+import { statusOf, CARD_BASE } from "@/lib/statusColors";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
@@ -442,22 +443,6 @@ function CommandCenterContent() {
     { label: "This Week", items: groupedJobs.thisWeek },
     { label: "Older", items: groupedJobs.older },
   ];
-
-  // The 4 job states. Like the earlier design, each card sits on a neutral
-  // near-black base (not navy — navy muddies the tint into grey) so a flat
-  // whole-card colour wash reads true. Plus a matching border, badge, and glow.
-  const STATUS: Record<string, { label: string; Icon: typeof Activity; color: string; border: string; wash: string; glow: string; spin?: boolean }> = {
-    QUEUED: { label: "Queued", Icon: Loader2, color: "#E8A153", border: "rgba(232,161,83,0.32)", wash: "rgba(232,161,83,0.14)", glow: "rgba(232,161,83,0.10)", spin: true },
-    RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
-    SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
-    FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
-    // Cancelled is deliberately the quietest state on the board: it is not a
-    // failure, and it should not compete for attention with one.
-    CANCELLED: { label: "Cancelled", Icon: Ban, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(160,160,160,0.06)" },
-  };
-  // Neutral near-black card base — lets the status wash read as true colour.
-  const CARD_BASE = "#0C0D10";
-  const statusOf = (s: string) => STATUS[s] ?? STATUS.QUEUED;
 
   const prLabel = (url: string) => {
     // Render a compact "owner/repo#123" from a GitHub PR URL when possible.

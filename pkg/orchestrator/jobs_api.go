@@ -21,6 +21,13 @@ type JobTaskResponse struct {
 	ResultURL    *string `json:"result_url,omitempty"`
 	ResultDetail *string `json:"result_detail,omitempty"`
 
+	// DependsOn lists the sibling worker ids this task waits on, as the planner
+	// recorded them. Bare worker ids, not task ids: the caller knows the job id
+	// and prefixing here would only make it strip the prefix back off.
+	DependsOn []string `json:"depends_on,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	Files     []string `json:"files,omitempty"`
+
 	// Timing, so a caller can say "queued 4m" / "running 2m, attempt 2" rather
 	// than showing an ageless spinner. StartedAt is set once at lease.
 	QueuedAt  time.Time  `json:"queued_at"`
@@ -152,6 +159,9 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 			Task:         specString(t.Spec, "task"),
 			ResultURL:    resultURL,
 			ResultDetail: resultDetail,
+			DependsOn:    specStrings(t.Spec, "depends_on"),
+			Model:        specString(t.Spec, "model"),
+			Files:        specStrings(t.Spec, "files"),
 			QueuedAt:     t.CreatedAt,
 			StartedAt:    t.StartedAt,
 			Attempts:     t.Attempts,
@@ -189,4 +199,25 @@ func (s *Server) handleJobRecord(w http.ResponseWriter, r *http.Request, orgID, 
 	w.Header().Set("X-Kiwi-Record-Hash", rec.RecordHash)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(rec.Body)
+}
+
+// specStrings reads a []string out of a worker spec. The spec is jsonb, so the
+// slice arrives as []interface{}; a malformed element is skipped rather than
+// failing the whole response.
+func specStrings(spec map[string]interface{}, key string) []string {
+	if spec == nil {
+		return nil
+	}
+	if v, ok := spec[key]; ok {
+		if arr, ok := v.([]interface{}); ok {
+			var res []string
+			for _, item := range arr {
+				if s, ok := item.(string); ok {
+					res = append(res, s)
+				}
+			}
+			return res
+		}
+	}
+	return nil
 }
