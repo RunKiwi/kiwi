@@ -3,6 +3,7 @@ package provisioner_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -145,6 +146,43 @@ func TestPoller_FailedPersists(t *testing.T) {
 	}
 	if len(launcher.LaunchCalls) != 0 {
 		t.Errorf("a failed launch records no successful call and never retries; got %d", len(launcher.LaunchCalls))
+	}
+
+	// The reason must be persisted, not merely logged: nothing retries a failed
+	// request, so this row is the only place the stranded org's tasks can learn
+	// why no runner ever arrived.
+	var r auth.ProvisioningRequest
+	if err := db.First(&r, "id = ?", "prov_fail").Error; err != nil {
+		t.Fatalf("load request: %v", err)
+	}
+	if !strings.Contains(r.Error, "docker unavailable") {
+		t.Errorf("failed request should record the launch error, got %q", r.Error)
+	}
+}
+
+// A request that succeeds must not carry stale error text from an earlier
+// attempt on the same row.
+func TestPoller_SuccessClearsError(t *testing.T) {
+	org, prov, _, db := setupTestDB(t)
+	mustCreateRequest(t, db, "prov_ok", org.ID, "provision")
+	if err := db.Model(&auth.ProvisioningRequest{}).Where("id = ?", "prov_ok").
+		Update("error", "stale failure text").Error; err != nil {
+		t.Fatalf("seed stale error: %v", err)
+	}
+
+	if _, err := prov.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce error: %v", err)
+	}
+
+	var r auth.ProvisioningRequest
+	if err := db.First(&r, "id = ?", "prov_ok").Error; err != nil {
+		t.Fatalf("load request: %v", err)
+	}
+	if r.Status != "completed" {
+		t.Fatalf("expected completed, got %s", r.Status)
+	}
+	if r.Error != "" {
+		t.Errorf("a completed request must carry no error, got %q", r.Error)
 	}
 }
 
