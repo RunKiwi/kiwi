@@ -244,8 +244,20 @@ function CommandCenterContent() {
 
   const handleRerunWithEdits = (job: { task?: string; repo?: string; fleet_id?: string }) => {
     setTask(job.task || "");
-    if (job.repo) setRepoUrl(job.repo);
+    if (job.repo) {
+      // JobSummary.repo is "owner/name", but the composer submits repo_url and
+      // matches the repo chip on url. Assigning the short form straight through
+      // leaves the chip showing nothing and submits an unusable repository.
+      const known = repos.find(r => r.full_name === job.repo);
+      setRepoUrl(known?.url ?? (job.repo.includes("://") ? job.repo : `https://github.com/${job.repo}`));
+      if (known?.default_branch) setRef(known.default_branch);
+    }
     if (job.fleet_id) setFleetId(job.fleet_id);
+
+    // A re-run is a fresh attempt; carrying the previous outcome into it just
+    // leaves a stale success or error sitting under the composer.
+    setSubmitError("");
+    setSubmitSuccess(null);
 
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });

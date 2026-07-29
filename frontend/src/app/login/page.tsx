@@ -68,7 +68,7 @@ export default function LoginPage() {
         </div>
         
         <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">Welcome to Kiwi</h1>
-        <p className="text-zinc-400 text-sm mb-8">Sign in to control your agentic execution platform</p>
+        <p className="text-zinc-400 text-sm mb-8">Sign in to plan a task and ship a verified pull request</p>
 
         {loadingProviders ? (
           <div className="w-5 h-5 border-2 border-white/20 border-t-[#93C645] rounded-full animate-spin mb-8" />

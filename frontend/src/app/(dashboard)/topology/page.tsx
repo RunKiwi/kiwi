@@ -162,7 +162,9 @@ export default function TopologyPage() {
           fitView
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="#333" gap={20} />
+          {/* Neutral grey reads as a different product against the navy canvas;
+              this matches the hairline used for borders elsewhere. */}
+          <Background color="rgba(234,240,242,0.10)" gap={20} />
           <Controls className="!bg-black/50 !border-white/10" />
         </ReactFlow>
 
