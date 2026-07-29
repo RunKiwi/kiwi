@@ -91,8 +91,10 @@ export function buildJobGraph(jobId: string, tasks: JobTask[]): JobGraph {
   const edges: GraphEdge[] = [];
   for (const node of nodes) {
     const deps = node.task.depends_on || [];
-    // Sort dependencies to ensure stable edge order for a single node's incoming edges
-    const sortedDeps = [...deps].sort((a, b) => a.localeCompare(b));
+    // Sorted for stable edge order, and de-duplicated: a spec that names the
+    // same dependency twice describes one edge, and drawing it twice paints a
+    // heavier line that reads as a different kind of relationship.
+    const sortedDeps = Array.from(new Set(deps)).sort((a, b) => a.localeCompare(b));
     for (const depId of sortedDeps) {
       const depNode = nodesByWorkerId.get(depId);
       if (depNode) {
