@@ -145,20 +145,24 @@ npm ci && npm run dev                               # http://localhost:3000
 Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`, published as `@runkiwi/sdk` on npm and `kiwi-sdk` on PyPI. Each directory carries its own README, which is what the registry renders as the package page.
 
 ```js
-// Node (sdk/node)
+// Node (sdk/node) — zero dependencies, Node 18+
 const { KiwiClient } = require('@runkiwi/sdk');
 const client = new KiwiClient('http://localhost:8080', process.env.KIWI_TOKEN);
-await client.submitTask('Fix flaky test', 'pkg/foo/foo.go', 'go test ./...', './codebase.zip');
+const { job_id } = await client.submitTask({
+  task: 'Fix flaky test', file: 'pkg/foo/foo.go', testCmd: 'go test ./...',
+});
+const job = await client.getJob(job_id);
 ```
 
 ```python
 # Python (sdk/python)
 from kiwi import KiwiClient
 client = KiwiClient("http://localhost:8080", token)
-client.submit_task("Fix flaky test", "pkg/foo/foo.go", "go test ./...", "./codebase.zip")
+result = client.submit_task(task="Fix flaky test", file="pkg/foo/foo.go", test_cmd="go test ./...")
+job = client.get_job(result["job_id"])
 ```
 
-Both constructors refuse to send a token over cleartext HTTP to a non-local host.
+Both submit to `/api/v1/planner/plan` — the daemon-fed path `kiwi submit` uses — so a submission is planned into a DAG and leased by a daemon. Workers run asynchronously; poll `getJob` / `get_job` for the PR. Both constructors refuse to send a token over cleartext HTTP to a non-local host.
 
 ## Webhooks
 

@@ -9,7 +9,9 @@ LONG_DESCRIPTION = (HERE / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="kiwi-sdk",
-    version="1.0.0",
+    # 0.x while the surface is still three methods. 1.0.0 is a semver promise
+    # of API stability that this client is not ready to make.
+    version="0.1.0",
     description="Python client for Kiwi — coding agents that run in infrastructure you control.",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
@@ -22,7 +24,7 @@ setup(
     },
     author="RunKiwi",
     license="MIT",
-    packages=find_packages(),
+    packages=find_packages(exclude=["test_kiwi", "tests", "tests.*"]),
     install_requires=["requests"],
     python_requires=">=3.9",
     keywords=["kiwi", "runkiwi", "coding-agent", "ai-agent", "byoc", "automation"],

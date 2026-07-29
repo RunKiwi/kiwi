@@ -1,6 +1,6 @@
 {
   "name": "@runkiwi/sdk",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Node.js client for Kiwi — coding agents that run in infrastructure you control.",
   "keywords": [
     "kiwi",
@@ -32,10 +32,6 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "echo \"No tests specified yet\""
-  },
-  "dependencies": {
-    "axios": "^1.4.0",
-    "form-data": "^4.0.0"
+    "test": "node --test"
   }
 }
