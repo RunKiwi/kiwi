@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask } from "@/lib/api";
@@ -115,27 +117,47 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus restoration & keydown listener for Escape and Tab trap
+  const isOpen = !!taskId;
+
+  // onClose is typically redefined on every parent render, so it cannot sit in a
+  // dependency array here: the dashboard re-renders on each poll, which would
+  // re-run the focus effect every few seconds — stealing focus back to the drawer
+  // mid-interaction and overwriting the element we promised to restore focus to.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  // Capture and restore focus across the open/close transition only. Keyed on
+  // isOpen rather than taskId so switching between jobs does not bounce focus
+  // out to the card and back.
   useEffect(() => {
-    if (!taskId) return;
-
+    if (!isOpen) return;
     previousFocusRef.current = document.activeElement as HTMLElement | null;
+    drawerRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus?.();
+    };
+  }, [isOpen]);
 
-    if (drawerRef.current) {
-      drawerRef.current.focus();
-    }
+  // Escape to close, Tab to cycle within the dialog.
+  useEffect(() => {
+    if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
       if (e.key === "Tab" && drawerRef.current) {
-        const focusables = drawerRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
+        // Disabled controls are not focusable, so including them would hand the
+        // trap a first/last element that silently refuses focus and let Tab
+        // escape the dialog. Stop/Retry/Delete are all conditionally disabled.
+        const focusables = Array.from(
+          drawerRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter(el => el.offsetParent !== null || el === document.activeElement);
         if (focusables.length === 0) return;
 
         const first = focusables[0];
@@ -156,16 +178,14 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     };
 
     window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
 
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      if (previousFocusRef.current && typeof previousFocusRef.current.focus === "function") {
-        previousFocusRef.current.focus();
-      }
-    };
-  }, [taskId, onClose]);
-
-  // Reset transient UI when the drawer switches jobs
+  // Reset transient UI when the drawer switches jobs, so a notice or a primed
+  // delete confirmation cannot leak onto a different job. Adjusting during
+  // render rather than in an effect is React's documented pattern for
+  // prop-derived state: it re-renders before committing, so the stale notice is
+  // never painted at all.
   const [prevTaskId, setPrevTaskId] = useState(taskId);
   if (taskId !== prevTaskId) {
     setPrevTaskId(taskId);
@@ -215,6 +235,9 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
       case 'RUNNING':
       case 'LEASED': return <Activity className="w-4 h-4 text-blue-400" />;
       case 'QUEUED':
+        // A task nobody can run is not "in progress". Swapping the spinner for a
+        // static warning is the difference between the UI implying work is
+        // happening and admitting that none is.
         return BLOCKED_PRESENTATION[task.blocked_reason!]?.tone === "problem"
           ? <ServerCrash className="w-4 h-4 text-red-400" />
           : <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
@@ -226,6 +249,8 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
   };
 
   const tasks = currentJob?.tasks ?? [];
+  // What is actionable depends on where the job is. Offering "stop" on a
+  // finished job or "retry" on a running one invites a click that does nothing.
   const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED");
   const canRetry = tasks.some(t => t.status === "FAILED" || t.status === "CANCELLED");
 
@@ -273,6 +298,8 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
           <div className="flex items-center gap-4">
             <div>
               <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
+                {/* The goal, not the id — an opaque job id says nothing about what
+                    is running, which is the first thing anyone opening this wants. */}
                 {currentJob?.task || "Job Details"}
                 {currentJob && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">

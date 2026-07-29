@@ -9,11 +9,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
-import { filterJobs, sortJobs, groupJobsByDate, type JobSortOption } from "@/lib/jobFilters";
+import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
+
+// How many jobs render before "Show more". Sized so a normal week fits in one
+// screenful of scrolling rather than to any rendering limit.
+const PAGE_SIZE = 60;
 
 function CommandCenterContent() {
   const { jobs, loadJobs } = useFleetStore();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(searchParams.get("job") || null);
   // Which job's PR list popover is open (job_id), if any.
@@ -25,12 +30,14 @@ function CommandCenterContent() {
   const [cardNotice, setCardNotice] = useState<{ jobId: string; message: string; tasksAffected: number } | null>(null);
   const [cardBusyJob, setCardBusyJob] = useState<string | null>(null);
 
-  // Filter & Sort state initialized from URL query params
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "all");
+  // Filter & Sort state initialized from URL query params. The URL is user-editable
+  // input, so each value is validated against what the control can actually render —
+  // an unchecked cast would leave a Select displaying a value absent from its options.
+  const [statusFilter, setStatusFilter] = useState(() => parseStatusParam(searchParams.get("status")));
   const [repoFilter, setRepoFilter] = useState(searchParams.get("repo") || "all");
   const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
-  const [sortBy, setSortBy] = useState<JobSortOption>((searchParams.get("sort") as JobSortOption) || "newest");
-  const [displayLimit, setDisplayLimit] = useState(60);
+  const [sortBy, setSortBy] = useState<JobSortOption>(() => parseSortParam(searchParams.get("sort")));
+  const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE);
 
   const openJobDrawer = (jobId: string) => {
     setActiveDrawerTaskId(jobId);
@@ -40,7 +47,12 @@ function CommandCenterContent() {
     setActiveDrawerTaskId(null);
   };
 
-  // Synchronize filter parameters and open job drawer with URL query string
+  // Synchronize the filters and the open job with the URL query string. This goes
+  // through the Next router rather than window.history so the router's own view of
+  // the URL stays in step — useSearchParams does not observe a raw
+  // history.replaceState, which would leave route state and the address bar
+  // disagreeing. Both writers share one effect precisely so they cannot clobber
+  // each other's params.
   useEffect(() => {
     const params = new URLSearchParams();
     if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
@@ -50,9 +62,19 @@ function CommandCenterContent() {
     if (activeDrawerTaskId) params.set("job", activeDrawerTaskId);
 
     const queryString = params.toString();
-    const url = queryString ? `/?${queryString}` : "/";
-    window.history.replaceState(null, "", url);
-  }, [statusFilter, repoFilter, searchQuery, sortBy, activeDrawerTaskId]);
+    router.replace(queryString ? `/?${queryString}` : "/", { scroll: false });
+  }, [statusFilter, repoFilter, searchQuery, sortBy, activeDrawerTaskId, router]);
+
+  // A narrowed result set should start from the top of the page, not inherit an
+  // expansion the user requested for a different set of jobs. Adjusted during
+  // render rather than in an effect so the first paint after a filter change is
+  // already correct — the same pattern TaskDrawer uses to reset per-job state.
+  const filterSignature = `${statusFilter}|${repoFilter}|${searchQuery.trim()}`;
+  const [prevFilterSignature, setPrevFilterSignature] = useState(filterSignature);
+  if (prevFilterSignature !== filterSignature) {
+    setPrevFilterSignature(filterSignature);
+    setDisplayLimit(PAGE_SIZE);
+  }
 
   // Form State — only task + repo are required. Everything else is a hint.
   const [task, setTask] = useState("");
@@ -81,8 +103,6 @@ function CommandCenterContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  const router = useRouter();
 
   useEffect(() => {
     loadJobs();
@@ -141,6 +161,26 @@ function CommandCenterContent() {
       document.removeEventListener("mousedown", onDown);
     };
   }, [openPrJob]);
+
+  // Stand a primed confirm down on Escape or any click outside the primed button.
+  // This deliberately does not use onBlur: clicking a <button> does not focus it
+  // in every browser, so a blur-based reset can leave a destructive action armed
+  // indefinitely after the pointer has moved on.
+  useEffect(() => {
+    if (!confirmCancelJob && !confirmDeleteJob) return;
+    const standDown = () => { setConfirmCancelJob(null); setConfirmDeleteJob(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") standDown(); };
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("[data-confirm-action]")) return;
+      standDown();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [confirmCancelJob, confirmDeleteJob]);
 
   const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
   // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
@@ -265,7 +305,8 @@ function CommandCenterContent() {
 
   // Derived filter calculations
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: jobs.length, QUEUED: 0, RUNNING: 0, SUCCEEDED: 0, FAILED: 0 };
+    const c: Record<string, number> = { all: jobs.length };
+    for (const s of FILTERABLE_STATUSES) c[s] = 0;
     for (const j of jobs) {
       const s = j.status?.toUpperCase();
       if (s && s in c) {
@@ -325,7 +366,9 @@ function CommandCenterContent() {
     RUNNING: { label: "Running", Icon: Activity, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)", glow: "rgba(59,130,246,0.12)" },
     SUCCEEDED: { label: "Succeeded", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)", glow: "rgba(147,198,69,0.09)" },
     FAILED: { label: "Failed", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)", glow: "rgba(239,68,68,0.09)" },
-    CANCELLED: { label: "Cancelled", Icon: XCircle, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(0,0,0,0)" },
+    // Cancelled is deliberately the quietest state on the board: it is not a
+    // failure, and it should not compete for attention with one.
+    CANCELLED: { label: "Cancelled", Icon: Ban, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)", glow: "rgba(160,160,160,0.06)" },
   };
   // Neutral near-black card base — lets the status wash read as true colour.
   const CARD_BASE = "#0C0D10";
@@ -548,10 +591,12 @@ function CommandCenterContent() {
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { key: "all", label: "All", count: counts.all },
-              { key: "QUEUED", label: "Queued", count: counts.QUEUED },
-              { key: "RUNNING", label: "Running", count: counts.RUNNING },
-              { key: "SUCCEEDED", label: "Succeeded", count: counts.SUCCEEDED },
-              { key: "FAILED", label: "Failed", count: counts.FAILED },
+              ...FILTERABLE_STATUSES.map(s => ({
+                key: s,
+                // "QUEUED" -> "Queued": the chips read as words, not enum values.
+                label: s.charAt(0) + s.slice(1).toLowerCase(),
+                count: counts[s],
+              })),
             ].map(chip => {
               const isActive = statusFilter.toLowerCase() === chip.key.toLowerCase();
               return (
@@ -646,7 +691,7 @@ function CommandCenterContent() {
               setSearchQuery("");
               setSortBy("newest");
             }}
-            className="mt-4 px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white transition-colors"
+            className="btn-ghost mt-4"
           >
             Clear filters
           </button>
@@ -657,7 +702,7 @@ function CommandCenterContent() {
             if (group.items.length === 0) return null;
             return (
               <div key={group.label} className="flex flex-col">
-                <div className="sticky top-0 z-20 py-2 bg-[#080B10]/90 backdrop-blur-md mb-3 flex items-center gap-2 border-b border-white/5">
+                <div className="sticky top-0 z-20 py-2 bg-[var(--background)]/90 backdrop-blur-md mb-3 flex items-center gap-2 border-b border-white/5">
                   <p className="eyebrow"><span className="dot"></span> {group.label}</p>
                   <span className="text-[10px] font-mono text-zinc-500 bg-white/5 rounded-full px-2 py-0.5">{group.items.length}</span>
                 </div>
@@ -680,7 +725,7 @@ function CommandCenterContent() {
                           type="button"
                           aria-label={`View details for job ${shortId(job.job_id)}`}
                           onClick={() => openJobDrawer(job.job_id)}
-                          className="absolute inset-0 z-0 rounded-2xl cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          className="absolute inset-0 z-0 rounded-2xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--green)]/60"
                         />
 
                         {/* Card inner content sitting above click overlay */}
@@ -706,7 +751,7 @@ function CommandCenterContent() {
                                       <button
                                         type="button"
                                         onClick={e => handleCardCancel(e, job.job_id)}
-                                        onBlur={() => setConfirmCancelJob(null)}
+                                        data-confirm-action
                                         title="Cancel job"
                                         className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                                           confirmCancelJob === job.job_id
@@ -718,7 +763,10 @@ function CommandCenterContent() {
                                         {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
                                       </button>
                                     )}
-                                    {job.status === "FAILED" && (
+                                    {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
+                                        so a job you called off is resumable straight from the card
+                                        rather than only from the drawer. */}
+                                    {(job.status === "FAILED" || job.status === "CANCELLED") && (
                                       <button
                                         type="button"
                                         onClick={e => handleCardRetry(e, job.job_id)}
@@ -733,7 +781,7 @@ function CommandCenterContent() {
                                       <button
                                         type="button"
                                         onClick={e => handleCardDelete(e, job.job_id)}
-                                        onBlur={() => setConfirmDeleteJob(null)}
+                                        data-confirm-action
                                         title="Delete job"
                                         className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                                           confirmDeleteJob === job.job_id
@@ -757,6 +805,8 @@ function CommandCenterContent() {
 
                           {cardNotice?.jobId === job.job_id && (
                             <div
+                              role="status"
+                              aria-live="polite"
                               className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border pointer-events-auto ${
                                 cardNotice.tasksAffected === 0
                                   ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
