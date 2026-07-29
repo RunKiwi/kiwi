@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/components/TaskComposer/serialize.test.ts src/lib/jobFilters.test.ts src/hooks/usePolling.test.ts"
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",
