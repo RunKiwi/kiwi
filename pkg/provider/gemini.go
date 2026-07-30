@@ -189,12 +189,20 @@ func (p *GeminiProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 // prompt, return the model's text response. Used for repo exploration and
 // multi-file edits, which are not shaped like GetCodeEdit's single-file fix.
 func (p *GeminiProvider) Complete(ctx context.Context, system, user string) (string, error) {
-	text, finish, err := p.generate(ctx, p.actorModel, system, user, 8192)
+	budget := CompletionBudget()
+	text, finish, err := p.generate(ctx, p.actorModel, system, user, budget)
 	if err != nil {
 		return "", fmt.Errorf("gemini complete request failed: %w", err)
 	}
 	if finish == "SAFETY" || finish == "PROHIBITED_CONTENT" {
 		return "", fmt.Errorf("complete request blocked by safety filter (%s)", finish)
+	}
+	// MAX_TOKENS means the model was cut off mid-answer. Returning the partial
+	// text lets it surface downstream as whatever the caller's parser happens to
+	// complain about — "unexpected end of JSON input" — which describes the
+	// symptom and hides the cause. Name the cause here instead.
+	if finish == "MAX_TOKENS" {
+		return "", &ErrTruncated{Budget: budget, Model: p.actorModel}
 	}
 	return text, nil
 }

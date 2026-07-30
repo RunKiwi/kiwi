@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,5 +133,30 @@ func TestGeminiComplete(t *testing.T) {
 	}
 	if in, out := gp.LastUsage(); in != 10 || out != 5 {
 		t.Errorf("usage = %d/%d, want 10/5", in, out)
+	}
+}
+
+// A response cut off at the output limit must be reported as truncated, not
+// returned as if it were complete. Returning the partial text is what produced
+// "parse json: unexpected end of JSON input" in production — a message that
+// describes the parser's symptom and hides the actual cause.
+func TestGeminiCompleteReportsTruncation(t *testing.T) {
+	resp := `{"candidates":[{"content":{"parts":[{"text":"{\"files\":[{\"path\":\"a.js\",\"content\":\"half a fi"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{}}`
+	srv, gp := geminiTestServer(t, resp, http.StatusOK)
+	defer srv.Close()
+
+	text, err := gp.Complete(context.Background(), "system", "user")
+	if err == nil {
+		t.Fatalf("expected a truncation error, got text %q", text)
+	}
+	var trunc *ErrTruncated
+	if !errors.As(err, &trunc) {
+		t.Fatalf("error should be *ErrTruncated so callers can act on it, got %T: %v", err, err)
+	}
+	if text != "" {
+		t.Errorf("a truncated response must not also return partial text, got %q", text)
+	}
+	if !strings.Contains(err.Error(), "cut off") {
+		t.Errorf("message should say the response was cut off, got: %v", err)
 	}
 }
