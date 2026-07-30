@@ -287,6 +287,11 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"ref":      req.Ref,
 				"file":     req.File,
 				"test_cmd": req.TestCmd,
+				// Recorded so planner spend can be attributed to the model that
+				// incurred it. Without it, a cost-by-model breakdown silently
+				// omits planning — which is the half most worth acting on, since
+				// the planner defaults to the most expensive model available.
+				"planner_model": actualModel,
 			},
 			PlannerCostUSD:   totalCost,
 			PlannerTokensIn:  totalIn,
