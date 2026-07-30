@@ -266,9 +266,7 @@ function CommandCenterContent() {
   };
 
   const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
-  // The planner runs on Kiwi's Control-Plane key, not the org's provider key, so
-  // its options are NOT gated by which keys the org has connected.
-  const plannerOptions = allModels;
+
   // The worker runs on the org's own provider key — only offer models it can
   // actually reach, so a task can't be launched with an unrunnable worker model.
   let workerOptions = allModels;
@@ -287,6 +285,8 @@ function CommandCenterContent() {
       showIntegrationsHint = true;
     }
   }
+
+  const plannerOptions = workerOptions;
 
   const handleSubmit = async () => {
     setSubmitError("");

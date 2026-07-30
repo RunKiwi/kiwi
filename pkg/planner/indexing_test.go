@@ -97,7 +97,7 @@ func TestSubmitPlanCompletionRecordsOutcome(t *testing.T) {
 		Updates(map[string]interface{}{"status": store.TaskLeased, "lease_id": leaseID})
 
 	pr := "https://github.com/owner/repo/pull/1"
-	if ok, err := s.CompleteTask(ctx, taskID, leaseID, store.TaskSucceeded, pr, "done"); err != nil || !ok {
+	if ok, err := s.CompleteTask(ctx, store.TaskCompletion{TaskID: taskID, LeaseID: leaseID, FinalStatus: store.TaskSucceeded, ResultURL: pr}); err != nil || !ok {
 		t.Fatalf("CompleteTask: ok=%v err=%v", ok, err)
 	}
 

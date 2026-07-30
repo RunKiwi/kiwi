@@ -53,6 +53,11 @@ func (p *GeminiProvider) LastCostUSD() float64 { return p.lastCost }
 // LastUsage reports the input/output token counts of the most recent API call.
 func (p *GeminiProvider) LastUsage() (int64, int64) { return p.lastInput, p.lastOutput }
 
+// Usage implements planner.UsageReporter by returning the cumulative usage of this provider.
+func (p *GeminiProvider) Usage() (int64, int64, float64) {
+	return p.lastInput, p.lastOutput, p.lastCost
+}
+
 // --- wire types for generateContent ---
 
 type geminiPart struct {
@@ -128,9 +133,9 @@ func (p *GeminiProvider) generate(ctx context.Context, model, system, user strin
 	if err := json.Unmarshal(body, &gr); err != nil {
 		return "", "", fmt.Errorf("decode gemini response: %w", err)
 	}
-	p.lastInput = gr.UsageMetadata.PromptTokenCount
-	p.lastOutput = gr.UsageMetadata.CandidatesTokenCount
-	p.lastCost = ModelCostUSD(model, p.lastInput, p.lastOutput)
+	p.lastInput += gr.UsageMetadata.PromptTokenCount
+	p.lastOutput += gr.UsageMetadata.CandidatesTokenCount
+	p.lastCost += ModelCostUSD(model, gr.UsageMetadata.PromptTokenCount, gr.UsageMetadata.CandidatesTokenCount)
 
 	if gr.PromptFeedback.BlockReason != "" {
 		return "", gr.PromptFeedback.BlockReason, nil

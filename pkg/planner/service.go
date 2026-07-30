@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
@@ -106,9 +108,77 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	}
 	req.ResolvedLearnings = resolved
 
-	plan, err := s.planner.Plan(ctx, req)
+	var p Planner
+	var completers []Completer
+	actualModel := "heuristic"
+	prov := "local"
+
+	if s.planner != nil {
+		p = s.planner
+	} else if os.Getenv("KIWI_PLANNER") != "llm" {
+		p = NewHeuristicPlanner()
+	} else {
+		actualModel = req.PlannerModel
+		if actualModel == "" {
+			actualModel = os.Getenv("KIWI_PLANNER_MODEL")
+			if actualModel == "" {
+				actualModel = "claude-opus-4-8"
+			}
+		}
+
+		prov = "anthropic"
+		if strings.HasPrefix(actualModel, "gemini-") {
+			prov = "google"
+		}
+
+		var key string
+		if override := os.Getenv("KIWI_PLANNER_API_KEY"); override != "" {
+			key = override
+		} else {
+			secretName := "ANTHROPIC_API_KEY"
+			if prov == "google" {
+				secretName = "GEMINI_API_KEY"
+			}
+			var kerr error
+			key, kerr = s.store.GetCredentialPlaintext(ctx, req.OrgID, secretName)
+			if kerr != nil || key == "" {
+				return nil, fmt.Errorf("no %s connected for planning", secretName)
+			}
+		}
+
+		// Planning runs on the Control Plane with the org's decrypted key. In BYOC
+		// that means Kiwi's network makes provider calls with a customer credential
+		// — acceptable for managed, a containment gap for BYOC. Moving planning into
+		// the daemon (as the Actor/Critic already are) closes it and is the intended
+		// direction; it needs a two-phase handoff (queue a plan task, daemon plans,
+		// reports the DAG, CP expands it into workers) and is deliberately not done
+		// here.
+		p = NewLLMPlannerFunc(func(m string) Completer {
+			var comp Completer
+			if prov == "google" {
+				comp = provider.NewGeminiProviderWithModels(key, m, m)
+			} else {
+				comp = provider.NewAnthropicProviderWithModels(key, m, m)
+			}
+			completers = append(completers, comp)
+			return comp
+		}, actualModel)
+	}
+
+	plan, err := p.Plan(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+
+	var totalCost float64
+	var totalIn, totalOut int64
+	for _, c := range completers {
+		if ur, ok := c.(UsageReporter); ok {
+			in, out, cost := ur.Usage()
+			totalIn += in
+			totalOut += out
+			totalCost += cost
+		}
 	}
 
 	// A missing limits row, or one written before MaxWorkersPerJob existed,
@@ -143,11 +213,13 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		})
 	}
 	content := map[string]interface{}{
-		"task":     req.Task,
-		"repo_url": req.RepoURL,
-		"ref":      req.Ref,
-		"summary":  plan.Summary,
-		"workers":  workers,
+		"task":             req.Task,
+		"repo_url":         req.RepoURL,
+		"ref":              req.Ref,
+		"summary":          plan.Summary,
+		"workers":          workers,
+		"planner_model":    actualModel,
+		"planner_provider": prov,
 	}
 
 	manifestID, err := contentHash(content)
@@ -179,6 +251,31 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			if res.RowsAffected == 0 {
 				return ErrIdempotentConflict
 			}
+		}
+
+		var ik *string
+		if req.IdempotencyKey != "" {
+			ik = &req.IdempotencyKey
+		}
+		job := &store.Job{
+			ID:             jobID,
+			OrgID:          req.OrgID,
+			UserID:         req.UserID,
+			Status:         "PENDING",
+			IdempotencyKey: ik,
+			Inputs: map[string]interface{}{
+				"task":     req.Task,
+				"repo_url": req.RepoURL,
+				"ref":      req.Ref,
+				"file":     req.File,
+				"test_cmd": req.TestCmd,
+			},
+			PlannerCostUSD:   totalCost,
+			PlannerTokensIn:  totalIn,
+			PlannerTokensOut: totalOut,
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
+			return fmt.Errorf("persist job: %w", err)
 		}
 
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(m).Error; err != nil {

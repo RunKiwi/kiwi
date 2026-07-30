@@ -277,6 +277,9 @@ export const client = {
   createCheckout: () =>
     fetchApi<{ url: string }>("/api/v1/billing/checkout", { method: "POST" }),
 
+  getSpend: (from: string, to: string) =>
+    fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+
   submitPlan: (req: PlanRequest) => 
     fetchApi<PlanResponse>("/api/v1/planner/plan", {
       method: "POST",

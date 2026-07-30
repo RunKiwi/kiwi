@@ -39,6 +39,13 @@ type JobSummary struct {
 	DaemonID string `json:"daemon_id"`
 }
 
+// TaskCompletion wraps the arguments for ending a task's lease.
+type TaskCompletion struct {
+	TaskID, LeaseID, FinalStatus, ResultURL, Detail string
+	CostUSD                                         float64
+	TokensIn, TokensOut                             int64
+}
+
 // Store defines the data access interface for the control plane.
 // It abstracts away the underlying database (e.g. Postgres or SQLite)
 // and provides a unified interface for all subsystems.
@@ -68,7 +75,7 @@ type Store interface {
 	EnqueueTask(ctx context.Context, task *QueuedTask) error
 	LeaseNextTask(ctx context.Context, orgID, leasedBy, fleetID string, ttl time.Duration) (*QueuedTask, error)
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
-	CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error)
+	CompleteTask(ctx context.Context, c TaskCompletion) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 	ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)

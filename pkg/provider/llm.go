@@ -47,9 +47,14 @@ func (p *AnthropicProvider) LastCostUSD() float64 { return p.lastCost }
 func (p *AnthropicProvider) LastUsage() (int64, int64) { return p.lastInput, p.lastOutput }
 
 func (p *AnthropicProvider) recordCost(u anthropic.Usage, model string) {
-	p.lastCost = ModelCostUSD(model, u.InputTokens, u.OutputTokens)
-	p.lastInput = u.InputTokens
-	p.lastOutput = u.OutputTokens
+	p.lastCost += ModelCostUSD(model, u.InputTokens, u.OutputTokens)
+	p.lastInput += u.InputTokens
+	p.lastOutput += u.OutputTokens
+}
+
+// Usage implements planner.UsageReporter by returning the cumulative usage of this provider.
+func (p *AnthropicProvider) Usage() (int64, int64, float64) {
+	return p.lastInput, p.lastOutput, p.lastCost
 }
 
 func collectText(resp *anthropic.Message) string {
