@@ -99,7 +99,7 @@ func TestCompleteTaskRejectsCancelledTask(t *testing.T) {
 		t.Fatalf("CancelJob: %v", err)
 	}
 
-	ok, err := s.CompleteTask(ctx, "j1-a", leaseID, TaskSucceeded, "https://pr", "")
+	ok, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "j1-a", LeaseID: leaseID, FinalStatus: TaskSucceeded, ResultURL: "https://pr"})
 	if err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
