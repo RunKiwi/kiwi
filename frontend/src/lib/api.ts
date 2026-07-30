@@ -7,8 +7,8 @@ export interface PlanRequest {
   file?: string;
   files?: string[];
   test_cmd?: string;
-  // model is the worker model (runs on your provider key). planner_model is the
-  // model that decomposes/verifies the task (runs on Kiwi's planning key).
+  // model is the worker model; planner_model decomposes the task into the
+  // worker DAG. Both run on your own provider key.
   model?: string;
   planner_model?: string;
   max_workers?: number;
@@ -158,6 +158,41 @@ export interface ValidateResponse {
   plan: string;
 }
 
+export interface SpendBucket {
+  label: string;
+  planner_usd: number;
+  worker_usd: number;
+  total_usd: number;
+}
+
+export interface SpendPoint {
+  date: string;
+  planner_usd: number;
+  worker_usd: number;
+}
+
+/** Mirrors orchestrator.SpendResponse. */
+export interface SpendResponse {
+  from: string;
+  to: string;
+  cost_usd: number;
+  planner_usd: number;
+  worker_usd: number;
+  agent_minutes: number;
+  tokens_in: number;
+  tokens_out: number;
+  job_count: number;
+  /**
+   * Jobs with at least one metered task. Below job_count, the total is a floor
+   * rather than a measurement — jobs that ran before cost metering shipped have
+   * no cost recorded, and their zero must not be shown as one.
+   */
+  metered_jobs: number;
+  daily: SpendPoint[];
+  by_repo: SpendBucket[];
+  by_model: SpendBucket[];
+}
+
 export interface UsageResponse {
   plan: string;
   activation_state: string;
@@ -263,6 +298,9 @@ export const client = {
   getAuthProviders: () => fetchApi<AuthProvidersResponse>("/auth/providers"),
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
+
+  getSpend: (from: string, to: string) =>
+    fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
 
   // Admin APIs
   getAdminStats: () => fetchApi<AdminStats>("/admin/stats"),
