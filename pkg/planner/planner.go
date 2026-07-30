@@ -14,6 +14,7 @@ import (
 // request body.
 type PlanRequest struct {
 	OrgID          string `json:"-"`
+	UserID         string `json:"-"`
 	IdempotencyKey string `json:"-"`
 	Task           string `json:"task"`
 	RepoURL        string `json:"repo_url"`

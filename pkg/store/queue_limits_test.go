@@ -73,7 +73,7 @@ func TestAgentMinutesMeteredFromStartedAt(t *testing.T) {
 		t.Fatalf("backdate started_at: %v", err)
 	}
 
-	ok, err := s.CompleteTask(ctx, "t1", *leased.LeaseID, TaskSucceeded, "", "")
+	ok, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: *leased.LeaseID, FinalStatus: TaskSucceeded})
 	if err != nil || !ok {
 		t.Fatalf("CompleteTask failed: %v, %v", err, ok)
 	}

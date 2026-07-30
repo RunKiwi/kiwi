@@ -1,0 +1,5 @@
+ALTER TABLE queued_tasks
+  ADD COLUMN cost_usd   DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ADD COLUMN tokens_in  BIGINT           NOT NULL DEFAULT 0,
+  ADD COLUMN tokens_out BIGINT           NOT NULL DEFAULT 0,
+  ADD COLUMN metered_at TIMESTAMPTZ;

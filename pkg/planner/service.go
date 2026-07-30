@@ -181,6 +181,36 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			}
 		}
 
+		// Persist the job row itself. Without it the planner path produced tasks
+		// with a job_id that referenced nothing, and every downstream write keyed
+		// on that id silently matched zero rows: agent-minutes were never
+		// recorded, the monthly compute cap never fired, and the per-job budget
+		// guard — which skips itself when the row is missing — never ran.
+		//
+		// OnConflict DoNothing so an idempotent replay does not clobber a job
+		// that is already accruing.
+		var ik *string
+		if req.IdempotencyKey != "" {
+			ik = &req.IdempotencyKey
+		}
+		job := &store.Job{
+			ID:             jobID,
+			OrgID:          req.OrgID,
+			UserID:         req.UserID,
+			Status:         "PENDING",
+			IdempotencyKey: ik,
+			Inputs: map[string]interface{}{
+				"task":     req.Task,
+				"repo_url": req.RepoURL,
+				"ref":      req.Ref,
+				"file":     req.File,
+				"test_cmd": req.TestCmd,
+			},
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
+			return fmt.Errorf("persist job: %w", err)
+		}
+
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(m).Error; err != nil {
 			return fmt.Errorf("persist manifest: %w", err)
 		}
