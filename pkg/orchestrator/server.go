@@ -84,40 +84,6 @@ func (s *Server) cpSigningKey() (*ver.SigningKey, error) {
 	return ver.CPSigningKey()
 }
 
-// selectPlanner chooses the planner from the environment. With
-// KIWI_PLANNER=llm and a Control-Plane planning key (KIWI_PLANNER_API_KEY, or
-// ANTHROPIC_API_KEY as a fallback), it wires the frontier-model LLMPlanner via
-// the provider's Completer; otherwise it uses the deterministic HeuristicPlanner
-// (the offline/default path). The planner runs on the CP's own key, not a
-// customer's (Execution Model RFC §4.1).
-func selectPlanner() planner.Planner {
-	if os.Getenv("KIWI_PLANNER") != "llm" {
-		return planner.NewHeuristicPlanner()
-	}
-	key := os.Getenv("KIWI_PLANNER_API_KEY")
-	if key == "" {
-		key = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	if key == "" {
-		fmt.Println("[planner] KIWI_PLANNER=llm but no planning key set; falling back to HeuristicPlanner")
-		return planner.NewHeuristicPlanner()
-	}
-	model := os.Getenv("KIWI_PLANNER_MODEL")
-	if model == "" {
-		model = "claude-opus-4-8"
-	}
-	fmt.Printf("[planner] Using LLMPlanner (default model %s)\n", model)
-	// Build the planner Completer per request so PlanRequest.PlannerModel can
-	// pick the model. The planning key is Anthropic, so non-Anthropic ids (e.g.
-	// gemini-*) fall back to the default rather than failing at call time.
-	return planner.NewLLMPlannerFunc(func(m string) planner.Completer {
-		if m == "" || strings.HasPrefix(m, "gemini") {
-			m = model
-		}
-		return provider.NewAnthropicProviderWithModels(key, m, m)
-	}, model)
-}
-
 func NewServer(storage store.Store, cfg *Config) *Server {
 	root := os.Getenv("KIWI_SNAPSHOT_DIR")
 	if root == "" {
@@ -135,8 +101,8 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		infra:        infra.NewDockerInfra(os.TempDir()),
 		snapshotRoot: root,
 		// Planner defaults to the deterministic HeuristicPlanner; the
-		// frontier-model LLMPlanner is selected via env (see selectPlanner).
-		planner:       planner.NewService(storage, selectPlanner(), embedder),
+		// frontier-model LLMPlanner is built per request in SubmitPlan.
+		planner:       planner.NewService(storage, nil, embedder),
 		credValidator: defaultCredValidator,
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
@@ -35,6 +36,12 @@ type Service struct {
 	// goroutine. Production leaves it false (best-effort, non-blocking); tests
 	// set it true so the write is observable without racing a goroutine.
 	indexSync bool
+	// newCompleter overrides how a planning Completer is built for a model.
+	// Production leaves it nil and gets a real provider; tests set it so the
+	// live code path — key resolution, provider routing, cost aggregation —
+	// runs without a network call. Injecting a whole Planner instead would skip
+	// that path entirely and prove nothing about it.
+	newCompleter func(model string) Completer
 }
 
 func NewService(s store.Store, p Planner, e provider.Embedder) *Service {
@@ -106,9 +113,90 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	}
 	req.ResolvedLearnings = resolved
 
-	plan, err := s.planner.Plan(ctx, req)
+	var p Planner
+	var completers []Completer
+	actualModel := "heuristic"
+	prov := "local"
+	// True when planning ran on a Control-Plane key rather than the org's, in
+	// which case the org did not pay for it and must not be billed for it.
+	plannedOnOperatorKey := false
+
+	if s.planner != nil {
+		p = s.planner
+	} else if os.Getenv("KIWI_PLANNER") != "llm" {
+		p = NewHeuristicPlanner()
+	} else {
+		actualModel = req.PlannerModel
+		if actualModel == "" {
+			actualModel = os.Getenv("KIWI_PLANNER_MODEL")
+			if actualModel == "" {
+				actualModel = "claude-opus-4-8"
+			}
+		}
+
+		prov = provider.ProviderOf(actualModel)
+
+		var key string
+		if override := os.Getenv("KIWI_PLANNER_API_KEY"); override != "" {
+			key = override
+			plannedOnOperatorKey = true
+		} else {
+			secretName := "ANTHROPIC_API_KEY"
+			if prov == provider.ProviderGemini {
+				secretName = "GEMINI_API_KEY"
+			}
+			var kerr error
+			key, kerr = s.store.GetCredentialPlaintext(ctx, req.OrgID, secretName)
+			if kerr != nil || key == "" {
+				// Phrased so the dashboard's error mapper recognises it as a
+				// credential problem and offers the link to Integrations.
+				return nil, fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+			}
+		}
+
+		// Planning runs on the Control Plane with the org's decrypted key. In BYOC
+		// that means Kiwi's network makes provider calls with a customer credential
+		// — acceptable for managed, a containment gap for BYOC. Moving planning into
+		// the daemon (as the Actor/Critic already are) closes it and is the intended
+		// direction; it needs a two-phase handoff (queue a plan task, daemon plans,
+		// reports the DAG, CP expands it into workers) and is deliberately not done
+		// here.
+		p = NewLLMPlannerFunc(func(m string) Completer {
+			var comp Completer
+			switch {
+			case s.newCompleter != nil:
+				comp = s.newCompleter(m)
+			case prov == provider.ProviderGemini:
+				comp = provider.NewGeminiProviderWithModels(key, m, m)
+			default:
+				comp = provider.NewAnthropicProviderWithModels(key, m, m)
+			}
+			completers = append(completers, comp)
+			return comp
+		}, actualModel)
+	}
+
+	plan, err := p.Plan(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+
+	// Planner spend, attributed to the org that paid for it. When the operator
+	// override supplied the key the org did not pay, so nothing is recorded
+	// against the job — billing a customer for a call made on Kiwi's credential
+	// would overstate their spend on a page they cannot reconcile against their
+	// own provider invoice.
+	var totalCost float64
+	var totalIn, totalOut int64
+	if !plannedOnOperatorKey {
+		for _, c := range completers {
+			if ur, ok := c.(UsageReporter); ok {
+				in, out, cost := ur.Usage()
+				totalIn += in
+				totalOut += out
+				totalCost += cost
+			}
+		}
 	}
 
 	// A missing limits row, or one written before MaxWorkersPerJob existed,
@@ -143,11 +231,13 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		})
 	}
 	content := map[string]interface{}{
-		"task":     req.Task,
-		"repo_url": req.RepoURL,
-		"ref":      req.Ref,
-		"summary":  plan.Summary,
-		"workers":  workers,
+		"task":             req.Task,
+		"repo_url":         req.RepoURL,
+		"ref":              req.Ref,
+		"summary":          plan.Summary,
+		"workers":          workers,
+		"planner_model":    actualModel,
+		"planner_provider": prov,
 	}
 
 	manifestID, err := contentHash(content)
@@ -181,14 +271,6 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			}
 		}
 
-		// Persist the job row itself. Without it the planner path produced tasks
-		// with a job_id that referenced nothing, and every downstream write keyed
-		// on that id silently matched zero rows: agent-minutes were never
-		// recorded, the monthly compute cap never fired, and the per-job budget
-		// guard — which skips itself when the row is missing — never ran.
-		//
-		// OnConflict DoNothing so an idempotent replay does not clobber a job
-		// that is already accruing.
 		var ik *string
 		if req.IdempotencyKey != "" {
 			ik = &req.IdempotencyKey
@@ -206,6 +288,9 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"file":     req.File,
 				"test_cmd": req.TestCmd,
 			},
+			PlannerCostUSD:   totalCost,
+			PlannerTokensIn:  totalIn,
+			PlannerTokensOut: totalOut,
 		}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
 			return fmt.Errorf("persist job: %w", err)
