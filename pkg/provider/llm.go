@@ -128,9 +128,13 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 // live model.
 func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (string, error) {
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
+	budget := CompletionBudget()
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(p.actorModel),
-		MaxTokens: 8000,
+		Model: anthropic.Model(p.actorModel),
+		// Adaptive thinking draws on the same MaxTokens budget as the visible
+		// answer, so this ceiling has to cover both — an 8000 budget left the
+		// multi-file Actor far less than 8000 tokens of actual JSON.
+		MaxTokens: int64(budget),
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
 		Messages: []anthropic.MessageParam{
@@ -141,6 +145,10 @@ func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (
 		return "", fmt.Errorf("anthropic completion request failed: %w", err)
 	}
 	p.recordCost(resp.Usage, p.actorModel)
+	// Truncation must not be returned as a complete answer; see ErrTruncated.
+	if resp.StopReason == anthropic.StopReasonMaxTokens {
+		return "", &ErrTruncated{Budget: budget, Model: p.actorModel}
+	}
 	if resp.StopReason == anthropic.StopReasonRefusal {
 		return "", errors.New("completion refused by safety classifier")
 	}
