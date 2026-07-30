@@ -34,6 +34,7 @@ func (s *Service) HandlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.OrgID = claims.OrgID
+	req.UserID = claims.UserID
 	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
 	if req.Task == "" {
 		http.Error(w, "task is required", http.StatusBadRequest)
