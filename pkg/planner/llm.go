@@ -45,11 +45,18 @@ func NewLLMPlannerFunc(newModel func(model string) Completer, defaultModel strin
 	return &LLMPlanner{newModel: newModel, defaultModel: defaultModel}
 }
 
+// plannerSystem deliberately does NOT ask for a per-worker "model". The planner
+// is never told which providers this org holds keys for, so any model it names
+// is a guess — and a wrong guess is not a bad default, it is a failed job: the
+// daemon routes strictly on the model id, so a hallucinated "claude-*" sends the
+// worker to Anthropic for an org that only connected Gemini. Kiwi assigns the
+// worker model from the request instead (see Plan below).
 const plannerSystem = "You are the Planner in an autonomous coding swarm. " +
 	"Decompose the user's task into a DAG of small, independently-executable worker jobs. " +
 	"Scope each worker by the file it edits and a test command that defines 'done' — NOT a persona. " +
+	"Do not choose models; the runtime assigns them. " +
 	"Respond ONLY with a JSON object: " +
-	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "model": string, "test_cmd": string, "depends_on": [string]}]}.`
+	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "test_cmd": string, "depends_on": [string]}]}.`
 
 func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	if p.newModel == nil {
@@ -116,10 +123,20 @@ func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	}
 
 	// Ensure every worker carries the loop's scope: a model, a target file, and
-	// a test command that defines "done" (#130). Fall back to the request's
-	// values when the model omitted them, so a worker is always executable.
+	// a test command that defines "done" (#130). File and test command fall back
+	// to the request's values when the model omitted them, so a worker is always
+	// executable.
+	//
+	// The model is different: it is the submitter's choice and overrides whatever
+	// the planner produced. A model is not a hint the planner is free to improve
+	// on — it selects the provider, and therefore which of the org's keys the
+	// daemon needs. Treating the planner's value as authoritative (which the old
+	// "only fill in when empty" fallback did, since the model always emitted one)
+	// silently discarded the user's selection and failed the job on the daemon
+	// minutes later with "no API key configured for the anthropic provider".
+	// Only fall back to the planner's suggestion when the request named none.
 	for i := range plan.Workers {
-		if plan.Workers[i].Model == "" {
+		if req.Model != "" {
 			plan.Workers[i].Model = req.Model
 		}
 		if plan.Workers[i].File == "" {
