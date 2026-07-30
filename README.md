@@ -128,6 +128,8 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 
 **LLM providers.** The daemon selects the provider from the worker's `-model`: a `gemini-*` model (e.g. `-model gemini-flash-latest`) uses the stored `GEMINI_API_KEY`; any other model uses `ANTHROPIC_API_KEY`. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
 
+The **worker model is yours to choose, not the planner's**: `-model` (and the dashboard's model selector) is applied to every worker the plan produces, overriding anything the planning model suggested. The planner is never told which providers your org holds keys for, so it is not asked to pick one — a model id selects the provider, and a guessed one would route the work to a key you never connected. `-planner-model` selects the model that decomposes the task; both run on your own provider key.
+
 ### 3. Run the Data Plane daemon
 
 ```bash
