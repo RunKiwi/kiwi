@@ -234,7 +234,12 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		// Do not strand the lease on a spec we cannot parse: fail it now so it
 		// does not sit LEASED until expiry and then retry to the same end.
 		if task.LeaseID != nil {
-			if _, cerr := s.storage.CompleteTask(r.Context(), task.ID, *task.LeaseID, store.TaskFailed, "", "dead-lettered due to daemon disconnect"); cerr != nil {
+			if _, cerr := s.storage.CompleteTask(r.Context(), store.TaskCompletion{
+				TaskID:      task.ID,
+				LeaseID:     *task.LeaseID,
+				FinalStatus: store.TaskFailed,
+				Detail:      "dead-lettered due to daemon disconnect",
+			}); cerr != nil {
 				log.Printf("[daemon] failing unusable task %s: %v", task.ID, cerr)
 			}
 		}
@@ -388,7 +393,24 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ok, err := s.storage.CompleteTask(r.Context(), req.TaskID, req.LeaseID, req.Status, req.ResultURL, req.Detail)
+	var costUSD float64
+	var tokensIn, tokensOut int64
+	for _, ev := range req.Events {
+		costUSD += ev.CostUSD
+		tokensIn += ev.InputTokens
+		tokensOut += ev.OutputTokens
+	}
+
+	ok, err := s.storage.CompleteTask(r.Context(), store.TaskCompletion{
+		TaskID:      req.TaskID,
+		LeaseID:     req.LeaseID,
+		FinalStatus: req.Status,
+		ResultURL:   req.ResultURL,
+		Detail:      req.Detail,
+		CostUSD:     costUSD,
+		TokensIn:    tokensIn,
+		TokensOut:   tokensOut,
+	})
 	if err != nil {
 		log.Printf("[daemon] complete task %s: %v", req.TaskID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

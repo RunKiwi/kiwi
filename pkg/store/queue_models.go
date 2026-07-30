@@ -62,11 +62,15 @@ type QueuedTask struct {
 	// task duration, whereas UpdatedAt resets on every renewal.
 	StartedAt *time.Time `json:"started_at"`
 	// Attempts counts how many times this task has been leased.
-	Attempts     int       `gorm:"not null;default:0" json:"attempts"`
-	ResultURL    *string   `json:"result_url"`
-	ResultDetail *string   `json:"result_detail"`
-	CreatedAt    time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
-	UpdatedAt    time.Time `gorm:"not null;default:current_timestamp" json:"updated_at"`
+	Attempts     int        `gorm:"not null;default:0" json:"attempts"`
+	ResultURL    *string    `json:"result_url"`
+	ResultDetail *string    `json:"result_detail"`
+	CostUSD      float64    `gorm:"not null;default:0" json:"cost_usd"`
+	TokensIn     int64      `gorm:"not null;default:0" json:"tokens_in"`
+	TokensOut    int64      `gorm:"not null;default:0" json:"tokens_out"`
+	MeteredAt    *time.Time `json:"metered_at"`
+	CreatedAt    time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`
 }
 
 func (QueuedTask) TableName() string { return "queued_tasks" }

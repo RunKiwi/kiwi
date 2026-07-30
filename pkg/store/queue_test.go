@@ -142,7 +142,7 @@ func TestLeaseEnforcesDAGDependencies(t *testing.T) {
 	}
 
 	// Complete impl → its dependency is now satisfied.
-	if ok, err := s.CompleteTask(ctx, "j1-impl", *l1.LeaseID, TaskSucceeded, "", ""); err != nil || !ok {
+	if ok, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "j1-impl", LeaseID: *l1.LeaseID, FinalStatus: TaskSucceeded}); err != nil || !ok {
 		t.Fatalf("CompleteTask(impl): ok=%v err=%v", ok, err)
 	}
 
@@ -278,7 +278,7 @@ func TestCompleteTaskFencing(t *testing.T) {
 	leased, _ := s.LeaseNextTask(ctx, "o1", "d", "", time.Minute)
 
 	// Stale/wrong token cannot complete.
-	ok, err := s.CompleteTask(ctx, "t1", "stale-lease", TaskSucceeded, "", "")
+	ok, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: "stale-lease", FinalStatus: TaskSucceeded})
 	if err != nil {
 		t.Fatalf("CompleteTask(stale): %v", err)
 	}
@@ -287,12 +287,12 @@ func TestCompleteTaskFencing(t *testing.T) {
 	}
 
 	// Invalid final status is an error.
-	if _, err := s.CompleteTask(ctx, "t1", *leased.LeaseID, "BOGUS", "", ""); err == nil {
+	if _, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: *leased.LeaseID, FinalStatus: "BOGUS"}); err == nil {
 		t.Error("expected error for invalid final status")
 	}
 
 	// Correct token completes.
-	ok, err = s.CompleteTask(ctx, "t1", *leased.LeaseID, TaskSucceeded, "https://github.com/pr/1", "detail string")
+	ok, err = s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: *leased.LeaseID, FinalStatus: TaskSucceeded, ResultURL: "https://github.com/pr/1", Detail: "detail string"})
 	if err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestCompleteTaskFencing(t *testing.T) {
 	}
 
 	// Double-complete is a no-op.
-	ok, _ = s.CompleteTask(ctx, "t1", *leased.LeaseID, TaskFailed, "", "")
+	ok, _ = s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: *leased.LeaseID, FinalStatus: TaskFailed})
 	if ok {
 		t.Error("completing an already-terminal task must be a no-op")
 	}
@@ -354,7 +354,7 @@ func TestRequeueExpiredLeasesAndRefencing(t *testing.T) {
 	}
 
 	// The dead daemon-1 waking up cannot complete with its stale token.
-	ok, _ := s.CompleteTask(ctx, "t1", oldLease, TaskSucceeded, "", "")
+	ok, _ := s.CompleteTask(ctx, TaskCompletion{TaskID: "t1", LeaseID: oldLease, FinalStatus: TaskSucceeded})
 	if ok {
 		t.Error("stale daemon must not complete a reassigned task (fencing after requeue)")
 	}
@@ -427,7 +427,7 @@ func TestDependencyFailureCascade(t *testing.T) {
 	}
 
 	// impl task fails
-	ok, err := s.CompleteTask(ctx, "j1-impl", *l1.LeaseID, TaskFailed, "", "")
+	ok, err := s.CompleteTask(ctx, TaskCompletion{TaskID: "j1-impl", LeaseID: *l1.LeaseID, FinalStatus: TaskFailed})
 	if err != nil || !ok {
 		t.Fatalf("CompleteTask(impl, FAILED): ok=%v err=%v", ok, err)
 	}

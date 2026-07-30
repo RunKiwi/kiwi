@@ -324,36 +324,40 @@ func (s *PostgresStore) RenewLease(ctx context.Context, taskID, leaseID string, 
 	return res.RowsAffected > 0, nil
 }
 
-func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, finalStatus, resultURL, detail string) (bool, error) {
-	if finalStatus != TaskSucceeded && finalStatus != TaskFailed {
-		return false, fmt.Errorf("invalid final status %q (want %s or %s)", finalStatus, TaskSucceeded, TaskFailed)
+func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (bool, error) {
+	if c.FinalStatus != TaskSucceeded && c.FinalStatus != TaskFailed {
+		return false, fmt.Errorf("invalid final status %q (want %s or %s)", c.FinalStatus, TaskSucceeded, TaskFailed)
 	}
 
 	var rowsAffected int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
 		updates := map[string]interface{}{
-			"status":     finalStatus,
+			"status":     c.FinalStatus,
 			"updated_at": now,
+			"cost_usd":   c.CostUSD,
+			"tokens_in":  c.TokensIn,
+			"tokens_out": c.TokensOut,
+			"metered_at": now,
 		}
-		if resultURL == "" {
+		if c.ResultURL == "" {
 			updates["result_url"] = nil
 		} else {
-			updates["result_url"] = resultURL
+			updates["result_url"] = c.ResultURL
 		}
-		if detail == "" {
+		if c.Detail == "" {
 			updates["result_detail"] = nil
 		} else {
-			updates["result_detail"] = detail
+			updates["result_detail"] = c.Detail
 		}
 
 		var t QueuedTask
-		if err := tx.Select("org_id", "job_id", "started_at").First(&t, "id = ?", taskID).Error; err != nil {
+		if err := tx.Select("org_id", "job_id", "started_at").First(&t, "id = ?", c.TaskID).Error; err != nil {
 			return err
 		}
 
 		res := tx.Model(&QueuedTask{}).
-			Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
+			Where("id = ? AND lease_id = ? AND status = ?", c.TaskID, c.LeaseID, TaskLeased).
 			Updates(updates)
 		if res.Error != nil {
 			return res.Error
@@ -361,6 +365,11 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 		rowsAffected = res.RowsAffected
 
 		if rowsAffected > 0 && t.JobID != "" {
+			if c.CostUSD > 0 {
+				if err := tx.Model(&Job{}).Where("id = ?", t.JobID).Update("cost_usd", gorm.Expr("cost_usd + ?", c.CostUSD)).Error; err != nil {
+					return err
+				}
+			}
 			// Meter from StartedAt (set once at lease), not UpdatedAt: RenewLease
 			// bumps UpdatedAt every renewal, so a task longer than the renew
 			// interval would otherwise record only the time since its last renew.
@@ -370,19 +379,19 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, taskID, leaseID, final
 					tx.Model(&Job{}).Where("id = ?", t.JobID).UpdateColumn("agent_minutes", gorm.Expr("agent_minutes + ?", elapsed))
 				}
 			}
-			if finalStatus == TaskFailed {
+			if c.FinalStatus == TaskFailed {
 				failJobAndQueuedTasks(tx, t.JobID, "Sibling task failed")
 			}
 			// Record the job's outcome on its learning row. A job's tasks complete
 			// independently and in any order, so "failed" must be sticky: any failed
 			// sibling fails the whole job, and a later success must not overwrite it.
 			// We therefore only let a success land while the row isn't already failed.
-			learningUpdates := map[string]interface{}{"outcome": strings.ToLower(finalStatus)}
-			if resultURL != "" {
-				learningUpdates["pr_url"] = resultURL
+			learningUpdates := map[string]interface{}{"outcome": strings.ToLower(c.FinalStatus)}
+			if c.ResultURL != "" {
+				learningUpdates["pr_url"] = c.ResultURL
 			}
 			q := tx.Model(&JobLearning{}).Where("org_id = ? AND job_id = ?", t.OrgID, t.JobID)
-			if finalStatus == TaskSucceeded {
+			if c.FinalStatus == TaskSucceeded {
 				q = q.Where("outcome IS NULL OR outcome <> ?", strings.ToLower(TaskFailed))
 			}
 			_ = q.Updates(learningUpdates)
