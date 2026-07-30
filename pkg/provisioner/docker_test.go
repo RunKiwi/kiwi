@@ -41,3 +41,33 @@ func TestFirstLineTruncates(t *testing.T) {
 		t.Errorf("a truncated message should be marked as such, got %q", got[len(got)-10:])
 	}
 }
+
+// A configured (registry) image must be pulled on every launch. `docker run`
+// reuses a cached tag without consulting the registry, so with a moving tag like
+// :latest a host that has launched once keeps starting the OLD daemon image —
+// a deploy that appears to succeed and silently changes nothing.
+func TestDockerLauncherPullsConfiguredImage(t *testing.T) {
+	t.Setenv("KIWI_DAEMON_IMAGE", "us-central1-docker.pkg.dev/proj/repo/kiwidaemon:latest")
+
+	d := NewDockerLauncher()
+	if !d.pullAlways {
+		t.Error("an explicitly configured registry image should be pulled on every launch")
+	}
+	if d.image != "us-central1-docker.pkg.dev/proj/repo/kiwidaemon:latest" {
+		t.Errorf("image = %q", d.image)
+	}
+}
+
+// The default image is built locally and never pushed, so forcing a pull would
+// fail every launch trying to reach Docker Hub.
+func TestDockerLauncherDoesNotPullLocalDefault(t *testing.T) {
+	t.Setenv("KIWI_DAEMON_IMAGE", "")
+
+	d := NewDockerLauncher()
+	if d.pullAlways {
+		t.Error("the local default image must not be pulled — it exists only on the host")
+	}
+	if d.image != defaultDaemonImage {
+		t.Errorf("image = %q, want %q", d.image, defaultDaemonImage)
+	}
+}
