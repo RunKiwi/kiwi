@@ -14,6 +14,13 @@ type Completer interface {
 	Complete(ctx context.Context, system, user string) (string, error)
 }
 
+// UsageReporter reports tokens and cost for the most recent Complete call. Optional:
+// a Completer that does not implement it contributes nothing, which is
+// correct — the heuristic path spends nothing.
+type UsageReporter interface {
+	Usage() (tokensIn, tokensOut int64, costUSD float64)
+}
+
 // LLMPlanner asks a frontier model (e.g. Fable) to decompose a task into a DAG
 // of workers. It implements Planner, so callers depend only on the interface.
 //

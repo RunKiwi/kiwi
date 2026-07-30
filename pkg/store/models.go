@@ -122,14 +122,17 @@ type Job struct {
 	Status     string  `gorm:"index;not null" json:"status"` // PENDING|SCHEDULING|RUNNING|PAUSED|SUCCEEDED|FAILED|CANCELED
 	// Dedupe is scoped per-org (org_id, idempotency_key) to match migration 0001;
 	// a single-column unique here would leak/collide keys across tenants.
-	IdempotencyKey *string                `gorm:"uniqueIndex:idx_org_idempotency,priority:2" json:"idempotency_key"`
-	Inputs         map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"inputs"`
-	SandboxRef     *string                `json:"sandbox_ref"`
-	CostUSD        float64                `gorm:"not null;default:0" json:"cost_usd"`
-	AgentMinutes   float64                `gorm:"not null;default:0" json:"agent_minutes"`
-	Error          *string                `json:"error"`
-	CreatedAt      time.Time              `gorm:"not null;default:current_timestamp" json:"created_at"`
-	UpdatedAt      time.Time              `gorm:"not null;default:current_timestamp" json:"updated_at"`
+	IdempotencyKey   *string                `gorm:"uniqueIndex:idx_org_idempotency,priority:2" json:"idempotency_key"`
+	Inputs           map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"inputs"`
+	SandboxRef       *string                `json:"sandbox_ref"`
+	CostUSD          float64                `gorm:"not null;default:0" json:"cost_usd"`
+	PlannerCostUSD   float64                `gorm:"not null;default:0" json:"planner_cost_usd"`
+	PlannerTokensIn  int64                  `gorm:"not null;default:0" json:"planner_tokens_in"`
+	PlannerTokensOut int64                  `gorm:"not null;default:0" json:"planner_tokens_out"`
+	AgentMinutes     float64                `gorm:"not null;default:0" json:"agent_minutes"`
+	Error            *string                `json:"error"`
+	CreatedAt        time.Time              `gorm:"not null;default:current_timestamp" json:"created_at"`
+	UpdatedAt        time.Time              `gorm:"not null;default:current_timestamp" json:"updated_at"`
 }
 
 // Agent represents an individual agent (master or worker) inside a job.
