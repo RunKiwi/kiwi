@@ -306,6 +306,28 @@ func callCost(caller any, fallback float64) float64 {
 	return fallback
 }
 
+// truncationHint appends an explanation when a parse failure looks like a
+// response that was cut off rather than one that was malformed.
+//
+// Providers that report a stop reason now raise provider.ErrTruncated before we
+// get here, but not every provider does, and a truncated reply is otherwise
+// indistinguishable from a syntax error: the extractor finds the last '}' in a
+// half-written document, hands the parser a fragment, and the user is told
+// "unexpected end of JSON input" — which says nothing about what to do. The
+// giveaway is unbalanced braces.
+func truncationHint(resp, raw string) string {
+	s := raw
+	if s == "" {
+		s = resp
+	}
+	if strings.Count(s, "{") <= strings.Count(s, "}") {
+		return ""
+	}
+	return " (the response appears to have been cut off mid-answer — the task may " +
+		"involve too many or too large files for the model's output limit; see " +
+		"KIWI_COMPLETION_MAX_TOKENS)"
+}
+
 // escapeControlCharsInStrings rewrites raw control characters that appear
 // *inside* JSON string literals into their escape sequences, leaving the
 // structural parts of the document untouched.
@@ -387,7 +409,19 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 		return fmt.Errorf("no readable files within size limits")
 	}
 
-	system := "You are an expert software engineer in an automated fix loop. Make the SMALLEST changes to make the tests pass. Return ONLY JSON in this format: {\"files\":[{\"path\":\"<matching-input-path>\",\"content\":\"<full new file>\"}]}"
+	// The response has to carry whole file contents, which makes output tokens
+	// the binding constraint on this call: with several candidate files, echoing
+	// all of them back exceeds any sane ceiling and the reply is truncated
+	// mid-JSON. Hence the explicit instruction to return only what changed —
+	// most tasks touch one or two files, and omitting the rest is the difference
+	// between a reply that fits and one that does not. The JSON rules are spelled
+	// out for the same reason the parser repairs them: models paste file content
+	// in verbatim, with real newlines, unless told plainly not to.
+	system := "You are an expert software engineer in an automated fix loop. " +
+		"Make the SMALLEST changes needed. " +
+		"Return ONLY JSON in this format: {\"files\":[{\"path\":\"<matching-input-path>\",\"content\":\"<full new file>\"}]}. " +
+		"Include ONLY the files you actually modify — omit every file you leave unchanged. " +
+		"Each content value must be a single valid JSON string: escape newlines as \\n and quotes as \\\", and never emit a literal newline inside it."
 	user := fmt.Sprintf("Task: %s\n\nFiles:\n%s\nBuild/test output:\n%s", task.Description, sb.String(), lastOutput)
 
 	actorStart := time.Now()
@@ -402,7 +436,7 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 	start := strings.IndexByte(resp, '{')
 	end := strings.LastIndexByte(resp, '}')
 	if start == -1 || end == -1 || start >= end {
-		return fmt.Errorf("invalid json response from model")
+		return fmt.Errorf("invalid json response from model%s", truncationHint(resp, ""))
 	}
 
 	var edit struct {
@@ -426,7 +460,7 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 		if err2 := json.Unmarshal([]byte(repaired), &edit); err2 != nil {
 			// Report the original error: it describes what the model actually
 			// produced, which is the more useful thing to debug from.
-			return fmt.Errorf("parse json: %w", err)
+			return fmt.Errorf("parse json: %w%s", err, truncationHint(resp, raw))
 		}
 	}
 

@@ -119,3 +119,25 @@ func TestEscapeControlCharsInStringsEscapesExoticControls(t *testing.T) {
 		t.Errorf("content = %q", got["content"])
 	}
 }
+
+// A response cut off mid-answer must be diagnosed as truncation, not left as a
+// bare "unexpected end of JSON input" that says nothing about what to do.
+func TestTruncationHintDetectsCutOffResponse(t *testing.T) {
+	truncated := `{"files":[{"path":"a.js","content":"function x() {`
+	got := truncationHint(truncated, "")
+	if got == "" {
+		t.Fatal("unbalanced braces should be reported as a likely truncation")
+	}
+	if !strings.Contains(got, "cut off") {
+		t.Errorf("hint should say the response was cut off, got %q", got)
+	}
+}
+
+// A well-formed document must not be blamed on truncation — that would send
+// someone chasing a token limit over what is really a different bug.
+func TestTruncationHintSilentOnBalancedJSON(t *testing.T) {
+	balanced := `{"files":[{"path":"a.js","content":"ok"}]}`
+	if got := truncationHint(balanced, ""); got != "" {
+		t.Errorf("balanced JSON should produce no hint, got %q", got)
+	}
+}

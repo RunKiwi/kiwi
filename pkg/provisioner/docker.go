@@ -24,16 +24,28 @@ const dockerSocket = "/var/run/docker.sock"
 // DockerLauncher implements Launcher using the local docker daemon.
 type DockerLauncher struct {
 	image string
+	// pullAlways forces a registry pull on every launch. `docker run` reuses a
+	// locally cached tag without checking the registry, so with a moving tag like
+	// :latest a host that has run once will keep starting the OLD daemon image
+	// forever — a deploy appears to succeed and changes nothing. Set only when the
+	// image comes from a registry (see NewDockerLauncher).
+	pullAlways bool
 }
 
 // NewDockerLauncher creates a new DockerLauncher. The daemon image is taken from
 // KIWI_DAEMON_IMAGE (default "kiwidaemon:latest").
+//
+// An explicitly configured image is treated as a registry reference and pulled
+// on every launch, so pushing a new build is enough to roll the daemons. The
+// default is not: local development builds `kiwidaemon:latest` on the host and
+// never pushes it anywhere, so forcing a pull there would fail every launch
+// trying to reach Docker Hub.
 func NewDockerLauncher() *DockerLauncher {
 	img := os.Getenv("KIWI_DAEMON_IMAGE")
 	if img == "" {
-		img = defaultDaemonImage
+		return &DockerLauncher{image: defaultDaemonImage}
 	}
-	return &DockerLauncher{image: img}
+	return &DockerLauncher{image: img, pullAlways: true}
 }
 
 func (d *DockerLauncher) containerName(orgID string) string {
@@ -49,6 +61,10 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 	args := []string{"run", "-d",
 		"--name", name,
 		"-e", "KIWI_JOIN_TOKEN=" + joinToken,
+	}
+
+	if d.pullAlways {
+		args = append(args, "--pull=always")
 	}
 
 	if fleetID == auth.SharedFreeFleet {
