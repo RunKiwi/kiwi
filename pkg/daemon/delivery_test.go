@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -118,13 +119,16 @@ func TestPublishResult(t *testing.T) {
 
 	gh := &fakeGH{}
 
-	// Test 1: no changes
+	// Test 1: no changes.
+	//
+	// This assertion previously expected (nil error, detail "no changes"), which
+	// is what let executeTask treat an unchanged worktree as a delivered result
+	// and report SUCCEEDED with no pull request. Nothing was produced, so it is
+	// an error — the caller distinguishes it from a delivery failure via
+	// errors.Is(err, errNoChanges).
 	pr, detail, err := publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail != "no changes" {
-		t.Errorf("expected no changes, got %q", detail)
+	if !errors.Is(err, errNoChanges) {
+		t.Fatalf("an unchanged worktree must report errNoChanges, got err=%v detail=%q", err, detail)
 	}
 
 	// Test 2: with changes
