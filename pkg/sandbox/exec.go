@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Result holds the execution outcome of a command run in the sandbox
@@ -110,6 +111,12 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	// The values behind the `-e NAME` flags above. They travel in the docker
+	// CLI's environment rather than its arguments, so they never appear in the
+	// process table.
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
@@ -154,22 +161,31 @@ func buildDockerArgs(dir string, cmdStr string, env []string, cfg *SandboxConfig
 		args = append(args, "--runtime", cfg.Runtime)
 	}
 
-	var envFilePath string
-	if len(env) > 0 {
-		envFile, err := os.CreateTemp("", "kiwi-env-*.env")
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create temp env file: %w", err)
+	// Environment is passed as `-e NAME`, with the value supplied through the
+	// docker CLI's own environment (see RunCommand). Two properties matter, and
+	// only this form has both.
+	//
+	// It survives newlines. The previous form wrote a temp --env-file, one
+	// KEY=VALUE per line, which cannot represent a multi-line value: TASK holds
+	// the planner's description, and the moment that description had a second
+	// line docker rejected the whole file —
+	//
+	//	docker: --env-file: invalid env file: variable '1. Inspect the repo' contains whitespaces
+	//
+	// — so the container never started, every command "failed" identically, and
+	// the loop stalled. No test command could pass, in any repository.
+	//
+	// And it keeps secrets out of the process table, which is why the env file
+	// was chosen originally: `-e NAME` puts only the NAME in argv, so a
+	// credential is not visible to `ps` on a host shared by other tenants.
+	for _, eVal := range env {
+		name, _, ok := strings.Cut(eVal, "=")
+		if !ok || name == "" {
+			continue
 		}
-		envFilePath = envFile.Name()
-
-		for _, eVal := range env {
-			envFile.WriteString(eVal + "\n")
-		}
-		envFile.Close()
-
-		args = append(args, "--env-file", envFilePath)
+		args = append(args, "-e", name)
 	}
 
 	args = append(args, dockerImage, "sh", "-c", cmdStr)
-	return args, envFilePath, nil
+	return args, "", nil
 }
