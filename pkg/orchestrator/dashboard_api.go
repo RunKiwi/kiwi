@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 )
 
 // handleFleets serves GET (list) and POST (create) /api/v1/fleets.
@@ -106,15 +107,12 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// inferProvider guesses the provider from the model id (matches daemon routing).
+// inferProvider guesses the provider from the model id. It delegates to
+// provider.ProviderOf rather than repeating the prefix rules, so a model added
+// on the Models page is labelled with the same provider the daemon will
+// actually route it to.
 func inferProvider(model string) string {
-	if strings.HasPrefix(model, "gemini") {
-		return "gemini"
-	}
-	if strings.HasPrefix(model, "claude") {
-		return "anthropic"
-	}
-	return "anthropic"
+	return provider.ProviderOf(model)
 }
 
 // integrationSpec maps an integration key to the credential name that backs it.
@@ -127,6 +125,7 @@ var integrationSpec = []struct {
 	{"slack", "SLACK_TOKEN", "slack"},
 	{"anthropic", "ANTHROPIC_API_KEY", "llm"},
 	{"gemini", "GEMINI_API_KEY", "llm"},
+	{"openai", "OPENAI_API_KEY", "llm"},
 	{"git", "GIT_TOKEN", "git"},
 }
 

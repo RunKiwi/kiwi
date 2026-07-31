@@ -432,11 +432,12 @@ export const client = {
 };
 
 // Built-in model ids offered even before an org adds custom ones. The daemon
-// routes gemini-* to Gemini, else Anthropic.
+// routes each to a provider by its id prefix — see providerOf.
 export const BUILTIN_MODELS = [
   "claude-opus-4-8",
   "claude-haiku-4-5-20251001",
   "gemini-2.0-flash",
+  "gpt-5-mini",
 ];
 
 // Curated models we recommend, grouped by provider. Shown on the Models page for
@@ -445,7 +446,7 @@ export const BUILTIN_MODELS = [
 export interface RecommendedModel {
   id: string;
   label: string;
-  provider: "anthropic" | "gemini";
+  provider: "anthropic" | "gemini" | "openai";
   note?: string;
 }
 
@@ -455,14 +456,37 @@ export const RECOMMENDED_MODELS: RecommendedModel[] = [
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", provider: "anthropic", note: "Fast & cheap" },
   { id: "gemini-flash-latest", label: "Gemini Flash (latest)", provider: "gemini", note: "Fast & cheap" },
   { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", provider: "gemini" },
+  { id: "gpt-5", label: "GPT-5", provider: "openai", note: "Most capable" },
+  { id: "gpt-5-mini", label: "GPT-5 mini", provider: "openai", note: "Balanced" },
+  { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", note: "Fast & cheap" },
 ];
 
 // A sensible default split for the task form: a strong planner, a fast worker.
 export const DEFAULT_PLANNER_MODEL = "claude-opus-4-8";
 export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
 
+// Mirrors provider.ProviderOf in the Go tree, which is what the daemon actually
+// routes on. The two must agree: this decides which key the UI tells you to
+// connect, and that one decides which key the task then needs.
+const OPENAI_MODEL_PREFIXES = ["gpt-", "gpt3", "gpt4", "o1", "o3", "o4", "chatgpt", "text-embedding-3"];
+
+// How each provider id is written for a human. "OpenAI" does not survive CSS
+// capitalize (it renders "Openai"), so the label is data, not a text-transform.
+export const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  gemini: "Gemini",
+  openai: "OpenAI",
+};
+
+export function providerLabel(id: string): string {
+  return PROVIDER_LABELS[id] ?? id;
+}
+
 export function providerOf(id: string): string {
-  return id.startsWith("gemini") ? "gemini" : "anthropic";
+  const m = id.toLowerCase();
+  if (m.startsWith("gemini")) return "gemini";
+  if (OPENAI_MODEL_PREFIXES.some((p) => m.startsWith(p))) return "openai";
+  return "anthropic";
 }
 
 export const SUPPORT_EMAIL = "support@runkiwi.dev";

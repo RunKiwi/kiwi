@@ -23,7 +23,7 @@ func TestDefaultCredValidator(t *testing.T) {
 	defer stub.Close()
 
 	// Point every provider endpoint at the stub.
-	anthropicValidateURL, geminiValidateURL, githubValidateURL = stub.URL, stub.URL, stub.URL
+	anthropicValidateURL, geminiValidateURL, openaiValidateURL, githubValidateURL = stub.URL, stub.URL, stub.URL, stub.URL
 
 	cases := []struct {
 		name    string
@@ -35,6 +35,8 @@ func TestDefaultCredValidator(t *testing.T) {
 		{"anthropic bad", "ANTHROPIC_API_KEY", "bad", true},
 		{"gemini good", "GEMINI_API_KEY", "good", false},
 		{"gemini bad", "GEMINI_API_KEY", "bad", true},
+		{"openai good", "OPENAI_API_KEY", "good", false},
+		{"openai bad", "OPENAI_API_KEY", "bad", true},
 		{"github good", "GITHUB_TOKEN", "good", false},
 		{"github bad", "GIT_TOKEN", "bad", true},
 		{"unknown name always allowed", "SLACK_TOKEN", "whatever", false},

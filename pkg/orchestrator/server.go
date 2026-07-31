@@ -90,9 +90,13 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		root = filepath.Join(os.TempDir(), "kiwi-snapshots")
 	}
 
+	// Gemini first only because it is the key most deployments already set; the
+	// two embedders are interchangeable for this purpose.
 	var embedder provider.Embedder
 	if cfg.EmbedGoogleKey != "" {
 		embedder = provider.NewGeminiProviderWithModels(cfg.EmbedGoogleKey, "", "")
+	} else if cfg.EmbedOpenAIKey != "" {
+		embedder = provider.NewOpenAIProviderWithModels(cfg.EmbedOpenAIKey, "", "")
 	}
 
 	s := &Server{

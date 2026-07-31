@@ -32,6 +32,7 @@ DOMAIN=localhost
 # Optional — fill these so the local daemon can run real tasks:
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
+OPENAI_API_KEY=
 GITHUB_TOKEN=
 EOF
 fi
@@ -63,6 +64,7 @@ seed_cred() { # name kind value
 }
 seed_cred ANTHROPIC_API_KEY llm "${ANTHROPIC_API_KEY:-}"
 seed_cred GEMINI_API_KEY    llm "${GEMINI_API_KEY:-}"
+seed_cred OPENAI_API_KEY    llm "${OPENAI_API_KEY:-}"
 seed_cred GIT_TOKEN         git "${GITHUB_TOKEN:-}"
 
 # 4. Mint a single-use join token and (re)start the host daemon.
