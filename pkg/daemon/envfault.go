@@ -106,6 +106,63 @@ func correctedImage(current, output, dir string) (string, string) {
 	return next, fault.Detail
 }
 
+// Network reachability failures, as each ecosystem words them.
+var networkErrorPatterns = []string{
+	"network is unreachable",
+	"temporary failure in name resolution",
+	"could not resolve host",
+	"getaddrinfo eai_again",
+	"getaddrinfo enotfound",
+	"no such host",
+	"failed to fetch",
+	"enetunreach",
+}
+
+// networkRequired reports why a repository's verification cannot run offline,
+// or "" when the failure is something else.
+//
+// Some projects need the network to *build*, not merely to install: this repo's
+// own website imports next/font/google, and Next fetches the font on every
+// build, cache or no cache. Phase A cannot help — the fetch is part of the
+// build, and the build is the thing that must run without network because it
+// executes model-generated code.
+//
+// There is no fix to apply here, so the point is to say so. The alternative is
+// what happened before: six Actor steps editing a component in response to a
+// font download failure, the user's whole budget spent, and a task that reports
+// only that the test did not pass.
+//
+// This is only consulted for the FIRST verification run, before any edit has
+// been applied. At that point nothing model-generated has executed, so a
+// network failure is a property of the repository rather than of the agent —
+// which is what makes the classification safe.
+func networkRequired(output string) string {
+	lower := strings.ToLower(output)
+	found := false
+	for _, p := range networkErrorPatterns {
+		if strings.Contains(lower, p) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ""
+	}
+
+	// Name the cause when it is recognisable, so the message is actionable
+	// rather than merely accurate.
+	switch {
+	case strings.Contains(lower, "font/google"), strings.Contains(lower, "fonts.googleapis"):
+		return "this project's build downloads Google Fonts (next/font/google), and network access is disabled while running model-generated code. " +
+			"Use a test command that runs offline, or self-host the font."
+	case strings.Contains(lower, "npm err"), strings.Contains(lower, "yarn"):
+		return "this project's test command reaches the network, which is disabled while running model-generated code. " +
+			"Dependencies are installed beforehand; anything fetched during the test itself cannot be."
+	}
+	return "this project's verification needs network access, which is disabled while running model-generated code. " +
+		"Dependencies are installed beforehand — a test command that fetches at run time cannot work here."
+}
+
 // ecosystemOfImage recovers the toolchain from an image reference, so a
 // correction can be re-resolved against the repository's pinned version.
 func ecosystemOfImage(image string) (ecosystem, bool) {

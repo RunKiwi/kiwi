@@ -623,6 +623,10 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// that output reaches the Actor. Only the first failure is examined, so a
 	// genuinely failing test costs nothing extra.
 	envChecked := false
+	// Set when the repository's own verification cannot run offline. Reported
+	// verbatim instead of a generic failure — there is nothing the Actor could
+	// do about it, so saying so beats spending the budget proving it.
+	offlineBlocked := ""
 	runTest := func(ctx context.Context) (string, bool, error) {
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
@@ -635,16 +639,31 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 					spec.ID, why, next, sandboxCfg.DockerImage)
 				sandboxCfg.DockerImage = next
 				if retry, rerr := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv); rerr == nil {
-					return retry.Output, retry.Success, nil
+					res = retry
 				}
-				// The retry could not run at all. Fall through and report the
+				// A retry that could not run at all falls through with the
 				// original result rather than losing it to a second fault.
+			}
+
+			// This is the first run, so nothing model-generated has executed
+			// yet: a network failure here describes the repository, not the
+			// agent. Returning an error stops the loop at step 0 rather than
+			// letting it edit code in response to a failed download.
+			if !res.Success {
+				if why := networkRequired(res.Output); why != "" {
+					log.Printf("Task %s: verification cannot run offline: %s", spec.ID, why)
+					offlineBlocked = why
+					return "", false, errors.New("verification requires network access")
+				}
 			}
 		}
 		return res.Output, res.Success, nil
 	}
 
 	result, err := runner.Run(taskCtx, task, runTest)
+	if offlineBlocked != "" {
+		return taskResult{detail: offlineBlocked, events: events}
+	}
 	if err != nil {
 		log.Printf("Task %s loop ended without success: %v (steps=%d, cost=$%.2f)",
 			spec.ID, err, result.Steps, result.CostUSD)
