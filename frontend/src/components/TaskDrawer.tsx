@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job } from "@/lib/api";
+import { RunTimeline } from "@/components/RunTimeline";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import {
@@ -520,6 +521,17 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                 code — the tests confirm the change did not break the suite, not that it
                 does what you asked. Review the pull request.
               </p>
+
+              {/* The run, phase by phase. Until this existed, a failed job's
+                  entire account of itself was one line of result text — so a
+                  ten-minute run that the Critic rejected three times reported
+                  only "reached max steps without passing", and the reason lived
+                  in a daemon log on a machine the user cannot reach. */}
+              {(() => {
+                const body = (record.data ?? {}) as ExecutionRecordBody;
+                const workers = body.execution?.workers ?? [];
+                return workers.length > 0 ? <RunTimeline workers={workers} /> : null;
+              })()}
 
               {/* Disclosure JSON toggle */}
               <button
