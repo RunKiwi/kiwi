@@ -710,13 +710,34 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		} else {
 			gh := &restGitHub{token: gitToken}
 			pr, d, err := publishResult(ctx, worktreePath, spec, gitToken, gh, "")
-			if err != nil {
+			switch {
+			case errors.Is(err, errNoChanges):
+				// The loop was satisfied without editing anything, so there is
+				// nothing to deliver. Reporting SUCCEEDED here was the exact
+				// "false green" the case below exists to prevent — the user
+				// asked for work, received a green tick, and got no pull
+				// request and no explanation beyond the words "no changes".
+				//
+				// It is the normal outcome for additive work. "Add an example"
+				// does not make `go build` start failing, so the test command
+				// passes on unmodified code and the loop correctly concludes
+				// there is nothing to do. The fault is the definition of done,
+				// not the agent, and the message has to say so.
+				log.Printf("Task %s: loop passed without changing anything (steps=%d)", spec.ID, result.Steps)
+				ok = false
+				if result.Steps == 0 {
+					detail = fmt.Sprintf("the test command (%s) already passed before any change was made, so nothing was done and there is nothing to open a PR with. "+
+						"This task needs a check that fails until the work exists — for new functionality, a test that exercises it.", testCmd)
+				} else {
+					detail = "the agent finished but left the repository unchanged, so there is nothing to open a PR with"
+				}
+			case err != nil:
 				// The loop passed but delivery failed. Report FAILED rather than a
 				// false green — a SUCCEEDED task with no PR is misleading.
 				log.Printf("Failed to publish result for task %s: %v", spec.ID, err)
 				detail = fmt.Sprintf("publish failed: %v", err)
 				ok = false
-			} else {
+			default:
 				prURL = pr
 				detail = d
 			}
