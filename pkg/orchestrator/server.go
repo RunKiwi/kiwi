@@ -466,6 +466,7 @@ func (s *Server) Start(addr string) error {
 	root.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
 	root.HandleFunc("/api/v1/daemon/renew", s.handleDaemonRenew)
 	root.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
+	root.HandleFunc("/api/v1/daemon/progress", s.handleDaemonProgress)
 
 	root.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

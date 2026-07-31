@@ -353,6 +353,12 @@ export const client = {
   // resolve against the control-plane origin and send the bearer token like
   // every other call — a bare relative fetch would hit the dashboard's own
   // origin unauthenticated.
+  // What a job is doing right now. Distinct from getJobRecord: a record is a
+  // signed artifact assembled once at the end, this is a mutable view of a run
+  // in flight, and it 404s for a job that never started.
+  getJobProgress: (jobId: string) =>
+    fetchApi<{ tasks: JobProgressTask[] }>(`/api/v1/jobs/${encodeURIComponent(jobId)}/progress`),
+
   getJobRecord: async (jobId: string): Promise<ExecutionRecordResponse> => {
     const headers = new Headers();
     const token = getToken();
@@ -443,6 +449,20 @@ export const BUILTIN_MODELS = [
 // Curated models we recommend, grouped by provider. Shown on the Models page for
 // one-click add so people don't have to hand-type ids. (Automatic discovery from
 // the org's stored key is a planned follow-up.)
+// One worker's live state while it runs. `steps` is the same shape RunTimeline
+// renders for a finished job, so the live and final views are one component.
+export interface JobProgressTask {
+  task_id: string;
+  status: string;
+  actor_model?: string;
+  steps: RecordStep[];
+  // What is running right now, for the gap between two steps — which on a slow
+  // install or test is most of the elapsed time.
+  phase?: string;
+  output_tail?: string;
+  progress_at?: string;
+}
+
 export interface RecommendedModel {
   id: string;
   label: string;
