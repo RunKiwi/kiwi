@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { client, BUILTIN_MODELS, RECOMMENDED_MODELS, providerOf, type ModelEntry, type RecommendedModel, type Integration } from "@/lib/api";
+import { client, BUILTIN_MODELS, RECOMMENDED_MODELS, providerOf, providerLabel, type ModelEntry, type RecommendedModel, type Integration } from "@/lib/api";
 import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles } from "lucide-react";
 import { Select } from "@/components/Select";
 import Link from "next/link";
@@ -68,8 +68,8 @@ export default function ModelsPage() {
                 <div className="min-w-0">
                   <div className="text-sm text-white truncate">{rec.label}</div>
                   <div className="text-xs text-zinc-500 truncate">
-                    <span className="capitalize">{rec.provider}</span>{rec.note ? ` · ${rec.note}` : ""}
-                    {!isConnected && <span className="ml-1 text-amber-500/80">(needs {rec.provider} key)</span>}
+                    <span>{providerLabel(rec.provider)}</span>{rec.note ? ` · ${rec.note}` : ""}
+                    {!isConnected && <span className="ml-1 text-amber-500/80">(needs {providerLabel(rec.provider)} key)</span>}
                   </div>
                 </div>
                 {added ? (
@@ -111,7 +111,7 @@ export default function ModelsPage() {
                 { value: "", label: "Auto-detect" },
                 { value: "anthropic", label: "Anthropic" },
                 { value: "gemini", label: "Gemini" },
-                { value: "codex", label: "Codex" },
+                { value: "openai", label: "OpenAI" },
               ]}
             />
           </div>

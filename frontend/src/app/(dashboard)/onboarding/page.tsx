@@ -26,6 +26,16 @@ const STARTER_TASKS = [
   },
 ];
 
+// The model providers offered at signup, and the credential name each key is
+// stored under. Kept as one table so the dropdown, the placeholder and the
+// saved credential name cannot drift apart — a key stored under a name the
+// backend never looks up connects nothing and reports success.
+const MODEL_PROVIDERS = [
+  { key: "anthropic", label: "Anthropic", credName: "ANTHROPIC_API_KEY", placeholder: "sk-ant-…" },
+  { key: "gemini", label: "Gemini", credName: "GEMINI_API_KEY", placeholder: "AIza…" },
+  { key: "openai", label: "OpenAI", credName: "OPENAI_API_KEY", placeholder: "sk-…" },
+];
+
 export default function OnboardingPage() {
   const router = useRouter();
 
@@ -121,9 +131,9 @@ export default function OnboardingPage() {
     setErr("");
     try {
       // Name and kind must match the Integrations catalog exactly, or the key is
-      // stored under something the backend never looks up. Both model providers
-      // are kind "llm"; the provider is carried by the credential name.
-      const secretName = modelProvider === "gemini" ? "GEMINI_API_KEY" : "ANTHROPIC_API_KEY";
+      // stored under something the backend never looks up. Every model provider
+      // is kind "llm"; the provider is carried by the credential name.
+      const secretName = MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.credName ?? "ANTHROPIC_API_KEY";
       await client.setCredential(secretName, "llm", val);
       setStep(3);
     } catch (e) {
@@ -247,7 +257,7 @@ export default function OnboardingPage() {
                 )}
               </div>
               <p className="text-zinc-400 text-sm mb-4">
-                Kiwi runs on your own model key. Add an Anthropic or Gemini key to power the planner and worker agents.
+                Kiwi runs on your own model key. Add an Anthropic, Gemini or OpenAI key to power the planner and worker agents.
               </p>
               {step === 2 && (
                 <div className="flex flex-col gap-3 max-w-md pt-2">
@@ -257,14 +267,15 @@ export default function OnboardingPage() {
                       onChange={(e) => setModelProvider(e.target.value)}
                       className="field text-sm w-36 py-2"
                     >
-                      <option value="anthropic">Anthropic</option>
-                      <option value="gemini">Gemini</option>
+                      {MODEL_PROVIDERS.map((p) => (
+                        <option key={p.key} value={p.key}>{p.label}</option>
+                      ))}
                     </select>
                     <input
                       type="password"
                       value={modelKey}
                       onChange={(e) => setModelKey(e.target.value)}
-                      placeholder={modelProvider === "anthropic" ? "sk-ant-…" : "AIza…"}
+                      placeholder={MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.placeholder}
                       className="flex-1 field text-sm"
                     />
                   </div>

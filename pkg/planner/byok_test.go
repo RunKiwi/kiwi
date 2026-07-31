@@ -33,10 +33,53 @@ func TestProviderNamingIsCanonical(t *testing.T) {
 	if provider.ProviderOf("claude-opus-4-8") != "anthropic" {
 		t.Errorf("claude model should map to anthropic, got %q", provider.ProviderOf("claude-opus-4-8"))
 	}
+	if provider.ProviderOf("gpt-5-mini") != "openai" {
+		t.Errorf("gpt model should map to %q, got %q", "openai", provider.ProviderOf("gpt-5-mini"))
+	}
 	// An unknown id falls back to Anthropic, matching ModelCostUSD's pricing
 	// fallback so naming and billing never disagree about the same model.
 	if provider.ProviderOf("some-new-model") != "anthropic" {
 		t.Errorf("unknown model should fall back to anthropic, got %q", provider.ProviderOf("some-new-model"))
+	}
+}
+
+// The planner resolves the org's key by the planning model's provider. If it
+// looked up the wrong credential name an org that connected only OpenAI would be
+// told it has no key at all, while its key sat in the store unread.
+func TestPlanningResolvesTheKeyForTheChosenModelsProvider(t *testing.T) {
+	s := newTestStore(t)
+	svc := NewService(s, nil, nil)
+
+	t.Setenv("KIWI_PLANNER", "llm")
+	t.Setenv("KIWI_PLANNER_API_KEY", "")
+	if err := s.SaveCredential(context.Background(), "org-1", "OPENAI_API_KEY", store.CredentialLLM, "sk-openai-x"); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.newCompleter = func(string) Completer { return &usageFake{} }
+
+	// Planning on a gpt model must find the OPENAI_API_KEY and succeed.
+	if _, err := svc.SubmitPlan(context.Background(), PlanRequest{
+		OrgID:        "org-1",
+		Task:         "do a thing",
+		PlannerModel: "gpt-5-mini",
+	}); err != nil {
+		t.Fatalf("planning on an OpenAI model with an OpenAI key connected: %v", err)
+	}
+
+	// The complement: an Anthropic model with only an OpenAI key connected must
+	// fail naming Anthropic, not OpenAI — otherwise the user adds the key they
+	// already have.
+	_, err := svc.SubmitPlan(context.Background(), PlanRequest{
+		OrgID:        "org-1",
+		Task:         "do a thing",
+		PlannerModel: "claude-opus-4-8",
+	})
+	if err == nil {
+		t.Fatal("expected an error: no Anthropic key is connected")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "anthropic") {
+		t.Errorf("error should name the missing provider (anthropic), got %q", err)
 	}
 }
 

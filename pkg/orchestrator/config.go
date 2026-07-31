@@ -15,6 +15,7 @@ type Config struct {
 	ServerToken        string
 	CORSAllowedOrigins string
 	EmbedGoogleKey     string
+	EmbedOpenAIKey     string
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -38,10 +39,17 @@ func LoadAndValidateConfig(flagAddr, flagDSN, flagRole, flagNats string) (*Confi
 		ServerToken:        os.Getenv("KIWI_SERVER_TOKEN"),
 		CORSAllowedOrigins: os.Getenv("KIWI_CORS_ALLOWED_ORIGINS"),
 		EmbedGoogleKey:     os.Getenv("KIWI_EMBED_GOOGLE_KEY"),
+		EmbedOpenAIKey:     os.Getenv("KIWI_EMBED_OPENAI_KEY"),
 	}
 
 	if cfg.EmbedGoogleKey == "" {
 		cfg.EmbedGoogleKey = os.Getenv("GEMINI_API_KEY")
+	}
+	// The embedder backs learnings search and runs on an operator key, not a
+	// customer's. Accepting an OpenAI key too means an operator who runs Kiwi
+	// without a Gemini account still gets search rather than silently losing it.
+	if cfg.EmbedOpenAIKey == "" {
+		cfg.EmbedOpenAIKey = os.Getenv("OPENAI_API_KEY")
 	}
 
 	if cfg.Env == "production" {

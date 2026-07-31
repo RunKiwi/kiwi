@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { client, type Integration } from "@/lib/api";
-import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, CheckCircle2 } from "lucide-react";
+import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, Bot, CheckCircle2 } from "lucide-react";
 import { CredentialField } from "@/components/CredentialField";
 import { parseActionableError } from "@/lib/errors";
 
@@ -17,8 +17,9 @@ const CATALOG: Record<string, {
   git:    { title: "Git push token", blurb: "Token the daemon uses to push branches.", credName: "GIT_TOKEN", kind: "git", placeholder: "github_pat_…", icon: GitBranch },
   anthropic: { title: "Anthropic", blurb: "API key for Claude models.", credName: "ANTHROPIC_API_KEY", kind: "llm", placeholder: "sk-ant-…", icon: Sparkles },
   gemini: { title: "Gemini", blurb: "API key for Google Gemini models.", credName: "GEMINI_API_KEY", kind: "llm", placeholder: "AIza…", icon: KeyRound },
+  openai: { title: "OpenAI", blurb: "API key for GPT models.", credName: "OPENAI_API_KEY", kind: "llm", placeholder: "sk-…", icon: Bot },
 };
-const ORDER = ["github", "slack", "anthropic", "gemini", "git"];
+const ORDER = ["github", "slack", "anthropic", "gemini", "openai", "git"];
 
 export default function IntegrationsPage() {
   const [status, setStatus] = useState<Record<string, boolean>>({});

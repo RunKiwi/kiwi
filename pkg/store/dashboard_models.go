@@ -26,12 +26,12 @@ func (Fleet) TableName() string { return "fleets" }
 
 // ModelEntry is an LLM model the org has made available in the UI (in addition
 // to the built-in defaults). Name is the API model id (e.g. gemini-2.0-flash);
-// the daemon routes gemini-* to Gemini, else Anthropic.
+// the daemon routes it to a provider with provider.ProviderOf.
 type ModelEntry struct {
 	ID        string    `gorm:"primaryKey" json:"id"`
 	OrgID     string    `gorm:"index;not null" json:"org_id"`
 	Name      string    `gorm:"not null" json:"name"`
-	Provider  string    `json:"provider"` // anthropic | gemini | codex
+	Provider  string    `json:"provider"` // anthropic | gemini | openai
 	CreatedAt time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 

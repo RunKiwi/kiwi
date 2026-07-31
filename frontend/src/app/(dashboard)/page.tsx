@@ -188,10 +188,17 @@ function CommandCenterContent() {
         setIntegrations(ints.integrations);
         const connected = (key: string) =>
           ints.integrations.some((i: Integration) => i.key === key && i.connected);
-        // Default to Gemini when it's the only model key connected.
-        if (connected("gemini") && !connected("anthropic")) {
-          setPlannerModel("gemini-2.0-flash");
-          setWorkerModel("gemini-flash-latest");
+        // The defaults are Anthropic models, so when Anthropic is the one
+        // provider NOT connected, fall to a provider the org can actually call.
+        // Without this a BYOK user's first task fails on a key they never added.
+        if (!connected("anthropic")) {
+          if (connected("gemini")) {
+            setPlannerModel("gemini-2.0-flash");
+            setWorkerModel("gemini-flash-latest");
+          } else if (connected("openai")) {
+            setPlannerModel("gpt-5");
+            setWorkerModel("gpt-5-mini");
+          }
         }
         if (firstRun) {
           const hasInt = ints.integrations.some((i: Integration) => i.connected);
