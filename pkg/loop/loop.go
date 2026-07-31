@@ -40,6 +40,11 @@ type Task struct {
 	Files []string
 	// WorktreeRoot is the absolute path to the worktree root, required for multi-file path validation.
 	WorktreeRoot string
+	// TargetsTest reports that the files to edit are themselves tests. The
+	// caller decides this (it knows the language conventions); the loop decides
+	// what to do about it, which depends on whether the tests are currently
+	// failing. See the anti-gaming note in Run.
+	TargetsTest bool
 }
 
 // Config tunes the loop's safety rails. Zero values get sensible defaults.
@@ -152,10 +157,16 @@ const (
 	dupOutputHalt = 3
 )
 
-// Run drives the loop: run the test; if it already passes there is nothing to
-// do. Otherwise repeatedly ask the Actor for a corrected file, optionally gate
-// it through the Critic, apply it, and re-test — until the test passes, the
-// budget or step cap is hit, or the Actor stalls.
+// Run drives the loop: record whether the tests currently pass, then repeatedly
+// ask the Actor for an edited file, optionally gate it through the Critic, apply
+// it, and re-test — until the tests pass, the budget or step cap is hit, or the
+// Actor stalls.
+//
+// The tests are a guard, not the goal. The user's description is the goal; the
+// tests exist to prove the change did not break anything. A green suite is
+// therefore not a reason to skip the work, and success means the same thing in
+// both directions: passing after the edit, whether that restored a red suite or
+// preserved a green one.
 func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, error) {
 	if r.Provider == nil {
 		return Result{}, fmt.Errorf("loop: no provider configured")
@@ -169,8 +180,8 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 		maxBudget = defaultMaxBudget
 	}
 
-	// Initial test: the task may already be satisfied, in which case editing
-	// anything would be wrong.
+	// Initial test: establishes the baseline the change must not regress, and
+	// gives the Actor the current state of the repository.
 	initStart := time.Now()
 	output, passed, err := runTest(ctx)
 	if err != nil {
@@ -178,11 +189,44 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 		return Result{}, fmt.Errorf("loop: initial test run failed: %w", err)
 	}
 	r.emit(0, "initial_test", outcomeOf(passed), output, initStart, nil)
-	if passed {
-		r.logf("[loop] initial test already passes; nothing to do\n")
-		return Result{Success: true, Steps: 0, FinalOutput: output}, nil
+
+	// baselineGreen records whether the repository already satisfied its test
+	// command before anything was touched. It decides what the loop is FOR,
+	// which is the difference between the two things Kiwi could be.
+	//
+	// This used to return early when the test passed — "already satisfied,
+	// nothing to do". That is only true if the test command expresses the
+	// request, which holds for a bug fix (the failing test IS the bug) and
+	// fails completely for additive work: adding an example does not make
+	// `go build` start failing, so the Actor was never invoked and the user got
+	// a green tick for work that never happened.
+	//
+	// So the test command is a GUARD, not a goal. The task is what the user
+	// asked for; the tests exist to prove the change did not break anything.
+	// One rule covers both cases: the test state must not get worse.
+	//
+	//	red   -> green   the fix worked
+	//	green -> green   the change landed without breaking anything
+	//
+	// Both are the same condition — "passing after the edit" — so beyond
+	// deleting the early return the loop below needs no special case.
+	baselineGreen := passed
+	if baselineGreen {
+		r.logf("[loop] tests already pass; making the requested change and keeping them green\n")
+	} else {
+		r.logf("[loop] initial test failed; entering correction loop\n")
 	}
-	r.logf("[loop] initial test failed; entering correction loop\n")
+
+	// Anti-gaming (Execution Model RFC §8, issue #132) applies only when the
+	// tests are red. Then a failing test defines the job, and letting the Actor
+	// edit it means it can pass the gate by weakening the assertion instead of
+	// fixing the code. When the tests are green the test file is not defining
+	// anything, and "add tests for the parser" is an ordinary, legitimate task —
+	// which the old unconditional refusal rejected outright.
+	if !baselineGreen && task.TargetsTest {
+		return Result{FinalOutput: output}, fmt.Errorf(
+			"loop: refusing to edit a test while it is failing — that would let the fix be faked by weakening the test; point the task at the code under test")
+	}
 
 	var cost float64
 	criticReasons := ""
@@ -201,7 +245,7 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 
 		if len(task.Files) > 0 {
 			r.logf("[loop] step %d: Actor proposing multi-file edit\n", step)
-			if err := r.proposeMultiFileEdit(ctx, &task, &cost, lastOutput, step); err != nil {
+			if err := r.proposeMultiFileEdit(ctx, &task, &cost, actorContext(lastOutput, baselineGreen), step); err != nil {
 				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput}, fmt.Errorf("loop: multi-file propose failed: %w", err)
 			}
 			criticReasons = ""
@@ -226,7 +270,7 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 			r.logf("[loop] step %d: Actor proposing edit\n", step)
 			actorStart := time.Now()
 			proposed, err := r.Provider.GetCodeEdit(ctx, task.Description, task.FilePath, string(content),
-				composeActorInput(lastOutput, criticReasons))
+				composeActorInput(actorContext(lastOutput, baselineGreen), criticReasons))
 			if err != nil {
 				r.emit(step, "actor", "error", err.Error(), actorStart, r.Provider)
 				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
@@ -302,6 +346,19 @@ func writeTargetFile(path string, content []byte) error {
 		}
 	}
 	return os.WriteFile(path, content, 0o644)
+}
+
+// actorContext frames the test output for the Actor. When the tests are already
+// green the raw output says "ok" everywhere, which reads as "nothing to do" —
+// the opposite of the instruction. Say plainly that the suite passes and that
+// keeping it passing is a constraint, not the objective.
+func actorContext(buildOutput string, baselineGreen bool) string {
+	if !baselineGreen {
+		return buildOutput
+	}
+	return "The test suite currently PASSES. Your job is to make the change described in the task. " +
+		"Do not treat the passing tests as meaning there is nothing to do — they are a guard against regressions, " +
+		"and they must still pass after your change.\n\nCurrent test output:\n" + buildOutput
 }
 
 // composeActorInput appends Critic feedback (if any) to the test output so the
