@@ -265,7 +265,7 @@ func (s *Server) LaunchTask(taskID, sandboxPath string, manifest *store.Manifest
 
 		ctx = context.WithValue(ctx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
 			UseDocker:   os.Getenv("USE_DOCKER") == "true",
-			DockerImage: "golang:1.21-alpine",
+			DockerImage: "golang:1.25-alpine",
 			MemoryLimit: "512m",
 			CPULimit:    "1.0",
 			NetworkNone: true,
