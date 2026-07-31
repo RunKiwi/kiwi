@@ -394,14 +394,18 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	// Anti-gaming: the loop's contract is "green test = done". If the Actor's
-	// target file is itself a test, it can pass the gate by weakening the test
-	// (delete an assertion, widen a tolerance) instead of fixing the code. Refuse
-	// the task rather than reward that (Execution Model RFC §8; issue #132).
-	if looksLikeTestFile(spec.File) {
-		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
-		return taskResult{detail: fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)}
-	}
+	// Anti-gaming (Execution Model RFC §8, issue #132) is no longer decided here.
+	// It used to be an outright refusal of any task targeting a test file, on the
+	// grounds that the Actor could satisfy "green test = done" by weakening the
+	// assertion instead of fixing the code.
+	//
+	// That reasoning only holds while the tests are FAILING, because only then is
+	// a test defining the job. When they pass, the test file defines nothing and
+	// "add tests for the parser" is an ordinary request that the blanket refusal
+	// rejected outright. The loop knows which case it is in — it runs the tests
+	// — so it makes the call; the daemon only reports what it observed, since it
+	// is the side that knows each language's naming conventions.
+	targetsTest := looksLikeTestFile(spec.File)
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
@@ -595,6 +599,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		Description:  description,
 		FilePath:     filepath.Join(worktreePath, targetFiles[0]),
 		WorktreeRoot: worktreePath,
+		TargetsTest:  targetsTest || looksLikeTestFile(targetFiles[0]),
 	}
 	if isMulti {
 		absFiles := make([]string, len(targetFiles))
@@ -710,13 +715,34 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		} else {
 			gh := &restGitHub{token: gitToken}
 			pr, d, err := publishResult(ctx, worktreePath, spec, gitToken, gh, "")
-			if err != nil {
+			switch {
+			case errors.Is(err, errNoChanges):
+				// The loop was satisfied without editing anything, so there is
+				// nothing to deliver. Reporting SUCCEEDED here was the exact
+				// "false green" the case below exists to prevent — the user
+				// asked for work, received a green tick, and got no pull
+				// request and no explanation beyond the words "no changes".
+				//
+				// It is the normal outcome for additive work. "Add an example"
+				// does not make `go build` start failing, so the test command
+				// passes on unmodified code and the loop correctly concludes
+				// there is nothing to do. The fault is the definition of done,
+				// not the agent, and the message has to say so.
+				log.Printf("Task %s: loop passed without changing anything (steps=%d)", spec.ID, result.Steps)
+				ok = false
+				if result.Steps == 0 {
+					detail = fmt.Sprintf("the test command (%s) already passed before any change was made, so nothing was done and there is nothing to open a PR with. "+
+						"This task needs a check that fails until the work exists — for new functionality, a test that exercises it.", testCmd)
+				} else {
+					detail = "the agent finished but left the repository unchanged, so there is nothing to open a PR with"
+				}
+			case err != nil:
 				// The loop passed but delivery failed. Report FAILED rather than a
 				// false green — a SUCCEEDED task with no PR is misleading.
 				log.Printf("Failed to publish result for task %s: %v", spec.ID, err)
 				detail = fmt.Sprintf("publish failed: %v", err)
 				ok = false
-			} else {
+			default:
 				prURL = pr
 				detail = d
 			}

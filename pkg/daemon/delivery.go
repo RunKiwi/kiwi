@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,18 @@ type githubClient interface {
 
 // jobBranchName is the single branch a whole job shares — every worker commits
 // to it in dependency order so the job yields one branch and one PR (#126).
+// errNoChanges reports that the loop finished without modifying anything, so
+// there is no commit to make and no pull request to open.
+//
+// This is not a successful outcome. A user submits a task expecting a change;
+// producing none, and reporting it green, is worse than failing — it teaches
+// them that a green tick means nothing. It happens when the verification
+// command already passes on unmodified code, which is the normal case for
+// additive work: "add an example" does not make `go build` start failing, so
+// the loop finds the repository already satisfying its definition of done and
+// correctly concludes there is nothing to do.
+var errNoChanges = errors.New("no changes")
+
 func jobBranchName(spec agent.WorkerSpec) string {
 	jobID := spec.JobID
 	if jobID == "" {
@@ -162,7 +175,12 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 		return "", "", err
 	}
 	if strings.TrimSpace(statusOut) == "" {
-		return "", "no changes", nil
+		// Nothing was produced. Returned as an error rather than a benign
+		// detail string so the caller cannot mistake it for a delivered
+		// result — which is exactly what happened: the task reported
+		// SUCCEEDED with no pull request and the word "no changes" as its
+		// only explanation.
+		return "", "", errNoChanges
 	}
 
 	if _, err := runGit("-c", "user.email=bot@runkiwi.com", "-c", "user.name=Kiwi", "commit", "-m", "kiwi: "+spec.Task); err != nil {
