@@ -389,6 +389,11 @@ func (s *Server) handleCORSAndPreflight(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+	// A browser can only read the response headers a server names here. The
+	// dashboard is served from a different origin to the API, so without this
+	// the record hash was sent and then discarded before any JavaScript saw it —
+	// which is why the receipt panel showed "—" for a record that has one.
+	w.Header().Set("Access-Control-Expose-Headers", "X-Kiwi-Record-Hash")
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
