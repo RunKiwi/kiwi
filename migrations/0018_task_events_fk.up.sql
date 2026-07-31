@@ -1,0 +1,25 @@
+-- task_events could never be written.
+--
+-- Migration 0005 created the table with
+--
+--   task_id TEXT NOT NULL REFERENCES task_states(id)
+--
+-- when task_states was where tasks lived. The daemon seam moved execution onto
+-- the lease queue, and a task now exists as a row in queued_tasks — so every
+-- insert has violated the constraint since:
+--
+--   ERROR: insert or update on table "task_events" violates foreign key
+--   constraint "task_events_task_id_fkey" (SQLSTATE 23503)
+--
+-- The write is best-effort by design (telemetry must never fail a result
+-- report), so the error was logged and swallowed, and the entire Actor-Critic
+-- telemetry pipeline was silently dead: no per-step evidence, and execution
+-- records assembled with empty worker steps.
+--
+-- The constraint is dropped rather than re-pointed at queued_tasks. That table
+-- exists only through AutoMigrate, so a numbered migration cannot depend on it
+-- being present; and these rows are append-only evidence for a signed record,
+-- which should outlive the queue row it describes rather than be cascaded away
+-- with it. task_id stays indexed, and every read is already scoped by
+-- (org_id, task_id).
+ALTER TABLE task_events DROP CONSTRAINT IF EXISTS task_events_task_id_fkey;
