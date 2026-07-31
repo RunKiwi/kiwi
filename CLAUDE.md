@@ -6,22 +6,28 @@ This file provides system context, architecture guidelines, and current status f
 
 ## 1. Project State & Architecture
 
-Kiwi is a **BYOC (Bring Your Own Cloud) agentic execution platform**: a **Control Plane** plans a task into a worker DAG and hands work out via a Postgres lease queue; a **Data Plane** daemon leases a worker, runs an **Actor–Critic loop** in a sandbox until the test command passes, and opens a PR. Run **managed** (Kiwi operates the Data Plane) or **BYOC** (the Data Plane runs in the customer's cloud).
+Kiwi is a **BYOC (Bring Your Own Cloud) agentic execution platform**: a **Control Plane** plans a task into a worker DAG and hands work out via a Postgres lease queue; a **Data Plane** daemon leases a worker, runs an **Actor–Critic loop** (`pkg/loop`, in the daemon process) that edits the repo and verifies each change with the test command in a sandbox, then opens a PR. Run **managed** (Kiwi operates the Data Plane) or **BYOC** (the Data Plane runs in the customer's cloud).
 
-**What's live:** the full path works end-to-end. A task posted to `/api/v1/planner/plan` is planned, leased by a per-org daemon, run through the loop with the test command in a **gVisor** sandbox, and returned as a PR. A self-serve **Free tier** runs every signup on a Kiwi-operated **shared fleet** — a per-org `kiwidaemon` process cold-started on submit by the **provisioner** (`pkg/provisioner`), gVisor-sandboxed, agent-minute-metered, with rolling-window abuse auto-suspend.
+**Kiwi does what you were asked, not what makes a check go green.** The task description is the objective; the test command is a **guard** proving the change broke nothing. It is not the definition of done. An earlier version returned early when the suite already passed, which made every additive request ("add an example") a silent no-op — see `pkg/loop/loop.go` and its tests before changing anything about the success criterion.
+
+**What's live:** the full path works end-to-end. A task posted to `/api/v1/planner/plan` is planned, leased by a per-org daemon, run through the loop with the test command in a **gVisor** sandbox, and returned as a PR. Three LLM providers are first-class (Anthropic, Gemini, OpenAI), routed by model id through `provider.ProviderOf`. The sandbox runs in **two phases** — a networked dependency install holding no credentials, then offline verification of model-generated code — so no repo is unverifiable merely because it has dependencies. Each run produces a signed, hash-chained **execution record** (`pkg/ver`). A self-serve **Free tier** runs every signup on a Kiwi-operated **shared fleet** — a per-org `kiwidaemon` process cold-started on submit by the **provisioner** (`pkg/provisioner`), gVisor-sandboxed, agent-minute-metered, with rolling-window abuse auto-suspend.
 
 **Active vs. dormant packages** — not everything in the tree is on the live path:
-- **Active:** `cmd/kiwid`, `cmd/kiwidaemon`, `pkg/orchestrator`, `pkg/daemon`, `pkg/planner`, `pkg/provisioner`, `pkg/store`, `pkg/crypto`, `pkg/gitcache`, `pkg/sandbox`, `pkg/auth`.
-- **Dormant** — compiled and tested, but not on the active path; don't build on them without discussion: `pkg/tunnel`, `pkg/billing`, `pkg/audit`, `pkg/agentapi`, `pkg/checkpoint`.
+- **Active:** `cmd/kiwid`, `cmd/kiwidaemon`, `pkg/orchestrator`, `pkg/daemon`, `pkg/loop`, `pkg/provider`, `pkg/ver`, `pkg/planner`, `pkg/provisioner`, `pkg/store`, `pkg/crypto`, `pkg/gitcache`, `pkg/sandbox`, `pkg/auth`.
+- **Built but not switched on in production** — the code is wired and tested; the deployment is not configured, so treat "it exists" and "it runs" as different claims: `pkg/billing` (Stripe Checkout + webhook are implemented, but no `STRIPE_*` variables are set in prod, so Pro is a contact flow today), `pkg/fleethost` (fleet auto-stop is a no-op unless `KIWI_FLEET_HOST_*` is set — it is not).
+- **Dormant** — compiled and tested, but not on the active path; don't build on them without discussion: `pkg/tunnel`, `pkg/audit`, `pkg/agentapi`, `pkg/checkpoint`.
 
-**In progress:** billing / **Pro** upgrade (UI-stubbed, no checkout wired), hardened multi-tenant **egress** isolation on the free-fleet host, and a **Firecracker** managed-*dedicated* path (built, not deployed or hardware-validated).
+**In progress:** a **Firecracker** managed-*dedicated* path (built, not deployed or hardware-validated), and finishing the **Pro** upgrade (see above — the blocker is configuration and a pricing decision, not code).
+
+**Shipped since this section last said otherwise:** multi-tenant **egress isolation** on the free-fleet host is live — the cloud metadata endpoint is blocked in the `DOCKER-USER` chain (`deploy/free-fleet/harden-egress.sh`), verified from inside a running container. Note that chain applies only to *forwarded* traffic, so a `--network host` container bypasses it entirely; never run one on a fleet host.
 
 ### Key Architectural Constraints for New Code:
 - **Language**: Go (`go.mod` targets 1.25).
 - **Persistence**: **PostgreSQL** via GORM. Use strong consistency (transactional outbox) for state transitions. Numbered `migrations/*.up.sql` files are applied by `RunMigrations` (`pkg/orchestrator/migrate.go`), tracked in `schema_migrations`, and run via `kiwid -role migrate` (prod serving roles set `KIWI_SKIP_BOOT_MIGRATE=true`). Note the schema has drifted from `migrations/0001` — some tables (e.g. `queued_tasks`, `credentials`) exist only via `AutoMigrate` in `pkg/orchestrator/db.go`. Add data/DDL changes as a new numbered migration.
 - **Queue**: **NATS JetStream** for durable queuing/event streaming; the BYOC daemon handoff uses the Postgres **lease queue** (`pkg/store/queue.go`) — tasks are leased, not popped, so a crashed daemon's work returns to the queue.
 - **Multi-tenant**: Every task-scoped row carries `org_id`.
-- **Security**: Secrets are never persisted in the sandbox. Customer credentials are sealed to the daemon's X25519 public key (`pkg/crypto`); the LLM Actor/Critic run in the daemon process, and only the test command runs in the sandbox (default-deny networking), so model-generated code never sees the keys.
+- **Security**: Secrets are never persisted in the sandbox. Customer credentials are sealed to the daemon's X25519 public key (`pkg/crypto`); the LLM Actor/Critic run in the daemon process, and only the test command runs in the sandbox, so model-generated code never sees the model keys.
+- **The two-phase sandbox invariant.** Phase A installs dependencies with the network **on** and a **nil environment** — no git token, no registry credential. Phase B runs the test command over model-generated code with the network **off** and credentials present. State it precisely: *model-generated code never has network access, and the phase that does never holds a secret.* Do not "simplify" this by giving Phase A credentials or Phase B a network; each collapses the property the split exists to create.
 - **Zero-knowledge is a BYOC-only claim.** In managed mode Kiwi operates the machine holding the private key and *can* decrypt. Do not write docs or code comments claiming zero-knowledge for managed mode.
 - **Terminology**: The supported LLM providers are Anthropic, Gemini, OpenAI, or compatible endpoints. The canonical identifier for the third is `openai` (credential `OPENAI_API_KEY`, integration key `openai`) — the earlier `codex` naming is retired and must not be reintroduced.
 - **Provider routing**: `provider.ProviderOf(model)` is the single mapping from a model id to its provider, and `provider.CredentialNameFor` from a provider to its key. Adding a provider means adding it there, to `PricingMap`, to `daemon.isLLMKey`, to `integrationSpec`, and to the frontend's `providerOf` — never re-deriving the rule in a new place.
@@ -93,7 +99,9 @@ kiwi/
 │   ├── kiwidaemon/       # BYOC Data Plane daemon (out-bound polling)
 │   └── kiwi-agent/       # In-sandbox agent entrypoint
 ├── pkg/
-│   ├── daemon/           # BYOC daemon: heartbeat client, poll loop
+│   ├── daemon/           # BYOC daemon: heartbeat client, poll loop, runtime/ecosystem inference, two-phase sandbox
+│   ├── loop/             # The Actor–Critic loop itself (runs in the daemon process, never in the sandbox)
+│   ├── ver/              # Signed, hash-chained execution record (kiwi.ver/v1)
 │   ├── crypto/           # X25519 sealing + Ed25519 signing
 │   ├── gitcache/         # Bare clone + git worktree provisioning
 │   ├── planner/          # Task -> worker DAG decomposition
@@ -102,9 +110,10 @@ kiwi/
 │   ├── queue/            # NATS JetStream relay + consumer
 │   ├── orchestrator/     # Core LLM loop, engine, HTTP server, webhooks
 │   ├── agent/            # In-sandbox master/worker runtime
-│   ├── sandbox/          # Execution isolator (Docker v1)
+│   ├── sandbox/          # Execution isolator (Docker + gVisor); two-phase: networked install, offline verify
 │   ├── infra/            # Docker driver
-│   ├── provider/         # Pluggable LLM interface (+ mock)
+│   ├── provider/         # Anthropic / Gemini / OpenAI clients + the one model→provider routing rule
+│   ├── fleethost/        # Fleet auto-stop controller (built; inert unless KIWI_FLEET_HOST_* is set)
 │   ├── auth/             # Orgs, API keys, limits
 │   ├── manifest/         # Manifest generation
 │   ├── client/           # Go client for the Control Plane API
@@ -112,7 +121,7 @@ kiwi/
 │   ├── agentapi/         # [paused] Master-worker API
 │   ├── checkpoint/       # [paused] Event log / snapshotting
 │   ├── audit/            # [paused] Audit log
-│   ├── billing/          # [paused] Usage/cost
+│   ├── billing/          # Stripe Checkout + webhook — implemented, not configured in prod (see §1)
 │   └── tunnel/           # [paused] Reverse credential proxy — see §1
 ├── frontend/             # Next.js dashboard
 ├── sdk/                  # Node + Python SDKs
