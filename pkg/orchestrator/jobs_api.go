@@ -10,6 +10,7 @@ import (
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
 type JobTaskResponse struct {
@@ -111,6 +112,11 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/record") {
 		jobID = filepath.Base(filepath.Dir(r.URL.Path))
 		s.handleJobRecord(w, r, claims.OrgID, jobID)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/progress") {
+		jobID = filepath.Base(filepath.Dir(r.URL.Path))
+		s.handleJobProgress(w, r, claims.OrgID, jobID)
 		return
 	}
 
@@ -220,4 +226,58 @@ func specStrings(spec map[string]interface{}, key string) []string {
 		}
 	}
 	return nil
+}
+
+// jobProgressTask is one worker's live state: the phases it has completed and
+// what it is doing right now.
+type jobProgressTask struct {
+	TaskID string          `json:"task_id"`
+	Status string          `json:"status"`
+	Model  string          `json:"actor_model,omitempty"`
+	Steps  []ver.TaskEvent `json:"steps"`
+	Phase  string          `json:"phase,omitempty"`
+	Output string          `json:"output_tail,omitempty"`
+	// ProgressAt is when the daemon last reported. A timestamp that stops
+	// advancing is how a hung run distinguishes itself from a slow one.
+	ProgressAt *time.Time `json:"progress_at,omitempty"`
+}
+
+// handleJobProgress serves GET /api/v1/jobs/{id}/progress — what is happening
+// right now, for a job that has not finished.
+//
+// Separate from /record deliberately. A record is a signed, hash-chained
+// artifact assembled once at the end and never revised; this is a mutable view
+// of a run in flight. Serving the two from one endpoint would either delay the
+// record until it could be trusted or imply these partial rows carry the same
+// weight, and neither is true.
+func (s *Server) handleJobProgress(w http.ResponseWriter, r *http.Request, orgID, jobID string) {
+	tasks, err := s.storage.GetJobTasks(r.Context(), orgID, jobID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(tasks) == 0 {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	out := make([]jobProgressTask, 0, len(tasks))
+	for _, t := range tasks {
+		p := jobProgressTask{
+			TaskID: t.ID,
+			Status: t.Status,
+			Model:  specString(t.Spec, "model"),
+			Steps:  s.taskEventsFor(r.Context(), orgID, t.ID),
+		}
+		if t.ProgressPhase != nil {
+			p.Phase = *t.ProgressPhase
+		}
+		if t.ProgressOutput != nil {
+			p.Output = *t.ProgressOutput
+		}
+		p.ProgressAt = t.ProgressAt
+		out = append(out, p)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": out})
 }

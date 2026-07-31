@@ -393,3 +393,32 @@ func decodeDaemonPubKey(b64 string) string {
 	}
 	return b64
 }
+
+// replaceTaskEvents makes the daemon's final report the authoritative history
+// for a task, discarding anything streamed while it ran.
+//
+// Progress updates deliver events incrementally so a run can be watched, and
+// the final report re-sends the whole list. Appending both would duplicate
+// every phase in the timeline, and — because the execution record is assembled
+// from these rows — would double the step count and the cost attributed to the
+// run. Replacing is also self-healing: a task whose progress updates were lost
+// to a network blip still ends with a complete history.
+//
+// Deleting first is safe because a task's events are only ever written by the
+// daemon holding its lease, and this runs at completion, after which no further
+// progress update can apply.
+func (s *Server) replaceTaskEvents(ctx context.Context, orgID, taskID string, events []ver.TaskEvent) {
+	if len(events) == 0 {
+		// A run that reported nothing must not erase what streaming captured.
+		return
+	}
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND task_id = ?", orgID, taskID).
+		Delete(&TaskEvent{}).Error; err != nil {
+		// Falling through to the insert would duplicate rather than replace, so
+		// stop: the streamed history is already the better of the two outcomes.
+		log.Printf("[ver] clear streamed events for task %s: %v", taskID, err)
+		return
+	}
+	s.recordTaskEvents(ctx, orgID, taskID, events)
+}

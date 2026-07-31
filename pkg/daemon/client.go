@@ -151,3 +151,20 @@ func (c *Client) RenewLease(ctx context.Context, req RenewReq) error {
 	}
 	return fmt.Errorf("renew lease failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }
+
+// ReportProgress posts partial telemetry for a still-running task. It is
+// best-effort: the caller logs and ignores any error, because a run must never
+// fail on account of its own observability.
+func (c *Client) ReportProgress(ctx context.Context, req ProgressReq) error {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/progress", req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("report progress failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+}

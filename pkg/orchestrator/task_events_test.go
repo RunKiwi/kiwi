@@ -102,3 +102,65 @@ func TestRecordTaskEvents_EmptyIsANoop(t *testing.T) {
 		t.Errorf("expected no rows, got %d", len(got))
 	}
 }
+
+// Progress updates stream events while a task runs; the final report re-sends
+// the whole list. Appending both would duplicate every phase in the timeline —
+// and because the execution record is assembled from these rows, it would also
+// double the step count and the cost attributed to the run.
+func TestReplaceTaskEvents_FinalReportSupersedesStreamedOnes(t *testing.T) {
+	s := newEventsServer(t)
+	ctx := context.Background()
+
+	// Streamed while running.
+	s.recordTaskEvents(ctx, "org-1", "job_x-w1", []ver.TaskEvent{
+		{Step: 0, Phase: "initial_test", Outcome: "fail"},
+		{Step: 1, Phase: "actor", Outcome: "proposed"},
+	})
+
+	// The authoritative list at completion — the same two phases plus the rest.
+	s.replaceTaskEvents(ctx, "org-1", "job_x-w1", []ver.TaskEvent{
+		{Step: 0, Phase: "initial_test", Outcome: "fail"},
+		{Step: 1, Phase: "actor", Outcome: "proposed"},
+		{Step: 1, Phase: "critic", Outcome: "approved"},
+		{Step: 1, Phase: "test", Outcome: "pass"},
+	})
+
+	got := s.taskEventsFor(ctx, "org-1", "job_x-w1")
+	if len(got) != 4 {
+		t.Fatalf("got %d events, want exactly 4 — streamed events must be replaced, not appended", len(got))
+	}
+	if got[0].Phase != "initial_test" || got[3].Phase != "test" {
+		t.Errorf("execution order lost after replace: %+v", got)
+	}
+}
+
+// A run that reports no events at the end must not erase what streaming
+// captured — that would turn a crash into an empty timeline, losing exactly the
+// evidence needed to understand it.
+func TestReplaceTaskEvents_EmptyFinalReportKeepsStreamedHistory(t *testing.T) {
+	s := newEventsServer(t)
+	ctx := context.Background()
+
+	s.recordTaskEvents(ctx, "org-1", "job_y-w1", []ver.TaskEvent{
+		{Step: 0, Phase: "initial_test", Outcome: "fail"},
+	})
+	s.replaceTaskEvents(ctx, "org-1", "job_y-w1", nil)
+
+	if got := s.taskEventsFor(ctx, "org-1", "job_y-w1"); len(got) != 1 {
+		t.Errorf("got %d events, want the streamed one kept", len(got))
+	}
+}
+
+// Replacement is org-scoped, like every other write here: one tenant's final
+// report must never delete another's telemetry, even for an identical task id.
+func TestReplaceTaskEvents_IsOrgScoped(t *testing.T) {
+	s := newEventsServer(t)
+	ctx := context.Background()
+
+	s.recordTaskEvents(ctx, "org-1", "shared", []ver.TaskEvent{{Step: 0, Phase: "test", Outcome: "pass"}})
+	s.replaceTaskEvents(ctx, "org-2", "shared", []ver.TaskEvent{{Step: 0, Phase: "actor", Outcome: "proposed"}})
+
+	if got := s.taskEventsFor(ctx, "org-1", "shared"); len(got) != 1 || got[0].Phase != "test" {
+		t.Errorf("another org's replace touched these rows: %+v", got)
+	}
+}

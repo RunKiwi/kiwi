@@ -158,3 +158,35 @@ func (s *PostgresStore) HasActiveTasks(ctx context.Context, orgID string) (bool,
 	}
 	return n > 0, nil
 }
+
+// RecordTaskProgress stores what a daemon says it is doing right now.
+//
+// Guarded by the fencing token, exactly as CompleteTask and RenewLease are: a
+// daemon whose lease was reassigned must not be able to write progress onto a
+// task another daemon now owns, or the dashboard would show one run's output
+// under another's. It also refuses to touch a task that is no longer LEASED, so
+// a late update cannot overwrite a finished task's final state.
+//
+// Returns false when the write did not apply, which the caller treats as
+// informational — progress is best-effort and must never fail a run.
+func (s *PostgresStore) RecordTaskProgress(ctx context.Context, taskID, leaseID, phase, output string) (bool, error) {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"progress_at": &now,
+	}
+	if phase != "" {
+		updates["progress_phase"] = &phase
+	}
+	if output != "" {
+		updates["progress_output"] = &output
+	}
+
+	res := s.db.WithContext(ctx).
+		Model(&QueuedTask{}).
+		Where("id = ? AND lease_id = ? AND status = ?", taskID, leaseID, TaskLeased).
+		Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
