@@ -87,3 +87,25 @@ type RenewReq struct {
 	LeaseID    string `json:"lease_id"`
 	SignPubKey string `json:"sign_pub_key"`
 }
+
+// ProgressReq carries what has happened so far in a still-running task, so the
+// dashboard can show a run as it happens rather than only once it is over.
+//
+// Events is a DELTA — only the phases not yet acknowledged — so a long run does
+// not re-send its whole history every few seconds. The Control Plane treats
+// these as provisional: the authoritative list arrives with ResultReq and
+// replaces them.
+type ProgressReq struct {
+	TaskID  string `json:"task_id"`
+	LeaseID string `json:"lease_id"`
+	// SignPubKey identifies the reporting daemon (verified against X-Kiwi-Signature).
+	SignPubKey string `json:"sign_pub_key"`
+	// Events not yet accepted by the Control Plane, in execution order.
+	Events []ver.TaskEvent `json:"events,omitempty"`
+	// Phase names what is running right now — "install", "test", "actor" — for
+	// the gap between two events, which on a slow command is most of the run.
+	Phase string `json:"phase,omitempty"`
+	// OutputTail is the end of the running command's output. The end is the part
+	// that says what it is doing; the start is usually a banner.
+	OutputTail string `json:"output_tail,omitempty"`
+}

@@ -76,6 +76,9 @@ type Store interface {
 	LeaseNextTask(ctx context.Context, orgID, leasedBy, fleetID string, ttl time.Duration) (*QueuedTask, error)
 	RenewLease(ctx context.Context, taskID, leaseID string, ttl time.Duration) (bool, error)
 	CompleteTask(ctx context.Context, c TaskCompletion) (bool, error)
+	// RecordTaskProgress stores a running task's current activity. Fenced by the
+	// lease id so a daemon that lost the task cannot write to it.
+	RecordTaskProgress(ctx context.Context, taskID, leaseID, phase, output string) (bool, error)
 	RequeueExpiredLeases(ctx context.Context) (int, error)
 	ExpireStaleQueuedTasks(ctx context.Context, ttl time.Duration) (int, error)
 	GetJobTasks(ctx context.Context, orgID, jobID string) ([]QueuedTask, error)
