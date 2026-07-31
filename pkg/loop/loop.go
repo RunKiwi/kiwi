@@ -155,6 +155,20 @@ const (
 	// dupOutputHalt stops the loop when the identical test output recurs this
 	// many times — a sign the Actor is stuck making no progress.
 	dupOutputHalt = 3
+	// rejectionHalt stops the loop after this many Critic rejections in a row.
+	//
+	// A rejection consumes an Actor call and applies nothing, so a run that
+	// cannot satisfy the Critic makes no progress at all while still spending
+	// the budget and the clock. That is not hypothetical: a task planned as
+	// "examples/advanced.rs" in a Go repository was rejected three times for
+	// having a Rust extension — the Critic was right each time, and the Actor
+	// could not comply, because it may change a file's contents but never its
+	// name. The fourth round died on the task deadline.
+	//
+	// Three is deliberately not two: the Critic's first reasons often do land,
+	// and stopping the moment an Actor needs a second try would throw away
+	// recoverable runs.
+	rejectionHalt = 3
 )
 
 // Run drives the loop: record whether the tests currently pass, then repeatedly
@@ -230,6 +244,9 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 
 	var cost float64
 	criticReasons := ""
+	// Consecutive Critic rejections. Reset by any approval, because progress
+	// resumed; counted otherwise, because nothing was applied.
+	rejections := 0
 	outputCounts := map[string]int{output: 1}
 	lastOutput := output
 
@@ -294,8 +311,16 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 					r.emit(step, "critic", "rejected", verdict.Reasons, criticStart, r.Critic)
 					r.logf("[loop] step %d: Critic rejected: %s\n", step, verdict.Reasons)
 					criticReasons = verdict.Reasons
+					rejections++
+					if rejections >= rejectionHalt {
+						r.logf("[loop] halted: the Critic rejected %d attempts in a row\n", rejections)
+						return Result{Success: false, Steps: step, CostUSD: cost, FinalOutput: lastOutput},
+							fmt.Errorf("loop: the Critic rejected %d attempts in a row and the Actor could not satisfy it — last reason: %s",
+								rejections, verdict.Reasons)
+					}
 					continue // Actor retries with feedback; nothing applied, no test
 				}
+				rejections = 0
 				r.emit(step, "critic", "approved", verdict.Reasons, criticStart, r.Critic)
 			}
 
