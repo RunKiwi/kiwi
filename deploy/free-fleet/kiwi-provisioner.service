@@ -1,0 +1,57 @@
+[Unit]
+# The free-tier provisioner: it polls provisioning_requests and cold-starts a
+# per-org kiwidaemon container on submit. It must run on a Docker + gVisor host,
+# never on Cloud Run, because it launches containers via the host Docker socket.
+#
+# This unit exists because the provisioner previously ran as a hand-issued
+# `docker run`. Its configuration lived only inside the running container, so
+# removing the container destroyed the only record of how to start it — which is
+# exactly what happened. The config now lives in files on disk, and systemd owns
+# the lifecycle.
+Description=Kiwi free-tier provisioner
+Documentation=https://github.com/RunKiwi/kiwi/blob/main/deploy/free-fleet/README.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=exec
+
+# Two environment files, each parsed by exactly one parser:
+#   provisioner.image  systemd reads it, to expand $KIWI_PROVISIONER_IMAGE below
+#   provisioner.env    docker reads it, and it holds the DSN (whose value
+#                      contains spaces, which systemd and docker quote
+#                      differently — so it is never handed to systemd)
+EnvironmentFile=/etc/kiwi/provisioner.image
+
+# Best-effort refresh so a restart picks up a new build. The pull happens on the
+# HOST, which holds registry credentials; see the note on --pull below.
+ExecStartPre=-/usr/bin/docker pull $KIWI_PROVISIONER_IMAGE
+ExecStartPre=-/usr/bin/docker rm -f kiwi-provisioner
+
+# Runs in the FOREGROUND (no -d) so systemd supervises the process directly
+# rather than watching a detached container it cannot see. Docker's own
+# --restart policy is deliberately omitted: two supervisors racing to restart
+# one container is worse than either alone.
+#
+# Default bridge networking, NOT --network host. harden-egress.sh installs its
+# metadata-endpoint block in the DOCKER-USER chain, which iptables applies only
+# to FORWARDED traffic — i.e. bridge-networked containers. A host-networked
+# container's traffic is host OUTPUT and skips that chain entirely, so it can
+# read the VM's service-account token from 169.254.169.254. Bridge reaches
+# Cloud SQL over the VPC and the public Control Plane perfectly well, so there
+# is nothing to trade away here.
+ExecStart=/usr/bin/docker run --rm --name kiwi-provisioner \
+    --env-file /etc/kiwi/provisioner.env \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /var/lib/kiwi:/var/lib/kiwi \
+    $KIWI_PROVISIONER_IMAGE -role api -addr :8090
+
+ExecStop=/usr/bin/docker stop --time 20 kiwi-provisioner
+
+Restart=always
+RestartSec=5s
+# Never give up: this is the only thing that starts free-tier work.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target
