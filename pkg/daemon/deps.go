@@ -1,8 +1,12 @@
 package daemon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -62,34 +66,60 @@ type installStep struct {
 // Lockfiles are checked before manifests because a lockfile identifies the
 // package manager exactly — yarn.lock and package-lock.json describe the same
 // package.json — and because the locked install is the reproducible one.
-func inferInstallStep(dir string) *installStep {
+func inferInstallStep(dir string) *installStep { return installStepFor(dir, true) }
+
+// installStepFor works out how to fetch a repository's dependencies, or returns
+// nil when it declares none.
+//
+// `locked` selects between the two situations in which this runs:
+//
+//	locked=true   before the loop — install exactly what the lockfile pins
+//	locked=false  after the Actor edited a manifest — resolve and re-lock
+//
+// The distinction is not cosmetic. `npm ci` deletes node_modules and installs
+// strictly from package-lock.json, and it *fails outright* when the lock and
+// package.json disagree — which is precisely the state the Actor creates by
+// adding a dependency. The same is true of every `--frozen-lockfile` flag. So a
+// re-install after an edit has to be the resolving form, which also updates the
+// lockfile so the change is committed complete.
+func installStepFor(dir string, locked bool) *installStep {
 	has := func(name string) bool {
 		_, err := os.Stat(filepath.Join(dir, name))
 		return err == nil
+	}
+	// pick returns the frozen command before the loop, the resolving one after.
+	pick := func(frozen, resolving string) string {
+		if locked {
+			return frozen
+		}
+		return resolving
 	}
 
 	switch {
 	// JavaScript: the lockfile names the package manager.
 	case has("pnpm-lock.yaml"):
-		return &installStep{"pnpm install --frozen-lockfile", "pnpm-lock.yaml"}
+		return &installStep{pick("pnpm install --frozen-lockfile", "pnpm install"), "pnpm-lock.yaml"}
 	case has("yarn.lock"):
-		return &installStep{"yarn install --frozen-lockfile", "yarn.lock"}
+		return &installStep{pick("yarn install --frozen-lockfile", "yarn install"), "yarn.lock"}
 	case has("package-lock.json"):
-		return &installStep{"npm ci", "package-lock.json"}
+		return &installStep{pick("npm ci", "npm install"), "package-lock.json"}
 	case has("package.json"):
 		// No lockfile to be reproducible against, so a plain install is the
 		// only option; `npm ci` would refuse outright.
 		return &installStep{"npm install", "package.json"}
 
 	case has("go.mod"):
-		return &installStep{"go mod download", "go.mod"}
+		// `go mod download` fetches what go.mod already names but does not add a
+		// requirement the code now imports, nor write the go.sum hashes for it.
+		// `go mod tidy` does both, which is what an edited go.mod needs.
+		return &installStep{pick("go mod download", "go mod tidy"), "go.mod"}
 
 	// Python: most specific tool first, since a project using poetry or pipenv
 	// also has a pyproject.toml that pip alone would handle differently.
 	case has("poetry.lock"):
-		return &installStep{"poetry install --no-interaction", "poetry.lock"}
+		return &installStep{pick("poetry install --no-interaction", "poetry lock --no-update && poetry install --no-interaction"), "poetry.lock"}
 	case has("Pipfile.lock"):
-		return &installStep{"pipenv install --dev --deploy", "Pipfile.lock"}
+		return &installStep{pick("pipenv install --dev --deploy", "pipenv install --dev"), "Pipfile.lock"}
 	case has("requirements.txt"):
 		return &installStep{"pip install -r requirements.txt", "requirements.txt"}
 	case has("pyproject.toml"):
@@ -108,4 +138,31 @@ func inferInstallStep(dir string) *installStep {
 	}
 
 	return nil
+}
+
+// manifestFingerprint summarises every dependency manifest present in the
+// worktree root, so an edit the Actor makes mid-loop can be detected by
+// comparing it against the fingerprint taken after the last install.
+//
+// Content-hashed rather than mtime-based: the Actor rewrites whole files, so a
+// no-op rewrite would bump the mtime and trigger a pointless five-minute
+// re-install. Missing files are simply absent from the hash, so deleting a
+// manifest registers as a change too.
+func manifestFingerprint(dir string) string {
+	names := make([]string, 0, len(manifestFiles))
+	for name := range manifestFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names) // map order must not change the fingerprint
+
+	h := sha256.New()
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(h, "%s:%d:", name, len(b))
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
