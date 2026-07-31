@@ -115,6 +115,26 @@ export interface ExecutionRecordResponse {
  * backend's own word for whether a Control-Plane signature is present
  * ("signed" | "unsigned"); it is not a claim that the client verified anything.
  */
+// One phase of the Actor-Critic loop, as recorded by the daemon that ran it.
+// Raw test output is never carried — only a digest — because it can contain
+// secrets; the Critic's own reasons are quoted, bounded, since they are what
+// explains a rejection.
+export interface RecordStep {
+  step: number;
+  phase: "initial_test" | "actor" | "critic" | "test" | string;
+  outcome: "pass" | "fail" | "proposed" | "approved" | "rejected" | "error" | string;
+  reasons?: string;
+  detail_hash?: string;
+}
+
+export interface RecordWorker {
+  worker_id?: string;
+  actor_model?: string;
+  critic_model?: string;
+  provider?: string;
+  steps?: RecordStep[];
+}
+
 export interface ExecutionRecordBody {
   ver?: string;
   record_id?: string;
@@ -124,6 +144,10 @@ export interface ExecutionRecordBody {
   record_signature?: { alg?: string; key?: string; sig?: string };
   verification?: { test_cmd?: string; final_outcome?: string; duration_ms?: number };
   intent?: { submitted_at?: string };
+  execution?: {
+    sandbox?: { runtime?: string; network?: string };
+    workers?: RecordWorker[];
+  };
 }
 
 export interface JobSummary {

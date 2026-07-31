@@ -559,6 +559,22 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return taskResult{detail: why}
 	}
 
+	// Repair a new file whose extension names the wrong language. The Actor can
+	// only change a file's contents, never its name, so a planner that guesses
+	// "examples/advanced.rs" for a Go repository creates a position the loop
+	// cannot win: the Critic rejects Go code in a .rs file, correctly, every
+	// time, until the budget runs out.
+	eco := inferEcosystem(worktreePath, testCmd)
+	for i, f := range targetFiles {
+		if _, err := os.Stat(filepath.Join(worktreePath, f)); err == nil {
+			continue // exists; its extension is the repository's business
+		}
+		if fixed := correctNewFileExtension(f, eco, worktreePath); fixed != f {
+			log.Printf("Task %s: new file %q has the wrong extension for a %s project; creating %q instead", spec.ID, f, eco, fixed)
+			targetFiles[i] = fixed
+		}
+	}
+
 	if testCmd == "" {
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
 	}

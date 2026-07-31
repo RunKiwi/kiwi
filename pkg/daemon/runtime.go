@@ -275,3 +275,73 @@ func pythonVersion(dir string) string {
 	}
 	return ""
 }
+
+// extensionEcosystem maps a source-file extension to the toolchain it belongs
+// to. Only unambiguous, language-defining extensions appear here: a Go project
+// legitimately contains .md, .yaml and .json files, and "correcting" those
+// would be worse than the bug this exists to fix.
+var extensionEcosystem = map[string]ecosystem{
+	".go":   ecoGo,
+	".rs":   ecoRust,
+	".py":   ecoPython,
+	".rb":   ecoRuby,
+	".php":  ecoPHP,
+	".java": ecoMaven,
+	".js":   ecoNode, ".jsx": ecoNode, ".ts": ecoNode, ".tsx": ecoNode, ".mjs": ecoNode,
+}
+
+// primaryExtension is the extension a new source file should carry for an
+// ecosystem. Node is resolved against the repository because .ts and .js are
+// both correct and only the project can say which.
+func primaryExtension(eco ecosystem, dir string) string {
+	switch eco {
+	case ecoGo:
+		return ".go"
+	case ecoRust:
+		return ".rs"
+	case ecoPython:
+		return ".py"
+	case ecoRuby:
+		return ".rb"
+	case ecoPHP:
+		return ".php"
+	case ecoMaven, ecoGradle:
+		return ".java"
+	case ecoNode:
+		if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); err == nil {
+			return ".ts"
+		}
+		return ".js"
+	}
+	return ""
+}
+
+// correctNewFileExtension repairs a path for a file that does not exist yet when
+// its extension belongs to a different language than the repository's.
+//
+// The planner names files without seeing the repo, so it guesses — and a guess
+// can be wrong in a way nothing downstream can recover from. It planned
+// examples/advanced.rs for a Go project; the Actor may only change a file's
+// CONTENTS, never its name, so the Critic correctly rejected the result three
+// times ("contains Go code, but has a .rs file extension") and the task burned
+// its entire ten-minute budget on a position it could not win.
+//
+// Deliberately narrow: it fires only for a file being created, only when the
+// extension unambiguously names another language, and only when we have a
+// confident replacement. Anything else — .md, .yaml, no extension at all — is
+// left exactly as it is.
+func correctNewFileExtension(rel string, eco ecosystem, dir string) string {
+	ext := strings.ToLower(filepath.Ext(rel))
+	if ext == "" {
+		return rel
+	}
+	fileEco, known := extensionEcosystem[ext]
+	if !known || fileEco == eco {
+		return rel
+	}
+	want := primaryExtension(eco, dir)
+	if want == "" || want == ext {
+		return rel
+	}
+	return strings.TrimSuffix(rel, filepath.Ext(rel)) + want
+}
