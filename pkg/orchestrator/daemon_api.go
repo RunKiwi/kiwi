@@ -438,7 +438,7 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 			execSig = nil
 		}
 	}
-	s.recordTaskEvents(r.Context(), d.OrgID, req.TaskID, req.Events)
+	s.replaceTaskEvents(r.Context(), d.OrgID, req.TaskID, req.Events)
 
 	w.WriteHeader(http.StatusNoContent)
 
@@ -619,4 +619,75 @@ func (s *Server) handleDaemonsList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleDaemonProgress serves POST /api/v1/daemon/progress — partial telemetry
+// for a task that is still running.
+//
+// The daemon is the only observer of the Actor–Critic loop, and until this
+// existed it kept everything until the end: a task running for ten minutes
+// showed a spinner, and one that was stuck looked exactly like one working.
+//
+// Everything here is best-effort and returns 204 even when nothing was stored.
+// A daemon must never retry, back off, or fail a run because its telemetry did
+// not land — the run is the product, this is the commentary.
+func (s *Server) handleDaemonProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req daemon.ProgressReq
+	_, _, err := readSignedBody(r, func(b []byte) (string, error) {
+		if err := json.Unmarshal(b, &req); err != nil {
+			return "", errors.New("invalid request body")
+		}
+		return req.SignPubKey, nil
+	})
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if req.TaskID == "" || req.LeaseID == "" {
+		http.Error(w, "task_id and lease_id are required", http.StatusBadRequest)
+		return
+	}
+
+	// Resolve the org from the signing identity rather than trusting anything in
+	// the body: task_events rows are org-scoped, and an unregistered or spoofed
+	// caller must not be able to write into another tenant's telemetry.
+	d, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	if err != nil {
+		if errors.Is(err, store.ErrDaemonNotFound) {
+			http.Error(w, "daemon not registered", http.StatusForbidden)
+			return
+		}
+		log.Printf("[daemon] progress lookup failed: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// The fencing token decides whether this daemon still owns the task. A
+	// reassigned lease means these events describe a run that has been
+	// abandoned, so storing them would interleave two runs' phases in one
+	// timeline. Nothing is written when it does not apply.
+	applied, err := s.storage.RecordTaskProgress(r.Context(), req.TaskID, req.LeaseID, req.Phase, summarize(req.OutputTail, 4000))
+	if err != nil {
+		log.Printf("[daemon] record progress for task %s: %v", req.TaskID, err)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !applied {
+		// Stale lease or a task that already finished. 204 rather than 409: the
+		// daemon has nothing useful to do with the distinction, and the run it is
+		// finishing will be rejected by CompleteTask on the same grounds.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Provisional. ReportResult sends the authoritative list at the end, which
+	// replaces these — see replaceTaskEvents.
+	s.recordTaskEvents(r.Context(), d.OrgID, req.TaskID, req.Events)
+
+	w.WriteHeader(http.StatusNoContent)
 }

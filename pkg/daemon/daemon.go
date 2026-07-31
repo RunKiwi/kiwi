@@ -56,6 +56,10 @@ type Config struct {
 	MaxBudgetUSD float64
 	// RenewInterval configures how often the daemon extends the lease of a running task.
 	RenewInterval time.Duration
+	// ProgressInterval is how often partial telemetry is flushed to the Control
+	// Plane while a task runs. Defaults to 3s when zero. Distinct from
+	// RenewInterval, which runs on minutes — far too slow to watch a run by.
+	ProgressInterval time.Duration
 	// SandboxRuntime configures the OCI runtime for docker sandboxes (e.g. "runsc").
 	SandboxRuntime string
 }
@@ -311,8 +315,16 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 			}
 		}(spec.ID)
 
-		out := d.executeTask(taskCtx, spec, creds)
-		taskCancel() // Stop the renewal timer
+		// Live telemetry. The daemon is the only observer of the loop, so
+		// without this a running task is a spinner: one that is stuck looks
+		// exactly like one working hard. Flushed on its own call rather than
+		// with the lease renewal, so a failed progress post can never cost the
+		// daemon a task it is successfully running.
+		prog := &progressReporter{}
+		go d.streamProgress(taskCtx, spec.ID, res.LeaseID, prog)
+
+		out := d.executeTask(taskCtx, spec, creds, prog)
+		taskCancel() // Stop the renewal and progress timers
 
 		// Reporting a result for a task we no longer hold is pointless — the CP
 		// rejects it on the fencing token — and actively misleading in the logs.
@@ -384,7 +396,7 @@ type taskResult struct {
 	events []ver.TaskEvent
 }
 
-func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string) taskResult {
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string, prog *progressReporter) taskResult {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
@@ -583,9 +595,10 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 
 	log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
-	// Collected synchronously: Runner.Run calls OnEvent inline on this
-	// goroutine, so no lock is needed and ordering matches execution order.
-	var events []ver.TaskEvent
+	// Runner.Run calls OnEvent inline on this goroutine, so ordering matches
+	// execution order. The reporter is what carries them out of the process
+	// while the task is still running; the full list is still sent with the
+	// result, which remains authoritative.
 	runner := &loop.Runner{
 		Provider: actor,
 		Critic:   critic,
@@ -594,7 +607,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			MaxBudgetUSD: d.config.MaxBudgetUSD,
 			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
 			OnEvent: func(e loop.Event) {
-				events = append(events, ver.TaskEvent{
+				prog.add(ver.TaskEvent{
 					Step:         e.Step,
 					Phase:        e.Phase,
 					Outcome:      e.Outcome,
@@ -695,7 +708,9 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		if fp := manifestFingerprint(worktreePath); fp != installedManifests {
 			if step := installStepFor(worktreePath, false); step != nil {
 				log.Printf("Task %s: a dependency manifest changed; re-installing with %q", spec.ID, step.Command)
+				prog.setActivity("install: "+step.Command, "")
 				if detail, ok := d.installDependencies(ctx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
+					prog.setActivity("install failed", detail)
 					return detail, false, nil
 				}
 			}
@@ -705,10 +720,12 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			installedManifests = manifestFingerprint(worktreePath)
 		}
 
+		prog.setActivity("test: "+testCmd, "")
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
 			return "", false, err
 		}
+		prog.setActivity("test: "+testCmd, res.Output)
 		if !res.Success && !envChecked {
 			envChecked = true
 			if next, why := correctedImage(sandboxCfg.DockerImage, res.Output, worktreePath); next != "" {
@@ -739,7 +756,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 
 	result, err := runner.Run(taskCtx, task, runTest)
 	if offlineBlocked != "" {
-		return taskResult{detail: offlineBlocked, events: events}
+		return taskResult{detail: offlineBlocked, events: prog.all()}
 	}
 	if err != nil {
 		log.Printf("Task %s loop ended without success: %v (steps=%d, cost=$%.2f)",
@@ -814,7 +831,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	return taskResult{ok: ok, prURL: prURL, detail: detail, abuse: abuse, events: events}
+	return taskResult{ok: ok, prURL: prURL, detail: detail, abuse: abuse, events: prog.all()}
 }
 
 // installDependencies runs phase A of the sandbox: the repository's own install

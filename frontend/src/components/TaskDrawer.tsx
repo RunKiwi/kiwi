@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask } from "@/lib/api";
 import { RunTimeline } from "@/components/RunTimeline";
+import { LiveRun } from "@/components/LiveRun";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import {
@@ -192,6 +193,9 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  // Live progress, polled while the job runs. Cleared on job switch below so
+  // one run's output can never appear under another's header.
+  const [progress, setProgress] = useState<JobProgressTask[]>([]);
   const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
@@ -249,12 +253,23 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     setRecordError(null);
     setShowJson(false);
     setCopiedHash(false);
+    setProgress([]);
   }
 
   usePolling(
     async () => {
-      if (taskId) {
-        await loadJob(taskId);
+      if (!taskId) return;
+      await loadJob(taskId);
+      // Progress only exists while the job runs; a finished job has a record
+      // instead, and asking for both would be a guaranteed wasted request.
+      if (!jobFinished) {
+        try {
+          const res = await client.getJobProgress(taskId);
+          setProgress(res.tasks ?? []);
+        } catch {
+          // Best-effort, exactly as it is on the daemon side: a run must never
+          // look broken because its commentary did not load.
+        }
       }
     },
     {
@@ -443,6 +458,19 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
       })()}
 
       <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
+        {/* What is happening right now. Shown only while the job is unfinished;
+            once it ends, the record panel below renders the same timeline from
+            the signed artifact rather than from live telemetry. */}
+        {!jobFinished && progress.length > 0 && (
+          <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-sky-400" />
+              <h3 className="text-sm font-semibold text-white">Running now</h3>
+            </div>
+            <LiveRun tasks={progress} />
+          </div>
+        )}
+
         {/* Execution record. A record exists only for a finished job, and not
             every finished job has one, so the panel appears when there is
             something to show rather than advertising an absence. */}
