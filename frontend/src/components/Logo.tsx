@@ -3,7 +3,7 @@ import { useId } from "react";
 /**
  * Kiwi bird mark. Colored via `currentColor`, so set the color with a Tailwind
  * `text-*` class or inline style. The eye is a mask hole, so the mark reads in a
- * single color on any ground. v0 silhouette — refine later.
+ * single color on any ground. Refined elegant silhouette.
  */
 export function Logo({ className }: { className?: string }) {
   // Unique per instance so multiple logos on a page don't share a mask id.
