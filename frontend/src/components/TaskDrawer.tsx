@@ -117,7 +117,8 @@ interface TaskDrawerProps {
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 
 export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProps) {
-  const { currentJob, loadJob } = useFleetStore();
+  const { currentJob: storeJob, loadJob } = useFleetStore();
+  const currentJob = storeJob?.job_id === taskId ? storeJob : null;
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
