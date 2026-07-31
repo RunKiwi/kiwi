@@ -54,9 +54,9 @@ func NewLLMPlannerFunc(newModel func(model string) Completer, defaultModel strin
 const plannerSystem = "You are the Planner in an autonomous coding swarm. " +
 	"Decompose the user's task into a DAG of small, independently-executable worker jobs. " +
 	"Scope each worker by the file it edits and a test command that defines 'done' — NOT a persona. " +
-	"Do not choose models; the runtime assigns them. " +
+	"Do not choose models or test commands; the runtime assigns them from the repository. " +
 	"Respond ONLY with a JSON object: " +
-	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "test_cmd": string, "depends_on": [string]}]}.`
+	`{"summary": string, "workers": [{"id": string, "task": string, "file": string, "depends_on": [string]}]}.`
 
 func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 	if p.newModel == nil {
@@ -142,9 +142,12 @@ func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*Plan, error) {
 		if plan.Workers[i].File == "" {
 			plan.Workers[i].File = req.File
 		}
-		if plan.Workers[i].TestCmd == "" {
-			plan.Workers[i].TestCmd = req.TestCmd
-		}
+		// Discard any test command the model named despite being told not to.
+		// Asking is not enforcing: a model that ignores the instruction would
+		// otherwise still set the definition of done from a repo it never saw,
+		// and — worse — suppress the daemon's inference from the real marker
+		// files. The submitter's command is reapplied by workerTestCmd.
+		plan.Workers[i].TestCmd = req.TestCmd
 	}
 	return &plan, nil
 }
