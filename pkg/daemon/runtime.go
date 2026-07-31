@@ -93,13 +93,20 @@ func inferSandboxImage(dir, testCmd string) string {
 	if img := devcontainerImage(dir); img != "" {
 		return img
 	}
+	return imageFor(inferEcosystem(dir, testCmd), dir)
+}
+
+// inferEcosystem resolves the toolchain a repository's tests need. Separate
+// from image selection because the package cache is wired per ecosystem too,
+// and both must agree about which one this is.
+func inferEcosystem(dir, testCmd string) ecosystem {
 	if eco, ok := commandEcosystem[leadingCommand(testCmd)]; ok {
-		return imageFor(eco, dir)
+		return eco
 	}
 	if eco, ok := markerEcosystem(dir); ok {
-		return imageFor(eco, dir)
+		return eco
 	}
-	return defaultImage()
+	return ecoGo
 }
 
 // leadingCommand extracts the executable a shell command invokes, seeing past

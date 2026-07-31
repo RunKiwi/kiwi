@@ -548,6 +548,13 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
+	// A task aimed at a dependency manifest cannot be verified offline, however
+	// good the edit. Say so now rather than after six Actor steps.
+	if why := dependencyChangeBlocked(targetFiles); why != "" {
+		log.Printf("Task %s: %s", spec.ID, why)
+		return taskResult{detail: why}
+	}
+
 	if testCmd == "" {
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
 	}
@@ -601,8 +608,23 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// as the strongest signal — it names the binary that has to exist. Kiwi's
 	// promise is that a user submits a prompt and nothing else, so there is no
 	// image flag to fall back on and no question to ask them.
+	// cacheEnv carries the toolchain variables that point at the durable package
+	// cache. It goes to BOTH phases: the install writes there, verification
+	// reads from there. It contains no credentials.
+	var cacheEnv []string
+
 	sandboxCfg.DockerImage = inferSandboxImage(worktreePath, testCmd)
-	log.Printf("Task %s: sandbox image %s (test %q)", spec.ID, sandboxCfg.DockerImage, testCmd)
+
+	// Redirect the toolchain's package cache somewhere that outlives a single
+	// container, so what the install phase downloads is what verification
+	// compiles against. Both phases get the same mount and variables.
+	if dc := depCacheFor(inferEcosystem(worktreePath, testCmd), d.config.CacheDir); dc != nil {
+		sandboxCfg.Mounts = append(sandboxCfg.Mounts, dc.Mounts...)
+		cacheEnv = dc.Env
+		testEnv = append(testEnv, dc.Env...)
+	}
+	log.Printf("Task %s: sandbox image %s (test %q, cache mounts %d)",
+		spec.ID, sandboxCfg.DockerImage, testCmd, len(sandboxCfg.Mounts))
 
 	// Phase A: fetch the repository's declared dependencies, with network and
 	// without credentials. Runs once, before the loop, so the Actor never sees
@@ -610,7 +632,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// this is separated from verification rather than solved by relaxing
 	// --network none.
 	if step := inferInstallStep(worktreePath); step != nil {
-		if detail, ok := d.installDependencies(taskCtx, worktreePath, sandboxCfg, step, spec.ID); !ok {
+		if detail, ok := d.installDependencies(taskCtx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
 			return taskResult{detail: detail}
 		}
 	}
@@ -730,7 +752,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 // cfg is shared with the verification phase and may be updated here: if the
 // install reveals the image is wrong, the correction carries over, so the tests
 // do not rediscover the same fault.
-func (d *Daemon) installDependencies(ctx context.Context, worktreePath string, cfg *sandbox.SandboxConfig, step *installStep, taskID string) (string, bool) {
+func (d *Daemon) installDependencies(ctx context.Context, worktreePath string, cfg *sandbox.SandboxConfig, step *installStep, taskID string, cacheEnv []string) (string, bool) {
 	log.Printf("Task %s: installing dependencies — %q (from %s)", taskID, step.Command, step.Source)
 
 	installCtx, cancel := context.WithTimeout(ctx, installTimeout())
@@ -745,10 +767,11 @@ func (d *Daemon) installDependencies(ctx context.Context, worktreePath string, c
 		return sandbox.RunCommand(
 			context.WithValue(installCtx, sandbox.SandboxConfigKey, &netCfg),
 			worktreePath, step.Command,
-			// No credentials. Not the git token, not a registry secret. This
-			// phase executes third-party install hooks with network access, so
-			// it is deliberately given nothing worth stealing.
-			nil,
+			// Only the cache variables — never a credential. Not the git token,
+			// not a registry secret. This phase executes third-party install
+			// hooks with network access, so it is deliberately given nothing
+			// worth stealing.
+			cacheEnv,
 		)
 	}
 

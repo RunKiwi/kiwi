@@ -43,7 +43,10 @@ func inferTestCmd(dir string) string {
 			return "npm test"
 		}
 	case exists("pyproject.toml"), exists("setup.py"), exists("pytest.ini"), exists("tox.ini"):
-		return "pytest"
+		// `python -m pytest` rather than the console script: packages are
+		// installed to an explicit PIP_TARGET so they outlive the install
+		// container, and that directory is on PYTHONPATH, not PATH.
+		return "python -m pytest"
 	case exists("pom.xml"):
 		return "mvn -q -B test"
 	case exists("build.gradle"), exists("build.gradle.kts"):
