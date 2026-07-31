@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"path"
-	"path/filepath"
 	"strings"
 )
 
@@ -24,30 +23,16 @@ var manifestFiles = map[string]bool{
 	"pom.xml": true, "build.gradle": true, "build.gradle.kts": true,
 }
 
-// dependencyChangeBlocked reports why a task cannot be completed offline when it
-// targets a dependency manifest, or "" when it does not.
+// A task that edits one of these is not refused. It used to be: the reasoning
+// was that the install phase runs before the Actor, so a package added
+// afterwards was never fetched and offline verification would fail on a missing
+// module however correct the edit.
 //
-// The install phase fetches what the manifest asks for *before* the Actor runs.
-// If the Actor then changes a version, that package was never downloaded, and
-// verification has no network to fetch it — so the build fails on a missing
-// module no matter how correct the edit is. Go makes it starker still: go.sum
-// needs cryptographic hashes of the new module, which cannot be computed
-// without downloading it.
-//
-// This is inherent to verifying model-generated code without network access,
-// not a bug to be fixed downstream. Saying so immediately is the whole value:
-// "update the sirupsen/logrus dependency to latest" otherwise spends six Actor
-// steps and the user's entire budget proving it.
-func dependencyChangeBlocked(files []string) string {
-	for _, f := range files {
-		if manifestFiles[filepath.Base(filepath.Clean(f))] {
-			return "this task changes " + filepath.Base(f) + ", and dependency changes cannot be verified here: " +
-				"packages are downloaded before the agent runs, and the verification step has no network access to fetch a version that was added afterwards. " +
-				"Run the upgrade locally (e.g. `go get -u`) and let Kiwi handle the code changes it requires."
-		}
-	}
-	return ""
-}
+// The premise held, the conclusion did not. It meant only that the install
+// phase had to run again, which it now does — see manifestFingerprint and the
+// re-install in executeTask's runTest. The refusal made ordinary work
+// impossible: "add a cookie consent banner, use a library if there is one" was
+// rejected before the model was called once.
 
 func looksLikeTestFile(p string) bool {
 	if p == "" {
