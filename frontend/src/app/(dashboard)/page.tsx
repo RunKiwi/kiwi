@@ -456,6 +456,12 @@ function CommandCenterContent() {
   // Job ids are `job_` + 16 hex; show a friendly short form (job_a3f19c…).
   const shortId = (id: string) => (id.length > 12 ? id.slice(0, 10) : id);
 
+  const formatRepoName = (repo: string) => {
+    if (!repo.includes("/")) return repo;
+    const [org, name] = repo.split("/");
+    return org.length > 3 ? `${org.slice(0, 3)}../${name}` : repo;
+  };
+
   const fieldClass = "field text-sm";
   const labelClass = "block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2";
   // Which repo (full_name) the current repoUrl corresponds to, for the select.
@@ -470,7 +476,7 @@ function CommandCenterContent() {
       </div>
 
       {/* Composer — one compact input with an inline control rail underneath. */}
-      <div className="glass-panel mb-6 flex flex-col relative z-20 overflow-visible p-4">
+      <div className="glass-panel mb-6 flex flex-col relative z-30 overflow-visible p-4">
         <TaskComposer
           value={task}
           onChange={(p) => {
@@ -871,11 +877,11 @@ function CommandCenterContent() {
                             </span>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <div
-                                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
+                                className="group/status inline-flex items-center gap-1.5 rounded-full border px-1.5 py-0.5 hover:px-2 text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all"
                                 style={{ color: m.color, borderColor: m.border, background: m.wash }}
                               >
                                 <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                                {m.label}
+                                <span className="hidden group-hover/status:inline">{m.label}</span>
                               </div>
                               <div className="flex items-center gap-1 pointer-events-auto" onClick={e => e.stopPropagation()}>
                                 {cardBusyJob === job.job_id ? (
@@ -888,14 +894,14 @@ function CommandCenterContent() {
                                         onClick={e => handleCardCancel(e, job.job_id)}
                                         data-confirm-action
                                         title="Cancel job"
-                                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                        className={`group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border transition-all ${
                                           confirmCancelJob === job.job_id
                                             ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
                                             : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
                                         }`}
                                       >
                                         <Ban className="w-3 h-3 shrink-0" />
-                                        {confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}
+                                        <span className="hidden group-hover/btn:inline whitespace-nowrap">{confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}</span>
                                       </button>
                                     )}
                                     {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
@@ -907,10 +913,10 @@ function CommandCenterContent() {
                                           type="button"
                                           onClick={e => handleCardRetry(e, job.job_id)}
                                           title="Retry job"
-                                          className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-colors"
+                                          className="group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-all"
                                         >
                                           <RotateCcw className="w-3 h-3 shrink-0" />
-                                          Retry
+                                          <span className="hidden group-hover/btn:inline whitespace-nowrap">Retry</span>
                                         </button>
                                         <button
                                           type="button"
@@ -919,10 +925,10 @@ function CommandCenterContent() {
                                             handleRerunWithEdits(job);
                                           }}
                                           title="Re-run with edits"
-                                          className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-[#93C645] hover:border-[#93C645]/30 hover:bg-[#93C645]/10 transition-colors"
+                                          className="group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-[#93C645] hover:border-[#93C645]/30 hover:bg-[#93C645]/10 transition-all"
                                         >
                                           <Copy className="w-3 h-3 shrink-0" />
-                                          Re-run
+                                          <span className="hidden group-hover/btn:inline whitespace-nowrap">Re-run</span>
                                         </button>
                                       </>
                                     )}
@@ -932,14 +938,14 @@ function CommandCenterContent() {
                                         onClick={e => handleCardDelete(e, job.job_id)}
                                         data-confirm-action
                                         title="Delete job"
-                                        className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                                        className={`group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border transition-all ${
                                           confirmDeleteJob === job.job_id
                                             ? "border-red-500/50 bg-red-500/20 text-red-300"
                                             : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
                                         }`}
                                       >
                                         <Trash2 className="w-3 h-3 shrink-0" />
-                                        {confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}
+                                        <span className="hidden group-hover/btn:inline whitespace-nowrap">{confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}</span>
                                       </button>
                                     )}
                                   </>
@@ -1015,8 +1021,8 @@ function CommandCenterContent() {
                                   )}
                                 </>
                               ) : job.repo ? (
-                                <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate">
-                                  <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{job.repo}
+                                <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate" title={job.repo}>
+                                  <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{formatRepoName(job.repo)}
                                 </span>
                               ) : (
                                 <span className="flex items-center gap-1.5 text-zinc-500">
