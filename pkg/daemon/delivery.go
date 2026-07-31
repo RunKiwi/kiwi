@@ -183,7 +183,7 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 		return "", "", errNoChanges
 	}
 
-	if _, err := runGit("-c", "user.email=bot@runkiwi.com", "-c", "user.name=Kiwi", "commit", "-m", "kiwi: "+spec.Task); err != nil {
+	if _, err := runGit("-c", "user.email=bot@runkiwi.dev", "-c", "user.name=Kiwi", "commit", "-m", "kiwi: "+spec.Task); err != nil {
 		return "", "", err
 	}
 
