@@ -154,11 +154,12 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 	// Remove any stale target directory (from a previous failure)
 	os.RemoveAll(worktreePath)
 
-	// Prune stale worktrees
-	runGit(ctx, barePath, "worktree", "prune")
+	// Clear stale registrations, including the locked ones prune skips — see
+	// clearStaleWorktrees for why an interrupted add leaves one behind.
+	clearStaleWorktrees(ctx, barePath)
 
 	// Try adding the worktree with the requested ref immediately (without fetch)
-	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, ref); err == nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, ref); err == nil {
 		c.recordAccess(barePath, +1)
 		return nil // Success!
 	}
@@ -168,7 +169,7 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 		return fmt.Errorf("failed to fetch ref %s: %w", ref, err)
 	}
 
-	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
 		// Clean up on error
 		os.RemoveAll(worktreePath)
 		return fmt.Errorf("failed to add worktree after fetch: %w", err)
@@ -206,12 +207,12 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 	}
 
 	os.RemoveAll(worktreePath)
-	runGit(ctx, barePath, "worktree", "prune")
+	clearStaleWorktrees(ctx, barePath)
 
 	// Prefer the shared job branch: if it exists on the remote, base the worktree
 	// on its tip (which carries earlier workers' commits).
 	if err := runGit(ctx, barePath, "fetch", "origin", jobBranch); err == nil {
-		if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
+		if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
 			c.recordAccess(barePath, +1)
 			return nil
 		}
@@ -220,14 +221,14 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 
 	// First worker (or no job branch yet): base on the requested ref, mirroring
 	// GetWorktree's add-then-fetch fallback.
-	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, baseRef); err == nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, baseRef); err == nil {
 		c.recordAccess(barePath, +1)
 		return nil
 	}
 	if err := runGit(ctx, barePath, "fetch", "origin", baseRef); err != nil {
 		return fmt.Errorf("failed to fetch base ref %s: %w", baseRef, err)
 	}
-	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
 		os.RemoveAll(worktreePath)
 		return fmt.Errorf("failed to add worktree after fetch: %w", err)
 	}
@@ -371,4 +372,77 @@ func (c *Cache) dropMeta(barePath string) {
 	defer c.mu.Unlock()
 	delete(c.meta, barePath)
 	c.locks.Delete(barePath)
+}
+
+// gitOutput runs a git command and returns its stdout.
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s failed: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// clearStaleWorktrees removes worktree registrations whose directory is gone,
+// including the locked ones that `git worktree prune` deliberately skips.
+//
+// This exists because of how `git worktree add` protects a half-built worktree:
+// it writes `locked` containing "initializing" into the admin directory before
+// checking anything out, and removes it on success. A process killed in that
+// window — a stopped daemon container, a task timeout, a revoked lease — leaves
+// the lock behind forever.
+//
+// From then on the entry is missing (the directory is deleted on the next
+// attempt) and locked (so prune refuses to touch it), and every future run for
+// that task fails with:
+//
+//	fatal: '<path>' is a missing but locked worktree
+//
+// Harmless when the cache is ephemeral. The free-tier cache is a persistent
+// host bind mount, so one interrupted task poisons that path permanently.
+//
+// Unlocking only entries whose directory is absent is what makes this safe: a
+// worktree that still exists on disk may be in use by a running task, and is
+// left strictly alone. That is also why the fix is not `worktree add -f -f`,
+// which would override a live worktree just as readily as a dead one.
+func clearStaleWorktrees(ctx context.Context, barePath string) {
+	out, err := gitOutput(ctx, barePath, "worktree", "list", "--porcelain")
+	if err != nil {
+		// Nothing to do — prune below still handles the unlocked cases.
+		runGit(ctx, barePath, "worktree", "prune")
+		return
+	}
+
+	// Porcelain format: records separated by blank lines, each starting with
+	// "worktree <path>" and carrying a bare "locked" line when locked.
+	var path string
+	var locked bool
+	flush := func() {
+		if path != "" && locked {
+			if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+				// Missing and locked: the stale case. Unlock so prune can clear
+				// it. A failure here is not fatal — prune simply skips it again.
+				runGit(ctx, barePath, "worktree", "unlock", path)
+			}
+		}
+		path, locked = "", false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			flush()
+			path = strings.TrimPrefix(line, "worktree ")
+		case line == "locked" || strings.HasPrefix(line, "locked "):
+			locked = true
+		}
+	}
+	flush()
+
+	runGit(ctx, barePath, "worktree", "prune")
 }
