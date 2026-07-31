@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -80,6 +81,76 @@ func repoTree(worktreePath string) ([]string, error) {
 	})
 
 	return paths, err
+}
+
+// resolveHint maps a planner-supplied path onto one that actually exists in the
+// repo, returning "" when it cannot.
+//
+// The planner never sees the repository — it is handed the repo URL, not its
+// contents — so every path it emits is a guess from the model's priors about
+// how a project is usually laid out. Those guesses are often nearly right:
+// "components/Footer.tsx" against a repo that keeps it at
+// "src/components/Footer.tsx" is a miss by one path segment. Trusting the guess
+// verbatim creates a duplicate component nothing imports; resolving it first
+// edits the file the user actually meant.
+//
+// Matching is exact first, then on the file name alone. A name that matches
+// several files is resolved by whichever candidate shares the most trailing
+// path segments with the hint, and left unresolved when that is still a tie —
+// an ambiguous guess is worth less than asking the model to choose from the
+// real tree, which is what the caller does next.
+func resolveHint(hint string, tree []string) string {
+	want := path.Clean(filepath.ToSlash(strings.TrimSpace(hint)))
+	if want == "" || want == "." || want == "/" {
+		return ""
+	}
+
+	for _, p := range tree {
+		if path.Clean(filepath.ToSlash(p)) == want {
+			return want
+		}
+	}
+
+	base := path.Base(want)
+	var candidates []string
+	for _, p := range tree {
+		q := path.Clean(filepath.ToSlash(p))
+		if path.Base(q) == base {
+			candidates = append(candidates, q)
+		}
+	}
+	switch len(candidates) {
+	case 0:
+		return ""
+	case 1:
+		return candidates[0]
+	}
+
+	best, bestScore, tied := "", -1, false
+	for _, c := range candidates {
+		switch score := commonSuffixSegments(want, c); {
+		case score > bestScore:
+			best, bestScore, tied = c, score, false
+		case score == bestScore:
+			tied = true
+		}
+	}
+	if tied {
+		return ""
+	}
+	return best
+}
+
+// commonSuffixSegments counts the trailing path segments two slash-separated
+// paths share, so "src/components/Footer.tsx" scores higher against the hint
+// "components/Footer.tsx" than "legacy/Footer.tsx" does.
+func commonSuffixSegments(a, b string) int {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	n := 0
+	for i, j := len(as)-1, len(bs)-1; i >= 0 && j >= 0 && as[i] == bs[j]; i, j = i-1, j-1 {
+		n++
+	}
+	return n
 }
 
 func discoverTargetFiles(ctx context.Context, actor provider.Provider, task string, tree []string) ([]string, error) {

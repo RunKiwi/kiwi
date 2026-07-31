@@ -404,15 +404,25 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	}, nil
 }
 
-// workerTestCmd resolves the test command for a worker: a per-worker command
-// from the planner takes precedence, otherwise the plan-wide command from the
-// request. Empty when neither is set (the daemon then cannot run a verifying
-// loop for that worker).
+// workerTestCmd resolves the test command for a worker: the submitter's command
+// wins, then anything a planner supplied.
+//
+// The order matters, and it is the reverse of what it was. The test command is
+// the definition of done, and the planner picks one without ever seeing the
+// repo — so it guesses, and a guess like "npm test" against a project with no
+// test script does not fail cleanly, it *errors*, which is indistinguishable
+// from a failing test. The loop then spends its whole budget trying to make a
+// script that does not exist pass.
+//
+// Empty is the useful answer when nobody supplied one: the daemon infers the
+// command from the repository's own marker files (inferTestCmd), which is a
+// decision made with the repo in hand rather than from its URL. A planner value
+// here would suppress that, so the LLM planner no longer emits one at all.
 func workerTestCmd(w PlannedWorker, req PlanRequest) string {
-	if w.TestCmd != "" {
-		return w.TestCmd
+	if req.TestCmd != "" {
+		return req.TestCmd
 	}
-	return req.TestCmd
+	return w.TestCmd
 }
 
 // contentHash returns the SHA-256 of the canonical JSON encoding of content
