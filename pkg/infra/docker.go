@@ -54,7 +54,7 @@ func (d *DockerInfra) Provision(ctx context.Context, sandboxPath string, manifes
 	if !ok || cfg == nil {
 		cfg = &sandbox.SandboxConfig{
 			UseDocker:   os.Getenv("USE_DOCKER") == "true",
-			DockerImage: "golang:1.21-alpine", // Default fallback
+			DockerImage: "golang:1.25-alpine", // Default fallback
 			MemoryLimit: "512m",
 			CPULimit:    "1.0",
 			NetworkNone: true,
