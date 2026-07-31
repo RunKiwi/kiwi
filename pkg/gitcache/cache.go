@@ -158,7 +158,7 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 	runGit(ctx, barePath, "worktree", "prune")
 
 	// Try adding the worktree with the requested ref immediately (without fetch)
-	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, ref); err == nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, ref); err == nil {
 		c.recordAccess(barePath, +1)
 		return nil // Success!
 	}
@@ -168,7 +168,7 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 		return fmt.Errorf("failed to fetch ref %s: %w", ref, err)
 	}
 
-	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
 		// Clean up on error
 		os.RemoveAll(worktreePath)
 		return fmt.Errorf("failed to add worktree after fetch: %w", err)
@@ -211,7 +211,7 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 	// Prefer the shared job branch: if it exists on the remote, base the worktree
 	// on its tip (which carries earlier workers' commits).
 	if err := runGit(ctx, barePath, "fetch", "origin", jobBranch); err == nil {
-		if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
+		if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
 			c.recordAccess(barePath, +1)
 			return nil
 		}
@@ -220,14 +220,14 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 
 	// First worker (or no job branch yet): base on the requested ref, mirroring
 	// GetWorktree's add-then-fetch fallback.
-	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, baseRef); err == nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, baseRef); err == nil {
 		c.recordAccess(barePath, +1)
 		return nil
 	}
 	if err := runGit(ctx, barePath, "fetch", "origin", baseRef); err != nil {
 		return fmt.Errorf("failed to fetch base ref %s: %w", baseRef, err)
 	}
-	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
+	if err := runGit(ctx, barePath, "worktree", "add", "-f", "-f", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
 		os.RemoveAll(worktreePath)
 		return fmt.Errorf("failed to add worktree after fetch: %w", err)
 	}
