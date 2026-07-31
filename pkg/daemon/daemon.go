@@ -494,8 +494,47 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		isMulti = false
 	}
 
+	// The repo exists only here, on the daemon, so this is the only place a file
+	// path can be checked against reality. A path on the spec is a hint from the
+	// planner — which is given the repo URL, not its contents — and previously a
+	// hint suppressed discovery entirely: the component that cannot see the repo
+	// overrode the one that can, and a near-miss like "components/Footer.tsx"
+	// against "src/components/Footer.tsx" became a new duplicate file rather than
+	// an edit to the real one.
+	tree, _ := repoTree(worktreePath)
+	if len(targetFiles) > 0 && len(tree) > 0 {
+		resolved := make([]string, 0, len(targetFiles))
+		anyReal := false
+		for _, hint := range targetFiles {
+			got := resolveHint(hint, tree)
+			if got == "" {
+				// Keep the hint: it may name a file that genuinely has to be
+				// created. Whether it does is decided below, once discovery has
+				// had a chance to find an existing home instead.
+				resolved = append(resolved, hint)
+				continue
+			}
+			if got != hint {
+				log.Printf("Task %s: target %q does not exist; resolved to %q", spec.ID, hint, got)
+			}
+			resolved = append(resolved, got)
+			anyReal = true
+		}
+		targetFiles = resolved
+
+		if !anyReal {
+			log.Printf("Task %s: no planned target exists in the repo; asking the model to choose from %d file(s)", spec.ID, len(tree))
+			if discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree); len(discovered) > 0 {
+				targetFiles = discovered
+				isMulti = len(discovered) > 1
+			}
+			// Falling through with the original hint is deliberate: discovery only
+			// ever returns files that already exist, so when it finds nothing the
+			// task really may need a new file, and the loop creates it.
+		}
+	}
+
 	if len(targetFiles) == 0 {
-		tree, _ := repoTree(worktreePath)
 		discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree)
 		if len(discovered) > 0 {
 			targetFiles = discovered
