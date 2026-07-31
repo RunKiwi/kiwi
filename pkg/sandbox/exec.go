@@ -27,6 +27,15 @@ type SandboxConfig struct {
 	CPULimit    string // e.g. "1.0"
 	Runtime     string // e.g. "runc", "runsc"
 	NetworkNone bool   // e.g. --network=none
+	// Mounts are extra bind mounts as "host:container" specs. They carry the
+	// package caches that must outlive a single container: a language toolchain
+	// downloads into its own home (/go/pkg/mod, ~/.cargo), not into the project
+	// directory, so without these the install phase's work is destroyed when its
+	// container exits and verification finds nothing.
+	//
+	// Host paths, so they must mean the same thing to whichever docker daemon
+	// runs the container — see the provisioner's launch mount.
+	Mounts []string
 }
 
 // Driver defines the interface for running a command in an isolated environment.
@@ -127,6 +136,10 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 func buildDockerArgs(dir string, cmdStr string, env []string, cfg *SandboxConfig, dockerImage string) ([]string, string, error) {
 	args := []string{"run", "--rm", "-i"}
 	args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
+
+	for _, m := range cfg.Mounts {
+		args = append(args, "-v", m)
+	}
 
 	if cfg.MemoryLimit != "" {
 		args = append(args, "--memory", cfg.MemoryLimit)

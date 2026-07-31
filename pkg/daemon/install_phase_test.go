@@ -48,7 +48,7 @@ func TestInstallPhase_PassesNoCredentials(t *testing.T) {
 
 	d := &Daemon{}
 	cfg := &sandbox.SandboxConfig{NetworkNone: true}
-	if detail, ok := d.installDependencies(context.Background(), dir, cfg, step, "task-1"); !ok {
+	if detail, ok := d.installDependencies(context.Background(), dir, cfg, step, "task-1", nil); !ok {
 		t.Fatalf("install failed: %s", detail)
 	}
 
@@ -71,7 +71,7 @@ func TestInstallPhase_DoesNotEnableNetworkForVerification(t *testing.T) {
 	d := &Daemon{}
 	cfg := &sandbox.SandboxConfig{NetworkNone: true, DockerImage: "node:20-alpine"}
 	if _, ok := d.installDependencies(context.Background(), dir, cfg,
-		&installStep{Command: "true", Source: "test"}, "task-1"); !ok {
+		&installStep{Command: "true", Source: "test"}, "task-1", nil); !ok {
 		t.Fatal("install should have succeeded")
 	}
 
@@ -91,7 +91,7 @@ func TestInstallPhase_FailureStopsTheTaskWithAReason(t *testing.T) {
 	d := &Daemon{}
 	cfg := &sandbox.SandboxConfig{NetworkNone: true}
 	detail, ok := d.installDependencies(context.Background(), dir, cfg,
-		&installStep{Command: `echo "npm ERR! 404 Not Found: left-pad@9.9.9" >&2; exit 1`, Source: "package-lock.json"}, "task-1")
+		&installStep{Command: `echo "npm ERR! 404 Not Found: left-pad@9.9.9" >&2; exit 1`, Source: "package-lock.json"}, "task-1", nil)
 
 	if ok {
 		t.Fatal("expected the install to fail")
@@ -127,7 +127,7 @@ func TestInstallPhase_ImageCorrectionCarriesIntoVerification(t *testing.T) {
 		Source:  "package.json",
 	}
 
-	if _, ok := d.installDependencies(context.Background(), dir, cfg, step, "task-1"); !ok {
+	if _, ok := d.installDependencies(context.Background(), dir, cfg, step, "task-1", nil); !ok {
 		t.Fatal("the retry should have succeeded")
 	}
 
