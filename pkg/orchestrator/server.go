@@ -532,6 +532,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// This is the middleware /api/v1/* actually passes through, and the
+		// record endpoint lives there — so the expose list has to be here too.
+		// A browser reads only the response headers a server names, and the
+		// dashboard is a different origin to the API, so without it the record
+		// hash is sent and then dropped before any JavaScript sees it.
+		w.Header().Set("Access-Control-Expose-Headers", "X-Kiwi-Record-Hash")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
