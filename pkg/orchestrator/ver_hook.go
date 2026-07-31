@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -363,16 +364,18 @@ func mapString(m map[string]interface{}, key string) string {
 
 func specString(spec map[string]interface{}, key string) string { return mapString(spec, key) }
 
-// providerForModel mirrors the daemon's routing: a gemini* model runs on
-// Gemini, anything else on Anthropic.
+// providerForModel names the provider a model ran on, for the signed execution
+// record. It shares provider.ProviderOf with the daemon that actually made the
+// calls: a record that attested to a different provider than the one billed
+// would be a false attestation, not a cosmetic mismatch.
+//
+// An empty model stays empty — the record must not claim a provider for a step
+// that named no model.
 func providerForModel(model string) string {
 	if model == "" {
 		return ""
 	}
-	if len(model) >= 6 && model[:6] == "gemini" {
-		return "gemini"
-	}
-	return "anthropic"
+	return provider.ProviderOf(model)
 }
 
 func sortStrings(s []string) {

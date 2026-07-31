@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -100,27 +99,32 @@ func New(cfg Config) (*Daemon, error) {
 	}, nil
 }
 
-// defaultProvider selects a live Actor/Critic by the worker's model: a
-// "gemini*" model routes to Gemini (using GEMINI_API_KEY), anything else to
-// Anthropic (using ANTHROPIC_API_KEY). If the selected provider's key is absent
-// from the bundle it returns nil providers, signalling no real loop can run.
+// defaultProvider selects a live Actor/Critic by the worker's model, routing
+// through provider.ProviderOf so the daemon agrees with the planner, the
+// dashboard and the execution record about which provider serves a model. The
+// key is read from the sealed bundle under that provider's credential name. If
+// it is absent the function returns nil providers, signalling no real loop can
+// run.
+//
 // One model drives both Actor and Critic for now; per-role models are a future
 // refinement once the planner emits them.
 func defaultProvider(creds map[string]string, model string) (provider.Provider, provider.Critic) {
-	if strings.HasPrefix(model, "gemini") {
-		key := creds[geminiKeyName]
-		if key == "" {
-			return nil, nil
-		}
-		gp := provider.NewGeminiProviderWithModels(key, model, model)
-		return gp, gp
-	}
-	key := creds[anthropicKeyName]
+	prov := provider.ProviderOf(model)
+	key := creds[provider.CredentialNameFor(prov)]
 	if key == "" {
 		return nil, nil
 	}
-	ap := provider.NewAnthropicProviderWithModels(key, model, model)
-	return ap, ap
+	switch prov {
+	case provider.ProviderGemini:
+		gp := provider.NewGeminiProviderWithModels(key, model, model)
+		return gp, gp
+	case provider.ProviderOpenAI:
+		op := provider.NewOpenAIProviderWithModels(key, model, model)
+		return op, op
+	default:
+		ap := provider.NewAnthropicProviderWithModels(key, model, model)
+		return ap, ap
+	}
 }
 
 // Start boots up the daemon, generating or loading its keypairs.
@@ -347,12 +351,18 @@ func (d *Daemon) openCredentials(sealed string) (map[string]string, error) {
 const (
 	anthropicKeyName = "ANTHROPIC_API_KEY"
 	geminiKeyName    = "GEMINI_API_KEY"
+	openaiKeyName    = "OPENAI_API_KEY"
 )
 
 // isLLMKey reports whether a credential is a model API key that must be kept out
 // of the sandbox environment.
+//
+// A provider added without an entry here would leak its key into the container
+// that runs model-generated code, so this is enumerated deliberately rather than
+// derived from a prefix — a missing name must fail a test, not silently widen
+// what the sandbox can see.
 func isLLMKey(name string) bool {
-	return name == anthropicKeyName || name == geminiKeyName
+	return name == anthropicKeyName || name == geminiKeyName || name == openaiKeyName
 }
 
 // executeTask provisions a workspace and runs the worker's Actor–Critic loop

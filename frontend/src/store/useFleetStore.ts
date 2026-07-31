@@ -4,7 +4,7 @@ import { client, Job, JobSummary, Daemon } from '@/lib/api';
 export type TaskStatus = "QUEUED" | "LEASED" | "SUCCEEDED" | "FAILED";
 
 export interface ProviderConfig {
-  name: "Anthropic" | "Gemini" | "Codex";
+  name: "Anthropic" | "Gemini" | "OpenAI";
   isConfigured: boolean;
 }
 
@@ -28,7 +28,7 @@ export const useFleetStore = create<FleetState>((set) => ({
   providers: [
     { name: "Anthropic", isConfigured: false },
     { name: "Gemini", isConfigured: false },
-    { name: "Codex", isConfigured: false },
+    { name: "OpenAI", isConfigured: false },
   ],
   isLoading: false,
   error: null,

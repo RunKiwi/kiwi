@@ -55,6 +55,11 @@ func runCredsSet(args []string) error {
 		if credKind == "generic" {
 			credKind = "llm"
 		}
+	case "openai":
+		credName = "OPENAI_API_KEY"
+		if credKind == "generic" {
+			credKind = "llm"
+		}
 	case "git":
 		credName = "GIT_TOKEN"
 		if credKind == "generic" {
