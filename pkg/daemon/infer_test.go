@@ -16,7 +16,7 @@ func TestInferTestCmd(t *testing.T) {
 		{"rust", map[string]string{"Cargo.toml": "[package]"}, "cargo test"},
 		{"node_with_test", map[string]string{"package.json": `{"scripts":{"test":"jest"}}`}, "npm test"},
 		{"node_without_test", map[string]string{"package.json": `{"scripts":{"build":"tsc"}}`}, ""},
-		{"python", map[string]string{"pyproject.toml": "[tool.poetry]"}, "pytest"},
+		{"python", map[string]string{"pyproject.toml": "[tool.poetry]"}, "python -m pytest"},
 		{"make", map[string]string{"Makefile": "test:\n\tgo test ./...\n"}, "make test"},
 		{"empty", map[string]string{}, ""},
 	}

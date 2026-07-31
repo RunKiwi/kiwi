@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
@@ -52,18 +53,47 @@ func (d *DockerLauncher) containerName(orgID string) string {
 	return fmt.Sprintf("kiwi-free-org-%s", orgID)
 }
 
-func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error) {
-	name := d.containerName(orgID)
+// hostCacheRoot is the directory on the fleet host under which each org's
+// daemon keeps its bare clones and worktrees. Overridable for hosts that keep
+// state elsewhere.
+func hostCacheRoot() string {
+	if v := os.Getenv("KIWI_HOST_CACHE_ROOT"); v != "" {
+		return v
+	}
+	return "/var/lib/kiwi"
+}
 
-	// In case there is an old container stuck, try to remove it first.
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
+// cacheDirFor is the per-org cache path. It is used verbatim on BOTH sides of
+// the daemon's bind mount — see launchArgs for why that is the whole point —
+// and being per-org keeps one tenant's checkouts off another's filesystem.
+func cacheDirFor(orgID string) string {
+	return filepath.Join(hostCacheRoot(), orgID)
+}
 
+// launchArgs builds the `docker run` arguments for an org's daemon.
+//
+// The bind mount here is load-bearing and was previously a named volume, which
+// silently broke every task on the free tier.
+//
+// The daemon writes a worktree to <cache>/worktrees/<task>, then runs the test
+// command by asking the HOST docker daemon (via the mounted socket) to bind
+// mount that path into a sandbox container. The host resolves the path against
+// its own filesystem. With a named volume the daemon's /tmp/kiwi-cache existed
+// only inside the daemon container, so the host found nothing at that path,
+// created an empty directory, and mounted that — and every test command ran
+// against an empty workspace. It could not pass, no edit could make it pass,
+// and the failure surfaced as "reached max steps without passing".
+//
+// Mounting a host directory at the identical path inside the container makes
+// the path mean the same thing on both sides, which is what a sibling-container
+// setup requires. -cache-dir points the daemon at it.
+func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, pullAlways bool) []string {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-e", "KIWI_JOIN_TOKEN=" + joinToken,
 	}
 
-	if d.pullAlways {
+	if pullAlways {
 		args = append(args, "--pull=always")
 	}
 
@@ -71,6 +101,31 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 		// Free daemons run the untrusted test command under gVisor.
 		args = append(args, "-e", "KIWI_SANDBOX_RUNTIME=runsc")
 	}
+
+	cacheDir := cacheDirFor(orgID)
+	args = append(args,
+		"-v", dockerSocket+":"+dockerSocket,
+		"-v", cacheDir+":"+cacheDir,
+		image,
+		"-api-url", apiURL,
+		"-cache-dir", cacheDir,
+	)
+	return args
+}
+
+func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error) {
+	name := d.containerName(orgID)
+
+	// In case there is an old container stuck, try to remove it first.
+	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
+
+	// The host side of the bind mount must exist and be writable by the daemon
+	// before it starts; docker would otherwise create it as root-owned.
+	if err := os.MkdirAll(cacheDirFor(orgID), 0o777); err != nil {
+		return "", fmt.Errorf("failed to create cache dir for %s: %w", orgID, err)
+	}
+
+	args := launchArgs(name, d.image, orgID, fleetID, joinToken, apiURL, d.pullAlways)
 
 	// The daemon runs its test-command sandbox via `docker run`, so it needs a
 	// Docker endpoint. We bind-mount the host socket, making test sandboxes
@@ -82,13 +137,7 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 	// the free-fleet host is already treated as hostile-by-default (segmented,
 	// no ambient cloud creds). The hardened alternative — a remote launcher that
 	// keeps the provisioner off the execution host — is tracked as follow-up.
-	args = append(args,
-		"-v", dockerSocket+":"+dockerSocket,
-		"-v", fmt.Sprintf("kiwi-cache-%s:/tmp/kiwi-cache", orgID),
-		d.image,
-		"-api-url", apiURL,
-	)
-
+	//
 	// CombinedOutput, not Run: docker reports *why* a launch failed on stderr
 	// ("manifest unknown", "no such image", a denied pull), and Run discards it,
 	// leaving only "exit status 125" to diagnose from.
