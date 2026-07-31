@@ -54,3 +54,51 @@ sudo -E ./harden-egress.sh      # block the metadata token endpoint
 `verify-egress.sh` is the demoable proof for the security claim: it runs a probe
 container, shows the service-account-token fetch failing, and shows a normal
 HTTPS call succeeding — before and after `harden-egress.sh`.
+
+---
+
+## The provisioner service
+
+The provisioner polls `provisioning_requests` and cold-starts a per-org daemon
+container on submit. It runs under systemd:
+
+```bash
+sudo IMAGE=<registry>/kiwid:latest KIWI_DSN='host=… user=… dbname=kiwi sslmode=disable' \
+  ./install-provisioner.sh
+
+systemctl status kiwi-provisioner
+journalctl -u kiwi-provisioner -f
+```
+
+`install-provisioner.sh` is idempotent — re-run it to pick up a unit change; it
+will not overwrite an existing `/etc/kiwi/provisioner.env`.
+
+| Path | Holds | Read by |
+| --- | --- | --- |
+| `/etc/systemd/system/kiwi-provisioner.service` | lifecycle | systemd |
+| `/etc/kiwi/provisioner.image` | image reference | systemd |
+| `/etc/kiwi/provisioner.env` (`0600`) | `KIWI_DSN`, `KIWI_PROVISIONER=docker`, `KIWI_PUBLIC_API_URL` | docker |
+
+It exists as a unit for a specific reason: the provisioner used to be a
+hand-issued `docker run`, so its entire configuration lived only inside the
+running container. Removing that container destroyed the only record of how to
+start it. The config now lives in files, and systemd owns restarts and boot.
+
+### Two settings that look wrong and are not
+
+**Bridge networking, never `--network host`.** The metadata block above lives in
+the `DOCKER-USER` chain, which iptables applies only to *forwarded* traffic —
+bridge-networked containers. A host-networked container's traffic is host
+`OUTPUT` and skips the chain entirely, so it can read the VM's service-account
+token. Bridge reaches Cloud SQL over the VPC and the public Control Plane
+without difficulty, so there is nothing gained by host networking and a
+fleet-compromise vector lost.
+
+**`KIWI_DAEMON_IMAGE` is deliberately unset.** Setting it to a registry
+reference turns on `docker run --pull=always` for every per-org daemon launch.
+Docker resolves registry credentials *client-side* — inside the provisioner
+container — and that container is cut off from the metadata endpoint by
+`harden-egress.sh`, so it cannot authenticate to the registry and every cold
+start fails to pull. Left unset, the launcher uses the local `kiwidaemon:latest`
+tag, which `kiwi-daemon-image.timer` refreshes on the **host**, where the
+credentials live. That is the design, not an oversight.
