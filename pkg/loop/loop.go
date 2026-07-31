@@ -206,10 +206,21 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 			}
 			criticReasons = ""
 		} else {
+			// A target that does not exist yet is a file to CREATE, not an error.
+			// "Add a cookie consent popup" plans a new component; failing here
+			// meant every additive task died at step 1 with "no such file or
+			// directory", before the Actor was ever asked anything. The Actor
+			// returns whole file contents regardless, so empty content is the
+			// correct starting point. Any other read error (permissions, a
+			// directory in the way) is still fatal — those are not creations.
 			content, err := os.ReadFile(task.FilePath)
 			if err != nil {
-				return Result{Steps: step - 1, CostUSD: cost, FinalOutput: lastOutput},
-					fmt.Errorf("loop: read target file: %w", err)
+				if !os.IsNotExist(err) {
+					return Result{Steps: step - 1, CostUSD: cost, FinalOutput: lastOutput},
+						fmt.Errorf("loop: read target file: %w", err)
+				}
+				content = nil
+				r.logf("[loop] step %d: target %s does not exist; creating it\n", step, task.FilePath)
 			}
 
 			r.logf("[loop] step %d: Actor proposing edit\n", step)
@@ -244,7 +255,7 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 				r.emit(step, "critic", "approved", verdict.Reasons, criticStart, r.Critic)
 			}
 
-			if err := os.WriteFile(task.FilePath, []byte(proposed), 0o644); err != nil {
+			if err := writeTargetFile(task.FilePath, []byte(proposed)); err != nil {
 				return Result{Steps: step, CostUSD: cost, FinalOutput: lastOutput},
 					fmt.Errorf("loop: write target file: %w", err)
 			}
@@ -277,6 +288,20 @@ func (r *Runner) Run(ctx context.Context, task Task, runTest TestFunc) (Result, 
 
 	return Result{Success: false, Steps: maxSteps, CostUSD: cost, FinalOutput: lastOutput},
 		fmt.Errorf("loop: reached max steps (%d) without passing", maxSteps)
+}
+
+// writeTargetFile writes content to path, creating any missing parent
+// directories first. A newly created target ("src/components/CookieConsent.tsx")
+// routinely lands in a directory that does not exist yet, and os.WriteFile does
+// not create one — it would fail with the same "no such file or directory" the
+// read used to, one step later.
+func writeTargetFile(path string, content []byte) error {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create parent directory: %w", err)
+		}
+	}
+	return os.WriteFile(path, content, 0o644)
 }
 
 // composeActorInput appends Critic feedback (if any) to the test output so the
@@ -392,6 +417,16 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 	for _, f := range task.Files {
 		stat, err := os.Stat(f)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				continue
+			}
+			// A target that does not exist yet is one to create. It still belongs
+			// in validFiles: that map doubles as the write allowlist below, so
+			// skipping it would let the Actor propose the file and then silently
+			// discard the result. Its keys come from task.Files, which the caller
+			// already validated, so admitting it widens nothing.
+			validFiles[f] = ""
+			sb.WriteString(fmt.Sprintf("File: %s (does not exist yet — create it)\n```\n```\n\n", f))
 			continue
 		}
 		if stat.Size() > 256*1024 {
@@ -509,7 +544,7 @@ func (r *Runner) proposeMultiFileEdit(ctx context.Context, task *Task, cost *flo
 			r.emit(step, "critic", "approved", verdict.Reasons, criticStart, r.Critic)
 		}
 
-		if err := os.WriteFile(match, []byte(f.Content), 0o644); err != nil {
+		if err := writeTargetFile(match, []byte(f.Content)); err != nil {
 			return fmt.Errorf("write file: %w", err)
 		}
 	}
