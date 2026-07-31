@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
@@ -603,6 +604,17 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	sandboxCfg.DockerImage = inferSandboxImage(worktreePath, testCmd)
 	log.Printf("Task %s: sandbox image %s (test %q)", spec.ID, sandboxCfg.DockerImage, testCmd)
 
+	// Phase A: fetch the repository's declared dependencies, with network and
+	// without credentials. Runs once, before the loop, so the Actor never sees
+	// a missing-module error it cannot fix by editing code. See deps.go for why
+	// this is separated from verification rather than solved by relaxing
+	// --network none.
+	if step := inferInstallStep(worktreePath); step != nil {
+		if detail, ok := d.installDependencies(taskCtx, worktreePath, sandboxCfg, step, spec.ID); !ok {
+			return taskResult{detail: detail}
+		}
+	}
+
 	// A wrong image and a failing test are the same observation — a non-zero
 	// exit with output — and conflating them is what let a Node task spend six
 	// Actor steps trying to make `npm test` pass inside a Go image. The first
@@ -686,6 +698,82 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 
 	return taskResult{ok: ok, prURL: prURL, detail: detail, abuse: abuse, events: events}
+}
+
+// installDependencies runs phase A of the sandbox: the repository's own install
+// command, with network enabled and no credentials whatsoever.
+//
+// It reports (detail, false) when the task cannot proceed. Failing here rather
+// than letting the loop discover it is deliberate — an Actor handed "Cannot
+// find module 'react'" will try to fix it by editing code, which cannot work
+// and costs the user their whole budget to learn.
+//
+// cfg is shared with the verification phase and may be updated here: if the
+// install reveals the image is wrong, the correction carries over, so the tests
+// do not rediscover the same fault.
+func (d *Daemon) installDependencies(ctx context.Context, worktreePath string, cfg *sandbox.SandboxConfig, step *installStep, taskID string) (string, bool) {
+	log.Printf("Task %s: installing dependencies — %q (from %s)", taskID, step.Command, step.Source)
+
+	installCtx, cancel := context.WithTimeout(ctx, installTimeout())
+	defer cancel()
+
+	// A separate config so only this phase gets network. Everything else —
+	// image, gVisor runtime, resource caps — matches verification, so the
+	// dependencies land in the environment that will actually use them.
+	netCfg := *cfg
+	netCfg.NetworkNone = false
+	run := func() (*sandbox.Result, error) {
+		return sandbox.RunCommand(
+			context.WithValue(installCtx, sandbox.SandboxConfigKey, &netCfg),
+			worktreePath, step.Command,
+			// No credentials. Not the git token, not a registry secret. This
+			// phase executes third-party install hooks with network access, so
+			// it is deliberately given nothing worth stealing.
+			nil,
+		)
+	}
+
+	res, err := run()
+	if err != nil {
+		return fmt.Sprintf("could not run dependency installation (%s): %v", step.Command, err), false
+	}
+
+	// The same environment faults that break tests break installs, and this is
+	// the first command to run — so a wrong image is usually discovered here.
+	if !res.Success {
+		if next, why := correctedImage(netCfg.DockerImage, res.Output, worktreePath); next != "" {
+			log.Printf("Task %s: %s; reinstalling in %s instead of %s", taskID, why, next, netCfg.DockerImage)
+			netCfg.DockerImage = next
+			cfg.DockerImage = next // carry the correction into verification
+			if retry, rerr := run(); rerr == nil {
+				res = retry
+			}
+		}
+	}
+
+	if !res.Success {
+		if installCtx.Err() == context.DeadlineExceeded {
+			return fmt.Sprintf("dependency installation timed out after %s (%s)", installTimeout(), step.Command), false
+		}
+		return truncateDetail(fmt.Sprintf("dependency installation failed (%s): %s",
+			step.Command, outputTail(res.Output, 400))), false
+	}
+
+	log.Printf("Task %s: dependencies installed", taskID)
+	return "", true
+}
+
+// outputTail returns the last n bytes of s on a rune boundary. The end of a
+// failing install is the part that says why.
+func outputTail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := s[len(s)-n:]
+	for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
+		cut = cut[1:]
+	}
+	return cut
 }
 
 // maxDetailLen bounds the result detail stored on a task so a verbose provider
