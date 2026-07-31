@@ -29,7 +29,7 @@ Daemons are hand-provisioned (one per organization) using the `opsctl` CLI. Auto
 Use the `opsctl` tool to mint a token and generate the Terraform variables:
 
 ```bash
-opsctl provision-daemon -org-id <org-id> -api-url https://api.runkiwi.com -image us-central1-docker.pkg.dev/.../kiwidaemon:latest
+opsctl provision-daemon -org-id <org-id> -api-url https://api.runkiwi.dev -image us-central1-docker.pkg.dev/.../kiwidaemon:latest
 ```
 
 This command will output a `terraform.tfvars` file for you to use.

@@ -118,7 +118,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 ./kiwi login -token "my-secret-token-1234"
 
 # Store credentials for the daemon to use (held daemon-side, never in the sandbox)
-./kiwi creds set anthropic "sk-ant-..."   # or: ./kiwi creds set gemini "AI..."
+./kiwi creds set anthropic "sk-ant-..."   # or: gemini "AI..." / openai "sk-..."
 ./kiwi creds set git "github_pat_..."
 
 # Submit a task. The agent can discover the file(s) and infer the test command,
@@ -154,7 +154,7 @@ The **worker model is yours to choose, not the planner's**: `-model` (and the da
 ### 3. Run the Data Plane daemon
 
 ```bash
-./kiwidaemon -api-url https://api.runkiwi.com \
+./kiwidaemon -api-url https://api.runkiwi.dev \
     -key-path ~/.kiwi/daemon.key -cache-dir /tmp/kiwi-cache \
     -poll-interval 5s -max-cached-repos 20 -max-steps 6 -max-budget 0.50 \
     -join-token "$KIWI_JOIN_TOKEN"
@@ -205,7 +205,9 @@ The Control Plane exposes webhooks for third-party integrations:
 The Free tier is **live in production**, split across two execution substrates because `kiwi-api` / `kiwi-orchestrator` run on **Cloud Run**, which cannot run the provisioner's `docker run` launches or a gVisor (`runsc`) sandbox:
 
 1. **Control plane on Cloud Run** — `kiwi-api`, `kiwi-orchestrator`, `kiwi-frontend`, backed by Cloud SQL (private IP). Cloud Run leaves `KIWI_PROVISIONER` unset, so its orchestrator keeps only the singleton sweepers and never attempts a `docker run`.
-2. **A Docker + gVisor GCE VM** ("free-fleet host", `kiwi-free-fleet`) with `runsc` registered as a Docker runtime, on the same VPC as Cloud SQL. It runs the control-plane binary with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), `KIWI_PUBLIC_API_URL=https://api.runkiwi.dev`, and `KIWI_DAEMON_IMAGE=<AR path>/kiwidaemon:latest`. The provisioner cold-starts a per-org `kiwidaemon` container on submit; the launcher bind-mounts the host `docker.sock` so each daemon's test sandbox runs as a sibling container under `runsc`.
+2. **A Docker + gVisor GCE VM** ("free-fleet host", `kiwi-free-fleet`) with `runsc` registered as a Docker runtime, on the same VPC as Cloud SQL. It runs the control-plane binary with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), and `KIWI_PUBLIC_API_URL=https://api.runkiwi.dev`, supervised by the `kiwi-provisioner` systemd unit in [`deploy/free-fleet/`](deploy/free-fleet/). The provisioner cold-starts a per-org `kiwidaemon` container on submit; the launcher bind-mounts the host `docker.sock` so each daemon's test sandbox runs as a sibling container under `runsc`.
+
+   `KIWI_DAEMON_IMAGE` is deliberately **left unset**. Setting it to a registry reference turns on `docker run --pull=always` for every launch, but Docker resolves registry credentials client-side — inside the provisioner container, which is cut off from the cloud metadata endpoint by `harden-egress.sh` — so every cold start would fail to pull. The launcher instead uses the local `kiwidaemon:latest` tag, refreshed on the *host* by a systemd timer, where the credentials live.
 3. The **`kiwidaemon` image** in Artifact Registry — `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets).
 
 Schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, the `fleets.type` `self-managed`→`managed` rename, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. **Pro** (dedicated) stays on per-org VMs.

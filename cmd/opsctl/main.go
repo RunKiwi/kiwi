@@ -40,7 +40,7 @@ func main() {
 func run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("opsctl provision-daemon", flag.ContinueOnError)
 	orgID := fs.String("org-id", "", "The organization ID")
-	apiURL := fs.String("api-url", "https://api.runkiwi.com", "The Kiwi API URL")
+	apiURL := fs.String("api-url", "https://api.runkiwi.dev", "The Kiwi API URL")
 	daemonImage := fs.String("image", "us-central1-docker.pkg.dev/my-gcp-project-id/kiwi-repo/kiwidaemon:latest", "The kiwidaemon image")
 	projectID := fs.String("project", "my-gcp-project-id", "GCP Project ID")
 	region := fs.String("region", "us-central1", "GCP Region")
