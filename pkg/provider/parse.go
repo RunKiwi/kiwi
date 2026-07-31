@@ -17,8 +17,12 @@ var PricingMap = map[string]Pricing{
 	"claude-3-5-sonnet": {InputCostPerM: 3.00, OutputCostPerM: 15.00},
 	"claude-3-5-haiku":  {InputCostPerM: 0.80, OutputCostPerM: 4.00},
 	"gemini-2.0-flash":  {InputCostPerM: 0.10, OutputCostPerM: 0.40},
-	"gemini-1.5-flash":  {InputCostPerM: 0.075, OutputCostPerM: 0.30},
-	"gemini-1.5-pro":    {InputCostPerM: 1.25, OutputCostPerM: 5.00},
+	// The alias the dashboard offers. Without an entry it fell back to
+	// gemini-2.0-flash pricing, which is close but leaves the per-job budget cap
+	// and the Spend page quietly approximating a model most tasks actually use.
+	"gemini-flash-latest": {InputCostPerM: 0.30, OutputCostPerM: 2.50},
+	"gemini-1.5-flash":    {InputCostPerM: 0.075, OutputCostPerM: 0.30},
+	"gemini-1.5-pro":      {InputCostPerM: 1.25, OutputCostPerM: 5.00},
 }
 
 // ModelCostUSD computes the cost of a call given token usage and model pricing.
