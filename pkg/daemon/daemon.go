@@ -562,13 +562,6 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	// A task aimed at a dependency manifest cannot be verified offline, however
-	// good the edit. Say so now rather than after six Actor steps.
-	if why := dependencyChangeBlocked(targetFiles); why != "" {
-		log.Printf("Task %s: %s", spec.ID, why)
-		return taskResult{detail: why}
-	}
-
 	// Repair a new file whose extension names the wrong language. The Actor can
 	// only change a file's contents, never its name, so a planner that guesses
 	// "examples/advanced.rs" for a Go repository creates a position the loop
@@ -667,6 +660,10 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			return taskResult{detail: detail}
 		}
 	}
+	// What the installed tree currently satisfies. Compared before each
+	// verification so an Actor edit to a manifest can be installed rather than
+	// refused — see the re-install in runTest below.
+	installedManifests := manifestFingerprint(worktreePath)
 
 	// A wrong image and a failing test are the same observation — a non-zero
 	// exit with output — and conflating them is what let a Node task spend six
@@ -681,6 +678,33 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// do about it, so saying so beats spending the budget proving it.
 	offlineBlocked := ""
 	runTest := func(ctx context.Context) (string, bool, error) {
+		// The Actor may have added a dependency. Phase B has no network, so the
+		// package it named would be missing and the build would fail on that
+		// rather than on anything the Actor could fix by editing code.
+		//
+		// Re-running the install phase is the answer, and it keeps both halves
+		// of the invariant: this still runs with network and NO credentials, and
+		// the verification that follows still runs offline. What changes is only
+		// that the manifest being installed was written by the model — so the
+		// install is given nothing worth stealing, exactly as before.
+		//
+		// A failed re-install is returned as the test output instead of failing
+		// the task, because "404 Not Found - GET .../nonexistent-pkg" is
+		// something the Actor can act on: it names a package that does not
+		// exist, and the next step can correct it.
+		if fp := manifestFingerprint(worktreePath); fp != installedManifests {
+			if step := installStepFor(worktreePath, false); step != nil {
+				log.Printf("Task %s: a dependency manifest changed; re-installing with %q", spec.ID, step.Command)
+				if detail, ok := d.installDependencies(ctx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
+					return detail, false, nil
+				}
+			}
+			// Recomputed rather than reused: a resolving install rewrites the
+			// lockfile, so the tree's fingerprint after installing is not the
+			// one that triggered it.
+			installedManifests = manifestFingerprint(worktreePath)
+		}
+
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
 			return "", false, err
