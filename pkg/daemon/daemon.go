@@ -441,13 +441,16 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	taskCtx, taskCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer taskCancel()
 
-	sandboxCtx := context.WithValue(taskCtx, sandbox.SandboxConfigKey, &sandbox.SandboxConfig{
+	// The image is held by pointer so a wrong guess can be corrected in place
+	// once the sandbox reports what is actually missing — see runTest below.
+	sandboxCfg := &sandbox.SandboxConfig{
 		UseDocker:   dockerEnabled(),
 		MemoryLimit: "512m",
 		CPULimit:    "1.0",
 		Runtime:     d.config.SandboxRuntime,
 		NetworkNone: true,
-	})
+	}
+	sandboxCtx := context.WithValue(taskCtx, sandbox.SandboxConfigKey, sandboxCfg)
 
 	// Test-command environment: every credential except the LLM keys.
 	testEnv := []string{"TASK=" + spec.Task}
@@ -593,10 +596,38 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		task.Files = absFiles
 	}
 
+	// Pick the image from what the repository declares, using the test command
+	// as the strongest signal — it names the binary that has to exist. Kiwi's
+	// promise is that a user submits a prompt and nothing else, so there is no
+	// image flag to fall back on and no question to ask them.
+	sandboxCfg.DockerImage = inferSandboxImage(worktreePath, testCmd)
+	log.Printf("Task %s: sandbox image %s (test %q)", spec.ID, sandboxCfg.DockerImage, testCmd)
+
+	// A wrong image and a failing test are the same observation — a non-zero
+	// exit with output — and conflating them is what let a Node task spend six
+	// Actor steps trying to make `npm test` pass inside a Go image. The first
+	// failure is therefore inspected: if the sandbox says the toolchain is
+	// missing or the wrong version, repair it and re-run once before any of
+	// that output reaches the Actor. Only the first failure is examined, so a
+	// genuinely failing test costs nothing extra.
+	envChecked := false
 	runTest := func(ctx context.Context) (string, bool, error) {
 		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
 		if err != nil {
 			return "", false, err
+		}
+		if !res.Success && !envChecked {
+			envChecked = true
+			if next, why := correctedImage(sandboxCfg.DockerImage, res.Output, worktreePath); next != "" {
+				log.Printf("Task %s: %s; retrying in %s instead of %s",
+					spec.ID, why, next, sandboxCfg.DockerImage)
+				sandboxCfg.DockerImage = next
+				if retry, rerr := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv); rerr == nil {
+					return retry.Output, retry.Success, nil
+				}
+				// The retry could not run at all. Fall through and report the
+				// original result rather than losing it to a second fault.
+			}
 		}
 		return res.Output, res.Success, nil
 	}

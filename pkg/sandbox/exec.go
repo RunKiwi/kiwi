@@ -87,7 +87,7 @@ func runLocal(ctx context.Context, dir string, cmdStr string, env []string) (*Re
 }
 
 func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg *SandboxConfig) (*Result, error) {
-	dockerImage := "golang:1.21-alpine"
+	dockerImage := "golang:1.25-alpine"
 	if cfg.DockerImage != "" {
 		dockerImage = cfg.DockerImage
 	}
