@@ -14,15 +14,28 @@ type Pricing struct {
 // PricingMap stores token pricing for common models.
 var PricingMap = map[string]Pricing{
 	"claude-opus-4-8":   {InputCostPerM: 5.00, OutputCostPerM: 25.00},
+	"claude-sonnet-5":   {InputCostPerM: 3.00, OutputCostPerM: 15.00},
 	"claude-3-5-sonnet": {InputCostPerM: 3.00, OutputCostPerM: 15.00},
 	"claude-3-5-haiku":  {InputCostPerM: 0.80, OutputCostPerM: 4.00},
-	"gemini-2.0-flash":  {InputCostPerM: 0.10, OutputCostPerM: 0.40},
+	// The default worker model. Without an entry it fell back to Opus pricing —
+	// five times its real input rate and five times its output rate — so the
+	// per-job budget cap tripped early and the Spend page overstated every job
+	// run on the default.
+	"claude-haiku-4-5-20251001": {InputCostPerM: 1.00, OutputCostPerM: 5.00},
+	"gemini-2.0-flash":          {InputCostPerM: 0.10, OutputCostPerM: 0.40},
 	// The alias the dashboard offers. Without an entry it fell back to
 	// gemini-2.0-flash pricing, which is close but leaves the per-job budget cap
 	// and the Spend page quietly approximating a model most tasks actually use.
 	"gemini-flash-latest": {InputCostPerM: 0.30, OutputCostPerM: 2.50},
 	"gemini-1.5-flash":    {InputCostPerM: 0.075, OutputCostPerM: 0.30},
 	"gemini-1.5-pro":      {InputCostPerM: 1.25, OutputCostPerM: 5.00},
+	"gpt-5":               {InputCostPerM: 1.25, OutputCostPerM: 10.00},
+	"gpt-5-mini":          {InputCostPerM: 0.25, OutputCostPerM: 2.00},
+	"gpt-5-nano":          {InputCostPerM: 0.05, OutputCostPerM: 0.40},
+	"gpt-4.1":             {InputCostPerM: 2.00, OutputCostPerM: 8.00},
+	"gpt-4.1-mini":        {InputCostPerM: 0.40, OutputCostPerM: 1.60},
+	"gpt-4o":              {InputCostPerM: 2.50, OutputCostPerM: 10.00},
+	"gpt-4o-mini":         {InputCostPerM: 0.15, OutputCostPerM: 0.60},
 }
 
 // ModelCostUSD computes the cost of a call given token usage and model pricing.
@@ -32,10 +45,15 @@ func ModelCostUSD(model string, inputTokens, outputTokens int64) float64 {
 	p, ok := PricingMap[cleaned]
 	if !ok {
 		// Fall back to a same-family default so an unlisted model isn't billed at
-		// the wrong provider's (much higher) rate.
-		if strings.HasPrefix(cleaned, "gemini") {
+		// the wrong provider's (much higher) rate. The family comes from
+		// ProviderOf, so pricing and key routing can never disagree about which
+		// provider a model belongs to.
+		switch ProviderOf(cleaned) {
+		case ProviderGemini:
 			p = PricingMap["gemini-2.0-flash"]
-		} else {
+		case ProviderOpenAI:
+			p = PricingMap["gpt-5-mini"]
+		default:
 			p = PricingMap["claude-opus-4-8"]
 		}
 	}

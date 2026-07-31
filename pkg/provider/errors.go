@@ -20,7 +20,7 @@ const (
 	ErrModelUnavailable
 )
 
-// Classify inspects a provider error (Anthropic or Gemini) and returns a kind
+// Classify inspects a provider error (Anthropic, Gemini or OpenAI) and returns a kind
 // plus a human-readable reason with no provider name and no raw payload — the
 // caller prefixes the provider. It matches on the substrings these APIs return
 // so it works regardless of which SDK surfaced the error.
@@ -31,8 +31,8 @@ func Classify(err error) (ErrorKind, string) {
 	s := strings.ToLower(err.Error())
 
 	switch {
-	// Billing exhausted. Anthropic: "credit balance is too low". Codex-style /
-	// compatible: "insufficient_quota", "billing".
+	// Billing exhausted. Anthropic: "credit balance is too low". OpenAI and
+	// compatible endpoints: "insufficient_quota", "billing".
 	case strings.Contains(s, "credit balance") ||
 		strings.Contains(s, "insufficient_quota") ||
 		strings.Contains(s, "insufficient credit") ||

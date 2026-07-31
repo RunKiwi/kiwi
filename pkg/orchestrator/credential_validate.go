@@ -15,6 +15,7 @@ import (
 var (
 	anthropicValidateURL = "https://api.anthropic.com/v1/models"
 	geminiValidateURL    = "https://generativelanguage.googleapis.com/v1beta/models"
+	openaiValidateURL    = "https://api.openai.com/v1/models"
 	githubValidateURL    = "https://api.github.com/user"
 )
 
@@ -43,6 +44,10 @@ func defaultCredValidator(ctx context.Context, name, value string) error {
 		u := geminiValidateURL + "?key=" + url.QueryEscape(value)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		return checkCredential(req, "Gemini")
+	case "OPENAI_API_KEY":
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, openaiValidateURL, nil)
+		req.Header.Set("Authorization", "Bearer "+value)
+		return checkCredential(req, "OpenAI")
 	case "GITHUB_TOKEN", "GIT_TOKEN":
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, githubValidateURL, nil)
 		req.Header.Set("Authorization", "Bearer "+value)

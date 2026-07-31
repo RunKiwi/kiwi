@@ -5,16 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 )
 
-// providerNameForModel returns the human-readable provider a model routes to,
-// mirroring defaultProvider's selection (gemini* → Gemini, else Anthropic). Used
-// only for messages, so it never needs a key.
+// providerNameForModel returns the human-readable provider a model routes to.
+// It resolves through the same provider.ProviderOf that defaultProvider uses, so
+// the message naming the missing key can never name a different provider than
+// the one whose key was actually looked up.
 func providerNameForModel(model string) string {
-	if strings.HasPrefix(model, "gemini") {
-		return "Gemini"
-	}
-	return "Anthropic"
+	return provider.DisplayNameFor(provider.ProviderOf(model))
 }
 
 // inferTestCmd guesses a project's test command from marker files at the repo

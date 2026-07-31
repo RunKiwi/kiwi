@@ -141,10 +141,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			key = override
 			plannedOnOperatorKey = true
 		} else {
-			secretName := "ANTHROPIC_API_KEY"
-			if prov == provider.ProviderGemini {
-				secretName = "GEMINI_API_KEY"
-			}
+			secretName := provider.CredentialNameFor(prov)
 			var kerr error
 			key, kerr = s.store.GetCredentialPlaintext(ctx, req.OrgID, secretName)
 			if kerr != nil || key == "" {
@@ -168,6 +165,8 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				comp = s.newCompleter(m)
 			case prov == provider.ProviderGemini:
 				comp = provider.NewGeminiProviderWithModels(key, m, m)
+			case prov == provider.ProviderOpenAI:
+				comp = provider.NewOpenAIProviderWithModels(key, m, m)
 			default:
 				comp = provider.NewAnthropicProviderWithModels(key, m, m)
 			}

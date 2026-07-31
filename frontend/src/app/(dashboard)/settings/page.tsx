@@ -13,6 +13,7 @@ import { isNotificationEnabled, setNotificationEnabled, requestNotificationPermi
 const PROVIDER_CREDENTIALS = [
   { key: "anthropic", label: "Anthropic", name: "ANTHROPIC_API_KEY" },
   { key: "gemini", label: "Gemini", name: "GEMINI_API_KEY" },
+  { key: "openai", label: "OpenAI", name: "OPENAI_API_KEY" },
   { key: "git", label: "Git push token", name: "GIT_TOKEN" },
 ];
 

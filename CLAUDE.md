@@ -23,7 +23,8 @@ Kiwi is a **BYOC (Bring Your Own Cloud) agentic execution platform**: a **Contro
 - **Multi-tenant**: Every task-scoped row carries `org_id`.
 - **Security**: Secrets are never persisted in the sandbox. Customer credentials are sealed to the daemon's X25519 public key (`pkg/crypto`); the LLM Actor/Critic run in the daemon process, and only the test command runs in the sandbox (default-deny networking), so model-generated code never sees the keys.
 - **Zero-knowledge is a BYOC-only claim.** In managed mode Kiwi operates the machine holding the private key and *can* decrypt. Do not write docs or code comments claiming zero-knowledge for managed mode.
-- **Terminology**: The supported LLM providers are Anthropic, Codex, Gemini, or compatible endpoints. **Do not use the literal three-letter "Open"+"AI" brand string in code, config, or docs (use `codex` instead).**
+- **Terminology**: The supported LLM providers are Anthropic, Gemini, OpenAI, or compatible endpoints. The canonical identifier for the third is `openai` (credential `OPENAI_API_KEY`, integration key `openai`) — the earlier `codex` naming is retired and must not be reintroduced.
+- **Provider routing**: `provider.ProviderOf(model)` is the single mapping from a model id to its provider, and `provider.CredentialNameFor` from a provider to its key. Adding a provider means adding it there, to `PricingMap`, to `daemon.isLLMKey`, to `integrationSpec`, and to the frontend's `providerOf` — never re-deriving the rule in a new place.
 
 ---
 

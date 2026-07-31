@@ -8,7 +8,7 @@ import (
 )
 
 // Completer is the minimal frontier-model surface the LLMPlanner needs. It is
-// satisfied by an adapter over the Anthropic/Codex/Gemini providers, and is
+// satisfied by an adapter over the Anthropic/Gemini/OpenAI providers, and is
 // trivially faked in tests (no network).
 type Completer interface {
 	Complete(ctx context.Context, system, user string) (string, error)

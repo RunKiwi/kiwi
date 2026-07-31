@@ -137,7 +137,17 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 
 `kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
 
-**LLM providers.** The daemon selects the provider from the worker's `-model`: a `gemini-*` model (e.g. `-model gemini-flash-latest`) uses the stored `GEMINI_API_KEY`; any other model uses `ANTHROPIC_API_KEY`. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
+**LLM providers.** The daemon selects the provider from the worker's `-model`, and reads that provider's key from your stored credentials:
+
+| Model id | Provider | Credential |
+| --- | --- | --- |
+| `gemini-*` (e.g. `gemini-flash-latest`) | Gemini | `GEMINI_API_KEY` |
+| `gpt-*`, `o1*`, `o3*`, `o4*`, `chatgpt-*` (e.g. `gpt-5-mini`) | OpenAI | `OPENAI_API_KEY` |
+| anything else (e.g. `claude-opus-4-8`) | Anthropic | `ANTHROPIC_API_KEY` |
+
+The same rule decides which key the planner uses, how a call is priced, and which provider the signed execution record names — it is one function (`provider.ProviderOf`) rather than a rule repeated per component. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
+
+Set `KIWI_OPENAI_BASE_URL` to point the OpenAI provider at a compatible endpoint (Azure, a gateway, a self-hosted server) instead of `api.openai.com`.
 
 The **worker model is yours to choose, not the planner's**: `-model` (and the dashboard's model selector) is applied to every worker the plan produces, overriding anything the planning model suggested. The planner is never told which providers your org holds keys for, so it is not asked to pick one — a model id selects the provider, and a guessed one would route the work to a key you never connected. `-planner-model` selects the model that decomposes the task; both run on your own provider key.
 
