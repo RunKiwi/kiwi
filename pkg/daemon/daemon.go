@@ -394,14 +394,18 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	// Anti-gaming: the loop's contract is "green test = done". If the Actor's
-	// target file is itself a test, it can pass the gate by weakening the test
-	// (delete an assertion, widen a tolerance) instead of fixing the code. Refuse
-	// the task rather than reward that (Execution Model RFC §8; issue #132).
-	if looksLikeTestFile(spec.File) {
-		log.Printf("Task %s: refusing — target %q is a test file", spec.ID, spec.File)
-		return taskResult{detail: fmt.Sprintf("refusing to let the agent edit the test that defines done (%s); point the task at the code under test, not its test", spec.File)}
-	}
+	// Anti-gaming (Execution Model RFC §8, issue #132) is no longer decided here.
+	// It used to be an outright refusal of any task targeting a test file, on the
+	// grounds that the Actor could satisfy "green test = done" by weakening the
+	// assertion instead of fixing the code.
+	//
+	// That reasoning only holds while the tests are FAILING, because only then is
+	// a test defining the job. When they pass, the test file defines nothing and
+	// "add tests for the parser" is an ordinary request that the blanket refusal
+	// rejected outright. The loop knows which case it is in — it runs the tests
+	// — so it makes the call; the daemon only reports what it observed, since it
+	// is the side that knows each language's naming conventions.
+	targetsTest := looksLikeTestFile(spec.File)
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
@@ -595,6 +599,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		Description:  description,
 		FilePath:     filepath.Join(worktreePath, targetFiles[0]),
 		WorktreeRoot: worktreePath,
+		TargetsTest:  targetsTest || looksLikeTestFile(targetFiles[0]),
 	}
 	if isMulti {
 		absFiles := make([]string, len(targetFiles))

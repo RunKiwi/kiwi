@@ -55,21 +55,31 @@ func writeTemp(t *testing.T, content string) string {
 	return p
 }
 
-func TestLoop_InitialTestPasses_NoEdits(t *testing.T) {
+// This test previously asserted that a passing initial test skipped editing
+// entirely ("Actor was called 0 times"). That expectation encoded the model
+// where the test command IS the request, which silently made every additive
+// task a no-op: `go build` does not start failing because an example is
+// missing, so the Actor was never invoked and the user got a green tick for
+// work that never happened.
+//
+// The tests are a guard, not the goal. A green suite means the change must not
+// break anything — not that there is nothing to do. What must still hold is
+// that the work happens and the suite is still green afterwards.
+func TestLoop_PassingSuiteStillRunsTheActor(t *testing.T) {
 	path := writeTemp(t, "already good")
-	prov := &scriptedProvider{edits: []string{"SHOULD NOT BE CALLED"}}
+	prov := &scriptedProvider{edits: []string{"already good, plus the requested change"}}
 	r := &Runner{Provider: prov}
 
-	res, err := r.Run(context.Background(), Task{Description: "noop", FilePath: path},
+	res, err := r.Run(context.Background(), Task{Description: "make a change", FilePath: path},
 		passWhenContains(path, "already good"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !res.Success || res.Steps != 0 {
-		t.Errorf("got success=%v steps=%d, want true/0", res.Success, res.Steps)
+	if !res.Success {
+		t.Errorf("got success=%v, want true — the suite is still green", res.Success)
 	}
-	if prov.calls != 0 {
-		t.Errorf("Actor was called %d times; a passing initial test must skip editing", prov.calls)
+	if prov.calls == 0 {
+		t.Error("the Actor was never asked; a passing suite is not a reason to skip the work")
 	}
 }
 

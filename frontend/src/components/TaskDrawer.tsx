@@ -516,7 +516,8 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                 A tamper-evident record of what ran: the plan, the commit, the test command
                 and its outcome, linked to the previous record in your organization&apos;s
                 chain. It attests to the execution, not to the correctness of the resulting
-                code.
+                code — the tests confirm the change did not break the suite, not that it
+                does what you asked. Review the pull request.
               </p>
 
               {/* Disclosure JSON toggle */}
