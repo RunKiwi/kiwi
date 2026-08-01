@@ -103,6 +103,18 @@ type ToolConversation interface {
 	Turns() int
 }
 
+// TranscriptReporter is implemented by conversations that can report how large
+// their transcript has become, so a caller can decide when to compact.
+//
+// It is separate from ToolConversation because the answer is necessarily an
+// estimate — it comes from the last request's billed input, not from a local
+// tokenizer — and a provider that cannot give one should be able to say so by
+// not implementing this, rather than by returning a number that looks
+// authoritative and is not.
+type TranscriptReporter interface {
+	TranscriptTokens() int64
+}
+
 // ToolRunner is a provider that can hold a tool-using conversation. Providers
 // that cannot are still perfectly usable as an Actor or an Architect — those
 // need only Complete — so this is a separate interface rather than an addition
