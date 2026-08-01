@@ -147,6 +147,82 @@ guessing files because nothing downstream needs a guess.
 The DAG code does not get deleted — `HeuristicPlanner`, `Validate`, and the
 `depends_on` gating in `LeaseNextTask` all remain live for `file_loop` mode.
 
+### 3.1 What the Control Plane planner does in session mode
+
+"The planner stops calling an LLM" reads like the planner mostly goes away. It
+does not. `SubmitPlan` is ~340 lines and the decomposition is about 60 of them;
+everything else is admission control and materialization, and all of it stays.
+
+> The CP planner stops being a **decomposer** and becomes an **admission
+> controller and job materializer**: it decides *whether* the work may run,
+> *where* it runs, *which models* it uses, and *what rows* represent it — and
+> stops deciding *how* the work is split up.
+
+**Unchanged.** The handler's org gating (`handler.go:44-59`: suspended orgs
+rejected, free orgs pinned to `SharedFreeFleet`), the free-tier cold start
+(`ensureFreeDaemon` + `wakeFleetHost`, `handler.go:71-74`), idempotency via
+`PlanSubmission` and its `ON CONFLICT` path, the `OrgLimits` lookup, and the
+single transaction that writes Job + Manifest + QueuedTask. Model, fleet, and
+test-command policy still resolve on the CP and are stamped onto the spec — the
+Control Plane still *chooses* the models even though it no longer *calls* them.
+
+**Removed.** Planner model/key selection, `GetCredentialPlaintext`, the three
+provider constructors, `p.Plan()`, and the usage aggregation
+(`service.go:129-199`). `plan.Validate` stays in the code path but is trivially
+satisfied by a one-worker plan, and `MaxWorkersPerJob` stops binding. In session
+mode `SubmitPlan` makes **zero LLM calls and reads zero credentials.**
+
+The shape of the change is small: a `SessionPlanner` implementing the existing
+`Planner` interface, returning one `PlannedWorker{ID: "session", Task: req.Task}`
+with no `File`/`Files` and no `DependsOn`. It needs no `Completer`, so it slots
+in as a third branch of the existing selection at `service.go:124` and nothing
+downstream in the transaction changes.
+
+Four knock-on effects follow, and the first is a silent feature loss:
+
+1. **Shared context would die by omission.** `ResolvedLearnings` is resolved on
+   the CP — embedding plus org-scoped pgvector search (`service.go:96-114`) — and
+   that must stay on the CP, because the daemon has no pgvector and no
+   cross-tenant index. But its only consumer today is the planner it is handed
+   to. Remove the CP planner and learnings are computed and dropped. They must be
+   threaded onto the spec (`spec["learnings"]`) so the daemon's Architect
+   receives them in its round-0 prompt.
+
+2. **The manifest becomes a submission record, not a plan.** It is
+   content-addressed (`contentHash`) and immutable, and `ver_hook.go:256-258`
+   reads `summary`, `planner_model`, and `planner_provider` out of
+   `manifest.Content` to build the execution record. In session mode the summary
+   does not exist at submit time and cannot be patched in later without changing
+   the manifest's hash. The manifest therefore keeps only submission facts (task,
+   repo, ref, reference mode, chosen models, `mode: session`), and the execution
+   record sources the plan summary and planner model/provider from the round-0
+   `spec` event in the session log. That is a `pkg/ver` hook change, not only a
+   planner change.
+
+3. **Planner spend accounting inverts.** `Job.PlannerCostUSD`, `PlannerTokensIn`,
+   and `PlannerTokensOut` are written at submit today. In session mode they are
+   zero at submit and backfilled from the daemon's round reports. The
+   `plannedOnOperatorKey` distinction becomes moot — planning always runs on the
+   org's key inside the org's own daemon, so the org always pays. The Spend
+   page's per-model breakdown reads `Job.Inputs["planner_model"]`, which stays
+   accurate at submit because the CP still selects the model; only the cost lags.
+
+4. **`plan.Summary` is unavailable at submit.** It feeds `SubmitResult.Summary`
+   (rendered by the dashboard) and the `JobLearning` row. Semantic search is
+   unaffected — the embedding is already computed from `req.Task`, not the
+   summary (`service.go:108`) — and `UpsertJobLearning` is keyed on `job_id` and
+   updates in place by design (`service.go:379`), so the daemon backfills the
+   real summary once the Architect writes it. The API returns a placeholder until
+   then.
+
+**One regression that needs a deliberate decision.** Today an org with no
+provider key fails *at submit*, with a precise message the dashboard maps to an
+Integrations link — because the CP must read the key in order to plan. In session
+mode nothing reads a key at submit, so that org receives a 202, a queued task,
+and a failure minutes later inside the daemon. The fix is cheap and should ship
+with the mode rather than after it: a credential **presence** check at submit
+(the row exists; no decryption, no plaintext) that raises the same error string.
+
 ---
 
 ## 4. Trust boundary: **C2 does not move into the sandbox**
@@ -632,9 +708,12 @@ crash-safe.
 token classes** (§6.1 — this one is a prerequisite for trustworthy budgets, so it
 may want to move earlier); compaction.
 
-**Phase 4 — collapse the plan.** Session mode emits one worker with no CP LLM
-call; extend `pkg/ver` to chain session events; dashboard shows rounds instead of
-workers.
+**Phase 4 — collapse the plan** (§3.1 is the checklist). `SessionPlanner` emits
+one worker with no CP LLM call; thread `ResolvedLearnings` onto the spec so
+shared context survives; move plan summary and planner model/provider in
+`ver_hook` from the manifest to the round-0 `spec` event; backfill planner spend
+and the `JobLearning` summary from daemon reports; add the submit-time credential
+presence check. Dashboard shows rounds instead of workers.
 
 **Phase 5 — optional.** Provider parity (Gemini, OpenAI tool-calling), then
 disjoint-milestone parallelism if it is still wanted, which it may not be.
@@ -681,7 +760,14 @@ disjoint-milestone parallelism if it is still wanted, which it may not be.
    means over-counted spend tripping `MaxBudgetPerJob` on cheap runs. Consider
    pulling that specific change into Phase 0.
 
-8. **`MaxRounds = 4` and `MaxToolCallsPerRound = 60` are guesses.** They are the
+8. **Submit stops being the place bad configuration is caught** (§3.1). Moving
+   planning into the daemon means a missing provider key, and any other fault the
+   CP currently discovers by trying to plan, surfaces minutes later in a queued
+   task instead of immediately in the API response. The presence check covers the
+   known case; the general shift — submit gets cheaper and later-failing — is
+   worth agreeing to on purpose.
+
+9. **`MaxRounds = 4` and `MaxToolCallsPerRound = 60` are guesses.** They are the
    two numbers that most directly determine both quality and cost, and neither has
    any evidence behind it yet. Phase 1's eval should set them, not the author of
    this document.
