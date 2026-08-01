@@ -35,6 +35,21 @@ type githubClient interface {
 // correctly concludes there is nothing to do.
 var errNoChanges = errors.New("no changes")
 
+// committedSince reports whether HEAD has moved past baseSHA — that is,
+// whether someone already committed the work this delivery is meant to carry.
+// An empty baseSHA means the caller has no starting point to compare against,
+// so nothing can be claimed and the answer is no.
+func committedSince(runGit func(args ...string) (string, error), baseSHA string) bool {
+	if strings.TrimSpace(baseSHA) == "" {
+		return false
+	}
+	head, err := runGit("rev-parse", "HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(head) != strings.TrimSpace(baseSHA)
+}
+
 func jobBranchName(spec agent.WorkerSpec) string {
 	jobID := spec.JobID
 	if jobID == "" {
@@ -281,7 +296,23 @@ func parseGitHubRepo(repoURL string) (owner, repo string, ok bool) {
 }
 
 // publishResult runs git add/commit/push and opens a PR.
+// publishResult delivers work that is sitting uncommitted in the worktree —
+// the single-file loop's shape, where the loop edits files and never touches
+// git.
 func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSpec, gitToken string, gh githubClient, pushRemoteOverride string) (prURL string, detail string, err error) {
+	return publishResultFrom(ctx, worktreePath, spec, gitToken, gh, pushRemoteOverride, "")
+}
+
+// publishResultFrom is publishResult with a known starting point.
+//
+// A session commits at the end of every round, so by delivery time the worktree
+// is clean and the work is already in the branch's history. That is
+// indistinguishable, to `git status`, from a run that did nothing — and
+// reporting errNoChanges there would throw away a finished task. baseSHA is
+// what tells the two apart: a clean tree whose HEAD has moved past the point
+// the session started from has work to deliver. An empty baseSHA keeps the
+// original behaviour exactly, which is what the single-file path passes.
+func publishResultFrom(ctx context.Context, worktreePath string, spec agent.WorkerSpec, gitToken string, gh githubClient, pushRemoteOverride, baseSHA string) (prURL string, detail string, err error) {
 	runGit := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = worktreePath
@@ -300,15 +331,17 @@ func publishResult(ctx context.Context, worktreePath string, spec agent.WorkerSp
 		return "", "", err
 	}
 	if strings.TrimSpace(statusOut) == "" {
-		// Nothing was produced. Returned as an error rather than a benign
-		// detail string so the caller cannot mistake it for a delivered
-		// result — which is exactly what happened: the task reported
-		// SUCCEEDED with no pull request and the word "no changes" as its
-		// only explanation.
-		return "", "", errNoChanges
-	}
-
-	if _, err := runGit("-c", "user.email=bot@runkiwi.dev", "-c", "user.name=Kiwi", "commit", "-m", "kiwi: "+spec.Task); err != nil {
+		// A clean tree means one of two things, and only baseSHA distinguishes
+		// them: nothing was produced, or the producer already committed.
+		if !committedSince(runGit, baseSHA) {
+			// Nothing was produced. Returned as an error rather than a benign
+			// detail string so the caller cannot mistake it for a delivered
+			// result — which is exactly what happened: the task reported
+			// SUCCEEDED with no pull request and the word "no changes" as its
+			// only explanation.
+			return "", "", errNoChanges
+		}
+	} else if _, err := runGit("-c", "user.email=bot@runkiwi.dev", "-c", "user.name=Kiwi", "commit", "-m", "kiwi: "+spec.Task); err != nil {
 		return "", "", err
 	}
 
