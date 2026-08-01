@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
@@ -108,4 +109,65 @@ type ProgressReq struct {
 	// OutputTail is the end of the running command's output. The end is the part
 	// that says what it is doing; the start is usually a banner.
 	OutputTail string `json:"output_tail,omitempty"`
+}
+
+// SessionCheckpointReq carries a session's durable position and the events that
+// belong to it. Both travel together deliberately: a checkpoint that advanced
+// the round without its events would leave a resumed session with a hole in its
+// history exactly where the crash was.
+type SessionCheckpointReq struct {
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	LeaseID   string `json:"lease_id"`
+	// SignPubKey identifies the reporting daemon (verified against X-Kiwi-Signature).
+	SignPubKey string `json:"sign_pub_key"`
+	JobID      string `json:"job_id,omitempty"`
+	RepoURL    string `json:"repo_url,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	BaseSHA    string `json:"base_sha,omitempty"`
+	HeadSHA    string `json:"head_sha,omitempty"`
+	Phase      string `json:"phase,omitempty"`
+	Round      int    `json:"round"`
+	Attempts   int    `json:"attempts"`
+	MaxRounds  int    `json:"max_rounds,omitempty"`
+	Rejections int    `json:"rejections,omitempty"`
+	// State is pkg/session's opaque checkpoint. The Control Plane stores it and
+	// hands it back; it never interprets it, so the session package can change
+	// what it remembers without a migration.
+	State          json.RawMessage `json:"state,omitempty"`
+	ArchitectModel string          `json:"architect_model,omitempty"`
+	WorkerModel    string          `json:"worker_model,omitempty"`
+	CostUSD        float64         `json:"cost_usd,omitempty"`
+	TokensIn       int64           `json:"tokens_in,omitempty"`
+	TokensOut      int64           `json:"tokens_out,omitempty"`
+	// Status is empty while the session runs, or SUCCEEDED/FAILED when it ends.
+	Status string `json:"status,omitempty"`
+	// Events are the phases since the last checkpoint, in order.
+	Events []SessionEvent `json:"events,omitempty"`
+}
+
+// SessionEvent is one phase of a session on the wire.
+type SessionEvent struct {
+	Round      int     `json:"round"`
+	Seq        int     `json:"seq"`
+	Kind       string  `json:"kind"`
+	Outcome    string  `json:"outcome,omitempty"`
+	Tool       string  `json:"tool,omitempty"`
+	Detail     string  `json:"detail,omitempty"`
+	DurationMs int64   `json:"duration_ms,omitempty"`
+	TokensIn   int64   `json:"tokens_in,omitempty"`
+	TokensOut  int64   `json:"tokens_out,omitempty"`
+	CostUSD    float64 `json:"cost_usd,omitempty"`
+}
+
+// SessionStateRes is the Control Plane's answer when a daemon asks whether a
+// task already has a session to resume.
+type SessionStateRes struct {
+	// Found is false on a task's first lease, which is the normal case.
+	Found     bool            `json:"found"`
+	SessionID string          `json:"session_id,omitempty"`
+	Round     int             `json:"round,omitempty"`
+	Attempts  int             `json:"attempts,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	State     json.RawMessage `json:"state,omitempty"`
 }

@@ -14,19 +14,24 @@ import (
 // advances a synthetic head, which is enough to exercise every branch the
 // runner takes on a real repository.
 type fakeWorkspace struct {
-	tree    []string
-	diff    string
-	files   []string
-	commits []string
-	head    string
-	noWork  bool
+	tree     []string
+	diff     string
+	files    []string
+	commits  []string
+	head     string
+	noWork   bool
+	wasReset bool
 }
 
 func (w *fakeWorkspace) Tree(context.Context) ([]string, error)         { return w.tree, nil }
 func (w *fakeWorkspace) Diff(context.Context) (string, error)           { return w.diff, nil }
 func (w *fakeWorkspace) FilesChanged(context.Context) ([]string, error) { return w.files, nil }
 func (w *fakeWorkspace) HeadSHA(context.Context) (string, error)        { return w.head, nil }
-func (w *fakeWorkspace) Reset(_ context.Context, sha string) error      { w.head = sha; return nil }
+func (w *fakeWorkspace) Reset(_ context.Context, sha string) error {
+	w.wasReset = true
+	w.head = sha
+	return nil
+}
 func (w *fakeWorkspace) Commit(_ context.Context, msg string) (string, error) {
 	if w.noWork {
 		return "", ErrNoChanges
@@ -38,17 +43,19 @@ func (w *fakeWorkspace) Commit(_ context.Context, msg string) (string, error) {
 
 // fakeArchitect replays a scripted sequence of verdicts.
 type fakeArchitect struct {
-	plan    Spec
-	planErr error
-	reviews []Spec
-	seen    []ReviewInput
-	usage   provider.ToolUsage
-	costPer float64
+	plan         Spec
+	planErr      error
+	reviews      []Spec
+	seen         []ReviewInput
+	usage        provider.ToolUsage
+	costPer      float64
+	plannedCalls int
 }
 
 func (a *fakeArchitect) Usage() provider.ToolUsage { return a.usage }
 
 func (a *fakeArchitect) Plan(context.Context, PlanInput) (Spec, error) {
+	a.plannedCalls++
 	a.usage.Add(provider.ToolUsage{CostUSD: a.costPer})
 	if a.planErr != nil {
 		return Spec{}, a.planErr
