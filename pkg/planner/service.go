@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -121,11 +122,42 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	// which case the org did not pay for it and must not be billed for it.
 	plannedOnOperatorKey := false
 
-	if s.planner != nil {
+	sessionMode := req.Mode == agent.ModeSession
+
+	// An operator kill-switch. Session mode is opt-in per task, but a mode that
+	// runs long agentic conversations on customer keys needs a way to be turned
+	// off across a fleet without a deploy rollback.
+	if sessionMode && os.Getenv("KIWI_SESSION_MODE") == "off" {
+		return nil, fmt.Errorf("session mode is disabled on this deployment")
+	}
+
+	switch {
+	case sessionMode:
+		// Nothing is decomposed and no model is called here: the Architect plans
+		// inside the daemon, on the customer's key, in their own cloud. The
+		// Control Plane still CHOOSES the models, so they are recorded accurately
+		// even though it no longer calls them.
+		actualModel = req.ArchitectModel
+		if actualModel == "" {
+			actualModel = req.Model
+		}
+		prov = provider.ProviderOf(actualModel)
+		p = NewSessionPlanner()
+
+		// Submitting used to fail here for an org with no provider key, because
+		// the Control Plane had to read that key in order to plan. It no longer
+		// reads one — which would turn a clear, immediate error into a task that
+		// sits in the queue and fails minutes later inside the daemon. A presence
+		// check keeps the old answer without the old access: it asks whether the
+		// row exists, and never decrypts it.
+		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
+			return nil, err
+		}
+	case s.planner != nil:
 		p = s.planner
-	} else if os.Getenv("KIWI_PLANNER") != "llm" {
+	case os.Getenv("KIWI_PLANNER") != "llm":
 		p = NewHeuristicPlanner()
-	} else {
+	default:
 		actualModel = req.PlannerModel
 		if actualModel == "" {
 			actualModel = os.Getenv("KIWI_PLANNER_MODEL")
@@ -220,23 +252,30 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	workers := make([]map[string]interface{}, 0, len(plan.Workers))
 	for _, w := range plan.Workers {
 		workers = append(workers, map[string]interface{}{
-			"id":         w.ID,
-			"task":       w.Task,
-			"file":       w.File,
-			"files":      w.Files,
-			"model":      w.Model,
-			"test_cmd":   workerTestCmd(w, req),
-			"depends_on": w.DependsOn,
+			"id":              w.ID,
+			"task":            w.Task,
+			"file":            w.File,
+			"files":           w.Files,
+			"model":           w.Model,
+			"test_cmd":        workerTestCmd(w, req),
+			"depends_on":      w.DependsOn,
+			"mode":            w.Mode,
+			"architect_model": w.ArchitectModel,
 		})
 	}
 	content := map[string]interface{}{
-		"task":             req.Task,
-		"repo_url":         req.RepoURL,
-		"ref":              req.Ref,
-		"summary":          plan.Summary,
-		"workers":          workers,
+		"task":     req.Task,
+		"repo_url": req.RepoURL,
+		"ref":      req.Ref,
+		"summary":  plan.Summary,
+		"workers":  workers,
+		// In session mode this is the model the Architect will run on. The
+		// Control Plane still selects it, so the record is accurate at submit
+		// even though the call happens later and elsewhere; only the COST arrives
+		// afterwards, reported by the daemon.
 		"planner_model":    actualModel,
 		"planner_provider": prov,
+		"mode":             planMode(req),
 	}
 
 	manifestID, err := contentHash(content)
@@ -316,6 +355,19 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"repo_url":   req.RepoURL,
 				"ref":        req.Ref,
 				"job_id":     jobID,
+			}
+			if w.Mode != "" {
+				spec["mode"] = w.Mode
+			}
+			if w.ArchitectModel != "" {
+				spec["architect_model"] = w.ArchitectModel
+			}
+			// Learnings are resolved here, on the Control Plane, because it owns
+			// the vector index — and consumed in the daemon, because in session
+			// mode that is where planning happens. Without this they would be
+			// searched for, paid for, and thrown away.
+			if sessionMode && len(resolved) > 0 {
+				spec["learnings"] = learningSummaries(resolved)
 			}
 			if err := tx.Create(&store.QueuedTask{
 				ID:      taskID,
@@ -439,4 +491,56 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// planMode reports the execution mode a request will run in, normalised so the
+// manifest never records an empty string for what is really the default.
+func planMode(req PlanRequest) string {
+	if req.Mode == agent.ModeSession {
+		return agent.ModeSession
+	}
+	return agent.ModeFileLoop
+}
+
+// learningSummaries reduces resolved prior jobs to the lines the Architect can
+// actually use. It carries the task and its summary and nothing else: a
+// learning is context, not evidence, and passing identifiers or URLs invites a
+// model to treat it as something to go and look up.
+func learningSummaries(learnings []store.JobLearning) []string {
+	out := make([]string, 0, len(learnings))
+	for _, l := range learnings {
+		switch {
+		case l.Summary != "" && l.Task != "":
+			out = append(out, fmt.Sprintf("%s — %s", l.Task, l.Summary))
+		case l.Summary != "":
+			out = append(out, l.Summary)
+		case l.Task != "":
+			out = append(out, l.Task)
+		}
+	}
+	return out
+}
+
+// requireProviderKey fails a submit when the org has no key for the provider
+// its models need.
+//
+// Presence only: it reads the credential's metadata row and never decrypts it,
+// so session mode keeps the Control Plane out of customer plaintext while still
+// failing fast. The message is phrased exactly as the planning path's was, so
+// the dashboard's error mapper still recognises it and offers Integrations.
+func (s *Service) requireProviderKey(ctx context.Context, orgID, prov string) error {
+	want := provider.CredentialNameFor(prov)
+	creds, err := s.store.ListCredentials(ctx, orgID)
+	if err != nil {
+		// A lookup failure is not evidence of a missing key. Letting the submit
+		// through means the daemon reports the real problem a minute later, which
+		// is better than refusing work over a transient database error.
+		return nil
+	}
+	for _, c := range creds {
+		if c.Name == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
 }

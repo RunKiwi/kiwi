@@ -25,6 +25,13 @@ type PlanRequest struct {
 	Files []string `json:"files,omitempty"`
 	// Model is the worker model (runs on the customer's provider key).
 	Model string `json:"model"`
+	// Mode selects the execution loop: "" or "file_loop" for the single-file
+	// Actor–Critic loop, "session" for the agentic Architect/Implementer loop.
+	Mode string `json:"mode,omitempty"`
+	// ArchitectModel is the session-mode planner/reviewer. It runs on the
+	// customer's key in their own daemon, like the worker — the split is by
+	// capability and price, not by whose credential pays.
+	ArchitectModel string `json:"architect_model,omitempty"`
 	// PlannerModel optionally overrides the model that decomposes and verifies
 	// the task. It runs on the Control Plane's own planning key, so it falls back
 	// to the platform default when empty or unsupported by that key.
@@ -46,13 +53,15 @@ type PlanRequest struct {
 
 // PlannedWorker is one node in the plan DAG.
 type PlannedWorker struct {
-	ID        string   `json:"id"`
-	Task      string   `json:"task"`
-	File      string   `json:"file"`
-	Files     []string `json:"files,omitempty"`
-	Model     string   `json:"model"`
-	TestCmd   string   `json:"test_cmd,omitempty"`
-	DependsOn []string `json:"depends_on,omitempty"`
+	ID             string   `json:"id"`
+	Task           string   `json:"task"`
+	File           string   `json:"file"`
+	Files          []string `json:"files,omitempty"`
+	Model          string   `json:"model"`
+	TestCmd        string   `json:"test_cmd,omitempty"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	Mode           string   `json:"mode,omitempty"`
+	ArchitectModel string   `json:"architect_model,omitempty"`
 }
 
 // Plan is the planner output: a DAG of workers.
