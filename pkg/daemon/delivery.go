@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -90,7 +91,15 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("github api returned status %d", resp.StatusCode)
+		// Include what GitHub actually said. A bare status number sent us
+		// guessing: 422 alone covers a missing base branch, a missing head
+		// branch, an existing PR and an empty diff, which need different fixes.
+		// The body names the field every time, and it is the only place that
+		// does — the user sees this string as the whole explanation of why
+		// their task produced no pull request.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return "", fmt.Errorf("github api returned status %d creating %s->%s in %s/%s: %s",
+			resp.StatusCode, head, base, owner, repo, describeGitHubError(body))
 	}
 
 	var res struct {
@@ -100,6 +109,59 @@ func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, titl
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	return res.HTMLURL, nil
+}
+
+// describeGitHubError renders a GitHub API error body as one readable line.
+//
+// The shape is {"message":"Validation Failed","errors":[{...}]}, where each
+// entry carries either a free-text `message` ("A pull request already exists
+// for o:b.", "No commits between main and main") or a `field`/`code` pair
+// ("base"/"invalid" when the base branch does not exist). Both forms matter, so
+// both are rendered. A body that is not JSON at all is passed through
+// truncated rather than swallowed.
+func describeGitHubError(body []byte) string {
+	var parsed struct {
+		Message string `json:"message"`
+		Errors  []struct {
+			Resource string `json:"resource"`
+			Field    string `json:"field"`
+			Code     string `json:"code"`
+			Message  string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Message == "" {
+		s := strings.TrimSpace(string(body))
+		if s == "" {
+			return "(empty response body)"
+		}
+		if len(s) > 500 {
+			s = s[:500] + "..."
+		}
+		return s
+	}
+
+	parts := make([]string, 0, len(parsed.Errors))
+	for _, e := range parsed.Errors {
+		switch {
+		case e.Message != "":
+			parts = append(parts, e.Message)
+		case e.Field != "":
+			parts = append(parts, fmt.Sprintf("%s is %s", e.Field, orUnknown(e.Code)))
+		case e.Code != "":
+			parts = append(parts, e.Code)
+		}
+	}
+	if len(parts) == 0 {
+		return parsed.Message
+	}
+	return parsed.Message + ": " + strings.Join(parts, "; ")
+}
+
+func orUnknown(code string) string {
+	if code == "" {
+		return "invalid"
+	}
+	return code
 }
 
 // FindOpenPR returns the html_url of the open PR whose head is `head` in
