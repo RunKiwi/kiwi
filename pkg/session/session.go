@@ -173,7 +173,14 @@ type Event struct {
 	InputTokens  int64
 	OutputTokens int64
 	CostUSD      float64
+	// seq orders events within a round for the durable log. It is set by emit,
+	// not by callers, and is unexported because it is a storage detail rather
+	// than something a telemetry consumer should reason about.
+	seq int
 }
+
+// Seq reports the event's position within its round.
+func (e Event) Seq() int { return e.seq }
 
 const detailCap = 2000
 
@@ -202,6 +209,12 @@ type Runner struct {
 	Workspace        Workspace
 	Verify           VerifyFunc
 	Config           Config
+	// Store makes the session durable. Nil runs it entirely in memory, which is
+	// what a test or a single-shot run wants; with one, a crashed daemon's task
+	// resumes from its last finished round rather than starting over.
+	Store Store
+	// SessionID identifies this session in the Store. Required when Store is set.
+	SessionID string
 }
 
 func (r *Runner) logf(format string, a ...any) {
@@ -210,12 +223,51 @@ func (r *Runner) logf(format string, a ...any) {
 	}
 }
 
-func (r *Runner) emit(ev Event) {
-	if r.Config.OnEvent == nil {
+// emit reports one phase and, when the session is durable, queues it for the
+// next checkpoint. Events are buffered rather than written as they happen: they
+// have to land in the same transaction as the checkpoint they belong to, or a
+// resumed session's history has a hole exactly where the crash was.
+func (r *Runner) emit(st *state, ev Event) {
+	ev.Detail = tail(ev.Detail, detailCap)
+	if r.Store != nil {
+		ev.seq = len(st.pending)
+		st.pending = append(st.pending, ev)
+	}
+	if r.Config.OnEvent != nil {
+		r.Config.OnEvent(ev)
+	}
+}
+
+// save writes a checkpoint together with everything emitted since the last one.
+//
+// A failed save is logged and swallowed. The session is the product; durability
+// is insurance, and dropping a run because the Control Plane was briefly
+// unreachable would trade a small risk of repeating a round for a certainty of
+// losing one.
+func (r *Runner) save(ctx context.Context, st *state, nextRound, attempts int) {
+	if r.Store == nil || r.SessionID == "" {
 		return
 	}
-	ev.Detail = tail(ev.Detail, detailCap)
-	r.Config.OnEvent(ev)
+	events := st.pending
+	st.pending = nil
+	if err := r.Store.Save(ctx, r.SessionID, st.checkpoint(st.baseSHA, nextRound, attempts), events); err != nil {
+		r.logf("[session] could not checkpoint round %d: %v\n", nextRound, err)
+		// Put them back so the next checkpoint carries them rather than losing
+		// the history of a round that did happen.
+		st.pending = append(events, st.pending...)
+	}
+}
+
+// finish records the terminal status, so a task leased again starts a new
+// session instead of resuming a concluded one.
+func (r *Runner) finish(ctx context.Context, st *state, success bool) {
+	if r.Store == nil || r.SessionID == "" {
+		return
+	}
+	r.save(ctx, st, st.round, 0)
+	if err := r.Store.Finish(ctx, r.SessionID, success); err != nil {
+		r.logf("[session] could not record the session as finished: %v\n", err)
+	}
 }
 
 // state is the session's live position. It is deliberately a value that could
@@ -245,6 +297,12 @@ type state struct {
 	// specSeen records spec fingerprints, so a reviewer asking for the same
 	// thing twice can be stopped.
 	specSeen map[string]int
+	// baseSHA is where the session started. Fixed for its lifetime.
+	baseSHA string
+	// pending holds events emitted since the last checkpoint.
+	pending []Event
+	// attempts counts starts of the current round, carried across a resume.
+	attempts int
 }
 
 // Run drives the session to a pull-requestable state or to a reasoned stop.
@@ -273,6 +331,53 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	if st.headSHA, err = r.Workspace.HeadSHA(ctx); err != nil {
 		return Result{}, fmt.Errorf("session: read head: %w", err)
 	}
+	st.baseSHA = st.headSHA
+
+	// Resume, if this task has been leased before and got somewhere.
+	//
+	// The in-progress round is discarded rather than continued: the worktree is
+	// reset to the last committed round and that round re-runs from its spec.
+	// Because the Implementer starts every round fresh anyway, this is not a
+	// special recovery path — it is the ordinary path entered later — and it
+	// costs at most one round rather than requiring a half-written provider
+	// transcript with an outstanding tool call to be persisted and replayed.
+	resumeFrom := 0
+	if r.Store != nil && r.SessionID != "" {
+		cp, lerr := r.Store.Load(ctx, r.SessionID)
+		if lerr != nil {
+			// Refusing to run because the checkpoint could not be read would turn
+			// a Control Plane blip into a failed task. Starting over is the safe
+			// answer: at worst the work is repeated.
+			r.logf("[session] could not load the checkpoint, starting from the beginning: %v\n", lerr)
+		} else if cp != nil && cp.Round > 0 {
+			if cp.Attempts >= maxRoundAttempts {
+				detail := fmt.Sprintf("stopped: round %d has already been started %d times without finishing, so it is being treated as unrunnable rather than retried further",
+					cp.Round, cp.Attempts)
+				r.logf("[session] %s\n", detail)
+				st.restore(cp)
+				st.round = cp.Round
+				r.finish(ctx, st, false)
+				return r.result(st, false, detail), nil
+			}
+			st.restore(cp)
+			st.baseSHA = cp.BaseSHA
+			resumeFrom = cp.Round
+			st.attempts = cp.Attempts
+			r.logf("[session] resuming at round %d (attempt %d) from %s\n", resumeFrom, st.attempts, shortSHA(cp.HeadSHA))
+			if cp.HeadSHA != "" {
+				if rerr := r.Workspace.Reset(ctx, cp.HeadSHA); rerr != nil {
+					return Result{}, fmt.Errorf("session: could not discard the interrupted round: %w", rerr)
+				}
+			}
+		}
+	}
+
+	// Baseline and planning happen once per session. A resumed run already has
+	// both — the Architect's spec is in the checkpoint — and re-planning would
+	// pay for a frontier-model call to reproduce an answer already written down.
+	if resumeFrom > 0 {
+		return r.rounds(ctx, task, st, cfg, resumeFrom)
+	}
 
 	// Baseline. As in the single-file loop this establishes what the change must
 	// not regress, and it is a guard rather than the objective: a green suite is
@@ -280,10 +385,10 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	start := time.Now()
 	baseOut, basePassed, err := r.Verify(ctx)
 	if err != nil {
-		r.emit(Event{Phase: "verify", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+		r.emit(st, Event{Phase: "verify", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
 		return Result{}, fmt.Errorf("session: baseline verification failed to run: %w", err)
 	}
-	r.emit(Event{Phase: "verify", Outcome: passFail(basePassed), Detail: baseOut, DurationMs: ms(start)})
+	r.emit(st, Event{Phase: "verify", Outcome: passFail(basePassed), Detail: baseOut, DurationMs: ms(start)})
 	st.lastVerify, st.verifyPassed = baseOut, basePassed
 	if basePassed {
 		r.logf("[session] baseline passes; the change must land and keep it passing\n")
@@ -306,30 +411,57 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	})
 	r.trackArchitect(st)
 	if err != nil {
-		r.emit(Event{Phase: "plan", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+		r.emit(st, Event{Phase: "plan", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
 		return r.result(st, false, fmt.Sprintf("planning failed: %v", err)), err
 	}
-	r.emit(Event{Phase: "plan", Outcome: "proposed", Detail: spec.Objective, DurationMs: ms(start), CostUSD: st.architect.CostUSD})
+	r.emit(st, Event{Phase: "plan", Outcome: "proposed", Detail: spec.Objective, DurationMs: ms(start), CostUSD: st.architect.CostUSD})
 	if spec.Verdict == VerdictAbandon {
 		r.logf("[session] the architect declined the task: %s\n", spec.Rationale)
 		return r.result(st, false, "the task was not attempted: "+spec.Rationale), nil
 	}
 	st.spec = spec
 	st.specSeen[spec.fingerprint()]++
+	// Zero, not one: the round loop increments before it runs, so a checkpoint
+	// written here records "round 1, not yet attempted".
+	st.attempts = 0
+	r.save(ctx, st, 1, 0)
 
-	for st.round = 1; st.round <= cfg.MaxRounds; st.round++ {
+	return r.rounds(ctx, task, st, cfg, 1)
+}
+
+// rounds drives the Implementer/review cycle from startRound onwards. It is
+// separate from Run so a resumed session can enter it directly, without
+// re-running the baseline or paying for a plan it already has.
+func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, startRound int) (Result, error) {
+	var start time.Time
+	for st.round = startRound; st.round <= cfg.MaxRounds; st.round++ {
 		if err := ctx.Err(); err != nil {
 			return r.result(st, false, deadlineDetail(err, st.round)), err
 		}
 		if st.total().CostUSD >= cfg.SessionBudgetUSD {
 			detail := fmt.Sprintf("stopped after %d round(s): the session budget of $%.2f was reached", st.round-1, cfg.SessionBudgetUSD)
 			r.logf("[session] halted: %s\n", detail)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.finish(ctx, st, false)
 			return r.result(st, false, detail), nil
 		}
 
-		r.emit(Event{Round: st.round, Phase: "round_start", Outcome: "ok", Detail: st.spec.Objective})
+		// Record the attempt BEFORE the round runs. A checkpoint written only on
+		// success cannot count attempts at all: a round that takes the daemon
+		// down never gets to write one, so every retry would look like the first.
+		st.attempts++
+		if st.attempts > maxRoundAttempts {
+			detail := fmt.Sprintf("stopped: round %d has been started %d times without finishing, so it is being treated as unrunnable rather than retried further",
+				st.round, st.attempts-1)
+			r.logf("[session] %s\n", detail)
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.finish(ctx, st, false)
+			return r.result(st, false, detail), nil
+		}
+
+		r.emit(st, Event{Round: st.round, Phase: "round_start", Outcome: "ok", Detail: st.spec.Objective})
 		r.logf("[session] round %d: %s\n", st.round, st.spec.Objective)
+		r.save(ctx, st, st.round, st.attempts)
 
 		note, err := r.runRound(ctx, task, st)
 		if err != nil {
@@ -347,10 +479,10 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		start = time.Now()
 		out, passed, verr := r.Verify(ctx)
 		if verr != nil {
-			r.emit(Event{Round: st.round, Phase: "verify", Outcome: "error", Detail: verr.Error(), DurationMs: ms(start)})
+			r.emit(st, Event{Round: st.round, Phase: "verify", Outcome: "error", Detail: verr.Error(), DurationMs: ms(start)})
 			return r.result(st, false, fmt.Sprintf("verification could not run: %v", verr)), verr
 		}
-		r.emit(Event{Round: st.round, Phase: "verify", Outcome: passFail(passed), Detail: out, DurationMs: ms(start)})
+		r.emit(st, Event{Round: st.round, Phase: "verify", Outcome: passFail(passed), Detail: out, DurationMs: ms(start)})
 		st.lastVerify, st.verifyPassed = out, passed
 
 		diff, err := r.Workspace.Diff(ctx)
@@ -387,10 +519,10 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		})
 		r.trackArchitect(st)
 		if err != nil {
-			r.emit(Event{Round: st.round, Phase: "review", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+			r.emit(st, Event{Round: st.round, Phase: "review", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
 			return r.result(st, false, fmt.Sprintf("review failed: %v", err)), err
 		}
-		r.emit(Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start)})
+		r.emit(st, Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start)})
 
 		st.history = append(st.history, fmt.Sprintf("- round %d: asked for %q; verification %s; reviewer said %s — %s",
 			st.round, firstLine(st.spec.Objective), passFail(passed), review.Verdict, firstLine(review.Rationale)))
@@ -398,7 +530,8 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		switch review.Verdict {
 		case VerdictApprove:
 			r.logf("[session] round %d approved\n", st.round)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "approve", Detail: review.Rationale})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "approve", Detail: review.Rationale})
+			r.finish(ctx, st, true)
 			res := r.result(st, true, "")
 			res.Summary = review.Summary
 			if res.Summary == "" {
@@ -408,7 +541,8 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		case VerdictAbandon:
 			detail := "the reviewer stopped the task: " + review.Rationale
 			r.logf("[session] %s\n", detail)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "abandon", Detail: review.Rationale})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "abandon", Detail: review.Rationale})
+			r.finish(ctx, st, false)
 			return r.result(st, false, detail), nil
 		}
 
@@ -419,7 +553,8 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 			detail := fmt.Sprintf("stopped after %d rounds: the reviewer rejected every one and the implementer could not satisfy it — last reason: %s",
 				st.round, firstLine(review.Rationale))
 			r.logf("[session] halted: %s\n", detail)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.finish(ctx, st, false)
 			return r.result(st, false, detail), nil
 		}
 
@@ -432,7 +567,8 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 			detail := fmt.Sprintf("stopped after %d rounds: the reviewer asked for the same change twice, so the session is looping — %s",
 				st.round, firstLine(review.Rationale))
 			r.logf("[session] halted: %s\n", detail)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.finish(ctx, st, false)
 			return r.result(st, false, detail), nil
 		}
 
@@ -443,15 +579,22 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		if stalled && st.round < cfg.MaxRounds {
 			detail := fmt.Sprintf("stopped after %d rounds: the last two ended in exactly the same state, so the session is not making progress", st.round)
 			r.logf("[session] halted: %s\n", detail)
-			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.emit(st, Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			r.finish(ctx, st, false)
 			return r.result(st, false, detail), nil
 		}
 
+		// The round finished and produced a reviewed result, so the next one
+		// starts with a clean attempt count: whatever went wrong was the work,
+		// not the round being unrunnable.
 		st.spec = review
+		st.attempts = 0
+		r.save(ctx, st, st.round+1, 0)
 	}
 
 	detail := fmt.Sprintf("stopped after the maximum of %d rounds without the reviewer approving", cfg.MaxRounds)
-	r.emit(Event{Round: cfg.MaxRounds, Phase: "session_end", Outcome: "halted", Detail: detail})
+	r.emit(st, Event{Round: cfg.MaxRounds, Phase: "session_end", Outcome: "halted", Detail: detail})
+	r.finish(ctx, st, false)
 	return r.result(st, false, detail), nil
 }
 
@@ -523,10 +666,10 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			start := time.Now()
 			out, err := r.Tools.Call(roundCtx, call)
 			if err != nil {
-				r.emit(Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name, Detail: err.Error(), DurationMs: ms(start)})
+				r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name, Detail: err.Error(), DurationMs: ms(start)})
 				return "", err
 			}
-			r.emit(Event{Round: st.round, Phase: "tool", Outcome: okErr(!out.IsError), Tool: call.Name,
+			r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: okErr(!out.IsError), Tool: call.Name,
 				Detail: out.Content, DurationMs: ms(start)})
 
 			if out.IsError {
@@ -705,6 +848,14 @@ func okErr(ok bool) string {
 		return "ok"
 	}
 	return "error"
+}
+
+// shortSHA abbreviates a commit for a log line.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 func firstLine(s string) string {
