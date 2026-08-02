@@ -80,7 +80,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		// asked for a mode this model cannot serve, and silently running a
 		// different loop would make the result impossible to interpret.
 		return taskResult{detail: fmt.Sprintf(
-			"model %q cannot use tools in this build, which session mode requires — choose an Anthropic model, or run this task in file_loop mode",
+			"model %q cannot use tools, which session mode requires — choose a model that can, or run this task in file_loop mode",
 			spec.Model)}
 	}
 
