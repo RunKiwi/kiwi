@@ -93,7 +93,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | ├ Crash recovery — round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
 | ├ Cost — prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ Phase 3 |
 | ├ Planner collapse — one worker per session job, **no LLM call and no credential decryption on the Control Plane** (`KIWI_SESSION_MODE=off` disables) | ✅ Phase 4 |
-| └ Provider parity — tool-calling on Anthropic, Gemini and OpenAI, so session mode is not one vendor's feature | ✅ Phase 5 |
+| └ Provider parity — tool-calling on Anthropic, Gemini and OpenAI, so session mode is not one vendor's feature | ✅ Phase 5 — Gemini additionally echoes the `thoughtSignature` it requires back on replay; without it the second tool turn of every conversation is rejected |
 
 ## Building
 
