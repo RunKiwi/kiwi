@@ -16,7 +16,10 @@ import (
 // outage. Grepping the tree keeps every copy of the URL honest, including the
 // ones in opsctl and the docs that drifted the same way.
 func TestNoReferencesToTheDeadDomain(t *testing.T) {
-	out, err := exec.Command("git", "grep", "-n", "api.runkiwi.com", "--", "..").CombinedOutput()
+	// Exclude this file: it names the dead domain in its own comments and in the
+	// grep pattern, so an unfiltered search always matches itself and the test
+	// can never pass. CI runs only ./pkg/..., which is why that went unnoticed.
+	out, err := exec.Command("git", "grep", "-n", "api.runkiwi.com", "--", "..", ":!*api_url_test.go").CombinedOutput()
 	if err != nil && len(out) == 0 {
 		// git grep exits non-zero with no output when there are no matches,
 		// which is the passing case.

@@ -53,6 +53,20 @@ func sessionAllowsTestCredentials() bool {
 	return v
 }
 
+// sessionLimits is the per-task round and spend cap for session mode.
+//
+// It exists as a seam because the spend cap used to read MaxBudgetUSD, the
+// file_loop field. That default is $0.50, a session costs $2-4, and the two
+// were close enough to look plausible and far enough apart to halt every
+// session on the budget rail in round one. Reading the wrong field is the
+// regression worth a test, so the read has a name.
+//
+// Zero is passed through rather than defaulted here; session.Config applies its
+// own defaults, and duplicating them would give two places to disagree.
+func (d *Daemon) sessionLimits() (rounds int, budgetUSD float64) {
+	return d.config.MaxRounds, d.config.SessionBudgetUSD
+}
+
 // executeSession runs a task through the agentic Architect/Implementer loop.
 //
 // The trust boundary is unchanged from the single-file path and slightly
@@ -142,6 +156,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		}
 	}
 
+	rounds, budget := d.sessionLimits()
+
 	runner := &session.Runner{
 		Store:            store,
 		SessionID:        sessionIDFor(spec.ID),
@@ -152,8 +168,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		Workspace:        base,
 		Verify:           deps.verify,
 		Config: session.Config{
-			MaxRounds:        d.config.MaxRounds,
-			SessionBudgetUSD: d.config.MaxBudgetUSD,
+			MaxRounds:        rounds,
+			SessionBudgetUSD: budget,
 			SessionDeadline:  sessionDeadlineFor(spec),
 			Log:              func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
 			OnEvent: func(e session.Event) {
