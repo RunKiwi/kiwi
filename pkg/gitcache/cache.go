@@ -120,21 +120,38 @@ func (c *Cache) getRepoLock(barePath string) *sync.Mutex {
 
 // runGit executes a git command and returns its output.
 func runGit(ctx context.Context, dir string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	return runGitAuth(ctx, dir, "", "", args...)
+}
+
+// runGitAuth is runGit with a credential for the remote. The token is passed
+// through `git -c` (see authArgs) and scrubbed from any error, since git echoes
+// the failing command back and that command contains the header.
+//
+// repoURL is passed explicitly rather than sniffed from args: `fetch origin`
+// names no URL — the remote lives in the bare repo's config — and a fetch
+// against a private repo needs the header exactly as much as the clone does.
+func runGitAuth(ctx context.Context, dir, repoURL, token string, args ...string) error {
+	full := args
+	if pre := authArgs(repoURL, token); len(pre) > 0 {
+		full = append(append([]string{}, pre...), args...)
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s failed: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
+		return fmt.Errorf("git %s failed: %w (stderr: %s)",
+			scrub(strings.Join(args, " "), token), err, scrub(stderr.String(), token))
 	}
 	return nil
 }
 
 // GetWorktree ensures the repo is cached and creates a new worktree at the target path.
 // `ref` can be a branch, tag, or commit hash.
-func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath string) error {
+func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath string, opts ...Option) error {
+	tok := apply(opts).token
 	barePath := c.repoPath(repoURL)
 	mu := c.getRepoLock(barePath)
 	mu.Lock()
@@ -144,7 +161,7 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 	if _, err := os.Stat(barePath); os.IsNotExist(err) {
 		// A new repo is about to be cloned. Make room first so the bound holds.
 		c.evictToFit(barePath)
-		if err := runGit(ctx, "", "clone", "--bare", repoURL, barePath); err != nil {
+		if err := runGitAuth(ctx, "", repoURL, tok, "clone", "--bare", repoURL, barePath); err != nil {
 			return fmt.Errorf("failed to clone bare repo: %w", err)
 		}
 	} else if err != nil {
@@ -165,7 +182,7 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 	}
 
 	// If it fails, fetch the specific ref and try again
-	if err := runGit(ctx, barePath, "fetch", "origin", ref); err != nil {
+	if err := runGitAuth(ctx, barePath, repoURL, tok, "fetch", "origin", ref); err != nil {
 		return fmt.Errorf("failed to fetch ref %s: %w", ref, err)
 	}
 
@@ -187,11 +204,12 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 // it means the later worker sees their edits, and its commit fast-forwards the
 // branch rather than forking a disconnected diff. The first worker (no branch
 // yet) falls back to baseRef. jobBranch == "" behaves exactly like GetWorktree.
-func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch, worktreePath string) error {
+func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch, worktreePath string, opts ...Option) error {
 	if jobBranch == "" {
-		return c.GetWorktree(ctx, repoURL, baseRef, worktreePath)
+		return c.GetWorktree(ctx, repoURL, baseRef, worktreePath, opts...)
 	}
 
+	tok := apply(opts).token
 	barePath := c.repoPath(repoURL)
 	mu := c.getRepoLock(barePath)
 	mu.Lock()
@@ -199,7 +217,7 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 
 	if _, err := os.Stat(barePath); os.IsNotExist(err) {
 		c.evictToFit(barePath)
-		if err := runGit(ctx, "", "clone", "--bare", repoURL, barePath); err != nil {
+		if err := runGitAuth(ctx, "", repoURL, tok, "clone", "--bare", repoURL, barePath); err != nil {
 			return fmt.Errorf("failed to clone bare repo: %w", err)
 		}
 	} else if err != nil {
@@ -211,7 +229,7 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 
 	// Prefer the shared job branch: if it exists on the remote, base the worktree
 	// on its tip (which carries earlier workers' commits).
-	if err := runGit(ctx, barePath, "fetch", "origin", jobBranch); err == nil {
+	if err := runGitAuth(ctx, barePath, repoURL, tok, "fetch", "origin", jobBranch); err == nil {
 		if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err == nil {
 			c.recordAccess(barePath, +1)
 			return nil
@@ -225,7 +243,7 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 		c.recordAccess(barePath, +1)
 		return nil
 	}
-	if err := runGit(ctx, barePath, "fetch", "origin", baseRef); err != nil {
+	if err := runGitAuth(ctx, barePath, repoURL, tok, "fetch", "origin", baseRef); err != nil {
 		return fmt.Errorf("failed to fetch base ref %s: %w", baseRef, err)
 	}
 	if err := runGit(ctx, barePath, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"); err != nil {
