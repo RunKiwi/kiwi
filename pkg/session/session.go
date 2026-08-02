@@ -173,13 +173,13 @@ type Event struct {
 	InputTokens  int64
 	OutputTokens int64
 	CostUSD      float64
-	// seq orders events within a round for the durable log. It is set by emit,
-	// not by callers, and is unexported because it is a storage detail rather
-	// than something a telemetry consumer should reason about.
+	// seq orders events across the whole session for the durable log. It is set
+	// by emit, not by callers, and is unexported because it is a storage detail
+	// rather than something a telemetry consumer should reason about.
 	seq int
 }
 
-// Seq reports the event's position within its round.
+// Seq reports the event's position in the session's history.
 func (e Event) Seq() int { return e.seq }
 
 const detailCap = 2000
@@ -230,7 +230,8 @@ func (r *Runner) logf(format string, a ...any) {
 func (r *Runner) emit(st *state, ev Event) {
 	ev.Detail = tail(ev.Detail, detailCap)
 	if r.Store != nil {
-		ev.seq = len(st.pending)
+		ev.seq = st.seq
+		st.seq++
 		st.pending = append(st.pending, ev)
 	}
 	if r.Config.OnEvent != nil {
@@ -301,6 +302,20 @@ type state struct {
 	baseSHA string
 	// pending holds events emitted since the last checkpoint.
 	pending []Event
+	// seq numbers events for the durable log. It counts across the whole
+	// session, not per round and not per checkpoint.
+	//
+	// Per-checkpoint numbering silently lost events: a round writes two
+	// checkpoints (one when it starts, one when it ends), so the counter reset
+	// mid-round and the first event after the reset collided with the first
+	// event before it. The (session, round, seq) index resolves a collision by
+	// ignoring the newcomer, so the loss was invisible.
+	//
+	// Session-wide numbering also survives a resume, which per-round numbering
+	// could not: a re-run round would have restarted at zero and collided with
+	// the crashed attempt's events for that same round, dropping the retry's
+	// history instead of appending it. Hence Checkpoint.Seq.
+	seq int
 	// attempts counts starts of the current round, carried across a resume.
 	attempts int
 }
