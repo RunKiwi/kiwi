@@ -258,3 +258,69 @@ func TestSessionRunsWithoutAStore(t *testing.T) {
 		t.Fatalf("expected success, got %+v err=%v", res, err)
 	}
 }
+
+// Event sequence numbers must not collide, because the (session, round, seq)
+// index resolves a collision by ignoring the newcomer — so a clash does not
+// error, it silently deletes history.
+//
+// A round writes two checkpoints, one when it starts and one when it ends.
+// Numbering per checkpoint reset the counter between them, so the first event
+// of the second batch collided with the first event of the first.
+func TestEventSequenceNumbersNeverCollide(t *testing.T) {
+	arch := &fakeArchitect{
+		plan: Spec{Verdict: VerdictProceed, Objective: "round one"},
+		reviews: []Spec{
+			{Verdict: VerdictRevise, Objective: "round two"},
+			{Verdict: VerdictApprove, Summary: "ok"},
+		},
+	}
+	ws := &fakeWorkspace{tree: []string{"a.go"}, diff: "+x", head: "base"}
+	store := &memStore{}
+
+	r := durableRunner(t, arch, ws, store)
+	r.Config.MaxRounds = 3
+	if _, err := r.Run(context.Background(), Task{Description: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	if store.saves < 3 {
+		t.Fatalf("expected several checkpoints, got %d", store.saves)
+	}
+
+	seen := map[[2]int]string{}
+	for _, e := range store.events {
+		key := [2]int{e.Round, e.Seq()}
+		if prev, dup := seen[key]; dup {
+			t.Fatalf("round %d seq %d used twice (%q then %q) — the second would be silently dropped",
+				e.Round, e.Seq(), prev, e.Phase)
+		}
+		seen[key] = e.Phase
+	}
+	if len(seen) != len(store.events) {
+		t.Fatalf("collision: %d events, %d distinct keys", len(store.events), len(seen))
+	}
+}
+
+// A resumed round re-emits its events. Numbering that restarted per round would
+// collide with the crashed attempt's rows and drop the retry's history, so the
+// counter is carried in the checkpoint.
+func TestResumedSessionKeepsNumberingUpwards(t *testing.T) {
+	arch := &fakeArchitect{reviews: []Spec{{Verdict: VerdictApprove, Summary: "ok"}}}
+	ws := &fakeWorkspace{tree: []string{"a.go"}, diff: "+x", head: "round1"}
+	store := &memStore{cp: &Checkpoint{
+		Round: 2, Seq: 17,
+		Spec:    Spec{Verdict: VerdictRevise, Objective: "continue"},
+		BaseSHA: "base", HeadSHA: "round1",
+	}}
+
+	if _, err := durableRunner(t, arch, ws, store).Run(context.Background(), Task{Description: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range store.events {
+		if e.Seq() < 17 {
+			t.Fatalf("resumed session reused seq %d, which the crashed attempt may already hold", e.Seq())
+		}
+	}
+	if store.cp.Seq <= 17 {
+		t.Errorf("the checkpoint must carry the advanced counter, got %d", store.cp.Seq)
+	}
+}

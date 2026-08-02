@@ -27,14 +27,18 @@ type Checkpoint struct {
 	HeadSHA  string `json:"head_sha"`
 	// Architect and Implementer spend are kept apart so a resumed session
 	// reports the same split an uninterrupted one does.
-	Architect    provider.ToolUsage `json:"architect_usage"`
-	Implementer  provider.ToolUsage `json:"implementer_usage"`
-	Rejections   int                `json:"rejections"`
-	History      []string           `json:"history"`
-	LastVerify   string             `json:"last_verify"`
-	VerifyPassed bool               `json:"verify_passed"`
-	Progress     map[string]int     `json:"progress"`
-	SpecSeen     map[string]int     `json:"spec_seen"`
+	Architect   provider.ToolUsage `json:"architect_usage"`
+	Implementer provider.ToolUsage `json:"implementer_usage"`
+	Rejections  int                `json:"rejections"`
+	// Seq is the next event sequence number. It is carried so a resumed session
+	// keeps numbering upwards instead of colliding with the events its crashed
+	// attempt already wrote.
+	Seq          int            `json:"seq"`
+	History      []string       `json:"history"`
+	LastVerify   string         `json:"last_verify"`
+	VerifyPassed bool           `json:"verify_passed"`
+	Progress     map[string]int `json:"progress"`
+	SpecSeen     map[string]int `json:"spec_seen"`
 }
 
 // Store persists a session so it survives the process running it.
@@ -74,6 +78,7 @@ func (st *state) checkpoint(baseSHA string, nextRound, attempts int) Checkpoint 
 		Architect:    st.architect,
 		Implementer:  st.implementer,
 		Rejections:   st.rejections,
+		Seq:          st.seq,
 		History:      st.history,
 		LastVerify:   st.lastVerify,
 		VerifyPassed: st.verifyPassed,
@@ -89,6 +94,7 @@ func (st *state) restore(cp *Checkpoint) {
 	st.architect = cp.Architect
 	st.implementer = cp.Implementer
 	st.rejections = cp.Rejections
+	st.seq = cp.Seq
 	st.history = cp.History
 	st.lastVerify = cp.LastVerify
 	st.verifyPassed = cp.VerifyPassed
