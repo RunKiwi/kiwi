@@ -61,6 +61,14 @@ type Config struct {
 	// MaxBudgetUSD caps provider spend per task on the customer's key; 0 uses
 	// the loop default. A runaway loop on a live key is a real cost risk.
 	MaxBudgetUSD float64
+	// SessionBudgetUSD caps provider spend per task in session mode; 0 uses the
+	// session default. It is deliberately NOT MaxBudgetUSD: the two loops have
+	// different economics. file_loop is a handful of single-file model calls and
+	// lives comfortably under a dollar, while a session is a task-long Architect
+	// plus an agentic Implementer over several rounds — the design puts it at
+	// $2-4. Sharing one number meant the file_loop default of $0.50 halted every
+	// session on the budget rail around the end of round one.
+	SessionBudgetUSD float64
 	// RenewInterval configures how often the daemon extends the lease of a running task.
 	RenewInterval time.Duration
 	// ProgressInterval is how often partial telemetry is flushed to the Control

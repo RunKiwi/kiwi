@@ -166,10 +166,10 @@ The **worker model is yours to choose, not the planner's**: `-model` (and the da
 ./kiwidaemon -api-url https://api.runkiwi.dev \
     -key-path ~/.kiwi/daemon.key -cache-dir /tmp/kiwi-cache \
     -poll-interval 5s -max-cached-repos 20 -max-steps 6 -max-budget 0.50 \
-    -join-token "$KIWI_JOIN_TOKEN"
+    -session-budget 5.00 -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Actor–Critic loop (`-max-steps` iterations / `-max-budget` USD per task cap the loop). The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound. For the shared Free tier, pass `-sandbox-runtime runsc` (or `KIWI_SANDBOX_RUNTIME=runsc`) so the test command runs under gVisor; the wall-clock cap per task comes from the org's `TaskTimeoutSeconds` limit.
+On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Actor–Critic loop (`-max-steps` iterations / `-max-budget` USD per task cap the loop). Session-mode tasks are capped separately by `-session-budget` (or `KIWI_SESSION_BUDGET_USD`), default `5.00` — the two loops have different economics, and a session costs several times what a file_loop task does, so `-max-budget` deliberately does not apply to it. The env fallback is what makes the setting reachable on the shared Free tier, where the provisioner launches per-org daemons with a fixed argv. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound. For the shared Free tier, pass `-sandbox-runtime runsc` (or `KIWI_SANDBOX_RUNTIME=runsc`) so the test command runs under gVisor; the wall-clock cap per task comes from the org's `TaskTimeoutSeconds` limit.
 
 ### 4. Dashboard
 
