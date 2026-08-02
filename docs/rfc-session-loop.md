@@ -728,8 +728,13 @@ shared context survives; move plan summary and planner model/provider in
 and the `JobLearning` summary from daemon reports; add the submit-time credential
 presence check. Dashboard shows rounds instead of workers.
 
-**Phase 5 — optional.** Provider parity (Gemini, OpenAI tool-calling), then
-disjoint-milestone parallelism if it is still wanted, which it may not be.
+**Phase 5 — provider parity.** Gemini and OpenAI tool-calling, so session mode
+is available to every org rather than to Anthropic customers only. *As built*,
+this stopped being optional: `defaultProvider` routes a task's model to whichever
+provider owns it, so a single-provider seam would have made the mode fail for
+orgs whose key is the "wrong" one — a per-tenant capability gap, not a
+nice-to-have. Disjoint-milestone parallelism remains deferred, and may never be
+wanted.
 
 ---
 
