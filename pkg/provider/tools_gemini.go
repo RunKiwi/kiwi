@@ -38,6 +38,21 @@ type geminiToolPart struct {
 	Text             string                  `json:"text,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+	// ThoughtSignature is an opaque token Gemini attaches to a functionCall part
+	// and requires back, unchanged, when that turn is replayed in `contents`.
+	// Omit it and the next request fails with 400 INVALID_ARGUMENT:
+	//
+	//   Function call is missing a thought_signature in functionCall parts.
+	//
+	// That is fatal rather than degrading: the second tool turn of every
+	// conversation is rejected, so no Gemini session gets past its first tool
+	// call. It only appears against the live API — a mock echoes whatever it is
+	// given — which is why the tool loop passed its tests and failed in prod.
+	//
+	// Nothing here reads it. It is decoded and re-encoded by the same struct, so
+	// declaring the field is the whole fix: Send appends the model's parts to
+	// c.contents verbatim, and the signature rides along.
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
 type geminiToolContent struct {
