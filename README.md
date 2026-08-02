@@ -87,6 +87,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | Billing — Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
 | Managed-**dedicated** (Pro) — per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
 | Egress isolation — sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
+| Session loop — a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | 📄 Proposal only — [docs/rfc-session-loop.md](docs/rfc-session-loop.md); nothing built, `pkg/loop` is unchanged |
 
 ## Building
 
