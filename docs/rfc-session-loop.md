@@ -191,13 +191,19 @@ Four knock-on effects follow, and the first is a silent feature loss:
 2. **The manifest becomes a submission record, not a plan.** It is
    content-addressed (`contentHash`) and immutable, and `ver_hook.go:256-258`
    reads `summary`, `planner_model`, and `planner_provider` out of
-   `manifest.Content` to build the execution record. In session mode the summary
-   does not exist at submit time and cannot be patched in later without changing
-   the manifest's hash. The manifest therefore keeps only submission facts (task,
-   repo, ref, reference mode, chosen models, `mode: session`), and the execution
-   record sources the plan summary and planner model/provider from the round-0
-   `spec` event in the session log. That is a `pkg/ver` hook change, not only a
-   planner change.
+   `manifest.Content` to build the execution record. In session mode the
+   per-task summary does not exist at submit time and cannot be patched in later
+   without changing the manifest's hash.
+
+   *As built*, this landed more simply than the RFC proposed, and `ver_hook`
+   needed no change at all. `planner_model` and `planner_provider` stay accurate
+   because the Control Plane still **chooses** the Architect's model even though
+   it no longer calls it — so the manifest records the model that will plan, and
+   only the *cost* arrives later. The manifest's `summary` becomes a fixed
+   description of the mode rather than of the task, and the task's real summary —
+   the Architect's own account of the change — travels in the result detail and
+   is backfilled onto the `JobLearning` row (see 4). The manifest also gains a
+   `mode` field so a record states which loop produced it.
 
 3. **Planner spend accounting inverts.** `Job.PlannerCostUSD`, `PlannerTokensIn`,
    and `PlannerTokensOut` are written at submit today. In session mode they are
@@ -210,18 +216,25 @@ Four knock-on effects follow, and the first is a silent feature loss:
 4. **`plan.Summary` is unavailable at submit.** It feeds `SubmitResult.Summary`
    (rendered by the dashboard) and the `JobLearning` row. Semantic search is
    unaffected — the embedding is already computed from `req.Task`, not the
-   summary (`service.go:108`) — and `UpsertJobLearning` is keyed on `job_id` and
-   updates in place by design (`service.go:379`), so the daemon backfills the
-   real summary once the Architect writes it. The API returns a placeholder until
-   then.
+   summary (`service.go:108`).
+
+   *As built*, the backfill happens in `CompleteTask` rather than through a
+   separate daemon call: when a task succeeds, its result detail (which in
+   session mode is the Architect's summary) fills the learning row's summary if
+   it is still empty. `COALESCE(NULLIF(...))` keeps it from overwriting a real
+   plan summary on the file_loop path.
 
 **One regression that needs a deliberate decision.** Today an org with no
 provider key fails *at submit*, with a precise message the dashboard maps to an
 Integrations link — because the CP must read the key in order to plan. In session
 mode nothing reads a key at submit, so that org receives a 202, a queued task,
-and a failure minutes later inside the daemon. The fix is cheap and should ship
-with the mode rather than after it: a credential **presence** check at submit
-(the row exists; no decryption, no plaintext) that raises the same error string.
+and a failure minutes later inside the daemon.
+
+*As built*, the presence check shipped with the mode: `requireProviderKey` reads
+the credential's metadata row through `ListCredentials` and never decrypts it,
+raising the same error string the planning path used. A lookup *failure* is
+deliberately not treated as a missing key — a transient database error should
+not refuse work the daemon could still do.
 
 ---
 

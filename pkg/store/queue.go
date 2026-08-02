@@ -390,6 +390,16 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (boo
 			if c.ResultURL != "" {
 				learningUpdates["pr_url"] = c.ResultURL
 			}
+			// Backfill the summary for jobs whose plan did not produce one at
+			// submit time. A session-mode job has no plan summary then — planning
+			// happens later, in the daemon — so the row was indexed with an empty
+			// one and would stay that way, making it useless as future context
+			// even though its embedding (computed from the task text) still
+			// matched. The daemon's detail on a successful task is the Architect's
+			// own account of the change, which is exactly what a summary should be.
+			if c.FinalStatus == TaskSucceeded && c.Detail != "" {
+				learningUpdates["summary"] = gorm.Expr("COALESCE(NULLIF(summary, ''), ?)", c.Detail)
+			}
 			q := tx.Model(&JobLearning{}).Where("org_id = ? AND job_id = ?", t.OrgID, t.JobID)
 			if c.FinalStatus == TaskSucceeded {
 				q = q.Where("outcome IS NULL OR outcome <> ?", strings.ToLower(TaskFailed))
