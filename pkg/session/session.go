@@ -1,0 +1,734 @@
+// Package session is Kiwi's agentic execution loop: one persistent Architect
+// that plans a task and reviews every round of it, and a tool-using Implementer
+// that carries each round out against the real repository.
+//
+// It is the counterpart to pkg/loop, not a replacement for it, and it keeps
+// that package's discipline about dependencies: everything context-specific —
+// how commands reach a sandbox, where the repository lives, how credentials are
+// obtained — is injected by the caller. This package imports pkg/provider and
+// the standard library, so it can be driven from the daemon, from a test, or
+// from the control plane without any of them importing each other.
+//
+// The shape of a run:
+//
+//	Architect plans ──▶ Implementer round ──▶ verify ──▶ Architect reviews ──┐
+//	      ▲                                                                  │
+//	      └──────────────────── revise ─────────────────────────────────────┘
+//
+// The Implementer starts each round with a fresh context. That is not a
+// limitation being worked around, it is the design: its transcript is a stale
+// cache of a filesystem that it is itself editing, while the worktree and the
+// job branch are current and durable. Making the round self-contained is also
+// what makes it restartable, which is what lets a long session live on a lease
+// queue built for disposable units of work.
+package session
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
+)
+
+// ErrNoChanges reports that a commit found nothing to commit. It mirrors the
+// daemon's own errNoChanges: a round that changes nothing has produced nothing
+// to deliver, and that is never success.
+var ErrNoChanges = errors.New("session: no changes to commit")
+
+// Workspace is the repository the session works in. The session never runs git
+// itself — git is the one operation that needs the credential the sandbox is
+// not allowed to hold, so it stays with the caller.
+type Workspace interface {
+	// Tree lists the repository's files, relative to its root.
+	Tree(ctx context.Context) ([]string, error)
+	// Diff returns the accumulated diff for the whole task.
+	Diff(ctx context.Context) (string, error)
+	// FilesChanged lists the paths the task has touched so far.
+	FilesChanged(ctx context.Context) ([]string, error)
+	// Commit records the working tree, returning the new head. It returns
+	// ErrNoChanges when there is nothing to record.
+	Commit(ctx context.Context, message string) (string, error)
+	// HeadSHA reports the current head.
+	HeadSHA(ctx context.Context) (string, error)
+	// Reset discards working-tree changes back to sha.
+	Reset(ctx context.Context, sha string) error
+}
+
+// VerifyFunc runs the task's verification command. Its contract is loop's
+// TestFunc verbatim: err is for a broken sandbox, a failing test is
+// (output, false, nil).
+type VerifyFunc func(ctx context.Context) (output string, passed bool, err error)
+
+// Task is one unit of work: the whole request, from prompt to pull request.
+type Task struct {
+	ID          string
+	Description string
+	TestCmd     string
+	// RepoContext is the repository's own AGENT.md, if it has one.
+	RepoContext string
+	// Learnings are summaries of prior jobs on this repository, resolved by the
+	// control plane. They reach the Architect here because the control plane no
+	// longer plans and so no longer consumes them itself.
+	Learnings []string
+}
+
+// Config tunes the session's rails. Zero values get defaults.
+//
+// The single-file loop's rails — six steps, fifty cents, three identical
+// failures, three rejections — assume a short bounded loop. An open-ended
+// agentic session needs the same guarantees expressed at two scales, because
+// there are now two loops: rounds, and tool calls within a round.
+type Config struct {
+	MaxRounds                int
+	MaxToolCallsPerRound     int
+	MaxConsecutiveToolErrors int
+	MaxRejections            int
+	RoundBudgetUSD           float64
+	SessionBudgetUSD         float64
+	RoundDeadline            time.Duration
+	SessionDeadline          time.Duration
+	// Cache enables prompt caching on the Implementer's conversation.
+	Cache bool
+	// CompactAt is the transcript token size above which a round compacts.
+	// Zero disables compaction.
+	CompactAt int64
+
+	Log     func(format string, a ...any)
+	OnEvent func(Event)
+}
+
+// Defaults. Every number here is a starting point chosen from the arithmetic in
+// the RFC, not from evidence; they are the two knobs most worth setting from a
+// real evaluation rather than from an author's judgment.
+const (
+	defaultMaxRounds                = 4
+	defaultMaxToolCallsPerRound     = 60
+	defaultMaxConsecutiveToolErrors = 5
+	defaultMaxRejections            = 3
+	defaultRoundBudgetUSD           = 1.50
+	defaultSessionBudgetUSD         = 5.00
+	defaultRoundDeadline            = 15 * time.Minute
+	defaultSessionDeadline          = 90 * time.Minute
+
+	// dupCommandWarn is how many identical (command, output) pairs in a round
+	// earn an explicit warning, and dupCommandHalt how many end the round.
+	//
+	// Warning before halting is the deliberate difference from the single-file
+	// loop, which can only stop. A model told "you have run this exact command
+	// three times and got the same output" frequently changes approach; the old
+	// loop never gets to say so, because its Actor has no turn to say it in.
+	dupCommandWarn = 3
+	dupCommandHalt = 5
+
+	// noProgressHalt stops the session when consecutive rounds end in the same
+	// place — same tree, same verification output.
+	noProgressHalt = 2
+)
+
+func (c Config) withDefaults() Config {
+	if c.MaxRounds <= 0 {
+		c.MaxRounds = defaultMaxRounds
+	}
+	if c.MaxToolCallsPerRound <= 0 {
+		c.MaxToolCallsPerRound = defaultMaxToolCallsPerRound
+	}
+	if c.MaxConsecutiveToolErrors <= 0 {
+		c.MaxConsecutiveToolErrors = defaultMaxConsecutiveToolErrors
+	}
+	if c.MaxRejections <= 0 {
+		c.MaxRejections = defaultMaxRejections
+	}
+	if c.RoundBudgetUSD <= 0 {
+		c.RoundBudgetUSD = defaultRoundBudgetUSD
+	}
+	if c.SessionBudgetUSD <= 0 {
+		c.SessionBudgetUSD = defaultSessionBudgetUSD
+	}
+	if c.RoundDeadline <= 0 {
+		c.RoundDeadline = defaultRoundDeadline
+	}
+	if c.SessionDeadline <= 0 {
+		c.SessionDeadline = defaultSessionDeadline
+	}
+	return c
+}
+
+// Event is one structured phase of a session, in order. Like loop.Event it
+// carries no task or org identity — the caller that persists one is the one
+// that can attribute it.
+type Event struct {
+	Round   int
+	Phase   string // plan | round_start | tool | verify | review | round_end | session_end | compaction
+	Outcome string // proposed | ok | error | pass | fail | approve | revise | abandon | halted
+	// Detail is human-readable context. As with loop.Event, never assume it is
+	// safe to publish verbatim: tool output can carry secrets.
+	Detail       string
+	Tool         string
+	DurationMs   int64
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+}
+
+const detailCap = 2000
+
+// Result reports the outcome of a session.
+type Result struct {
+	Success bool
+	Rounds  int
+	CostUSD float64
+	Usage   provider.ToolUsage
+	// Summary is the Architect's pull request body, set when it approved.
+	Summary string
+	// Detail explains a non-success outcome in words a user can act on.
+	Detail      string
+	FinalOutput string
+	HeadSHA     string
+}
+
+// Runner executes a session.
+type Runner struct {
+	Architect   Architect
+	Implementer provider.ToolRunner
+	// ImplementerModel is used only for reporting; routing already happened when
+	// the caller built Implementer.
+	ImplementerModel string
+	Tools            ToolHost
+	Workspace        Workspace
+	Verify           VerifyFunc
+	Config           Config
+}
+
+func (r *Runner) logf(format string, a ...any) {
+	if r.Config.Log != nil {
+		r.Config.Log(format, a...)
+	}
+}
+
+func (r *Runner) emit(ev Event) {
+	if r.Config.OnEvent == nil {
+		return
+	}
+	ev.Detail = tail(ev.Detail, detailCap)
+	r.Config.OnEvent(ev)
+}
+
+// state is the session's live position. It is deliberately a value that could
+// be written down and read back: the durable-session work persists exactly this
+// and resumes a crashed run from it.
+type state struct {
+	round int
+	spec  Spec
+	// Architect and Implementer spend are tracked apart rather than as one
+	// running total, because they are the two halves of the tiering decision:
+	// an expensive reviewer called a handful of times and a cheap worker called
+	// constantly. A single number cannot answer "was the split worth it", which
+	// is the question the defaults in this file exist to be checked against.
+	architect   provider.ToolUsage
+	implementer provider.ToolUsage
+	// roundConv is the last-seen cumulative usage of the round's conversation,
+	// so per-turn deltas can be folded into implementer.
+	roundConv    provider.ToolUsage
+	rejections   int
+	history      []string
+	lastVerify   string
+	verifyPassed bool
+	headSHA      string
+	// progress records (tree, verification output) fingerprints per round, so a
+	// session that keeps arriving in the same place can be stopped.
+	progress map[string]int
+	// specSeen records spec fingerprints, so a reviewer asking for the same
+	// thing twice can be stopped.
+	specSeen map[string]int
+}
+
+// Run drives the session to a pull-requestable state or to a reasoned stop.
+func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
+	if r.Architect == nil {
+		return Result{}, fmt.Errorf("session: no architect configured")
+	}
+	if r.Implementer == nil {
+		return Result{}, fmt.Errorf("session: no implementer configured")
+	}
+	if r.Tools == nil || r.Workspace == nil || r.Verify == nil {
+		return Result{}, fmt.Errorf("session: tools, workspace and verify are all required")
+	}
+	cfg := r.Config.withDefaults()
+	r.Config = cfg
+
+	ctx, cancel := context.WithTimeout(ctx, cfg.SessionDeadline)
+	defer cancel()
+
+	st := &state{progress: map[string]int{}, specSeen: map[string]int{}}
+
+	tree, err := r.Workspace.Tree(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("session: read repository tree: %w", err)
+	}
+	if st.headSHA, err = r.Workspace.HeadSHA(ctx); err != nil {
+		return Result{}, fmt.Errorf("session: read head: %w", err)
+	}
+
+	// Baseline. As in the single-file loop this establishes what the change must
+	// not regress, and it is a guard rather than the objective: a green suite is
+	// not a reason to skip the work.
+	start := time.Now()
+	baseOut, basePassed, err := r.Verify(ctx)
+	if err != nil {
+		r.emit(Event{Phase: "verify", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+		return Result{}, fmt.Errorf("session: baseline verification failed to run: %w", err)
+	}
+	r.emit(Event{Phase: "verify", Outcome: passFail(basePassed), Detail: baseOut, DurationMs: ms(start)})
+	st.lastVerify, st.verifyPassed = baseOut, basePassed
+	if basePassed {
+		r.logf("[session] baseline passes; the change must land and keep it passing\n")
+	} else {
+		r.logf("[session] baseline fails; the change must make it pass\n")
+	}
+
+	// Round 0: the Architect writes the opening spec. This is the planning the
+	// control plane used to do without ever seeing the repository.
+	start = time.Now()
+	spec, err := r.Architect.Plan(ctx, PlanInput{
+		Task:            task.Description,
+		RepoMap:         tree,
+		TestCmd:         task.TestCmd,
+		BaselineOutput:  baseOut,
+		BaselinePassed:  basePassed,
+		RepoContext:     task.RepoContext,
+		PriorLearnings:  task.Learnings,
+		MaxRoundsBudget: cfg.MaxRounds,
+	})
+	r.trackArchitect(st)
+	if err != nil {
+		r.emit(Event{Phase: "plan", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+		return r.result(st, false, fmt.Sprintf("planning failed: %v", err)), err
+	}
+	r.emit(Event{Phase: "plan", Outcome: "proposed", Detail: spec.Objective, DurationMs: ms(start), CostUSD: st.architect.CostUSD})
+	if spec.Verdict == VerdictAbandon {
+		r.logf("[session] the architect declined the task: %s\n", spec.Rationale)
+		return r.result(st, false, "the task was not attempted: "+spec.Rationale), nil
+	}
+	st.spec = spec
+	st.specSeen[spec.fingerprint()]++
+
+	for st.round = 1; st.round <= cfg.MaxRounds; st.round++ {
+		if err := ctx.Err(); err != nil {
+			return r.result(st, false, deadlineDetail(err, st.round)), err
+		}
+		if st.total().CostUSD >= cfg.SessionBudgetUSD {
+			detail := fmt.Sprintf("stopped after %d round(s): the session budget of $%.2f was reached", st.round-1, cfg.SessionBudgetUSD)
+			r.logf("[session] halted: %s\n", detail)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			return r.result(st, false, detail), nil
+		}
+
+		r.emit(Event{Round: st.round, Phase: "round_start", Outcome: "ok", Detail: st.spec.Objective})
+		r.logf("[session] round %d: %s\n", st.round, st.spec.Objective)
+
+		note, err := r.runRound(ctx, task, st)
+		if err != nil {
+			return r.result(st, false, fmt.Sprintf("round %d failed: %v", st.round, err)), err
+		}
+
+		// Commit before verifying. The branch is where a round's work becomes
+		// durable, and a crash between the two must not lose the edits.
+		if sha, cerr := r.Workspace.Commit(ctx, fmt.Sprintf("kiwi: round %d — %s", st.round, firstLine(st.spec.Objective))); cerr == nil {
+			st.headSHA = sha
+		} else if !errors.Is(cerr, ErrNoChanges) {
+			return r.result(st, false, fmt.Sprintf("could not commit round %d: %v", st.round, cerr)), cerr
+		}
+
+		start = time.Now()
+		out, passed, verr := r.Verify(ctx)
+		if verr != nil {
+			r.emit(Event{Round: st.round, Phase: "verify", Outcome: "error", Detail: verr.Error(), DurationMs: ms(start)})
+			return r.result(st, false, fmt.Sprintf("verification could not run: %v", verr)), verr
+		}
+		r.emit(Event{Round: st.round, Phase: "verify", Outcome: passFail(passed), Detail: out, DurationMs: ms(start)})
+		st.lastVerify, st.verifyPassed = out, passed
+
+		diff, err := r.Workspace.Diff(ctx)
+		if err != nil {
+			return r.result(st, false, fmt.Sprintf("could not read the diff: %v", err)), err
+		}
+		files, _ := r.Workspace.FilesChanged(ctx)
+
+		// No-progress across rounds: the whole-task diff and the verification
+		// output are both byte-identical to a previous round, so this round
+		// changed nothing about where the session stands. It generalises the
+		// single-file loop's identical-output rail, which cannot see the tree and
+		// so cannot tell "stuck" from "working on something else".
+		//
+		// Recorded here but acted on after the review, below: the reviewer is
+		// still entitled to look at the round and approve it. Halting first would
+		// throw away a finished, passing change because the round before it
+		// happened to leave the same state.
+		st.progress[fingerprint(diff, out)]++
+		stalled := st.progress[fingerprint(diff, out)] >= noProgressHalt
+
+		start = time.Now()
+		review, err := r.Architect.Review(ctx, ReviewInput{
+			Task:            task.Description,
+			Spec:            st.spec,
+			Round:           st.round,
+			Diff:            diff,
+			FilesChanged:    files,
+			HandoffNote:     note,
+			VerifyOutput:    out,
+			VerifyPassed:    passed,
+			History:         st.history,
+			RoundsRemaining: cfg.MaxRounds - st.round,
+		})
+		r.trackArchitect(st)
+		if err != nil {
+			r.emit(Event{Round: st.round, Phase: "review", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+			return r.result(st, false, fmt.Sprintf("review failed: %v", err)), err
+		}
+		r.emit(Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start)})
+
+		st.history = append(st.history, fmt.Sprintf("- round %d: asked for %q; verification %s; reviewer said %s — %s",
+			st.round, firstLine(st.spec.Objective), passFail(passed), review.Verdict, firstLine(review.Rationale)))
+
+		switch review.Verdict {
+		case VerdictApprove:
+			r.logf("[session] round %d approved\n", st.round)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "approve", Detail: review.Rationale})
+			res := r.result(st, true, "")
+			res.Summary = review.Summary
+			if res.Summary == "" {
+				res.Summary = review.Rationale
+			}
+			return res, nil
+		case VerdictAbandon:
+			detail := "the reviewer stopped the task: " + review.Rationale
+			r.logf("[session] %s\n", detail)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "abandon", Detail: review.Rationale})
+			return r.result(st, false, detail), nil
+		}
+
+		// A revise verdict is a rejection: it consumed a round and delivered
+		// nothing the reviewer would accept.
+		st.rejections++
+		if st.rejections >= cfg.MaxRejections {
+			detail := fmt.Sprintf("stopped after %d rounds: the reviewer rejected every one and the implementer could not satisfy it — last reason: %s",
+				st.round, firstLine(review.Rationale))
+			r.logf("[session] halted: %s\n", detail)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			return r.result(st, false, detail), nil
+		}
+
+		// A reviewer asking for the same thing twice is looping. The single-file
+		// loop discovered this failure by counting rejections; comparing them
+		// catches it a round earlier and says something more useful about why.
+		fpSpec := review.fingerprint()
+		st.specSeen[fpSpec]++
+		if st.specSeen[fpSpec] >= 2 {
+			detail := fmt.Sprintf("stopped after %d rounds: the reviewer asked for the same change twice, so the session is looping — %s",
+				st.round, firstLine(review.Rationale))
+			r.logf("[session] halted: %s\n", detail)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			return r.result(st, false, detail), nil
+		}
+
+		// Now act on the stall recorded above — but only if another round would
+		// actually follow. On the last round the cap is the accurate explanation,
+		// and reporting "no progress" instead would tell the user to look for a
+		// stuck agent when what they have is a task too big for its budget.
+		if stalled && st.round < cfg.MaxRounds {
+			detail := fmt.Sprintf("stopped after %d rounds: the last two ended in exactly the same state, so the session is not making progress", st.round)
+			r.logf("[session] halted: %s\n", detail)
+			r.emit(Event{Round: st.round, Phase: "session_end", Outcome: "halted", Detail: detail})
+			return r.result(st, false, detail), nil
+		}
+
+		st.spec = review
+	}
+
+	detail := fmt.Sprintf("stopped after the maximum of %d rounds without the reviewer approving", cfg.MaxRounds)
+	r.emit(Event{Round: cfg.MaxRounds, Phase: "session_end", Outcome: "halted", Detail: detail})
+	return r.result(st, false, detail), nil
+}
+
+// runRound drives one Implementer conversation to its end and returns the
+// handoff note it left.
+func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, error) {
+	cfg := r.Config
+	roundCtx, cancel := context.WithTimeout(ctx, cfg.RoundDeadline)
+	defer cancel()
+
+	if fr, ok := r.Tools.(interface{ Reset() }); ok {
+		fr.Reset()
+	}
+
+	conv := r.Implementer.StartConversation(
+		implementerSystem(task.TestCmd),
+		r.Tools.Defs(),
+		provider.ConversationOpts{Cache: cfg.Cache, CompactAt: cfg.CompactAt},
+	)
+
+	roundStartCost := st.total().CostUSD
+	st.roundConv = provider.ToolUsage{}
+	text := r.roundPrompt(task, st)
+	var results []provider.ToolResult
+
+	dupes := map[string]int{}
+	consecutiveErrors := 0
+
+	for calls := 0; calls < cfg.MaxToolCallsPerRound; {
+		if err := roundCtx.Err(); err != nil {
+			// A round that runs out of time is not a failed session: the work it
+			// committed stands and the reviewer judges it. Only a session-level
+			// deadline ends the run.
+			r.logf("[session] round %d hit its %s deadline\n", st.round, cfg.RoundDeadline)
+			return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
+		}
+
+		turn, err := conv.Send(roundCtx, text, results)
+		r.trackImplementer(st, conv)
+		if err != nil {
+			if roundCtx.Err() != nil {
+				return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
+			}
+			return "", fmt.Errorf("implementer turn failed: %w", err)
+		}
+		text, results = "", nil
+
+		if spent := st.total().CostUSD - roundStartCost; spent >= cfg.RoundBudgetUSD {
+			r.logf("[session] round %d hit its $%.2f budget\n", st.round, cfg.RoundBudgetUSD)
+			return r.noteOrDefault(fmt.Sprintf("the round stopped at its $%.2f budget", cfg.RoundBudgetUSD)), nil
+		}
+		if st.total().CostUSD >= cfg.SessionBudgetUSD {
+			return r.noteOrDefault(fmt.Sprintf("the session stopped at its $%.2f budget", cfg.SessionBudgetUSD)), nil
+		}
+
+		if turn.Done {
+			// The model ended its turn without asking for a tool and without
+			// calling finish. Treat its closing text as the note: it has said
+			// what it did, and refusing to accept that would burn a round on
+			// protocol.
+			if done, note := r.finished(); done {
+				return note, nil
+			}
+			return r.noteOrDefault(turn.Text), nil
+		}
+
+		for _, call := range turn.Calls {
+			calls++
+			start := time.Now()
+			out, err := r.Tools.Call(roundCtx, call)
+			if err != nil {
+				r.emit(Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name, Detail: err.Error(), DurationMs: ms(start)})
+				return "", err
+			}
+			r.emit(Event{Round: st.round, Phase: "tool", Outcome: okErr(!out.IsError), Tool: call.Name,
+				Detail: out.Content, DurationMs: ms(start)})
+
+			if out.IsError {
+				consecutiveErrors++
+			} else {
+				consecutiveErrors = 0
+			}
+
+			// Repetition rail. Warn first — a model told plainly that it is
+			// repeating itself usually changes approach — and halt only if it
+			// keeps going.
+			if call.Name == ToolRun {
+				key := fingerprint(string(call.Input), out.Content)
+				dupes[key]++
+				switch {
+				case dupes[key] >= dupCommandHalt:
+					r.logf("[session] round %d: the same command produced the same output %d times; ending the round\n", st.round, dupes[key])
+					return r.noteOrDefault("the round was stopped: the same command kept producing the same output"), nil
+				case dupes[key] == dupCommandWarn:
+					out.Content += fmt.Sprintf("\n\n[kiwi] You have now run this exact command %d times and received identical output. "+
+						"Repeating it will not tell you anything new — change your approach.", dupes[key])
+				}
+			}
+
+			results = append(results, out)
+		}
+
+		if consecutiveErrors >= cfg.MaxConsecutiveToolErrors {
+			r.logf("[session] round %d: %d tool calls failed in a row; ending the round\n", st.round, consecutiveErrors)
+			return r.noteOrDefault(fmt.Sprintf("the round was stopped after %d tool calls failed in a row", consecutiveErrors)), nil
+		}
+
+		if done, note := r.finished(); done {
+			return note, nil
+		}
+	}
+
+	r.logf("[session] round %d reached the %d tool-call cap\n", st.round, cfg.MaxToolCallsPerRound)
+	return r.noteOrDefault(fmt.Sprintf("the round reached its limit of %d tool calls", cfg.MaxToolCallsPerRound)), nil
+}
+
+// finished reports the handoff note if the Implementer called finish.
+func (r *Runner) finished() (bool, string) {
+	f, ok := r.Tools.(interface{ Finished() (bool, string) })
+	if !ok {
+		return false, ""
+	}
+	return f.Finished()
+}
+
+func (r *Runner) noteOrDefault(fallback string) string {
+	if done, note := r.finished(); done && strings.TrimSpace(note) != "" {
+		return note
+	}
+	return fallback
+}
+
+func (r *Runner) roundPrompt(task Task, st *state) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# The user's request\n%s\n", task.Description)
+	if task.RepoContext != "" {
+		fmt.Fprintf(&b, "\n# Repository conventions (AGENT.md)\n%s\n", task.RepoContext)
+	}
+	fmt.Fprintf(&b, "\n# Your brief for this round (round %d)\n%s\n", st.round, st.spec.Prompt())
+	if len(st.history) > 0 {
+		b.WriteString("\n# What earlier rounds did\nYou do not remember these; they are summarised for you.\n")
+		for _, h := range st.history {
+			fmt.Fprintf(&b, "%s\n", h)
+		}
+	}
+	if task.TestCmd != "" {
+		fmt.Fprintf(&b, "\n# Verification command\n%s\n\nMost recent result (%s):\n```\n%s\n```\n",
+			task.TestCmd, passFail(st.verifyPassed), tail(st.lastVerify, 4000))
+	}
+	b.WriteString("\nStart by orienting yourself in the repository. When the work is done, call finish with a handoff note.\n")
+	return b.String()
+}
+
+func implementerSystem(testCmd string) string {
+	var b strings.Builder
+	b.WriteString(`You are the Implementer on an automated software change. You have tools to read, search,
+write and run things in a sandboxed checkout of a real repository. Do the work described in your brief.
+
+How this works:
+
+- You get ONE round. You will not remember it afterwards — a reviewer reads your diff and either
+  approves it or writes a new brief for a fresh instance of you. Put everything worth knowing in the
+  handoff note you pass to finish.
+- Make the change the brief asks for, and no more. Unrelated refactoring makes review harder and is
+  the most common reason a round is rejected.
+- Verify your own work before finishing. Run the build and the tests; if something you changed does
+  not compile, fix it now rather than leaving it for the reviewer to find.
+- Your shell has NO network access and NO credentials. If you need dependencies installed, use the
+  install tool, which is the one brokered exception.
+- You cannot run git. Committing, branching and pushing are handled for you; just leave the working
+  tree in the state you want reviewed.
+`)
+	if testCmd != "" {
+		fmt.Fprintf(&b, "\nThe verification command for this repository is: %s\n", testCmd)
+		b.WriteString("It is a guard proving you broke nothing, not the definition of done. Making it pass by " +
+			"weakening a test is a failure, not a shortcut.\n")
+	}
+	return b.String()
+}
+
+// total is the session's spend: both roles together. Every budget rail reads
+// this, so a cheap implementer cannot be used to hide an expensive reviewer.
+func (st *state) total() provider.ToolUsage {
+	var t provider.ToolUsage
+	t.Add(st.architect)
+	t.Add(st.implementer)
+	return t
+}
+
+// trackArchitect refreshes the Architect's cumulative usage. Architect.Usage
+// reports a running total, so it is assigned rather than accumulated.
+func (r *Runner) trackArchitect(st *state) {
+	if r.Architect == nil {
+		return
+	}
+	st.architect = r.Architect.Usage()
+}
+
+// trackImplementer folds one turn's usage into the session total. A
+// conversation also reports cumulatively, so the delta since the last turn is
+// what this round has newly spent.
+func (r *Runner) trackImplementer(st *state, conv provider.ToolConversation) {
+	total := conv.Usage()
+	prev := st.roundConv
+	st.implementer.Add(provider.ToolUsage{
+		InputTokens:      total.InputTokens - prev.InputTokens,
+		OutputTokens:     total.OutputTokens - prev.OutputTokens,
+		CacheReadTokens:  total.CacheReadTokens - prev.CacheReadTokens,
+		CacheWriteTokens: total.CacheWriteTokens - prev.CacheWriteTokens,
+		CostUSD:          total.CostUSD - prev.CostUSD,
+	})
+	st.roundConv = total
+}
+
+func (r *Runner) result(st *state, success bool, detail string) Result {
+	rounds := st.round
+	if rounds > r.Config.MaxRounds {
+		rounds = r.Config.MaxRounds
+	}
+	return Result{
+		Success:     success,
+		Rounds:      rounds,
+		CostUSD:     st.total().CostUSD,
+		Usage:       st.total(),
+		Detail:      detail,
+		FinalOutput: st.lastVerify,
+		HeadSHA:     st.headSHA,
+	}
+}
+
+func fingerprint(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func ms(t time.Time) int64 { return time.Since(t).Milliseconds() }
+
+func passFail(ok bool) string {
+	if ok {
+		return "pass"
+	}
+	return "fail"
+}
+
+func okErr(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "error"
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := s[len(s)-n:]
+	for len(cut) > 0 && cut[0]&0xC0 == 0x80 {
+		cut = cut[1:]
+	}
+	return cut
+}
+
+func deadlineDetail(err error, round int) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Sprintf("the session ran out of time during round %d", round)
+	}
+	return fmt.Sprintf("the session was cancelled during round %d", round)
+}

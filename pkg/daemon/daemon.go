@@ -23,6 +23,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/loop"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
+	"github.com/ibreakthecloud/kiwi/pkg/session"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
@@ -51,6 +52,12 @@ type Config struct {
 	MaxCachedRepos int
 	// MaxSteps caps Actor iterations per task; 0 uses the loop default.
 	MaxSteps int
+	// MaxRounds caps Architect/Implementer rounds per task in session mode; 0
+	// uses the session default. It is separate from MaxSteps because the two
+	// count different things: a step is one model call, a round is a whole
+	// agentic pass over the repository, so the same number would mean wildly
+	// different budgets in the two modes.
+	MaxRounds int
 	// MaxBudgetUSD caps provider spend per task on the customer's key; 0 uses
 	// the loop default. A runaway loop on a live key is a real cost risk.
 	MaxBudgetUSD float64
@@ -479,13 +486,19 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 	sandboxCtx := context.WithValue(taskCtx, sandbox.SandboxConfigKey, sandboxCfg)
 
+	sessionMode := spec.Mode == agent.ModeSession
+
 	// Test-command environment: every credential except the LLM keys.
-	testEnv := []string{"TASK=" + spec.Task}
-	for name, value := range creds {
-		if isLLMKey(name) {
-			continue
-		}
-		testEnv = append(testEnv, name+"="+value)
+	//
+	// Session mode withholds them all by default. The exclusion of LLM keys
+	// exists because the sandbox runs model-generated code; the wider exclusion
+	// exists because in session mode the model also chooses the *commands*, and
+	// their output travels back into the event log. A credential that can be
+	// read and echoed does not need a network to escape. See
+	// sessionAllowsTestCredentials for the opt-in and what it costs.
+	testEnv := taskTestEnv(spec.Task, creds, sessionMode)
+	if sessionMode && !sessionAllowsTestCredentials() {
+		log.Printf("Task %s: session mode — withholding all credentials from the sandbox", spec.ID)
 	}
 
 	// Build the Actor/Critic (daemon-side, not in the sandbox). The provider is
@@ -524,69 +537,79 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		isMulti = false
 	}
 
-	// The repo exists only here, on the daemon, so this is the only place a file
-	// path can be checked against reality. A path on the spec is a hint from the
-	// planner — which is given the repo URL, not its contents — and previously a
-	// hint suppressed discovery entirely: the component that cannot see the repo
-	// overrode the one that can, and a near-miss like "components/Footer.tsx"
-	// against "src/components/Footer.tsx" became a new duplicate file rather than
-	// an edit to the real one.
-	tree, _ := repoTree(worktreePath)
-	if len(targetFiles) > 0 && len(tree) > 0 {
-		resolved := make([]string, 0, len(targetFiles))
-		anyReal := false
-		for _, hint := range targetFiles {
-			got := resolveHint(hint, tree)
-			if got == "" {
-				// Keep the hint: it may name a file that genuinely has to be
-				// created. Whether it does is decided below, once discovery has
-				// had a chance to find an existing home instead.
-				resolved = append(resolved, hint)
-				continue
-			}
-			if got != hint {
-				log.Printf("Task %s: target %q does not exist; resolved to %q", spec.ID, hint, got)
-			}
-			resolved = append(resolved, got)
-			anyReal = true
-		}
-		targetFiles = resolved
+	// Everything from here to the end of the extension repair exists to decide
+	// which file the Actor is allowed to edit — resolving the planner's hints
+	// against the real tree, asking a model to choose when they resolve to
+	// nothing, and correcting an extension the planner guessed for the wrong
+	// language. A session Implementer greps for itself and writes wherever the
+	// work leads, so none of it applies, and running it would cost a model call
+	// to answer a question nobody asked.
+	if !sessionMode {
 
-		if !anyReal {
-			log.Printf("Task %s: no planned target exists in the repo; asking the model to choose from %d file(s)", spec.ID, len(tree))
-			if discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree); len(discovered) > 0 {
+		// The repo exists only here, on the daemon, so this is the only place a file
+		// path can be checked against reality. A path on the spec is a hint from the
+		// planner — which is given the repo URL, not its contents — and previously a
+		// hint suppressed discovery entirely: the component that cannot see the repo
+		// overrode the one that can, and a near-miss like "components/Footer.tsx"
+		// against "src/components/Footer.tsx" became a new duplicate file rather than
+		// an edit to the real one.
+		tree, _ := repoTree(worktreePath)
+		if len(targetFiles) > 0 && len(tree) > 0 {
+			resolved := make([]string, 0, len(targetFiles))
+			anyReal := false
+			for _, hint := range targetFiles {
+				got := resolveHint(hint, tree)
+				if got == "" {
+					// Keep the hint: it may name a file that genuinely has to be
+					// created. Whether it does is decided below, once discovery has
+					// had a chance to find an existing home instead.
+					resolved = append(resolved, hint)
+					continue
+				}
+				if got != hint {
+					log.Printf("Task %s: target %q does not exist; resolved to %q", spec.ID, hint, got)
+				}
+				resolved = append(resolved, got)
+				anyReal = true
+			}
+			targetFiles = resolved
+
+			if !anyReal {
+				log.Printf("Task %s: no planned target exists in the repo; asking the model to choose from %d file(s)", spec.ID, len(tree))
+				if discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree); len(discovered) > 0 {
+					targetFiles = discovered
+					isMulti = len(discovered) > 1
+				}
+				// Falling through with the original hint is deliberate: discovery only
+				// ever returns files that already exist, so when it finds nothing the
+				// task really may need a new file, and the loop creates it.
+			}
+		}
+
+		if len(targetFiles) == 0 {
+			discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree)
+			if len(discovered) > 0 {
 				targetFiles = discovered
-				isMulti = len(discovered) > 1
+				isMulti = true
+			} else {
+				return taskResult{detail: "could not identify a file to change from the task description — set one under Advanced options"}
 			}
-			// Falling through with the original hint is deliberate: discovery only
-			// ever returns files that already exist, so when it finds nothing the
-			// task really may need a new file, and the loop creates it.
 		}
-	}
 
-	if len(targetFiles) == 0 {
-		discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree)
-		if len(discovered) > 0 {
-			targetFiles = discovered
-			isMulti = true
-		} else {
-			return taskResult{detail: "could not identify a file to change from the task description — set one under Advanced options"}
-		}
-	}
-
-	// Repair a new file whose extension names the wrong language. The Actor can
-	// only change a file's contents, never its name, so a planner that guesses
-	// "examples/advanced.rs" for a Go repository creates a position the loop
-	// cannot win: the Critic rejects Go code in a .rs file, correctly, every
-	// time, until the budget runs out.
-	eco := inferEcosystem(worktreePath, testCmd)
-	for i, f := range targetFiles {
-		if _, err := os.Stat(filepath.Join(worktreePath, f)); err == nil {
-			continue // exists; its extension is the repository's business
-		}
-		if fixed := correctNewFileExtension(f, eco, worktreePath); fixed != f {
-			log.Printf("Task %s: new file %q has the wrong extension for a %s project; creating %q instead", spec.ID, f, eco, fixed)
-			targetFiles[i] = fixed
+		// Repair a new file whose extension names the wrong language. The Actor can
+		// only change a file's contents, never its name, so a planner that guesses
+		// "examples/advanced.rs" for a Go repository creates a position the loop
+		// cannot win: the Critic rejects Go code in a .rs file, correctly, every
+		// time, until the budget runs out.
+		eco := inferEcosystem(worktreePath, testCmd)
+		for i, f := range targetFiles {
+			if _, err := os.Stat(filepath.Join(worktreePath, f)); err == nil {
+				continue // exists; its extension is the repository's business
+			}
+			if fixed := correctNewFileExtension(f, eco, worktreePath); fixed != f {
+				log.Printf("Task %s: new file %q has the wrong extension for a %s project; creating %q instead", spec.ID, f, eco, fixed)
+				targetFiles[i] = fixed
+			}
 		}
 	}
 
@@ -594,51 +617,59 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
 	}
 
-	log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
-	// Runner.Run calls OnEvent inline on this goroutine, so ordering matches
-	// execution order. The reporter is what carries them out of the process
-	// while the task is still running; the full list is still sent with the
-	// result, which remains authoritative.
-	runner := &loop.Runner{
-		Provider: actor,
-		Critic:   critic,
-		Config: loop.Config{
-			MaxSteps:     d.config.MaxSteps,
-			MaxBudgetUSD: d.config.MaxBudgetUSD,
-			Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
-			OnEvent: func(e loop.Event) {
-				prog.add(ver.TaskEvent{
-					Step:         e.Step,
-					Phase:        e.Phase,
-					Outcome:      e.Outcome,
-					Detail:       e.Detail,
-					DurationMs:   e.DurationMs,
-					InputTokens:  e.InputTokens,
-					OutputTokens: e.OutputTokens,
-					CostUSD:      e.CostUSD,
-				})
-			},
-		},
-	}
 	// Inject the repo's AGENT.md (if any) as per-repo context for the Actor —
 	// conventions, how to run tests, what not to touch (Execution Model RFC §5).
 	description := spec.Task
-	if rc := repoContext(worktreePath); rc != "" {
+	if rc := repoContext(worktreePath); rc != "" && !sessionMode {
 		log.Printf("Task %s: injecting repo AGENT.md context (%d bytes)", spec.ID, len(rc))
 		description = withRepoContext(description, rc)
 	}
-	task := loop.Task{
-		Description:  description,
-		FilePath:     filepath.Join(worktreePath, targetFiles[0]),
-		WorktreeRoot: worktreePath,
-		TargetsTest:  targetsTest || looksLikeTestFile(targetFiles[0]),
-	}
-	if isMulti {
-		absFiles := make([]string, len(targetFiles))
-		for i, f := range targetFiles {
-			absFiles[i] = filepath.Join(worktreePath, f)
+
+	// The single-file loop and its task are built only for the mode that uses
+	// them: a session has no pre-assigned file, so loop.Task's FilePath would
+	// index an empty slice.
+	var runner *loop.Runner
+	var task loop.Task
+	if !sessionMode {
+		log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
+		// Runner.Run calls OnEvent inline on this goroutine, so ordering matches
+		// execution order. The reporter is what carries them out of the process
+		// while the task is still running; the full list is still sent with the
+		// result, which remains authoritative.
+		runner = &loop.Runner{
+			Provider: actor,
+			Critic:   critic,
+			Config: loop.Config{
+				MaxSteps:     d.config.MaxSteps,
+				MaxBudgetUSD: d.config.MaxBudgetUSD,
+				Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
+				OnEvent: func(e loop.Event) {
+					prog.add(ver.TaskEvent{
+						Step:         e.Step,
+						Phase:        e.Phase,
+						Outcome:      e.Outcome,
+						Detail:       e.Detail,
+						DurationMs:   e.DurationMs,
+						InputTokens:  e.InputTokens,
+						OutputTokens: e.OutputTokens,
+						CostUSD:      e.CostUSD,
+					})
+				},
+			},
 		}
-		task.Files = absFiles
+		task = loop.Task{
+			Description:  description,
+			FilePath:     filepath.Join(worktreePath, targetFiles[0]),
+			WorktreeRoot: worktreePath,
+			TargetsTest:  targetsTest || looksLikeTestFile(targetFiles[0]),
+		}
+		if isMulti {
+			absFiles := make([]string, len(targetFiles))
+			for i, f := range targetFiles {
+				absFiles[i] = filepath.Join(worktreePath, f)
+			}
+			task.Files = absFiles
+		}
 	}
 
 	// Pick the image from what the repository declares, using the test command
@@ -752,6 +783,34 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			}
 		}
 		return res.Output, res.Success, nil
+	}
+
+	if sessionMode {
+		var installFn session.InstallFunc
+		if inferInstallStep(worktreePath) != nil {
+			installFn = func(ctx context.Context) (string, bool, error) {
+				step := installStepFor(worktreePath, false)
+				if step == nil {
+					return "this repository declares no dependency install step", false, nil
+				}
+				if detail, ok := d.installDependencies(ctx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
+					return detail, false, nil
+				}
+				return "dependencies installed", true, nil
+			}
+		}
+		return d.executeSession(taskCtx, spec, creds, prog, sessionDeps{
+			worktreePath: worktreePath,
+			sandboxCfg:   sandboxCfg,
+			// The Implementer's shell gets the toolchain cache variables and
+			// nothing else. cacheEnv is credential-free by construction — it is
+			// the same set the networked install phase is given, for the same
+			// reason.
+			execEnv: cacheEnv,
+			testCmd: testCmd,
+			verify:  runTest,
+			install: installFn,
+		})
 	}
 
 	result, err := runner.Run(taskCtx, task, runTest)

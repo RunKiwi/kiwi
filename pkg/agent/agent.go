@@ -80,7 +80,32 @@ type WorkerSpec struct {
 	DependsOn      []string `json:"depends_on,omitempty"`
 	JobID          string   `json:"job_id"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+
+	// Mode selects the execution loop. Empty means ModeFileLoop, so every spec
+	// written before this field existed keeps running exactly as it did.
+	Mode string `json:"mode,omitempty"`
+	// ArchitectModel is the model that plans and reviews in ModeSession. It runs
+	// on the customer's own key, like every other model Kiwi calls, and is
+	// expected to be a more capable (and more expensive) one than Model: the
+	// reviewer is called a handful of times per task while the implementer is
+	// called constantly, so the split buys judgment where it is cheap to buy.
+	// Empty falls back to Model.
+	ArchitectModel string `json:"architect_model,omitempty"`
+	// Learnings are summaries of prior jobs on this repository. The control
+	// plane resolves them (it owns the vector index) and passes them through,
+	// because in ModeSession it no longer plans and so no longer consumes them
+	// itself.
+	Learnings []string `json:"learnings,omitempty"`
 }
+
+// Execution modes for WorkerSpec.Mode.
+const (
+	// ModeFileLoop is the single-file Actor–Critic loop (pkg/loop). It is the
+	// default and remains the path every existing task takes.
+	ModeFileLoop = "file_loop"
+	// ModeSession is the agentic Architect/Implementer session (pkg/session).
+	ModeSession = "session"
+)
 
 // WorkerResult is the outcome of one worker.
 type WorkerResult struct {
