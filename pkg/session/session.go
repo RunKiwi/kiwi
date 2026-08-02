@@ -92,10 +92,17 @@ type Config struct {
 	SessionBudgetUSD         float64
 	RoundDeadline            time.Duration
 	SessionDeadline          time.Duration
-	// Cache enables prompt caching on the Implementer's conversation.
-	Cache bool
+	// NoCache turns prompt caching OFF for the Implementer's conversation.
+	//
+	// Inverted deliberately, unlike provider.ConversationOpts.Cache. At the
+	// transport layer opt-in is right: a provider must not write cache entries a
+	// caller did not ask for. Here the zero value is a policy default, and the
+	// right default is on — a tool round re-sends its transcript every turn, so
+	// caching is roughly the difference between a $5 round and a $0.70 one, and
+	// a caller that forgets a field should not pay seven times over for it.
+	NoCache bool
 	// CompactAt is the transcript token size above which a round compacts.
-	// Zero disables compaction.
+	// Negative disables compaction; zero uses the default.
 	CompactAt int64
 
 	Log     func(format string, a ...any)
@@ -114,6 +121,15 @@ const (
 	defaultSessionBudgetUSD         = 5.00
 	defaultRoundDeadline            = 15 * time.Minute
 	defaultSessionDeadline          = 90 * time.Minute
+	// defaultCompactAt is where a round's transcript is summarised and restarted.
+	// Well below any current model's context window on purpose: the aim is to
+	// stop paying to re-send exploration the model has already drawn its
+	// conclusions from, not to rescue a round about to overflow.
+	defaultCompactAt = 100_000
+	// compactKeepResults is how many recent tool results survive compaction
+	// verbatim. The most recent output is what the model is actually working
+	// from; older reads are what the summary is for.
+	compactKeepResults = 8
 
 	// dupCommandWarn is how many identical (command, output) pairs in a round
 	// earn an explicit warning, and dupCommandHalt how many end the round.
@@ -154,6 +170,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SessionDeadline <= 0 {
 		c.SessionDeadline = defaultSessionDeadline
+	}
+	if c.CompactAt == 0 {
+		c.CompactAt = defaultCompactAt
 	}
 	return c
 }
@@ -624,16 +643,17 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 		fr.Reset()
 	}
 
-	conv := r.Implementer.StartConversation(
-		implementerSystem(task.TestCmd),
-		r.Tools.Defs(),
-		provider.ConversationOpts{Cache: cfg.Cache, CompactAt: cfg.CompactAt},
-	)
+	system := implementerSystem(task.TestCmd)
+	opts := provider.ConversationOpts{Cache: !cfg.NoCache, CompactAt: cfg.CompactAt}
+	conv := r.Implementer.StartConversation(system, r.Tools.Defs(), opts)
 
 	roundStartCost := st.total().CostUSD
 	st.roundConv = provider.ToolUsage{}
 	text := r.roundPrompt(task, st)
 	var results []provider.ToolResult
+	// compacted carries the summary of a transcript that was replaced, so the
+	// round continues from a digest rather than from nothing.
+	compacted := ""
 
 	dupes := map[string]int{}
 	consecutiveErrors := 0
@@ -645,6 +665,37 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			// deadline ends the run.
 			r.logf("[session] round %d hit its %s deadline\n", st.round, cfg.RoundDeadline)
 			return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
+		}
+
+		// Compaction. The transcript is re-sent on every turn, so an exploration
+		// phase that has already yielded its conclusions is pure recurring cost.
+		// Rather than editing a provider's message list from outside — which
+		// would mean owning its format — the round asks the model to summarise,
+		// then starts a fresh conversation from that summary. It is the same move
+		// the session makes between rounds, applied within one.
+		//
+		// Checked here, before the send, because this is the point where the
+		// outstanding tool results are still in hand: they go out with the
+		// compaction request, satisfying the API's requirement that every tool
+		// call be answered, and are then dropped along with the transcript they
+		// belong to.
+		if cfg.CompactAt > 0 {
+			if tr, ok := conv.(provider.TranscriptReporter); ok && tr.TranscriptTokens() >= cfg.CompactAt {
+				summary, cerr := r.compact(roundCtx, conv, st, results)
+				r.trackImplementer(st, conv)
+				if cerr != nil {
+					// Not fatal: a round that cannot compact is a round that keeps
+					// paying full price, which is worse than the alternative but
+					// far better than a failed task.
+					r.logf("[session] round %d: could not compact the transcript: %v\n", st.round, cerr)
+				} else {
+					compacted = summary
+					conv = r.Implementer.StartConversation(system, r.Tools.Defs(), opts)
+					st.roundConv = provider.ToolUsage{}
+					text = r.compactedPrompt(task, st, compacted)
+					results = nil
+				}
+			}
 		}
 
 		turn, err := conv.Send(roundCtx, text, results)
@@ -740,6 +791,50 @@ func (r *Runner) noteOrDefault(fallback string) string {
 		return note
 	}
 	return fallback
+}
+
+// compact asks the model to summarise its own round so far, then reports the
+// summary. What is safe to drop is a judgment the model is better placed to
+// make than a token-counting heuristic: it knows which of the forty files it
+// read actually mattered.
+// pending carries the tool results that have not been answered yet. They must
+// travel WITH the compaction request rather than being dropped: every provider
+// requires each tool call to be answered in the turn that follows it —
+// Anthropic rejects a bare text turn after tool_use blocks, OpenAI after
+// tool_calls, Gemini after a functionCall — and compaction only ever triggers
+// when the model has just asked for tools, so sending the prompt alone would
+// fail the request every single time it mattered.
+func (r *Runner) compact(ctx context.Context, conv provider.ToolConversation, st *state, pending []provider.ToolResult) (string, error) {
+	start := time.Now()
+	turn, err := conv.Send(ctx, compactPrompt, pending)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(turn.Text) == "" {
+		return "", errors.New("the model returned an empty summary")
+	}
+	r.emit(st, Event{Round: st.round, Phase: "compaction", Outcome: "ok", Detail: turn.Text, DurationMs: ms(start)})
+	r.logf("[session] round %d: transcript compacted\n", st.round)
+	return turn.Text, nil
+}
+
+const compactPrompt = `Your context is being compacted to keep this round affordable. Stop what you are doing and
+write a handover to yourself — you will continue with this summary in place of everything above it.
+
+Cover: what you have already changed and where; what you learned about this repository that you would
+otherwise have to rediscover; what you were in the middle of; and what remains. Be specific about
+paths and symbols. Do not call any tools in this reply.`
+
+// compactedPrompt restarts a round from its summary.
+func (r *Runner) compactedPrompt(task Task, st *state, summary string) string {
+	var b strings.Builder
+	b.WriteString(r.roundPrompt(task, st))
+	b.WriteString("\n# Where you had got to\n")
+	b.WriteString("This round has already been running. Your earlier work is on disk and your own handover follows; " +
+		"re-read anything you need rather than assuming it is unchanged.\n\n")
+	b.WriteString(summary)
+	b.WriteString("\n")
+	return b.String()
 }
 
 func (r *Runner) roundPrompt(task Task, st *state) string {
