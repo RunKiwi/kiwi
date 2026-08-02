@@ -20,6 +20,9 @@ type MockToolRunner struct {
 	// CostPerTurn is charged to the conversation's usage on every turn, so
 	// budget rails are exercised without a provider that reports real cost.
 	CostPerTurn float64
+	// TokensPerTurn grows the reported transcript size each turn, so a caller's
+	// compaction threshold can be reached deterministically.
+	TokensPerTurn int64
 	// Started records every conversation this runner handed out, so a test can
 	// assert on the system prompt and tool set it was given.
 	Started []MockConversationStart
@@ -42,7 +45,13 @@ type mockConversation struct {
 	runner *MockToolRunner
 	turns  int
 	usage  ToolUsage
+	// tokens grows with each turn so a test can drive a caller's compaction
+	// threshold without a real model.
+	tokens int64
 }
+
+// TranscriptTokens implements TranscriptReporter.
+func (c *mockConversation) TranscriptTokens() int64 { return c.tokens }
 
 func (c *mockConversation) Turns() int       { return c.turns }
 func (c *mockConversation) Usage() ToolUsage { return c.usage }
@@ -52,6 +61,7 @@ func (c *mockConversation) Send(ctx context.Context, text string, results []Tool
 		return Turn{}, err
 	}
 	c.turns++
+	c.tokens += c.runner.TokensPerTurn
 	c.usage.Add(ToolUsage{InputTokens: 100, OutputTokens: 50, CostUSD: c.runner.CostPerTurn})
 	if c.runner.Script == nil {
 		return Turn{Text: "done", Done: true}, nil
