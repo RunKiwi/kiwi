@@ -667,6 +667,37 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
 		}
 
+		// Compaction. The transcript is re-sent on every turn, so an exploration
+		// phase that has already yielded its conclusions is pure recurring cost.
+		// Rather than editing a provider's message list from outside — which
+		// would mean owning its format — the round asks the model to summarise,
+		// then starts a fresh conversation from that summary. It is the same move
+		// the session makes between rounds, applied within one.
+		//
+		// Checked here, before the send, because this is the point where the
+		// outstanding tool results are still in hand: they go out with the
+		// compaction request, satisfying the API's requirement that every tool
+		// call be answered, and are then dropped along with the transcript they
+		// belong to.
+		if cfg.CompactAt > 0 {
+			if tr, ok := conv.(provider.TranscriptReporter); ok && tr.TranscriptTokens() >= cfg.CompactAt {
+				summary, cerr := r.compact(roundCtx, conv, st, results)
+				r.trackImplementer(st, conv)
+				if cerr != nil {
+					// Not fatal: a round that cannot compact is a round that keeps
+					// paying full price, which is worse than the alternative but
+					// far better than a failed task.
+					r.logf("[session] round %d: could not compact the transcript: %v\n", st.round, cerr)
+				} else {
+					compacted = summary
+					conv = r.Implementer.StartConversation(system, r.Tools.Defs(), opts)
+					st.roundConv = provider.ToolUsage{}
+					text = r.compactedPrompt(task, st, compacted)
+					results = nil
+				}
+			}
+		}
+
 		turn, err := conv.Send(roundCtx, text, results)
 		r.trackImplementer(st, conv)
 		if err != nil {
@@ -683,32 +714,6 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 		}
 		if st.total().CostUSD >= cfg.SessionBudgetUSD {
 			return r.noteOrDefault(fmt.Sprintf("the session stopped at its $%.2f budget", cfg.SessionBudgetUSD)), nil
-		}
-
-		// Compaction. The transcript is re-sent on every turn, so an exploration
-		// phase that has already yielded its conclusions is pure recurring cost.
-		// Rather than editing a provider's message list from outside — which
-		// would mean owning its format — the round asks the model to summarise,
-		// then starts a fresh conversation from that summary. It is the same
-		// move the session makes between rounds, applied within one.
-		if cfg.CompactAt > 0 && !turn.Done {
-			if tr, ok := conv.(provider.TranscriptReporter); ok && tr.TranscriptTokens() >= cfg.CompactAt {
-				summary, cerr := r.compact(roundCtx, conv, st)
-				r.trackImplementer(st, conv)
-				if cerr != nil {
-					// Not fatal: a round that cannot compact is a round that keeps
-					// paying full price, which is worse than the alternative but
-					// far better than a failed task.
-					r.logf("[session] round %d: could not compact the transcript: %v\n", st.round, cerr)
-				} else {
-					compacted = summary
-					conv = r.Implementer.StartConversation(system, r.Tools.Defs(), opts)
-					st.roundConv = provider.ToolUsage{}
-					text = r.compactedPrompt(task, st, compacted)
-					results = nil
-					continue
-				}
-			}
 		}
 
 		if turn.Done {
@@ -792,9 +797,16 @@ func (r *Runner) noteOrDefault(fallback string) string {
 // summary. What is safe to drop is a judgment the model is better placed to
 // make than a token-counting heuristic: it knows which of the forty files it
 // read actually mattered.
-func (r *Runner) compact(ctx context.Context, conv provider.ToolConversation, st *state) (string, error) {
+// pending carries the tool results that have not been answered yet. They must
+// travel WITH the compaction request rather than being dropped: every provider
+// requires each tool call to be answered in the turn that follows it —
+// Anthropic rejects a bare text turn after tool_use blocks, OpenAI after
+// tool_calls, Gemini after a functionCall — and compaction only ever triggers
+// when the model has just asked for tools, so sending the prompt alone would
+// fail the request every single time it mattered.
+func (r *Runner) compact(ctx context.Context, conv provider.ToolConversation, st *state, pending []provider.ToolResult) (string, error) {
 	start := time.Now()
-	turn, err := conv.Send(ctx, compactPrompt, nil)
+	turn, err := conv.Send(ctx, compactPrompt, pending)
 	if err != nil {
 		return "", err
 	}

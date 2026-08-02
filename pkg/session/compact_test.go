@@ -172,3 +172,55 @@ func TestSessionUsageCarriesCacheTokenClasses(t *testing.T) {
 		t.Error("usage should carry token counts")
 	}
 }
+
+// Compaction only ever triggers when the model has just asked for tools, and
+// every provider requires each tool call to be answered in the turn that
+// follows it — Anthropic rejects a bare text turn after tool_use blocks, OpenAI
+// after tool_calls, Gemini after a functionCall.
+//
+// So the outstanding results have to travel WITH the compaction request. Sending
+// the prompt alone made the request fail every single time it mattered.
+func TestCompactionAnswersTheOutstandingToolCalls(t *testing.T) {
+	tools, _ := newTools(t)
+
+	var compactCarriedResults bool
+	var compactSawNoResults bool
+	impl := &provider.MockToolRunner{
+		TokensPerTurn: 60,
+		Script: func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+			if strings.Contains(text, "Your context is being compacted") {
+				if len(results) > 0 {
+					compactCarriedResults = true
+				} else {
+					compactSawNoResults = true
+				}
+				return provider.Turn{Text: "summary of what I did"}, nil
+			}
+			if strings.Contains(text, "Where you had got to") {
+				return provider.Turn{Calls: []provider.ToolCall{
+					provider.MockCall("f", ToolFinish, map[string]string{"note": "done"}),
+				}}, nil
+			}
+			return provider.Turn{Calls: []provider.ToolCall{
+				provider.MockCall(fmt.Sprintf("c%d", n), ToolReadFile, map[string]string{"path": "main.go"}),
+			}}, nil
+		},
+	}
+
+	arch := &fakeArchitect{plan: Spec{Verdict: VerdictProceed, Objective: "explore"}}
+	ws := &fakeWorkspace{tree: []string{"main.go"}, diff: "+x", head: "base"}
+	r := &Runner{Architect: arch, Implementer: impl, Tools: tools, Workspace: ws, Verify: passing("ok")}
+	r.Config.MaxRounds = 1
+	r.Config.CompactAt = 100
+	r.Config.MaxToolCallsPerRound = 30
+
+	if _, err := r.Run(context.Background(), Task{Description: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	if compactSawNoResults {
+		t.Error("the compaction request left tool calls unanswered — every provider rejects that")
+	}
+	if !compactCarriedResults {
+		t.Fatal("expected the compaction request to carry the outstanding tool results")
+	}
+}
