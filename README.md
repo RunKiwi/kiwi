@@ -89,7 +89,8 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | Egress isolation — sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
 | Session loop — a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | 🚧 Building, phase by phase — [docs/rfc-session-loop.md](docs/rfc-session-loop.md); `pkg/loop` stays the default path |
 | ├ Tool-calling seam (`provider.ToolRunner`) + persistent sandbox (`sandbox.Session`) + cache-aware pricing | ✅ Phase 0 |
-| ├ `pkg/session` — Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1 — in-memory; the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
+| ├ `pkg/session` — Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1 — the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
+| ├ Crash recovery — round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
 
 ## Building
 

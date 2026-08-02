@@ -50,6 +50,14 @@ type TaskCompletion struct {
 // It abstracts away the underlying database (e.g. Postgres or SQLite)
 // and provides a unified interface for all subsystems.
 type Store interface {
+	// Agentic sessions (pkg/session). A session is a task-long conversation, so
+	// unlike a queued task it needs a durable position of its own: the queue can
+	// only say a task is LEASED, not which round of it is in flight.
+	GetAgentSessionByTask(ctx context.Context, orgID, taskID string) (*AgentSession, error)
+	SaveAgentSession(ctx context.Context, sess *AgentSession, events []AgentSessionEvent) error
+	ListAgentSessionEvents(ctx context.Context, orgID, sessionID string) ([]AgentSessionEvent, error)
+	FinishAgentSession(ctx context.Context, orgID, sessionID, status string) error
+
 	// Tenancy & Limits
 	GetOrganization(ctx context.Context, id string) (*Organization, error)
 	GetOrgLimits(ctx context.Context, orgID string) (*OrgLimits, error)

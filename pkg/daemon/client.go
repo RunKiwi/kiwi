@@ -168,3 +168,55 @@ func (c *Client) ReportProgress(ctx context.Context, req ProgressReq) error {
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	return fmt.Errorf("report progress failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }
+
+// CheckpointSession writes a session's durable position and its new events.
+//
+// Like ReportResult it is fenced by the lease token, so a daemon that has lost
+// the task cannot write over the run that replaced it. A 409 means exactly
+// that, and is returned as ErrLeaseLost so the caller can stop rather than
+// retry into a wall.
+func (c *Client) CheckpointSession(ctx context.Context, req SessionCheckpointReq) error {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/session", req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return ErrLeaseLost
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("session checkpoint failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+}
+
+// LoadSession asks whether a task already has a session to resume. A task on
+// its first lease has none, which is reported as Found=false rather than as an
+// error — that is the common case, not a fault.
+func (c *Client) LoadSession(ctx context.Context, taskID, sessionID, signPubKey string) (*SessionStateRes, error) {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/session/load", SessionCheckpointReq{
+		SessionID:  sessionID,
+		TaskID:     taskID,
+		SignPubKey: signPubKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return &SessionStateRes{}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("session load failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+
+	var res SessionStateRes
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("decode session state: %w", err)
+	}
+	return &res, nil
+}
