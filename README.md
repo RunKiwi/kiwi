@@ -92,6 +92,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | ├ `pkg/session` — Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1 — the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
 | ├ Crash recovery — round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
 | ├ Cost — prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ Phase 3 |
+| ├ Planner collapse — one worker per session job, **no LLM call and no credential decryption on the Control Plane** (`KIWI_SESSION_MODE=off` disables) | ✅ Phase 4 |
 
 ## Building
 
