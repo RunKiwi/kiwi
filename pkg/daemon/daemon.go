@@ -330,7 +330,7 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		prog := &progressReporter{}
 		go d.streamProgress(taskCtx, spec.ID, res.LeaseID, prog)
 
-		out := d.executeTask(taskCtx, spec, creds, prog)
+		out := d.executeTask(taskCtx, spec, creds, prog, res.LeaseID)
 		taskCancel() // Stop the renewal and progress timers
 
 		// Reporting a result for a task we no longer hold is pointless — the CP
@@ -403,7 +403,7 @@ type taskResult struct {
 	events []ver.TaskEvent
 }
 
-func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string, prog *progressReporter) taskResult {
+func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string, prog *progressReporter, leaseID string) taskResult {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
@@ -800,6 +800,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			}
 		}
 		return d.executeSession(taskCtx, spec, creds, prog, sessionDeps{
+			leaseID:      leaseID,
 			worktreePath: worktreePath,
 			sandboxCfg:   sandboxCfg,
 			// The Implementer's shell gets the toolchain cache variables and

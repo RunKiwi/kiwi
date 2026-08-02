@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,9 @@ import (
 // needs. Passing it as a struct keeps the branch in executeTask to one line and
 // means the two paths cannot drift on sandbox configuration.
 type sessionDeps struct {
+	// leaseID fences every checkpoint, exactly as it fences a result: a daemon
+	// that lost the task must not write over the run that replaced it.
+	leaseID      string
 	worktreePath string
 	sandboxCfg   *sandbox.SandboxConfig
 	// execEnv is the environment for the Implementer's own shell. It carries the
@@ -118,7 +122,29 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		Install: deps.install,
 	}
 
+	// Durable state. Without it a crashed daemon restarts the task from the base
+	// commit; with it, the task resumes at its last finished round. The daemon
+	// has no database, so this travels over the same signed, lease-fenced
+	// channel as every other daemon report.
+	var store session.Store
+	if deps.leaseID != "" {
+		store = &cpSessionStore{
+			client:         d.client,
+			taskID:         spec.ID,
+			leaseID:        deps.leaseID,
+			signPubKey:     base64.StdEncoding.EncodeToString(d.signPubKey),
+			jobID:          spec.JobID,
+			repoURL:        spec.RepoURL,
+			branch:         jobBranchName(spec),
+			architectModel: architectModel,
+			workerModel:    spec.Model,
+			maxRounds:      d.config.MaxRounds,
+		}
+	}
+
 	runner := &session.Runner{
+		Store:            store,
+		SessionID:        sessionIDFor(spec.ID),
 		Architect:        &session.LLMArchitect{Provider: architectProv, Model: architectModel},
 		Implementer:      implementer,
 		ImplementerModel: spec.Model,

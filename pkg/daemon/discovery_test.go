@@ -87,7 +87,7 @@ func TestExecuteTaskEmptyDiscoveryHonestFailure(t *testing.T) {
 
 	// spec.File is empty, spec.Files is nil
 	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "fix it", File: "", TestCmd: "true"}
-	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}, &progressReporter{})
+	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}, &progressReporter{}, "")
 	ok, detail := res.ok, res.detail
 
 	if ok {
