@@ -9,13 +9,16 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-geist-mono",
 
 const TITLE = "Kiwi — One issue in. One PR out.";
 const DESCRIPTION =
-  "Plan a task, run a swarm of agents, and ship one verified pull request. The Kiwi dashboard.";
+  "Plan a task, run a swarm of agents, and ship one verified pull request. Kiwi is your agentic execution platform for automating software development tasks.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://app.runkiwi.dev"),
-  title: "Kiwi Dashboard",
+  title: TITLE,
   description: DESCRIPTION,
   applicationName: "Kiwi",
+  icons: {
+    icon: "/icon.svg",
+  },
   // Use the kiwi-bird mark (app/icon.svg) — the default create-next-app
   // favicon.ico was removed so it can't be picked up in link unfurls.
   openGraph: {
