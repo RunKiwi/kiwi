@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { RecordWorker, RecordStep } from "@/lib/api";
+import { formatDuration, formatCost, formatTokens } from "@/lib/datetime";
 
 /**
  * RunTimeline renders what actually happened inside the Actor–Critic loop.
@@ -35,10 +36,62 @@ const PHASE_LABEL: Record<string, string> = {
   actor: "Actor",
   critic: "Critic",
   test: "Test",
+  // Session mode emits these two raw (pkg/daemon/session_run.go sessionPhase),
+  // so without them a session run showed bare snake_case rows.
+  round_start: "Round started",
+  session_end: "Session ended",
 };
 
 function outcomeOf(o: string) {
   return OUTCOME[o] ?? { dot: "bg-zinc-500", text: "text-zinc-400", label: o };
+}
+
+/**
+ * Split a phase into its label and the tool it ran, if any.
+ *
+ * Session mode encodes the tool into the phase as `actor:read_file`. Rendering
+ * that verbatim was most of why a session run read as a black box — the row
+ * said `actor:read_file` with no indication of what was read.
+ */
+function labelPhase(phase: string): { label: string; tool: string } {
+  const colon = phase.indexOf(":");
+  if (colon !== -1) {
+    const head = phase.slice(0, colon);
+    return { label: PHASE_LABEL[head] ?? head, tool: phase.slice(colon + 1).trim() };
+  }
+  return { label: PHASE_LABEL[phase] ?? phase, tool: "" };
+}
+
+/**
+ * Per-worker totals for the header row.
+ *
+ * The signed record carries these on the worker; the live feed carries the same
+ * quantities per step instead. So a finished run reads the record's totals and a
+ * running one sums what has arrived so far — which is why the numbers climb
+ * during a run rather than appearing at the end.
+ */
+function workerTotals(w: RecordWorker): string[] {
+  const steps = w.steps ?? [];
+  const sum = (pick: (s: RecordStep) => number | undefined) =>
+    steps.reduce((n, s) => n + (pick(s) ?? 0), 0);
+
+  // Prefer the record's own totals; fall back to summing the live steps.
+  const recordTokens = (w.input_tokens ?? 0) + (w.output_tokens ?? 0);
+  const tokens = recordTokens > 0
+    ? recordTokens
+    : sum(s => s.input_tokens) + sum(s => s.output_tokens);
+
+  const recordCost = w.cost_usd ?? 0;
+  const cost = recordCost > 0 ? recordCost : sum(s => s.cost_usd);
+
+  const elapsed = sum(s => s.duration_ms);
+
+  const out: string[] = [];
+  if (elapsed > 0) out.push(formatDuration(elapsed));
+  if (tokens > 0) out.push(`${formatTokens(tokens)} tok`);
+  if (cost > 0) out.push(formatCost(cost));
+  if (w.critic_rejections) out.push(`${w.critic_rejections} rejected`);
+  return out;
 }
 
 /** Steps arrive flat and ordered; group them so each Actor iteration reads as one unit. */
@@ -57,23 +110,44 @@ function groupBySteps(steps: RecordStep[]): Array<{ step: number; rows: RecordSt
 
 function StepRow({ row }: { row: RecordStep }) {
   const o = outcomeOf(row.outcome);
-  const phase = PHASE_LABEL[row.phase] ?? row.phase;
+  const { label, tool } = labelPhase(row.phase);
+
+  // Cost and tokens ride the live feed, not the signed record, so a running job
+  // shows them and a finished one falls back to the worker totals. Rendered
+  // only when non-zero — a "$0.0000 · 0 tok" row on a phase that made no model
+  // call is noise dressed up as information.
+  const meta: string[] = [];
+  if (row.duration_ms) meta.push(formatDuration(row.duration_ms));
+  const tokens = (row.input_tokens ?? 0) + (row.output_tokens ?? 0);
+  if (tokens > 0) meta.push(`${formatTokens(tokens)} tok`);
+  if (row.cost_usd) meta.push(formatCost(row.cost_usd));
 
   return (
     <div className="flex gap-2.5">
       <span className={`mt-[7px] w-1.5 h-1.5 rounded-full shrink-0 ${o.dot}`} aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-zinc-300">
-          <span className="text-zinc-400">{phase}</span>{" "}
+        <p className="text-xs text-zinc-300 flex items-center gap-1.5 flex-wrap">
+          <span className="text-zinc-400">{label}</span>
+          {tool && (
+            <code className="text-[10px] font-mono px-1 py-px rounded bg-white/5 text-zinc-300">
+              {tool}
+            </code>
+          )}
           <span className={o.text}>{o.label}</span>
+          {meta.length > 0 && (
+            <span className="ml-auto text-[10px] text-zinc-500 font-mono shrink-0 tabular-nums">
+              {meta.join(" · ")}
+            </span>
+          )}
         </p>
-        {row.reasons ? (
-          // The Critic's own words. Quoted rather than paraphrased: this is the
-          // run explaining itself, and rewording it would lose the specifics
-          // that make it actionable.
-          <p className="mt-1 text-[11px] leading-relaxed text-zinc-400 border-l-2 border-white/10 pl-2.5">
-            {row.reasons}
-          </p>
+        {/* `reasons` is the Critic's verdict on the signed record; `detail` is
+            what the live feed carries for the same row (a tool's output tail, a
+            test result). Either way it is the run explaining itself in its own
+            words, so it is quoted rather than paraphrased. */}
+        {(row.reasons || row.detail) ? (
+          <pre className="mt-1 text-[11px] leading-relaxed text-zinc-400 border-l-2 border-white/10 pl-2.5 whitespace-pre-wrap break-words font-sans">
+            {row.reasons || row.detail}
+          </pre>
         ) : null}
       </div>
     </div>
@@ -110,10 +184,19 @@ export function RunTimeline({ workers }: { workers: RecordWorker[] }) {
               {/* The model is worth stating: a run's behaviour is a property of
                   the model as much as of the code, and it is the first thing
                   worth changing when results disappoint. */}
-              {(w.actor_model || withSteps.length > 1) && (
-                <div className="flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
+              {(w.actor_model || withSteps.length > 1 || workerTotals(w).length > 0) && (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500 font-mono flex-wrap">
                   {withSteps.length > 1 && <span className="text-zinc-400">{w.worker_id}</span>}
                   {w.actor_model && <span>{w.actor_model}</span>}
+                  {/* The critic model is often a different (cheaper or dearer)
+                      one than the actor, and which pairing ran is exactly what
+                      you need when comparing two runs of the same task. */}
+                  {w.critic_model && w.critic_model !== w.actor_model && (
+                    <span className="text-zinc-600">critic {w.critic_model}</span>
+                  )}
+                  {workerTotals(w).length > 0 && (
+                    <span className="ml-auto tabular-nums">{workerTotals(w).join(" · ")}</span>
+                  )}
                 </div>
               )}
 
