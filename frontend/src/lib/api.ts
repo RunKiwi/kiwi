@@ -86,6 +86,10 @@ export interface JobTask {
   result_detail?: string;
   queued_at: string;
   started_at?: string;
+  // Last write to the task row. On a terminal task this is the completion time
+  // — the schema has no completed_at. On a running one it is bumped by lease
+  // renewal, so it is only a finish time once the task is terminal.
+  updated_at?: string;
   attempts: number;
   leased_by?: string;
   /** Set only while the task is QUEUED; blocked_detail is the sentence to show. */
