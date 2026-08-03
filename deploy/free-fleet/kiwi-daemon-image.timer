@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically refresh the Kiwi free-tier daemon image
+
+[Timer]
+# Also on boot, so a host that was stopped overnight does not cold-start orgs
+# on a stale image before the first interval elapses.
+OnBootSec=2min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
