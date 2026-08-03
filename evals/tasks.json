@@ -1,0 +1,52 @@
+{
+  "repo": "https://github.com/RunKiwi/kiwi-eval",
+  "ref": "main",
+  "test_cmd": "go test ./...",
+  "comment": [
+    "Tasks are ordered roughly by how much they should favour the session loop.",
+    "The first few are things file_loop was built for; the last few need reading",
+    "one file to change another, which file_loop has no way to express.",
+    "",
+    "Every task is ADDITIVE and the fixture suite passes on main. That is",
+    "deliberate: a loop that returns early on a green suite must be seen to",
+    "no-op rather than silently pass (CLAUDE.md, the success criterion)."
+  ],
+  "tasks": [
+    {
+      "id": "t01-single-fn",
+      "file": "validate/validate.go",
+      "hint": "single file, self-contained — file_loop's home ground",
+      "task": "Add a Phone(s string) error function to validate/validate.go that returns an error when s contains any character other than digits, spaces, '+' or '-', and returns nil otherwise. Add tests for it in validate/validate_test.go covering a valid number, an invalid one, and the empty string. Leave Email and its test unchanged."
+    },
+    {
+      "id": "t02-edge-cases",
+      "file": "validate/validate.go",
+      "hint": "single file, but the correct answer needs care about edge cases",
+      "task": "Strengthen Email in validate/validate.go so it also rejects: an address with nothing before the @, nothing after the @, more than one @, or whitespace anywhere. Keep the existing signature and keep returning a descriptive error. Extend validate/validate_test.go to cover each new rejection case. The existing TestEmail assertions must still pass."
+    },
+    {
+      "id": "t03-new-method",
+      "file": "store/store.go",
+      "hint": "single file, must respect an existing concurrency pattern",
+      "task": "Add a Delete(k string) error method to store/store.go that removes a key and returns ErrNotFound if it was not present. It must use the same mutex discipline as the existing methods. Add tests in store/store_test.go for deleting an existing key, deleting a missing key, and that Len drops after a delete."
+    },
+    {
+      "id": "t04-discovery",
+      "file": "",
+      "hint": "no target file given — the loop has to find where the work belongs",
+      "task": "Add a Keys() []string method that returns all keys currently in the store, sorted alphabetically so the result is deterministic. Put it wherever it belongs in this repository and add tests alongside the existing ones for that package."
+    },
+    {
+      "id": "t05-cross-package",
+      "file": "",
+      "hint": "needs reading one package to write another — file_loop cannot express this",
+      "task": "Add a new file store/validated.go with a ValidatedStore type that wraps *Store and exposes SetEmail(key, email string) error. SetEmail must reject the value using the validate package's Email function before storing it, returning that error unchanged, and otherwise store it via the underlying Store. Add tests in store/validated_test.go covering an accepted email and a rejected one. Do not modify the validate package."
+    },
+    {
+      "id": "t06-refactor",
+      "file": "",
+      "hint": "a rename that must stay consistent across two packages",
+      "task": "The Store.Len method is poorly named for what it reports. Rename it to Count throughout the repository, updating every call site and test so the whole suite still passes. Do not change its behaviour or signature beyond the name."
+    }
+  ]
+}
