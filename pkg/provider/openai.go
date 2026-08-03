@@ -51,7 +51,7 @@ func NewOpenAIProviderWithModels(apiKey, actorModel, criticModel string) *OpenAI
 		actorModel:  actorModel,
 		criticModel: criticModel,
 		baseURL:     base,
-		http:        http.DefaultClient,
+		http:        retryingClient(),
 	}
 }
 
