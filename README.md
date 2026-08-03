@@ -94,6 +94,7 @@ Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. T
 | ├ Cost — prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ Phase 3 |
 | ├ Planner collapse — one worker per session job, **no LLM call and no credential decryption on the Control Plane** (`KIWI_SESSION_MODE=off` disables) | ✅ Phase 4 |
 | └ Provider parity — tool-calling on Anthropic, Gemini and OpenAI, so session mode is not one vendor's feature | ✅ Phase 5 — Gemini additionally echoes the `thoughtSignature` it requires back on replay; without it the second tool turn of every conversation is rejected |
+| └ Reachable from the clients — `-mode session` on the CLI, `mode` in the SDK/API, an **Execution loop** control in the dashboard | ✅ Proven end to end in production: Architect plans, Implementer works with tools, reviewer approves, PR opened. `file_loop` stays the default everywhere and the key is omitted entirely unless session is chosen |
 
 ## Building
 
@@ -136,6 +137,16 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 ./kiwi submit -task "Fix the divide-by-zero panic in Divide()" \
     -repo https://github.com/you/yourrepo -ref main \
     -file math_utils.go -test-cmd "go test ./..."
+
+# Run it as an agentic session instead: an Architect plans the whole task and
+# reviews each round, an Implementer works with real tool calls (read, grep,
+# write, run). -architect-model is optional and defaults to -model; it is worth
+# setting to something more capable, since the reviewer is called a handful of
+# times per task while the implementer runs constantly.
+./kiwi submit -task "Add a Modulo function mirroring Divide, with table-driven tests" \
+    -repo https://github.com/you/yourrepo -ref main \
+    -file math_utils.go -test-cmd "go test ./..." \
+    -mode session -model claude-haiku-4-5-20251001 -architect-model claude-sonnet-5
 
 # Resume an existing task
 ./kiwi submit -resume -task-id <task-id>
