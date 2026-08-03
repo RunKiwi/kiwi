@@ -18,6 +18,10 @@ const (
 	// ErrModelUnavailable: the requested model does not exist or is not available
 	// to this key.
 	ErrModelUnavailable
+	// ErrTransient: the provider failed on its own side (5xx, "overloaded").
+	// Distinct from ErrRateLimit because nothing about the account is wrong —
+	// the advice is to wait, not to raise a limit or add credits.
+	ErrTransient
 )
 
 // Classify inspects a provider error (Anthropic, Gemini or OpenAI) and returns a kind
@@ -47,6 +51,19 @@ func Classify(err error) (ErrorKind, string) {
 		strings.Contains(s, "too many requests") ||
 		strings.Contains(s, " 429"):
 		return ErrRateLimit, "the provider is rate-limiting or the quota window is exhausted — retry shortly or raise the account's limits"
+
+	// The provider's own side failed. Reached only after the transport has
+	// already retried (see retry.go), so by here it is persistent, not a blip.
+	// "service unavailable" rather than a bare "unavailable", which would also
+	// match a model-not-found and send the user chasing the wrong problem.
+	case strings.Contains(s, "overloaded") ||
+		strings.Contains(s, "service unavailable") ||
+		strings.Contains(s, " 500") ||
+		strings.Contains(s, " 502") ||
+		strings.Contains(s, " 503") ||
+		strings.Contains(s, " 504") ||
+		strings.Contains(s, " 529"):
+		return ErrTransient, "the provider is failing or overloaded on its side — this was already retried, so wait and run the task again"
 
 	// Bad model. Gemini: "is no longer available", NOT_FOUND / 404 on a model.
 	case strings.Contains(s, "no longer available") ||
