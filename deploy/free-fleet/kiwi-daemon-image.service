@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh the Kiwi free-tier daemon image from Artifact Registry
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiwi-refresh-daemon-image.sh

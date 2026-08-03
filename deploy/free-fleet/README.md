@@ -39,6 +39,11 @@ sudo -E ./harden-egress.sh      # block the metadata token endpoint
 
 ### Operational notes
 
+- **Disk.** The host holds the OS, every sandbox base image, and a git cache per
+  org, so it fills from three directions at once. It ran on a 10GB boot disk and
+  hit 98%; it is now 50GB. Pruning slows the fill, it does not stop it — a fleet
+  packing more orgs needs headroom, not just hygiene.
+
 - **Persistence:** iptables rules don't survive a reboot. Re-apply on boot via
   `netfilter-persistent`, cloud-init, or a systemd oneshot that runs
   `harden-egress.sh`.
@@ -84,6 +89,43 @@ hand-issued `docker run`, so its entire configuration lived only inside the
 running container. Removing that container destroyed the only record of how to
 start it. The config now lives in files, and systemd owns restarts and boot.
 
+---
+
+## The daemon-image refresh timer
+
+The provisioner launches per-org daemons from a **local** `kiwidaemon:latest`
+tag and never pulls (see the `KIWI_DAEMON_IMAGE` note below). Something has to
+keep that local tag current, and that is this timer — every 30 minutes, plus 2
+minutes after boot so a host that was stopped overnight does not cold-start orgs
+on a stale image.
+
+```bash
+sudo ./install-daemon-image-refresh.sh      # idempotent; re-run to pick up a change
+systemctl list-timers kiwi-daemon-image.timer
+journalctl -u kiwi-daemon-image.service -n 20
+```
+
+**It prunes, and that is not optional.** Retagging `kiwidaemon:latest` to a newly
+pulled image leaves the previous one untagged. Those orphans are invisible to
+`docker images` and accumulate one per refresh (~170MB each): the host reached
+**98% and could not pull any image at all**, so cold starts failed with "no space
+left on device" — which presents as a broken free tier, not as a disk alert.
+Twenty-four orphans had built up before anyone looked.
+
+The prune is `docker image prune -f` — **never `-a`**. Without `-a` it removes
+only dangling images. With `-a` it would also delete every tagged image not
+attached to a running container: `kiwidaemon:latest` itself, which the
+provisioner resolves locally and cannot re-pull, and the sandbox base images
+(`golang`, `node`, `postgres`) that a task would then refetch mid-run.
+
+A prune failure is logged but does not fail the unit — serving a current daemon
+image matters more than reclaiming space.
+
+> The script and both units lived only on the host for their entire life, in no
+> repository, exactly as the provisioner once did. A rebuilt or second fleet host
+> would have silently served a stale image with nothing to say so. They are now
+> in this directory and installed from it.
+
 ### Two settings that look wrong and are not
 
 **Bridge networking, never `--network host`.** The metadata block above lives in
@@ -101,4 +143,5 @@ container — and that container is cut off from the metadata endpoint by
 `harden-egress.sh`, so it cannot authenticate to the registry and every cold
 start fails to pull. Left unset, the launcher uses the local `kiwidaemon:latest`
 tag, which `kiwi-daemon-image.timer` refreshes on the **host**, where the
-credentials live. That is the design, not an oversight.
+credentials live (installed by `install-daemon-image-refresh.sh` in this
+directory). That is the design, not an oversight.
