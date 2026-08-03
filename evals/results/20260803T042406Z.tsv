@@ -1,0 +1,4 @@
+task_id	mode	job_id	status	wall_s	pr_url	detail
+t01-single-fn	file_loop	job_63ea317d1ddad7a9	FAILED	78	loop failed after 1 step(s): loop: actor failed: anthropic actor request failed: POST "https://api.anthropic.com/v1/messages": 400 Bad Request (Request-ID: req_	
+t02-edge-cases	file_loop	job_21266c70dedd9e9e	FAILED	79	loop failed after 1 step(s): loop: actor failed: anthropic actor request failed: POST "https://api.anthropic.com/v1/messages": 400 Bad Request (Request-ID: req_	
+t03-new-method	file_loop	job_3d8771e761f73b94	FAILED	80	loop failed after 1 step(s): loop: actor failed: anthropic actor request failed: POST "https://api.anthropic.com/v1/messages": 400 Bad Request (Request-ID: req_	
