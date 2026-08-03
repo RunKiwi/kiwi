@@ -317,7 +317,10 @@ function CommandCenterContent() {
         file: (inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file,
         test_cmd: inlineData.test_cmd || testCmd,
         model: inlineData.model || workerModel,
-        planner_model: plannerModel,
+        // Omitted in session mode rather than sent and ignored. The Control
+        // Plane discards it there, so sending it put a value in the request
+        // that no part of the run would honour.
+        ...(mode === "session" ? {} : { planner_model: plannerModel }),
         max_workers: inlineData.max_workers || maxWorkers,
         fleet_id: fleetId,
         reference_mode: inlineData.reference_mode || referenceMode,
@@ -522,13 +525,27 @@ function CommandCenterContent() {
             </label>
           )}
 
-          {/* Planner & verifier */}
-          <Select
-            variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
-            icon={<span className="pdot" style={{ background: "#93C645" }} />}
-            value={plannerModel} onChange={setPlannerModel}
-            options={plannerOptions.map(m => ({ value: m, label: m }))}
-          />
+          {/* Planner & verifier.
+
+              Hidden in session mode, where it decides nothing. SubmitPlan takes
+              the session branch (pkg/planner/service.go) and never reads
+              planner_model: SessionPlanner makes no LLM call at all, because
+              the Architect does the planning inside the daemon. Worse, the
+              manifest then records planner_model as the ARCHITECT model
+              (service.go, "planner_model": actualModel), so leaving this chip
+              lit did not merely mislead — it advertised a choice that was
+              silently replaced by a different one.
+
+              The Architect model control in Advanced is the real successor, so
+              the setting is not lost, only moved to where it applies. */}
+          {mode !== "session" && (
+            <Select
+              variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
+              icon={<span className="pdot" style={{ background: "#93C645" }} />}
+              value={plannerModel} onChange={setPlannerModel}
+              options={plannerOptions.map(m => ({ value: m, label: m }))}
+            />
+          )}
 
           {/* Worker */}
           <Select

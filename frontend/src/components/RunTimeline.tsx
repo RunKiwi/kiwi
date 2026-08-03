@@ -29,17 +29,57 @@ const OUTCOME: Record<string, { dot: string; text: string; label: string }> = {
   rejected: { dot: "bg-amber-400", text: "text-amber-300", label: "rejected" },
   fail: { dot: "bg-rose-400", text: "text-rose-300", label: "failed" },
   error: { dot: "bg-rose-500", text: "text-rose-300", label: "errored" },
+  // Session mode: an Implementer turn either asks for tools or stops. Neither
+  // is a failure, so neither gets a failure colour.
+  tools: { dot: "bg-sky-400", text: "text-sky-300", label: "called tools" },
+  done: { dot: "bg-zinc-400", text: "text-zinc-400", label: "ended its turn" },
+  ok: { dot: "bg-zinc-400", text: "text-zinc-400", label: "ok" },
 };
+
+/**
+ * A tool call's arguments, rendered as the one line that matters.
+ *
+ * The raw value is the JSON the model emitted, which is the honest thing to
+ * keep but a poor thing to show: `{"command":"npm test"}` reads worse than
+ * `npm test`. So the common single-meaning arguments are unwrapped and anything
+ * unrecognised falls back to the JSON, which is still better than nothing.
+ */
+function summariseInput(input?: string): string {
+  if (!input) return "";
+  try {
+    const o = JSON.parse(input) as Record<string, unknown>;
+    for (const k of ["command", "path", "pattern"]) {
+      if (typeof o[k] === "string" && o[k]) {
+        // edit_file and read_file both key on `path`; naming the other argument
+        // is what distinguishes "read this" from "change this".
+        if (k === "path" && typeof o.old_string === "string") {
+          return `${o[k]} — replacing ${JSON.stringify(shorten(o.old_string, 40))}`;
+        }
+        return o[k] as string;
+      }
+    }
+    return input;
+  } catch {
+    return input;
+  }
+}
+
+function shorten(s: string, n: number): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > n ? flat.slice(0, n) + "…" : flat;
+}
 
 const PHASE_LABEL: Record<string, string> = {
   initial_test: "Baseline check",
   actor: "Actor",
   critic: "Critic",
   test: "Test",
-  // Session mode emits these two raw (pkg/daemon/session_run.go sessionPhase),
-  // so without them a session run showed bare snake_case rows.
+  // Session mode emits these raw (pkg/daemon/session_run.go sessionPhase), so
+  // without them a session run showed bare snake_case rows.
   round_start: "Round started",
   session_end: "Session ended",
+  implementer: "Implementer",
+  compaction: "Compacted context",
 };
 
 function outcomeOf(o: string) {
@@ -111,6 +151,7 @@ function groupBySteps(steps: RecordStep[]): Array<{ step: number; rows: RecordSt
 function StepRow({ row }: { row: RecordStep }) {
   const o = outcomeOf(row.outcome);
   const { label, tool } = labelPhase(row.phase);
+  const args = summariseInput(row.input);
 
   // Cost and tokens ride the live feed, not the signed record, so a running job
   // shows them and a finished one falls back to the worker totals. Rendered
@@ -140,6 +181,16 @@ function StepRow({ row }: { row: RecordStep }) {
             </span>
           )}
         </p>
+        {/* What the tool was actually asked to do. Without this a row could say
+            that `run` was called and show what it printed, but never the
+            command — so "is it rewriting whole files or editing them?" was not
+            answerable from the timeline, only guessable from the output. */}
+        {args && (
+          <p className="mt-0.5 text-[11px] font-mono text-zinc-500 break-all">
+            <span className="text-zinc-600 select-none">$ </span>
+            {args}
+          </p>
+        )}
         {/* `reasons` is the Critic's verdict on the signed record; `detail` is
             what the live feed carries for the same row (a tool's output tail, a
             test result). Either way it is the run explaining itself in its own
