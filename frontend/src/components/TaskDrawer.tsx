@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep } from "@/lib/api";
+import { durationBetween, formatDuration, formatCost, formatTokens } from "@/lib/datetime";
 import { RunTimeline } from "@/components/RunTimeline";
 import { LiveRun } from "@/components/LiveRun";
 import { usePolling } from "@/hooks/usePolling";
@@ -72,6 +73,85 @@ function timingLabel(task: JobTask): string {
   if (task.attempts > 1) parts.push(`attempt ${task.attempts}`);
   if (task.leased_by) parts.push(task.leased_by);
   return parts.join(" · ");
+}
+
+/**
+ * The facts about a run that were previously nowhere in the UI: which models
+ * ran it, what it cost, how many tokens it burned, and how long it took.
+ *
+ * All of this was already arriving — per step on the live progress feed, and as
+ * per-worker totals on the signed record — and nothing rendered any of it. The
+ * two sources are read in that order of preference: the record is authoritative
+ * once a run finishes, the live feed is all there is before then.
+ *
+ * Every field is omitted when absent rather than shown as a zero. A drawer that
+ * says "$0.00 · 0 tok" on a queued job states something false; one that says
+ * nothing yet is merely quiet.
+ */
+function RunFacts({
+  job,
+  progress,
+  record,
+}: {
+  job: Job | null;
+  progress: JobProgressTask[];
+  record: ExecutionRecordResponse | null;
+}) {
+  const body = (record?.data ?? {}) as ExecutionRecordBody;
+  const workers = body.execution?.workers ?? [];
+
+  // Models: the record names actor and critic per worker; before it exists the
+  // progress feed carries the actor, and the job's tasks carry the requested
+  // model even before anything has run.
+  const models = new Set<string>();
+  for (const w of workers) {
+    if (w.actor_model) models.add(w.actor_model);
+    if (w.critic_model) models.add(w.critic_model);
+  }
+  for (const p of progress) if (p.actor_model) models.add(p.actor_model);
+  for (const t of job?.tasks ?? []) if (t.model) models.add(t.model);
+
+  const sumSteps = (pick: (s: RecordStep) => number | undefined) =>
+    progress.reduce((n, p) => n + (p.steps ?? []).reduce((m, s) => m + (pick(s) ?? 0), 0), 0);
+
+  const recordTokens = workers.reduce(
+    (n, w) => n + (w.input_tokens ?? 0) + (w.output_tokens ?? 0), 0);
+  const tokens = recordTokens > 0
+    ? recordTokens
+    : sumSteps(s => s.input_tokens) + sumSteps(s => s.output_tokens);
+
+  const recordCost = workers.reduce((n, w) => n + (w.cost_usd ?? 0), 0);
+  const cost = recordCost > 0 ? recordCost : sumSteps(s => s.cost_usd);
+
+  // Wall clock from the first start to the last finish, which is what the user
+  // waited — not the summed step durations, which exclude queueing and install.
+  const starts = (job?.tasks ?? []).map(t => t.started_at).filter(Boolean) as string[];
+  const started = starts.length > 0 ? starts.sort()[0] : undefined;
+  // The record has no finish timestamp, but verification carries the measured
+  // duration; fall back to counting up from the start while the run is live.
+  const elapsed = body.verification?.duration_ms
+    ? formatDuration(body.verification.duration_ms)
+    : started
+      ? durationBetween(started, new Date().toISOString())
+      : "";
+
+  const facts: Array<[string, string]> = [];
+  if (models.size > 0) facts.push(["model", [...models].join(", ")]);
+  if (elapsed) facts.push([record ? "took" : "running for", elapsed]);
+  if (tokens > 0) facts.push(["tokens", formatTokens(tokens)]);
+  if (cost > 0) facts.push(["cost", formatCost(cost)]);
+  if (facts.length === 0) return null;
+
+  return (
+    <dl className="mt-2 flex items-center gap-x-4 gap-y-1 flex-wrap text-[11px]">
+      {facts.map(([k, v]) => (
+        <div key={k} className="flex items-baseline gap-1.5">
+          <dt className="text-zinc-600 uppercase tracking-wider">{k}</dt>
+          <dd className="text-zinc-300 font-mono tabular-nums">{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function BlockedBanner({ task }: { task: JobTask }) {
@@ -365,6 +445,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
               {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
               {taskId}
             </p>
+            <RunFacts job={currentJob} progress={progress} record={record} />
           </div>
         </div>
         <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
