@@ -43,7 +43,7 @@ func NewGeminiProviderWithModels(apiKey, actorModel, criticModel string) *Gemini
 		actorModel:  actorModel,
 		criticModel: criticModel,
 		baseURL:     defaultGeminiBaseURL,
-		http:        http.DefaultClient,
+		http:        retryingClient(),
 	}
 }
 

@@ -156,6 +156,8 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 
 The same rule decides which key the planner uses, how a call is priced, and which provider the signed execution record names — it is one function (`provider.ProviderOf`) rather than a rule repeated per component. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
 
+**Transient provider failures are retried** (`pkg/provider/retry.go`): `429` and `5xx` are retried with exponential backoff and jitter, honouring the provider's own `Retry-After` when it sends one, and never sleeping past the caller's deadline. This matters most for session mode — a session makes dozens of calls per round, so meeting at least one throttle is close to certain, and without a retry a single blip discarded a task that had already spent minutes and dollars. A retried-away failure is not billed: usage is recorded from the decoded response, which the swallowed attempts never reach. Only Gemini and OpenAI are wrapped; the Anthropic provider uses the official SDK, which already retries.
+
 Set `KIWI_OPENAI_BASE_URL` to point the OpenAI provider at a compatible endpoint (Azure, a gateway, a self-hosted server) instead of `api.openai.com`.
 
 The **worker model is yours to choose, not the planner's**: `-model` (and the dashboard's model selector) is applied to every worker the plan produces, overriding anything the planning model suggested. The planner is never told which providers your org holds keys for, so it is not asked to pick one — a model id selects the provider, and a guessed one would route the work to a key you never connected. `-planner-model` selects the model that decomposes the task; both run on your own provider key.
