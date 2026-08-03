@@ -116,7 +116,30 @@ func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, pullAlway
 func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error) {
 	name := d.containerName(orgID)
 
-	// In case there is an old container stuck, try to remove it first.
+	// A running container is left alone.
+	//
+	// The container is named per ORG, not per task, and this used to begin with
+	// an unconditional `docker rm -f`. So submitting a second task while the
+	// first was still running killed the daemon executing it — mid-edit,
+	// mid-test, whenever. The task stayed LEASED with nobody running it, and
+	// nothing detects a vanished daemon, so it sat until the 10-minute lease
+	// lapsed (leaseTTL in pkg/orchestrator/daemon_api.go) and was re-leased on a
+	// second attempt.
+	//
+	// The visible symptom was a task that took twelve minutes to do two minutes
+	// of work, with the extra ten spent on a lease owned by a dead process. The
+	// tell is attempts=2 on the slow ones and attempts=1 on the fast ones.
+	//
+	// Reuse is correct rather than merely safe: the daemon is a long-lived
+	// per-org poller, so the running one picks the new task up on its next
+	// heartbeat. Launching is only needed when nothing is there.
+	if d.isRunning(ctx, name) {
+		return Handle(name), nil
+	}
+
+	// Not running — but a stopped or half-created container still owns the name,
+	// so it has to go before a fresh one can take it. This is the case the
+	// original `rm -f` was written for.
 	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 
 	// The host side of the bind mount must exist and be writable by the daemon
@@ -147,6 +170,21 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 	}
 
 	return Handle(name), nil
+}
+
+// isRunning reports whether the org's container exists and is running.
+//
+// `docker inspect` exits non-zero when the container does not exist, which is
+// indistinguishable here from a docker that is unreachable — both answer "not
+// running", and both lead to the same next step of removing the name and
+// launching. Erring toward false keeps the old behaviour when docker is sick:
+// a launch that fails loudly beats silently reusing a container we cannot see.
+func (d *DockerLauncher) isRunning(ctx context.Context, name string) bool {
+	out, err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", name).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
 }
 
 func (d *DockerLauncher) Stop(ctx context.Context, orgID string) error {

@@ -123,21 +123,42 @@ function RunFacts({
   const recordCost = workers.reduce((n, w) => n + (w.cost_usd ?? 0), 0);
   const cost = recordCost > 0 ? recordCost : sumSteps(s => s.cost_usd);
 
-  // Wall clock from the first start to the last finish, which is what the user
-  // waited — not the summed step durations, which exclude queueing and install.
-  const starts = (job?.tasks ?? []).map(t => t.started_at).filter(Boolean) as string[];
-  const started = starts.length > 0 ? starts.sort()[0] : undefined;
-  // The record has no finish timestamp, but verification carries the measured
-  // duration; fall back to counting up from the start while the run is live.
-  const elapsed = body.verification?.duration_ms
+  // Two different clocks, and conflating them hid a real bug.
+  //
+  // This read verification.duration_ms, which is how long the TEST COMMAND ran
+  // — a sub-measurement sitting next to test_cmd and output_hash in the record.
+  // Labelling it "took" reported two minutes for a task that occupied thirteen.
+  // The giveaway was a flicker on open: the real elapsed rendered first, then
+  // the record loaded and overwrote it with the smaller number.
+  //
+  // `waited` is the gap before work began. It is usually seconds, and when it is
+  // not, it is the whole story — an orphaned lease is ten minutes of nothing,
+  // and a drawer that only showed run time made that invisible.
+  const tasks = job?.tasks ?? [];
+  const queuedAts = tasks.map(t => t.queued_at).filter(Boolean).sort() as string[];
+  const startedAts = tasks.map(t => t.started_at).filter(Boolean).sort() as string[];
+  const submitted = queuedAts[0];
+  const started = startedAts[0];
+
+  const terminal = tasks.length > 0 &&
+    tasks.every(t => ["SUCCEEDED", "FAILED", "CANCELLED"].includes(t.status));
+  // No completion timestamp is exposed, so a finished run measures to its last
+  // update and a live one measures to now.
+  const endpoint = terminal ? (tasks.map(t => t.updated_at).filter(Boolean).sort().pop()) : new Date().toISOString();
+
+  const waited = durationBetween(submitted, started);
+  const ran = durationBetween(started, endpoint);
+  const testTook = body.verification?.duration_ms
     ? formatDuration(body.verification.duration_ms)
-    : started
-      ? durationBetween(started, new Date().toISOString())
-      : "";
+    : "";
 
   const facts: Array<[string, string]> = [];
   if (models.size > 0) facts.push(["model", [...models].join(", ")]);
-  if (elapsed) facts.push([record ? "took" : "running for", elapsed]);
+  // Shown whenever it is non-trivial, because a long wait is the single most
+  // useful thing the drawer can tell you and it is not the agent's fault.
+  if (waited && waited !== "0s" && !/^\d+ms$/.test(waited)) facts.push(["waited", waited]);
+  if (ran) facts.push([terminal ? "ran" : "running for", ran]);
+  if (testTook) facts.push(["tests", testTook]);
   if (tokens > 0) facts.push(["tokens", formatTokens(tokens)]);
   if (cost > 0) facts.push(["cost", formatCost(cost)]);
   if (facts.length === 0) return null;

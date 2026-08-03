@@ -33,7 +33,17 @@ type JobTaskResponse struct {
 	// than showing an ageless spinner. StartedAt is set once at lease.
 	QueuedAt  time.Time  `json:"queued_at"`
 	StartedAt *time.Time `json:"started_at,omitempty"`
-	Attempts  int        `json:"attempts"`
+	// UpdatedAt is the last write to the row. On a TERMINAL task that is the
+	// completion time, which is the only finish timestamp the schema has — there
+	// is no completed_at. It is deliberately not a finish time on a RUNNING
+	// task, because RenewLease bumps it every few minutes (the same reason
+	// agent-minute metering reads StartedAt instead; see migration 0020).
+	//
+	// Exposed so a caller can report total elapsed. Without it the drawer could
+	// only show the test-command duration, which reported two minutes for a task
+	// that took thirteen — the missing eleven being an orphaned lease.
+	UpdatedAt time.Time `json:"updated_at"`
+	Attempts  int       `json:"attempts"`
 	// LeasedBy is the daemon executing the task, when one holds the lease.
 	LeasedBy *string `json:"leased_by,omitempty"`
 
@@ -170,6 +180,7 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 			Files:        specStrings(t.Spec, "files"),
 			QueuedAt:     t.CreatedAt,
 			StartedAt:    t.StartedAt,
+			UpdatedAt:    t.UpdatedAt,
 			Attempts:     t.Attempts,
 			LeasedBy:     leasedBy,
 		}
