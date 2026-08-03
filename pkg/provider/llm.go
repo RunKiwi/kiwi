@@ -72,12 +72,11 @@ func (p *AnthropicProvider) GetCodeEdit(ctx context.Context, task, fileName, cod
 	user := fmt.Sprintf("Task: %s\n\nFile: %s\n\nCurrent contents:\n```\n%s\n```\n\nBuild/test output:\n%s",
 		task, fileName, codeContent, buildOutput)
 
-	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(p.actorModel),
 		MaxTokens: 16000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
+		Thinking:  thinkingFor(p.actorModel),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
@@ -101,12 +100,11 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 	user := fmt.Sprintf("Task: %s\n\nFile: %s\n\nOriginal:\n```\n%s\n```\n\nProposed:\n```\n%s\n```\n\nBuild/test output that motivated the change:\n%s",
 		task, fileName, oldContent, newContent, buildOutput)
 
-	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(p.criticModel),
 		MaxTokens: 2000,
 		System:    []anthropic.TextBlockParam{{Text: system}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
+		Thinking:  thinkingFor(p.criticModel),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
@@ -127,7 +125,6 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 // the planner's Completer interface so LLMPlanner can decompose tasks with a
 // live model.
 func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (string, error) {
-	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	budget := CompletionBudget()
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model: anthropic.Model(p.actorModel),
@@ -136,7 +133,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, system, user string) (
 		// multi-file Actor far less than 8000 tokens of actual JSON.
 		MaxTokens: int64(budget),
 		System:    []anthropic.TextBlockParam{{Text: system}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
+		Thinking:  thinkingFor(p.actorModel),
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
