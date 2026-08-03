@@ -69,7 +69,8 @@ type Config struct {
 	// $2-4. Sharing one number meant the file_loop default of $0.50 halted every
 	// session on the budget rail around the end of round one.
 	SessionBudgetUSD float64
-	// RenewInterval configures how often the daemon extends the lease of a running task.
+	// RenewInterval configures how often the daemon extends the lease of a
+	// running task. Zero uses defaultRenewInterval.
 	RenewInterval time.Duration
 	// ProgressInterval is how often partial telemetry is flushed to the Control
 	// Plane while a task runs. Defaults to 3s when zero. Distinct from
@@ -294,7 +295,7 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		go func(specID string) {
 			interval := d.config.RenewInterval
 			if interval <= 0 {
-				interval = 4 * time.Minute
+				interval = defaultRenewInterval
 			}
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
@@ -380,6 +381,21 @@ const (
 	geminiKeyName    = "GEMINI_API_KEY"
 	openaiKeyName    = "OPENAI_API_KEY"
 )
+
+// defaultRenewInterval is how often a running task's lease is extended, and now
+// also how often a busy daemon proves it is alive.
+//
+// It must stay comfortably under TWO separate deadlines, and it used to respect
+// only one of them. The lease is 10 minutes (leaseTTL in pkg/orchestrator), so
+// any interval well under that keeps the task. But the Control Plane reports a
+// daemon offline after 3 minutes without contact (daemonStaleAfter in
+// pkg/store/queue_diagnose.go), and the old 4-minute interval was longer than
+// that window — so a daemon doing nothing wrong looked dead between renewals.
+//
+// Two minutes sits inside both, and the shorter interval buys a second thing
+// worth having: five renewal attempts per lease instead of two, so a transient
+// failure no longer needs to be a near-miss.
+const defaultRenewInterval = 2 * time.Minute
 
 // isLLMKey reports whether a credential is a model API key that must be kept out
 // of the sandbox environment.
@@ -735,6 +751,29 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// verbatim instead of a generic failure — there is nothing the Actor could
 	// do about it, so saying so beats spending the budget proving it.
 	offlineBlocked := ""
+
+	// verifyBox lets session mode run the test command inside the container it
+	// already has, instead of paying a fresh `docker run` for every round.
+	//
+	// The single-file loop leaves this nil and keeps its one-shot behaviour: it
+	// has no persistent container to reuse. Session mode sets it once the box
+	// exists (see executeSession), which is after this closure is built — hence
+	// the pointer rather than a parameter.
+	//
+	// It is dropped on image correction. The box was started from an image
+	// chosen before anything ran, so if that guess turns out to be wrong the
+	// running container is wrong too, and the corrected re-run has to go back
+	// through RunCommand — which builds a container per call and can therefore
+	// use the new image. Correction happens at most once per task, so the
+	// fallback costs a container start in the rare case and saves one per round
+	// in the common one.
+	var verifyBox *sandbox.Session
+	runInSandbox := func(ctx context.Context) (*sandbox.Result, error) {
+		if verifyBox != nil {
+			return verifyBox.Exec(ctx, testCmd, testEnv)
+		}
+		return sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
+	}
 	runTest := func(ctx context.Context) (string, bool, error) {
 		// The Actor may have added a dependency. Phase B has no network, so the
 		// package it named would be missing and the build would fail on that
@@ -766,7 +805,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 
 		prog.setActivity("test: "+testCmd, "")
-		res, err := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv)
+		res, err := runInSandbox(ctx)
 		if err != nil {
 			return "", false, err
 		}
@@ -777,6 +816,9 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 				log.Printf("Task %s: %s; retrying in %s instead of %s",
 					spec.ID, why, next, sandboxCfg.DockerImage)
 				sandboxCfg.DockerImage = next
+				// The running box is on the image we just rejected, so it cannot
+				// serve the retry. Fall back to a per-call container from here on.
+				verifyBox = nil
 				if retry, rerr := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv); rerr == nil {
 					res = retry
 				}
@@ -825,6 +867,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			testCmd: testCmd,
 			verify:  runTest,
 			install: installFn,
+			useBox:  func(b *sandbox.Session) { verifyBox = b },
 		})
 	}
 

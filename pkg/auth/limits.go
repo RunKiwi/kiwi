@@ -52,8 +52,21 @@ func FreeLimits(orgID string) *OrgLimits {
 		// compute lever is agent-minutes below, not the dollar budget.
 		MaxBudgetPerMonth:       500.00,
 		MaxAgentMinutesPerMonth: 500,
-		TaskTimeoutSeconds:      600,
-		MaxSandboxDiskMB:        512,
+		// Twenty minutes, raised from ten.
+		//
+		// Ten was chosen for the single-file loop, where it is close to
+		// unreachable: six Actor steps at $0.50 rarely take that long unless the
+		// test suite is slow, so the step and dollar rails bind first. Session
+		// mode has different economics — $5 buys three or four rounds, each with
+		// an Architect plan, an agentic Implementer and a review — and there the
+		// clock was binding, cutting off runs that still had budget to spend.
+		//
+		// Still short of the 1800 every other plan gets (DefaultLimits), because
+		// wall clock is what Free meters: this is 20 of the org's 500
+		// agent-minutes per month, so a month is ~25 maximum-length tasks rather
+		// than ~50.
+		TaskTimeoutSeconds: 1200,
+		MaxSandboxDiskMB:   512,
 	}
 }
 
