@@ -165,11 +165,29 @@ func (c Config) withDefaults() Config {
 	if c.SessionBudgetUSD <= 0 {
 		c.SessionBudgetUSD = defaultSessionBudgetUSD
 	}
-	if c.RoundDeadline <= 0 {
-		c.RoundDeadline = defaultRoundDeadline
-	}
 	if c.SessionDeadline <= 0 {
 		c.SessionDeadline = defaultSessionDeadline
+	}
+	if c.RoundDeadline <= 0 {
+		// Derived from the session's own clock, not a flat 15 minutes.
+		//
+		// A round is one Architect objective, one agentic Implementer stretch and
+		// one review. The value of several rounds is the review BETWEEN them: the
+		// Architect sees the diff, says what is wrong, and the next round acts on
+		// it. One long round is a worse use of the same minutes.
+		//
+		// A fixed 15 minutes was invisible while the wall-clock cap was ten —
+		// the session deadline always fired first, so this never applied. Raise
+		// the cap past 15 minutes and it becomes live in the worst way: a single
+		// round could consume three quarters of the budget and leave no time to
+		// act on its review. Allowing a third of the session per round keeps at
+		// least three, which is where MaxRounds sits anyway.
+		//
+		// The ceiling still applies, so a long BYOC session is unchanged.
+		c.RoundDeadline = c.SessionDeadline / 3
+		if c.RoundDeadline > defaultRoundDeadline {
+			c.RoundDeadline = defaultRoundDeadline
+		}
 	}
 	if c.CompactAt == 0 {
 		c.CompactAt = defaultCompactAt
@@ -186,8 +204,15 @@ type Event struct {
 	Outcome string // proposed | ok | error | pass | fail | approve | revise | abandon | halted
 	// Detail is human-readable context. As with loop.Event, never assume it is
 	// safe to publish verbatim: tool output can carry secrets.
-	Detail       string
-	Tool         string
+	Detail string
+	Tool   string
+	// Input is the tool call's arguments, as the model wrote them. Without it a
+	// timeline can say that `run` was called and what it printed, but never the
+	// command — which is most of what a reader wants to know.
+	//
+	// Model-authored, so it is safe to display; it is capped like Detail and, in
+	// the signed record, hashed rather than quoted for the same reason Detail is.
+	Input        string
 	DurationMs   int64
 	InputTokens  int64
 	OutputTokens int64
@@ -202,6 +227,11 @@ type Event struct {
 func (e Event) Seq() int { return e.seq }
 
 const detailCap = 2000
+
+// inputCap bounds a recorded tool argument. Smaller than detailCap because the
+// one call that can be genuinely large is write_file, whose whole content would
+// otherwise be carried twice — once as the argument and once as the file.
+const inputCap = 600
 
 // Result reports the outcome of a session.
 type Result struct {
@@ -248,6 +278,10 @@ func (r *Runner) logf(format string, a ...any) {
 // resumed session's history has a hole exactly where the crash was.
 func (r *Runner) emit(st *state, ev Event) {
 	ev.Detail = tail(ev.Detail, detailCap)
+	// Arguments are truncated from the FRONT, unlike Detail. A tool call's
+	// meaning is at its start — the path, the pattern, the command — whereas
+	// command output explains itself at the end.
+	ev.Input = head(ev.Input, inputCap)
 	if r.Store != nil {
 		ev.seq = st.seq
 		st.seq++
@@ -698,14 +732,31 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			}
 		}
 
+		// The Implementer's own turn is timed and reported like every other phase.
+		//
+		// It was the one thing in a session that was not. Every surrounding phase
+		// emitted a duration, so the sum of a task's events came to less than its
+		// wall clock and the difference — model generation, plus any provider
+		// backoff inside it — was attributed to nothing at all. That gap is
+		// usually the largest single component of a run, which made "where did
+		// the time go" unanswerable from the record.
+		turnStart := time.Now()
 		turn, err := conv.Send(roundCtx, text, results)
-		r.trackImplementer(st, conv)
+		used := r.trackImplementer(st, conv)
 		if err != nil {
+			r.emit(st, Event{Round: st.round, Phase: "implementer", Outcome: "error",
+				Detail: err.Error(), DurationMs: ms(turnStart),
+				InputTokens: used.InputTokens, OutputTokens: used.OutputTokens, CostUSD: used.CostUSD})
 			if roundCtx.Err() != nil {
 				return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
 			}
 			return "", fmt.Errorf("implementer turn failed: %w", err)
 		}
+		// Detail is the model's own prose, which is what it said it was doing
+		// between tool calls; the tool calls themselves are emitted below.
+		r.emit(st, Event{Round: st.round, Phase: "implementer", Outcome: turnOutcome(turn),
+			Detail: turn.Text, DurationMs: ms(turnStart),
+			InputTokens: used.InputTokens, OutputTokens: used.OutputTokens, CostUSD: used.CostUSD})
 		text, results = "", nil
 
 		if spent := st.total().CostUSD - roundStartCost; spent >= cfg.RoundBudgetUSD {
@@ -732,11 +783,12 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			start := time.Now()
 			out, err := r.Tools.Call(roundCtx, call)
 			if err != nil {
-				r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name, Detail: err.Error(), DurationMs: ms(start)})
+				r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name,
+					Input: string(call.Input), Detail: err.Error(), DurationMs: ms(start)})
 				return "", err
 			}
 			r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: okErr(!out.IsError), Tool: call.Name,
-				Detail: out.Content, DurationMs: ms(start)})
+				Input: string(call.Input), Detail: out.Content, DurationMs: ms(start)})
 
 			if out.IsError {
 				consecutiveErrors++
@@ -906,17 +958,22 @@ func (r *Runner) trackArchitect(st *state) {
 // trackImplementer folds one turn's usage into the session total. A
 // conversation also reports cumulatively, so the delta since the last turn is
 // what this round has newly spent.
-func (r *Runner) trackImplementer(st *state, conv provider.ToolConversation) {
+// trackImplementer folds one turn's usage into the session totals and returns
+// that turn's delta, so a caller can attribute the turn it just made without
+// recomputing the subtraction.
+func (r *Runner) trackImplementer(st *state, conv provider.ToolConversation) provider.ToolUsage {
 	total := conv.Usage()
 	prev := st.roundConv
-	st.implementer.Add(provider.ToolUsage{
+	delta := provider.ToolUsage{
 		InputTokens:      total.InputTokens - prev.InputTokens,
 		OutputTokens:     total.OutputTokens - prev.OutputTokens,
 		CacheReadTokens:  total.CacheReadTokens - prev.CacheReadTokens,
 		CacheWriteTokens: total.CacheWriteTokens - prev.CacheWriteTokens,
 		CostUSD:          total.CostUSD - prev.CostUSD,
-	})
+	}
+	st.implementer.Add(delta)
 	st.roundConv = total
+	return delta
 }
 
 func (r *Runner) result(st *state, success bool, detail string) Result {
@@ -983,6 +1040,38 @@ func tail(s string, n int) string {
 	cut := s[len(s)-n:]
 	for len(cut) > 0 && cut[0]&0xC0 == 0x80 {
 		cut = cut[1:]
+	}
+	return cut
+}
+
+// turnOutcome describes what an Implementer turn decided to do: ask for tools,
+// or stop. Both are ordinary, so neither is an error — the distinction is what
+// tells a reader whether the round ended because the model was finished or
+// because a rail cut it short.
+func turnOutcome(t provider.Turn) string {
+	switch {
+	case len(t.Calls) > 0:
+		return "tools"
+	case t.Done:
+		return "done"
+	default:
+		return "ok"
+	}
+}
+
+// head keeps the first n bytes, trimming back to a rune boundary. The mirror of
+// tail, for the things whose meaning is at the start rather than the end.
+func head(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := s[:n]
+	for len(cut) > 0 && cut[len(cut)-1]&0xC0 == 0x80 {
+		cut = cut[:len(cut)-1]
+	}
+	// A multi-byte rune can straddle the cut: drop the partial leader too.
+	for len(cut) > 0 && cut[len(cut)-1]&0xC0 == 0xC0 {
+		cut = cut[:len(cut)-1]
 	}
 	return cut
 }

@@ -55,9 +55,17 @@ type progressReporter struct {
 }
 
 // add records one loop phase. Called inline on the loop goroutine.
+//
+// The timestamp is taken here rather than where the row is persisted. The
+// Control Plane writes a whole flush at once, so stamping it there gave every
+// event in a three-second batch the same instant — which is exactly the
+// resolution needed to see where a run spends time it does not account for.
 func (p *progressReporter) add(ev ver.TaskEvent) {
 	if p == nil {
 		return
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

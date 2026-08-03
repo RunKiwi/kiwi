@@ -297,6 +297,9 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // Live progress, polled while the job runs. Cleared on job switch below so
   // one run's output can never appear under another's header.
   const [progress, setProgress] = useState<JobProgressTask[]>([]);
+  // Set once the post-finish fetch has landed, so the trailing read happens
+  // exactly once rather than on every idle tick for the life of the drawer.
+  const [finalProgress, setFinalProgress] = useState(false);
   const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
@@ -355,18 +358,29 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     setShowJson(false);
     setCopiedHash(false);
     setProgress([]);
+    setFinalProgress(false);
   }
 
   usePolling(
     async () => {
       if (!taskId) return;
       await loadJob(taskId);
-      // Progress only exists while the job runs; a finished job has a record
-      // instead, and asking for both would be a guaranteed wasted request.
-      if (!jobFinished) {
+      // Progress is fetched while the job runs AND once more after it ends.
+      //
+      // It used to stop at the finish line, on the assumption that a finished
+      // job has a record instead. It does — but the record deliberately carries
+      // `detail_hash` rather than `detail` (pkg/ver/record.go), and quotes
+      // prose only for the Critic. So for a session run, whose phases are
+      // `actor:<tool>`, everything the run said about itself disappeared the
+      // moment it succeeded: the tool output, the commands, the whole account.
+      //
+      // The rows are still in task_events and still served here. One trailing
+      // fetch keeps them, and finalProgress stops it repeating forever.
+      if (!jobFinished || !finalProgress) {
         try {
           const res = await client.getJobProgress(taskId);
           setProgress(res.tasks ?? []);
+          if (jobFinished) setFinalProgress(true);
         } catch {
           // Best-effort, exactly as it is on the daemon side: a run must never
           // look broken because its commentary did not load.
@@ -560,14 +574,20 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
       })()}
 
       <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
-        {/* What is happening right now. Shown only while the job is unfinished;
-            once it ends, the record panel below renders the same timeline from
-            the signed artifact rather than from live telemetry. */}
-        {!jobFinished && progress.length > 0 && (
+        {/* What is happening right now — and, when a finished job produced no
+            record, what happened at all.
+
+            The second case used to render nothing. Not every finished job has a
+            record, and the record panel below is the only other thing that
+            draws a timeline, so a run that ended without one had no account of
+            itself anywhere despite its phases being loaded and in hand. */}
+        {progress.length > 0 && (!jobFinished || !record) && (
           <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-sky-400" />
-              <h3 className="text-sm font-semibold text-white">Running now</h3>
+              <Activity className={`w-4 h-4 ${jobFinished ? "text-zinc-400" : "text-sky-400"}`} />
+              <h3 className="text-sm font-semibold text-white">
+                {jobFinished ? "What happened" : "Running now"}
+              </h3>
             </div>
             <LiveRun tasks={progress} />
           </div>
@@ -659,7 +679,22 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                   in a daemon log on a machine the user cannot reach. */}
               {(() => {
                 const body = (record.data ?? {}) as ExecutionRecordBody;
-                const workers = body.execution?.workers ?? [];
+                const recordWorkers = body.execution?.workers ?? [];
+                // The live feed wins where it exists, because it is strictly
+                // richer for the same rows: it carries `detail`, `input` and
+                // per-step cost, where the record carries hashes. The record is
+                // authoritative about WHAT happened — and the panel above
+                // reports its chain and signature from the record alone — but
+                // it is deliberately not a transcript, so rendering the
+                // timeline from it loses the account of the run.
+                const liveWorkers = progress
+                  .filter(t => (t.steps?.length ?? 0) > 0)
+                  .map(t => ({
+                    worker_id: t.task_id,
+                    actor_model: t.actor_model,
+                    steps: t.steps ?? [],
+                  }));
+                const workers = liveWorkers.length > 0 ? liveWorkers : recordWorkers;
                 return workers.length > 0 ? <RunTimeline workers={workers} /> : null;
               })()}
 

@@ -95,7 +95,12 @@ type WorkerStep struct {
 	Phase      string `json:"phase"`
 	Outcome    string `json:"outcome"`
 	DetailHash string `json:"detail_hash,omitempty"`
-	Reasons    string `json:"reasons,omitempty"`
+	// InputHash commits to the tool arguments without exporting them. They are
+	// model-authored rather than captured program output, but a `run` command can
+	// still quote a repository's contents, so the record hashes them for the same
+	// reason it hashes detail.
+	InputHash string `json:"input_hash,omitempty"`
+	Reasons   string `json:"reasons,omitempty"`
 }
 
 type Verification struct {
