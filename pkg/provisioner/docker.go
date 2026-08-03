@@ -113,7 +113,7 @@ func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, pullAlway
 	return args
 }
 
-func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error) {
+func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string, orgIdle bool) (Handle, error) {
 	name := d.containerName(orgID)
 
 	// A running container is left alone.
@@ -134,7 +134,19 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 	// per-org poller, so the running one picks the new task up on its next
 	// heartbeat. Launching is only needed when nothing is there.
 	if d.isRunning(ctx, name) {
-		return Handle(name), nil
+		// Reuse unless the container is left over from a previous deploy AND the
+		// org is idle. Skipping the staleness check entirely was a regression:
+		// the old unconditional `rm -f` recycled the container on every submit,
+		// so an image roll landed by side effect. Reuse removed that, and a
+		// long-lived daemon then served the previous build indefinitely — a
+		// deploy that reported success and changed nothing.
+		//
+		// Staleness alone is not enough to justify replacing it. A daemon on an
+		// old image that is mid-task is exactly the case the reuse fix exists
+		// for, so a busy one is left alone and retired on a later launch.
+		if !d.isStale(ctx, name) || !orgIdle {
+			return Handle(name), nil
+		}
 	}
 
 	// Not running — but a stopped or half-created container still owns the name,
@@ -185,6 +197,25 @@ func (d *DockerLauncher) isRunning(ctx context.Context, name string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "true"
+}
+
+// isStale reports whether the running container was started from a different
+// image than the one this launcher would use now.
+//
+// Compared by resolved image ID, not by tag: the tag is what moves during a
+// deploy, so both sides would read "kiwidaemon:latest" and always look equal.
+func (d *DockerLauncher) isStale(ctx context.Context, name string) bool {
+	running, err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Image}}", name).Output()
+	if err != nil {
+		return false
+	}
+	want, err := exec.CommandContext(ctx, "docker", "image", "inspect", "-f", "{{.Id}}", d.image).Output()
+	if err != nil {
+		// The desired image is not present locally, so there is nothing better
+		// to switch to; keep what is running.
+		return false
+	}
+	return strings.TrimSpace(string(running)) != strings.TrimSpace(string(want))
 }
 
 func (d *DockerLauncher) Stop(ctx context.Context, orgID string) error {
