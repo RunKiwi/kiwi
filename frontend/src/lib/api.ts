@@ -130,12 +130,35 @@ export interface ExecutionRecordResponse {
 // Raw test output is never carried — only a digest — because it can contain
 // secrets; the Critic's own reasons are quoted, bounded, since they are what
 // explains a rejection.
+/**
+ * One step of a run.
+ *
+ * Two sources produce this shape and they carry different fields, which is why
+ * almost everything below is optional:
+ *
+ * - The **live progress** feed (`ver.TaskEvent`) carries `detail`, `duration_ms`,
+ *   `input_tokens`, `output_tokens` and `cost_usd` — what a step is doing and
+ *   what it cost, available while the run is still going.
+ * - The **signed record** (`ver.WorkerStep`) carries `reasons` and `detail_hash`
+ *   instead, and moves the token and cost totals up to the worker.
+ *
+ * `phase` for session mode is `actor:<tool>` (e.g. `actor:read_file`), plus the
+ * raw `round_start` / `session_end` markers — see `sessionPhase` in
+ * pkg/daemon/session_run.go.
+ */
 export interface RecordStep {
   step: number;
   phase: "initial_test" | "actor" | "critic" | "test" | string;
   outcome: "pass" | "fail" | "proposed" | "approved" | "rejected" | "error" | string;
+  // Signed-record only.
   reasons?: string;
   detail_hash?: string;
+  // Live-progress only.
+  detail?: string;
+  duration_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
 }
 
 export interface RecordWorker {
@@ -144,6 +167,13 @@ export interface RecordWorker {
   critic_model?: string;
   provider?: string;
   steps?: RecordStep[];
+  // Per-worker totals, present on the signed record. The live feed reports the
+  // same quantities per step instead, so a running job sums its steps and a
+  // finished one reads these.
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
+  critic_rejections?: number;
 }
 
 export interface ExecutionRecordBody {
