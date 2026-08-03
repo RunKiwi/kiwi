@@ -307,7 +307,7 @@ func (s *Server) handleDaemonRenew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prove the daemon is known.
-	_, err = s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	d, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
 	if err != nil {
 		if errors.Is(err, store.ErrDaemonNotFound) {
 			http.Error(w, "daemon not registered", http.StatusForbidden)
@@ -315,6 +315,21 @@ func (s *Server) handleDaemonRenew(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	// A renewal is proof of life, and it used not to count as one.
+	//
+	// The daemon runs a task synchronously on its poll goroutine, so it sends no
+	// heartbeat for the whole run — and the heartbeat was the only thing that
+	// touched this row. A daemon working hard therefore went stale after
+	// daemonStaleAfter and was reported as offline: "no runner is connected"
+	// on a queued sibling, and an offline badge in the fleet UI, both while it
+	// was in fact busy doing exactly what was asked.
+	//
+	// Best-effort: liveness bookkeeping must never fail a renewal, because
+	// losing a renewal loses the task.
+	if err := s.storage.TouchDaemon(r.Context(), d.ID); err != nil {
+		log.Printf("[daemon] touch on renew for %s: %v", d.ID, err)
 	}
 
 	ok, err := s.storage.RenewLease(r.Context(), req.TaskID, req.LeaseID, leaseTTL)
@@ -665,6 +680,15 @@ func (s *Server) handleDaemonProgress(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[daemon] progress lookup failed: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	// Progress is the densest liveness signal there is — it arrives every few
+	// seconds for the whole run, where a renewal arrives every couple of minutes
+	// and a heartbeat not at all until the task ends. Touched before the fencing
+	// check on purpose: a daemon reporting on a lease it has lost is still a
+	// daemon that is alive and should not be advertised as offline.
+	if err := s.storage.TouchDaemon(r.Context(), d.ID); err != nil {
+		log.Printf("[daemon] touch on progress for %s: %v", d.ID, err)
 	}
 
 	// The fencing token decides whether this daemon still owns the task. A

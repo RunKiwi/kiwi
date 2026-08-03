@@ -146,3 +146,54 @@ func TestAssembleIsDeterministic(t *testing.T) {
 		t.Errorf("workers not sorted: got %q first", r1.Execution.Workers[0].WorkerID)
 	}
 }
+
+// Tool arguments are model-authored rather than captured program output, but a
+// `run` command can still quote a repository's contents — so the record commits
+// to them with a hash rather than exporting them, exactly as it does detail.
+func TestAssembleHashesToolInput(t *testing.T) {
+	in := baseInput()
+	in.Workers = []WorkerInput{{
+		WorkerID: "impl",
+		Events: []TaskEvent{{
+			Step:    1,
+			Phase:   "actor:run",
+			Outcome: "ok",
+			Input:   `{"command":"cat .env && echo hunter2"}`,
+		}},
+	}}
+
+	rec, err := AssembleRecord(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := rec.Execution.Workers[0].Steps[0]
+	if !strings.HasPrefix(step.InputHash, "sha256:") {
+		t.Errorf("expected a sha256 input hash, got %q", step.InputHash)
+	}
+
+	b, err := Canonicalize(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "hunter2") {
+		t.Fatal("raw tool arguments leaked into the canonicalized record")
+	}
+}
+
+// An event with no arguments must not gain an empty hash field: a record that
+// commits to "" for every non-tool phase says something it does not mean.
+func TestAssembleOmitsInputHashWhenThereIsNoInput(t *testing.T) {
+	in := baseInput()
+	in.Workers = []WorkerInput{{
+		WorkerID: "impl",
+		Events:   []TaskEvent{{Step: 1, Phase: "test", Outcome: "pass"}},
+	}}
+
+	rec, err := AssembleRecord(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.Execution.Workers[0].Steps[0].InputHash; got != "" {
+		t.Errorf("input hash should be absent, got %q", got)
+	}
+}

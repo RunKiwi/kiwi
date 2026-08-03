@@ -32,6 +32,11 @@ type sessionDeps struct {
 	testCmd string
 	verify  session.VerifyFunc
 	install session.InstallFunc
+	// useBox hands the round's persistent container back to the verification
+	// closure, so the test command runs inside the container the session
+	// already has rather than in a new one per round. Nil leaves verification
+	// on its own per-call container.
+	useBox func(*sandbox.Session)
 }
 
 // sessionAllowsTestCredentials reports whether the org has opted into putting
@@ -122,6 +127,14 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		}
 	}()
 
+	// Verification joins the Implementer inside this container. Both were
+	// already running the same image, mounts and offline network policy; the
+	// only difference was that verification paid to create a container each
+	// time, once per round plus the baseline.
+	if deps.useBox != nil {
+		deps.useBox(box)
+	}
+
 	tools := &session.FileTools{
 		Root: deps.worktreePath,
 		Exec: func(ctx context.Context, command string) (string, bool, error) {
@@ -178,6 +191,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 					Phase:        sessionPhase(e),
 					Outcome:      e.Outcome,
 					Detail:       e.Detail,
+					Input:        e.Input,
 					DurationMs:   e.DurationMs,
 					InputTokens:  e.InputTokens,
 					OutputTokens: e.OutputTokens,

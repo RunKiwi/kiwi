@@ -23,17 +23,22 @@ func (s *Server) recordTaskEvents(ctx context.Context, orgID, taskID string, eve
 	rows := make([]TaskEvent, 0, len(events))
 	for _, e := range events {
 		rows = append(rows, TaskEvent{
-			TaskID:       taskID,
-			OrgID:        orgID,
-			Step:         e.Step,
-			Phase:        e.Phase,
-			Outcome:      e.Outcome,
-			Detail:       summarize(e.Detail, 4000),
+			TaskID:  taskID,
+			OrgID:   orgID,
+			Step:    e.Step,
+			Phase:   e.Phase,
+			Outcome: e.Outcome,
+			Detail:  summarize(e.Detail, 4000),
+			// Arguments are kept from the front: a tool call says what it is at
+			// its start, unlike output, which explains itself at its end.
+			Input:        headOf(e.Input, 1000),
 			DurationMs:   e.DurationMs,
 			InputTokens:  e.InputTokens,
 			OutputTokens: e.OutputTokens,
 			CostUSD:      e.CostUSD,
-			CreatedAt:    time.Now(),
+			// The daemon stamps each event as it happens; a flush carries several
+			// at once, so falling back to now would collapse them onto one instant.
+			CreatedAt: eventTime(e.At),
 		})
 	}
 	if err := s.db.WithContext(ctx).Create(&rows).Error; err != nil {
@@ -57,10 +62,12 @@ func (s *Server) taskEventsFor(ctx context.Context, orgID, taskID string) []ver.
 			Phase:        r.Phase,
 			Outcome:      r.Outcome,
 			Detail:       r.Detail,
+			Input:        r.Input,
 			DurationMs:   r.DurationMs,
 			InputTokens:  r.InputTokens,
 			OutputTokens: r.OutputTokens,
 			CostUSD:      r.CostUSD,
+			At:           r.CreatedAt,
 		})
 	}
 	return out

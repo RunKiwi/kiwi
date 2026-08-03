@@ -163,6 +163,14 @@ export interface RecordStep {
   input_tokens?: number;
   output_tokens?: number;
   cost_usd?: number;
+  // The tool call's arguments, as the model wrote them — the command `run` was
+  // given, the path `read_file` was asked for. Live-progress only: the signed
+  // record commits to them as `input_hash` instead, for the same reason it
+  // hashes `detail`.
+  input?: string;
+  // When the daemon recorded the event. Durations say how long each phase took;
+  // only this says how long the run spent between them.
+  at?: string;
 }
 
 export interface RecordWorker {

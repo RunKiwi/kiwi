@@ -3,6 +3,7 @@ package ver
 import (
 	"fmt"
 	"sort"
+	"time"
 	"unicode/utf8"
 )
 
@@ -14,14 +15,22 @@ import (
 // wire AND forms part of the daemon's signed attestation payload, so both sides
 // must serialize it identically.
 type TaskEvent struct {
-	Step         int     `json:"step"`
-	Phase        string  `json:"phase"`
-	Outcome      string  `json:"outcome"`
-	Detail       string  `json:"detail"`
+	Step    int    `json:"step"`
+	Phase   string `json:"phase"`
+	Outcome string `json:"outcome"`
+	Detail  string `json:"detail"`
+	// Input is the tool call's arguments as the model wrote them, for a `tool`
+	// phase. It answers "what command did it run", which the phase and the
+	// output together cannot.
+	Input        string  `json:"input,omitempty"`
 	DurationMs   int64   `json:"duration_ms"`
 	InputTokens  int64   `json:"input_tokens"`
 	OutputTokens int64   `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
+	// At is when the event was recorded. Durations say how long each phase took;
+	// only a timestamp says how long the run spent between them, which is where
+	// unattributed time hides.
+	At time.Time `json:"at,omitzero"`
 }
 
 // WorkerInput describes one planned worker and everything observed about its
@@ -151,10 +160,16 @@ func AssembleRecord(in AssembleInput) (*Record, error) {
 			Steps:       make([]WorkerStep, 0, len(w.Events)),
 		}
 		for _, ev := range w.Events {
+			// The tool, when there is one, already rides in Phase as
+			// `actor:<tool>` — see sessionPhase in pkg/daemon. It is not repeated
+			// as its own field.
 			step := WorkerStep{
 				Step:    ev.Step,
 				Phase:   ev.Phase,
 				Outcome: ev.Outcome,
+			}
+			if ev.Input != "" {
+				step.InputHash = HashString(ev.Input)
 			}
 			if ev.Detail != "" {
 				// Always a hash. Raw detail (test output especially) can carry
