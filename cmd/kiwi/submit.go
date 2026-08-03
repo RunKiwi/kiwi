@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/client"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
@@ -24,6 +25,8 @@ func runSubmit(args []string) error {
 	repo := fs.String("repo", "", "git repo URL — BYOC path: the daemon clones it in your cloud and runs via the lease queue")
 	ref := fs.String("ref", "main", "git ref to check out (with -repo)")
 	model := fs.String("model", "", "LLM model for the worker (with -repo; planner default if empty)")
+	mode := fs.String("mode", "", "execution loop: file_loop (default) or session — session runs an Architect that plans and reviews an agentic Implementer over several rounds")
+	architectModel := fs.String("architect-model", "", "model that plans and reviews in -mode session (defaults to -model); expected to be more capable than the worker")
 	maxWorkers := fs.Int("max-workers", 1, "workers the planner may fan out (with -repo; 1 = single-worker MVP path)")
 	secretsPath := fs.String("secrets", "secrets.json", "path to secrets.json")
 	resume := fs.Bool("resume", false, "resume an existing task instead of submitting")
@@ -38,10 +41,40 @@ func runSubmit(args []string) error {
 	// -repo selects the BYOC path (planner → lease queue → daemon in your cloud).
 	// Without it, the legacy zip-upload path runs the task in the Control Plane.
 	if *repo != "" {
-		return submitPlan(*server, t, *idempotencyKey, *task, *repo, *ref, *file, *testCmd, *model, *maxWorkers, *interval)
+		return submitPlan(*server, t, *idempotencyKey, *interval, client.PlanOptions{
+			Task:           *task,
+			RepoURL:        *repo,
+			Ref:            *ref,
+			File:           *file,
+			TestCmd:        *testCmd,
+			Model:          *model,
+			MaxWorkers:     *maxWorkers,
+			Mode:           *mode,
+			ArchitectModel: *architectModel,
+		})
 	}
 
 	return submitTask(*server, t, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval)
+}
+
+// validateMode rejects an unknown -mode at the CLI rather than letting it reach
+// the planner, which treats anything that is not "session" as file_loop. A typo
+// like -mode sesion would otherwise run the default loop and report success,
+// and the user would have no way to tell their flag was ignored.
+func validateMode(mode string) error {
+	switch mode {
+	case "", agent.ModeFileLoop, agent.ModeSession:
+		return nil
+	default:
+		return fmt.Errorf("unknown -mode %q: use %q or %q", mode, agent.ModeFileLoop, agent.ModeSession)
+	}
+}
+
+func orDefault(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 // requireSecureRemote refuses to send a bearer token in cleartext to a non-local
@@ -61,12 +94,15 @@ func requireSecureRemote(server string) error {
 // planner, which decomposes it and enqueues workers onto the lease queue. A
 // registered daemon in the customer's cloud leases and executes them. No
 // codebase is uploaded — the daemon clones repo directly.
-func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, model string, maxWorkers int, interval time.Duration) error {
+func submitPlan(server, token, idempotencyKey string, interval time.Duration, opts client.PlanOptions) error {
 	if err := requireSecureRemote(server); err != nil {
 		return err
 	}
-	if task == "" || file == "" || testCmd == "" {
+	if opts.Task == "" || opts.File == "" || opts.TestCmd == "" {
 		return fmt.Errorf("-task, -file, and -test-cmd are required")
+	}
+	if err := validateMode(opts.Mode); err != nil {
+		return err
 	}
 
 	c := client.New(server, token)
@@ -74,7 +110,7 @@ func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, m
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	res, err := c.PlanTask(ctx, task, repo, ref, file, testCmd, model, maxWorkers)
+	res, err := c.PlanTask(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to submit plan: %w", err)
 	}
@@ -83,8 +119,18 @@ func submitPlan(server, token, idempotencyKey, task, repo, ref, file, testCmd, m
 	fmt.Printf("[kiwi] Job:      %s\n", res.JobID)
 	fmt.Printf("[kiwi] Manifest: %s\n", res.ManifestID)
 	fmt.Printf("[kiwi] Enqueued %d worker task(s): %v\n", len(res.TaskIDs), res.TaskIDs)
+	if opts.Mode == agent.ModeSession {
+		architect := opts.ArchitectModel
+		if architect == "" {
+			architect = opts.Model
+		}
+		// Worth saying out loud: session mode is the more expensive path, and the
+		// two-model split is the thing people get wrong when they first reach for it.
+		fmt.Printf("[kiwi] Mode:     session — architect %s plans and reviews, implementer %s works in rounds\n",
+			orDefault(architect, "planner default"), orDefault(opts.Model, "planner default"))
+	}
 	fmt.Printf("[kiwi] A registered daemon in your cloud will lease and execute these. "+
-		"It clones %s@%s, runs the loop until %q passes, and opens a PR.\n", repo, ref, testCmd)
+		"It clones %s@%s, runs the loop until %q passes, and opens a PR.\n", opts.RepoURL, opts.Ref, opts.TestCmd)
 
 	for {
 		status, err := c.GetJob(ctx, res.JobID)

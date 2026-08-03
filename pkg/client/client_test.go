@@ -145,7 +145,10 @@ func TestPlanTaskAccepts202(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "tok")
-	res, err := c.PlanTask(context.Background(), "fix it", "https://github.com/x/y", "main", "a.go", "go test ./...", "", 1)
+	res, err := c.PlanTask(context.Background(), PlanOptions{
+		Task: "fix it", RepoURL: "https://github.com/x/y", Ref: "main",
+		File: "a.go", TestCmd: "go test ./...", MaxWorkers: 1,
+	})
 	if err != nil {
 		t.Fatalf("PlanTask on 202 should succeed, got: %v", err)
 	}
