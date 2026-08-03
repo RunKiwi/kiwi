@@ -12,7 +12,11 @@ type Handle string
 type Launcher interface {
 	// Launch starts a per-org daemon process for orgID, bound to fleetID,
 	// presenting joinToken on first handshake. Returns an opaque handle.
-	Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error)
+	// orgIdle reports that the org has no task in flight, which is what makes
+	// it safe to retire a container left on a previous image. Killing a busy
+	// daemon strands its lease for the full TTL, so a stale-but-working
+	// container is kept when orgIdle is false and retired on a later launch.
+	Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string, orgIdle bool) (Handle, error)
 	Stop(ctx context.Context, orgID string) error
 }
 
@@ -38,7 +42,7 @@ func NewStubLauncher() *StubLauncher {
 	return &StubLauncher{}
 }
 
-func (s *StubLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string) (Handle, error) {
+func (s *StubLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string, orgIdle bool) (Handle, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

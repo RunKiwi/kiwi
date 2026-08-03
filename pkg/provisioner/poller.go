@@ -187,7 +187,7 @@ func (p *Provisioner) execute(ctx context.Context, req auth.ProvisioningRequest)
 		if err != nil {
 			return statusFailed, fmt.Errorf("mint join token for org %s: %w", req.OrgID, err)
 		}
-		if _, err := p.launcher.Launch(ctx, req.OrgID, auth.SharedFreeFleet, joinToken, p.apiURL); err != nil {
+		if _, err := p.launcher.Launch(ctx, req.OrgID, auth.SharedFreeFleet, joinToken, p.apiURL, p.noTaskInFlight(ctx, req.OrgID)); err != nil {
 			return statusFailed, fmt.Errorf("launch daemon for org %s: %w", req.OrgID, err)
 		}
 		return statusCompleted, nil
@@ -216,4 +216,30 @@ func (p *Provisioner) settle(ctx context.Context, id, status, errText string) er
 	return p.db.WithContext(ctx).Model(&auth.ProvisioningRequest{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{"status": status, "error": errText}).Error
+}
+
+// noTaskInFlight reports that the org has nothing executing right now.
+//
+// Deliberately distinct from orgIdle in sweep.go, which is the stricter
+// auto-stop question (no QUEUED work either, and nothing recent). Here a QUEUED
+// task is fine to replace a container under — no lease is held yet — so the
+// only disqualifier is a task actually leased to a daemon.
+//
+// It gates retiring a daemon container left on a previous image. Replacing a
+// busy one strands its lease until the TTL lapses — a two-minute task taking
+// twelve — so staleness is only acted on between tasks.
+//
+// LEASED is the only in-flight state: QUEUED work has not been handed to a
+// daemon yet, and everything else is terminal. On a query error this answers
+// false, which keeps the stale container rather than risking a live one.
+func (p *Provisioner) noTaskInFlight(ctx context.Context, orgID string) bool {
+	var inFlight int64
+	err := p.db.WithContext(ctx).
+		Model(&store.QueuedTask{}).
+		Where("org_id = ? AND status = ?", orgID, store.TaskLeased).
+		Count(&inFlight).Error
+	if err != nil {
+		return false
+	}
+	return inFlight == 0
 }
