@@ -6,7 +6,7 @@ import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGi
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
+import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
@@ -107,6 +107,8 @@ function CommandCenterContent() {
   const [file, setFile] = useState("");
   const [testCmd, setTestCmd] = useState("");
   const [maxWorkers, setMaxWorkers] = useState(1);
+  const [mode, setMode] = useState<ExecutionMode>("file_loop");
+  const [architectModel, setArchitectModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Shared context off by default: it's opt-in, so a task never silently spends
   // extra tokens on prior-work retrieval unless the user turns it on.
@@ -319,6 +321,10 @@ function CommandCenterContent() {
         fleet_id: fleetId,
         reference_mode: inlineData.reference_mode || referenceMode,
         reference_job_ids: inlineData.reference_mode === "manual" ? inlineData.reference_job_ids : (referenceMode === "manual" ? referenceJobIds : undefined),
+        // Sent only when session is chosen. Omitting the key entirely on the
+        // default path keeps every existing submission byte-identical to what
+        // it was before this control existed.
+        ...(mode === "session" ? { mode, architect_model: architectModel || undefined } : {}),
       });
       setSubmitSuccess(resp.job_id);
       // The launch just spent budget; refresh so the meter beside this button
@@ -620,6 +626,25 @@ function CommandCenterContent() {
               <label className={labelClass}>Max workers {inlineData.max_workers && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
               <input type="number" min="1" max="10" value={inlineData.max_workers || maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} disabled={!!inlineData.max_workers} className={`${fieldClass} ${inlineData.max_workers ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
+            <div>
+              <label className={labelClass}>Execution loop</label>
+              <Select
+                ariaLabel="Execution loop" value={mode} onChange={v => setMode(v as ExecutionMode)}
+                options={[
+                  { value: "file_loop", label: "Standard", hint: "edit + verify" },
+                  { value: "session", label: "Session", hint: "plan, work, review" },
+                ]}
+              />
+            </div>
+            {mode === "session" && (
+              <div>
+                <label className={labelClass}>Architect model <span className="text-zinc-600 normal-case font-normal">(plans &amp; reviews)</span></label>
+                <Select
+                  ariaLabel="Architect model" searchable value={architectModel} onChange={setArchitectModel}
+                  options={[{ value: "", label: `Same as worker (${workerModel})` }, ...workerOptions.map(m => ({ value: m, label: m }))]}
+                />
+              </div>
+            )}
             <div>
               <label className={labelClass}>Shared context {inlineData.reference_mode && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
               <button

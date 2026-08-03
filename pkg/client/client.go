@@ -101,20 +101,54 @@ type PlanResult struct {
 	Summary    string   `json:"summary"`
 }
 
+// PlanOptions is one BYOC plan submission.
+//
+// A struct rather than more positional parameters: the call already carried
+// eight, and mode and architect_model would have made ten indistinguishable
+// strings at the call site.
+type PlanOptions struct {
+	Task       string
+	RepoURL    string
+	Ref        string
+	File       string
+	TestCmd    string
+	Model      string
+	MaxWorkers int
+
+	// Mode selects the execution loop: "" or "file_loop" for the single-file
+	// Actor–Critic loop, "session" for the agentic Architect/Implementer loop.
+	// Empty is the default and keeps every existing submission on its current
+	// path (agent.ModeFileLoop).
+	Mode string
+	// ArchitectModel is the session-mode planner/reviewer, and is ignored in
+	// file_loop mode. Empty falls back to Model.
+	ArchitectModel string
+}
+
 // PlanTask submits a task to the BYOC planner path (POST /api/v1/planner/plan).
 // Unlike SubmitTask, it does not upload a codebase: the daemon clones repoURL in
 // the customer's own cloud. The Control Plane decomposes the task into a plan and
 // enqueues its workers onto the lease queue for a daemon to pick up.
-func (c *Client) PlanTask(ctx context.Context, task, repoURL, ref, file, testCmd, model string, maxWorkers int) (*PlanResult, error) {
-	body, err := json.Marshal(map[string]interface{}{
-		"task":        task,
-		"repo_url":    repoURL,
-		"ref":         ref,
-		"file":        file,
-		"test_cmd":    testCmd,
-		"model":       model,
-		"max_workers": maxWorkers,
-	})
+func (c *Client) PlanTask(ctx context.Context, opts PlanOptions) (*PlanResult, error) {
+	payload := map[string]interface{}{
+		"task":        opts.Task,
+		"repo_url":    opts.RepoURL,
+		"ref":         opts.Ref,
+		"file":        opts.File,
+		"test_cmd":    opts.TestCmd,
+		"model":       opts.Model,
+		"max_workers": opts.MaxWorkers,
+	}
+	// Omitted rather than sent empty: the planner treats an absent mode as
+	// file_loop, and sending "" would make every request look like it had
+	// opinions about a field the caller never set.
+	if opts.Mode != "" {
+		payload["mode"] = opts.Mode
+	}
+	if opts.ArchitectModel != "" {
+		payload["architect_model"] = opts.ArchitectModel
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}

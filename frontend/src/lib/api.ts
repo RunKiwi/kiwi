@@ -15,7 +15,18 @@ export interface PlanRequest {
   fleet_id?: string;
   reference_mode?: string;
   reference_job_ids?: string[];
+  // mode selects the execution loop. Omit (or "file_loop") for the single-file
+  // Actor–Critic loop; "session" runs an Architect that plans and reviews an
+  // agentic Implementer over several rounds. Omitted means file_loop, so every
+  // existing submission keeps its current behaviour.
+  mode?: ExecutionMode;
+  // architect_model plans and reviews in session mode and is ignored otherwise.
+  // Expected to be more capable than model: the reviewer is called a handful of
+  // times per task while the implementer runs constantly.
+  architect_model?: string;
 }
+
+export type ExecutionMode = "file_loop" | "session";
 
 export interface Fleet {
   id: string;
