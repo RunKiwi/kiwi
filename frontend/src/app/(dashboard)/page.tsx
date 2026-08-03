@@ -14,6 +14,7 @@ import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import { sendJobCompletionNotification } from "@/lib/notifications";
 import { statusOf, CARD_BASE } from "@/lib/statusColors";
+import { shortTime, exactTime } from "@/lib/datetime";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
@@ -1056,11 +1057,17 @@ function CommandCenterContent() {
                                 <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate" title={job.repo}>
                                   <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{formatRepoName(job.repo)}
                                 </span>
-                              ) : (
-                                <span className="flex items-center gap-1.5 text-zinc-500">
-                                  <Clock className="w-3 h-3 shrink-0" />{new Date(job.created_at).toLocaleTimeString()}
-                                </span>
-                              )}
+                              ) : null}
+                              {/* Always rendered, not just as a repo-less fallback. It used
+                                  to be the `else` branch, so a job with a repo — the normal
+                                  case — showed no time at all, and one without showed a bare
+                                  clock that said nothing about which day. */}
+                              <span
+                                className="flex items-center gap-1.5 text-zinc-500 shrink-0"
+                                title={exactTime(job.created_at)}
+                              >
+                                <Clock className="w-3 h-3 shrink-0" />{shortTime(job.created_at)}
+                              </span>
                             </div>
                             {/* Right: task count */}
                             <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
