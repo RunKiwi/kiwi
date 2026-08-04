@@ -1,8 +1,8 @@
 # Loop comparison harness
 
-`docs/rfc-session-loop.md` §11 gates changing any default on evidence: session
-vs `file_loop` over a fixed task set, compared on PR-opened rate, human-accept
-rate, cost and wall clock. This directory is that comparison, made repeatable.
+Changing the default loop is gated on evidence: session vs `file_loop` over a
+fixed task set, compared on PR-opened rate, human-accept rate, cost and wall
+clock. This directory is that comparison, made repeatable.
 
 ```bash
 KIWI_API_KEY=... ./evals/run.sh                 # both loops, every task
@@ -66,8 +66,8 @@ staged.
 
 ## Reading a result honestly
 
-- **Sample size.** Six tasks is a pilot, not the ~20 the RFC asks for. One task
-  either way moves a rate by 17 points.
+- **Sample size.** Six tasks is a pilot, not the ~20 a real comparison needs.
+  One task either way moves a rate by 17 points.
 - **One sample per cell.** These loops are stochastic; a single run per
   (task, mode) cannot separate a loop being better from a model having a good
   day. Repeat runs before believing a small gap.
