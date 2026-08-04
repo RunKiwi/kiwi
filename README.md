@@ -77,7 +77,7 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 | Billing: Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
 | Managed-**dedicated** (Pro): per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
 | Egress isolation: sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
-| Session loop: a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | 🚧 Building, phase by phase: [docs/rfc-session-loop.md](docs/rfc-session-loop.md); `pkg/loop` stays the default path |
+| Session loop: a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | 🚧 Building, phase by phase; `pkg/loop` stays the default path |
 | ├ Tool-calling seam (`provider.ToolRunner`) + persistent sandbox (`sandbox.Session`) + cache-aware pricing | ✅ Phase 0 |
 | ├ `pkg/session`: Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1: the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
 | ├ Crash recovery: round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
