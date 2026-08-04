@@ -2,9 +2,9 @@
 #
 # Compare Kiwi's two execution loops on the same task set.
 #
-# The RFC gates changing any default on this comparison (docs/rfc-session-loop.md
-# §11): session vs file_loop over a fixed set of tasks, measuring PR-opened rate,
-# cost, and wall clock. Human-accept rate is deliberately NOT measured here —
+# Changing the default loop is gated on this comparison: session vs file_loop
+# over a fixed set of tasks, measuring PR-opened rate, cost, and wall clock.
+# Human-accept rate is deliberately NOT measured here —
 # it cannot be, by a script. The PRs are the artifact; someone has to read them.
 #
 # Runs are strictly SEQUENTIAL. A Free-tier org has MaxConcurrentJobs=1
