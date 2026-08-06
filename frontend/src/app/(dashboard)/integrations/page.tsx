@@ -5,6 +5,7 @@ import { client, type Integration } from "@/lib/api";
 import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, Bot, CheckCircle2 } from "lucide-react";
 import { CredentialField } from "@/components/CredentialField";
 import { parseActionableError } from "@/lib/errors";
+import { capture } from "@/lib/analytics";
 
 // UI catalog: which integrations we surface and how to connect them. `credName`
 // is the credential the backend stores; `kind` classifies it.
@@ -47,6 +48,12 @@ export default function IntegrationsPage() {
 
     try {
       await client.setCredential(meta.credName, meta.kind, val);
+      // `key` is a catalog id ("github", "anthropic"), never the token itself.
+      if (meta.kind === "llm") {
+        capture("model_key_added", { provider: key, surface: "integrations" });
+      } else if (meta.kind === "github") {
+        capture("repo_connected", { surface: "integrations" });
+      }
       setValues(v => ({ ...v, [key]: "" }));
       setMsg(m => ({ ...m, [key]: "Connected and verified ✓" }));
       setIsErr(e => ({ ...e, [key]: false }));

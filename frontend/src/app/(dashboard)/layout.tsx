@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
+import { identify } from "@/lib/analytics";
 import { Logo } from "@/components/Logo";
 import { ActivationBanner } from "@/components/ActivationBanner";
 import { FreePlanBanner } from "@/components/FreePlanBanner";
@@ -50,6 +51,19 @@ export default function DashboardLayout({
       client.getUsage().then(usage => {
         setIsSuperAdmin(!!usage.is_super_admin);
         setPlan(usage.plan);
+        // A returning user arrives with a token and never passes through
+        // /auth/callback, so this is the only place their events get attached
+        // to them. Re-identifying an already-identified user is a no-op that
+        // refreshes the plan trait, which is the point: a Free→Pro move should
+        // show up on subsequent events.
+        const userId = auth.getUserId();
+        if (userId) {
+          identify(userId, {
+            org_id: auth.getOrgId() ?? "",
+            plan: usage.plan,
+            activation_state: usage.activation_state,
+          });
+        }
       }).catch(() => {});
     }
   }, [isAuthenticated, router]);

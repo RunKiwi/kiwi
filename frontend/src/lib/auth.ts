@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react';
+import { resetIdentity } from './analytics';
 
 const TOKEN_KEY = 'kiwi_token';
 const ORG_ID_KEY = 'kiwi_org_id';
 const ORG_NAME_KEY = 'kiwi_org_name';
+// Kept alongside the session so analytics can identify a returning user, who
+// arrives with a token already and never passes through /auth/callback.
+const USER_ID_KEY = 'kiwi_user_id';
 
 export const auth = {
   getToken: () => {
@@ -23,11 +27,29 @@ export const auth = {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(ORG_ID_KEY);
       localStorage.removeItem(ORG_NAME_KEY);
+      localStorage.removeItem(USER_ID_KEY);
     }
   },
   getOrgName: () => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(ORG_NAME_KEY);
+    }
+    return null;
+  },
+  setUserId: (userId: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(USER_ID_KEY, userId);
+    }
+  },
+  getUserId: () => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(USER_ID_KEY);
+    }
+    return null;
+  },
+  getOrgId: () => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(ORG_ID_KEY);
     }
     return null;
   }
@@ -46,7 +68,10 @@ export function useAuth() {
     isAuthenticated, 
     logout: () => {
       auth.clearSession();
+      // Drop the analytics identity too, or the next person to sign in on this
+      // browser has their events merged into the previous user's profile.
+      resetIdentity();
       window.location.href = '/login';
-    } 
+    }
   };
 }

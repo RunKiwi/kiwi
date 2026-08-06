@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { CheckCircle2, ChevronRight, Loader2, AlertCircle, Key, FolderGit2, Rocket, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { client, type Integration, type GithubRepo } from "@/lib/api";
+import { capture } from "@/lib/analytics";
 
 const STARTER_TASKS = [
   {
@@ -106,6 +107,7 @@ export default function OnboardingPage() {
     setErr("");
     try {
       await client.setCredential("GITHUB_TOKEN", "github", val);
+      capture("repo_connected", { surface: "onboarding" });
       const res = await client.listIntegrations();
       const gh = res.integrations.find((i: Integration) => i.key === "github");
       if (gh?.connected) {
@@ -124,6 +126,7 @@ export default function OnboardingPage() {
     const val = modelKey.trim();
     if (!val) {
       // Key entry is optional if user already has global key or wants to skip
+      capture("onboarding_step_skipped", { step: 2 });
       setStep(3);
       return;
     }
@@ -135,6 +138,7 @@ export default function OnboardingPage() {
       // is kind "llm"; the provider is carried by the credential name.
       const secretName = MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.credName ?? "ANTHROPIC_API_KEY";
       await client.setCredential(secretName, "llm", val);
+      capture("model_key_added", { provider: modelProvider, surface: "onboarding" });
       setStep(3);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to save model credential");
@@ -220,7 +224,10 @@ export default function OnboardingPage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => setStep(2)}
+                    onClick={() => {
+                      capture("onboarding_step_skipped", { step: 1 });
+                      setStep(2);
+                    }}
                     className="text-xs text-zinc-500 hover:text-zinc-300 text-left mt-1 underline"
                   >
                     Skip for now →
@@ -295,7 +302,10 @@ export default function OnboardingPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setStep(3)}
+                      onClick={() => {
+                        capture("onboarding_step_skipped", { step: 2 });
+                        setStep(3);
+                      }}
                       className="text-xs text-zinc-400 hover:text-white transition-colors"
                     >
                       Skip (use default)
@@ -387,7 +397,10 @@ export default function OnboardingPage() {
                       <ChevronRight className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleLaunchStarter("")}
+                      onClick={() => {
+                        capture("onboarding_step_skipped", { step: 3 });
+                        handleLaunchStarter("");
+                      }}
                       className="text-xs text-zinc-400 hover:text-white transition-colors"
                     >
                       Skip to dashboard
