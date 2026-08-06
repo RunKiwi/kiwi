@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep } from "@/lib/api";
 import { durationBetween, formatDuration, formatCost, formatTokens } from "@/lib/datetime";
+import { ThinkingOrb } from "thinking-orbs";
 import { RunTimeline } from "@/components/RunTimeline";
 import { LiveRun } from "@/components/LiveRun";
+import { jobOrbState } from "@/lib/orbState";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import {
@@ -399,6 +401,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
 
   if (!taskId && !currentJob) return null;
 
+  // Null unless a task is actually executing, so the header orb appears only
+  // while there is something to think about.
+  const headerOrb = jobOrbState(progress);
+
   const getPhaseIcon = (task: JobTask) => {
     switch (task.status) {
       case 'RUNNING':
@@ -465,6 +471,17 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         {/* Drawer Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
           <div className="flex items-center gap-4">
+            {/* Present only while a task is genuinely executing — a queued or
+                finished job must not look like it is thinking. jobOrbState
+                returns null for both, which is what removes the orb. */}
+            {headerOrb && (
+              <ThinkingOrb
+                state={headerOrb}
+                size={64}
+                className="shrink-0"
+                aria-label="Job running"
+              />
+            )}
             <div>
               <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
                 {/* The goal, not the id — an opaque job id says nothing about what
