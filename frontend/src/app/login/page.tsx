@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { client } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { capture, identify, rememberAuthMethod } from "@/lib/analytics";
 import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
@@ -40,14 +41,26 @@ export default function LoginPage() {
     
     setIsLoading(true);
     setError("");
+    capture("signup_started", { method: "api_key" });
 
     try {
       auth.setSession(apiKey, "", "");
       const res = await client.validate();
       auth.setSession(apiKey, res.org_id, res.org_name);
+      auth.setUserId(res.user_id);
+      capture("signup_completed", { method: "api_key" });
+      identify(res.user_id, {
+        org_id: res.org_id,
+        plan: res.plan,
+        activation_state: res.activation_state,
+      });
       router.push("/");
-    } catch {
+    } catch (err) {
       auth.clearSession();
+      capture("signup_failed", {
+        method: "api_key",
+        reason: err instanceof Error ? err.message : "unknown",
+      });
       setError("Invalid API key or server unreachable.");
     } finally {
       setIsLoading(false);
@@ -75,8 +88,12 @@ export default function LoginPage() {
         ) : !showApiKey ? (
           <div className="w-full flex flex-col gap-4">
             {providers.includes("github") && (
-              <a 
+              <a
                 href={`${getBaseUrl()}/auth/github/start`}
+                onClick={() => {
+                  rememberAuthMethod("github");
+                  capture("signup_started", { method: "github" });
+                }}
                 className="w-full flex items-center justify-center gap-3 bg-white text-black hover:bg-zinc-200 transition-colors py-3 px-4 rounded-xl font-semibold"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -86,8 +103,12 @@ export default function LoginPage() {
               </a>
             )}
             {providers.includes("google") && (
-              <a 
+              <a
                 href={`${getBaseUrl()}/auth/google/start`}
+                onClick={() => {
+                  rememberAuthMethod("google");
+                  capture("signup_started", { method: "google" });
+                }}
                 className="w-full flex items-center justify-center gap-3 bg-white/10 text-white hover:bg-white/20 transition-colors py-3 px-4 rounded-xl font-medium"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">

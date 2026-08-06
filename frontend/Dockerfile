@@ -3,6 +3,7 @@
 # Build context is this directory (frontend/):
 #   docker buildx build --platform linux/amd64 \
 #     --build-arg NEXT_PUBLIC_KIWI_API_URL=https://api.runkiwi.dev \
+#     --build-arg NEXT_PUBLIC_POSTHOG_KEY=phc_...   # optional, see below \
 #     -t <img> --push ./frontend
 #
 # NEXT_PUBLIC_* is baked at BUILD time (build-arg), not runtime. The API URL is
@@ -31,6 +32,13 @@ COPY . .
 RUN mkdir -p public
 ARG NEXT_PUBLIC_KIWI_API_URL
 ENV NEXT_PUBLIC_KIWI_API_URL=$NEXT_PUBLIC_KIWI_API_URL
+# Product analytics, opt-in. Unlike the API URL these are deliberately NOT
+# required: with the key unset the app never imports posthog-js, which is what
+# a self-hosted build should do. Only our own images pass them.
+ARG NEXT_PUBLIC_POSTHOG_KEY
+ARG NEXT_PUBLIC_POSTHOG_HOST
+ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
+ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Fail the build when the API URL is missing, rather than shipping a dashboard

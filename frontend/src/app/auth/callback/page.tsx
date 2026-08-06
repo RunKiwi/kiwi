@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { client } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { capture, identify, recallAuthMethod } from "@/lib/analytics";
 import { Logo } from "@/components/Logo";
 
 export default function AuthCallbackPage() {
@@ -21,7 +22,11 @@ export default function AuthCallbackPage() {
     // The work runs inside an async closure so any setState happens in a
     // callback, not synchronously in the effect body (react-hooks/set-state-in-effect).
     (async () => {
+      // Which provider was chosen is stashed before the redirect, so the two
+      // halves of the signup funnel can be joined by method.
+      const method = recallAuthMethod();
       if (!token) {
+        capture("signup_failed", { method, reason: "no_token_returned" });
         setError("No sign-in token was returned. Please try again.");
         return;
       }
@@ -31,9 +36,20 @@ export default function AuthCallbackPage() {
         auth.setSession(token, "", "");
         const res = await client.validate();
         auth.setSession(token, res.org_id, res.org_name);
+        auth.setUserId(res.user_id);
+        capture("signup_completed", { method });
+        identify(res.user_id, {
+          org_id: res.org_id,
+          plan: res.plan,
+          activation_state: res.activation_state,
+        });
         router.replace("/");
-      } catch {
+      } catch (err) {
         auth.clearSession();
+        capture("signup_failed", {
+          method,
+          reason: err instanceof Error ? err.message : "validate_failed",
+        });
         setError("Sign-in failed. Please try again.");
       }
     })();

@@ -185,6 +185,8 @@ cd frontend && cp .env.local.example .env.local   # set NEXT_PUBLIC_KIWI_API_URL
 npm ci && npm run dev                               # http://localhost:3000
 ```
 
+**Product analytics are optional and off.** Set `NEXT_PUBLIC_POSTHOG_KEY` (a build arg, since `NEXT_PUBLIC_*` is baked at build time) and the dashboard reports an activation funnel — sign-in, repo connected, model key added, task submitted, PR opened. Leave it unset, as every self-hosted deployment should, and `posthog-js` is never downloaded or initialized and no request leaves the browser. What is sent is allow-listed by type in `frontend/src/lib/analytics.ts`: no repository names, task text, branch names or credential values, and PostHog's autocapture and session replay are both disabled, because a dashboard for a product that contains customer code has no business shipping the contents of that dashboard to a third party.
+
 ## SDKs
 
 Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`, published as `@runkiwi/sdk` on npm and `kiwi-sdk` on PyPI. Each directory carries its own README, which is what the registry renders as the package page.

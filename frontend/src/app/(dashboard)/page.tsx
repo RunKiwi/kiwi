@@ -14,6 +14,7 @@ import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
 import { sendJobCompletionNotification } from "@/lib/notifications";
 import { statusOf, CARD_BASE } from "@/lib/statusColors";
+import { capture } from "@/lib/analytics";
 import { shortTime, exactTime } from "@/lib/datetime";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
@@ -96,6 +97,10 @@ function CommandCenterContent() {
     typeof window === "undefined" ? "" : localStorage.getItem(key) ?? "";
   const [task, setTask] = useState(() => starterOf("kiwi_starter_task"));
   const [repoUrl, setRepoUrl] = useState(() => starterOf("kiwi_starter_repo"));
+  // Whether onboarding pre-filled this composer. Read at mount because the
+  // effect below clears the hand-off keys, and submit happens long after —
+  // by then there is no way left to tell a starter task from a typed one.
+  const cameFromStarter = useRef(task !== "");
 
   useEffect(() => {
     localStorage.removeItem("kiwi_starter_task");
@@ -305,6 +310,7 @@ function CommandCenterContent() {
     setSubmitError("");
     setSubmitSuccess(null);
     if (!task.trim() || !repoUrl.trim()) {
+      capture("task_submit_failed", { reason: "missing_task_or_repo" });
       setSubmitError("A task and a repository are required.");
       return;
     }
@@ -331,6 +337,18 @@ function CommandCenterContent() {
         ...(mode === "session" ? { mode, architect_model: architectModel || undefined } : {}),
       });
       setSubmitSuccess(resp.job_id);
+      // Task text, repository and branch are deliberately absent — see the
+      // note at the top of lib/analytics.ts. The model ids are ours, not the
+      // customer's, and which of them people actually pick is the reason this
+      // event exists.
+      capture("task_submitted", {
+        mode,
+        worker_model: inlineData.model || workerModel,
+        planner_model: mode === "session" ? undefined : plannerModel,
+        max_workers: inlineData.max_workers || maxWorkers,
+        has_test_cmd: Boolean(inlineData.test_cmd || testCmd),
+        from_starter: cameFromStarter.current,
+      });
       // The launch just spent budget; refresh so the meter beside this button
       // reflects it rather than the figure from page load.
       client.getUsage().then(setU).catch(() => {});
@@ -338,6 +356,9 @@ function CommandCenterContent() {
       setInlineData({});
       loadJobs();
     } catch (err) {
+      capture("task_submit_failed", {
+        reason: err instanceof Error ? err.message : "unknown",
+      });
       setSubmitError(err instanceof Error ? err.message : "Failed to submit plan");
     } finally {
       setIsSubmitting(false);
