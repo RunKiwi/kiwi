@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Terminal } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 import { RunTimeline } from "@/components/RunTimeline";
+import { orbStateForPhase } from "@/lib/orbState";
 import type { JobProgressTask } from "@/lib/api";
 
 /**
@@ -86,12 +88,17 @@ export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
         return (
           <div key={t.task_id} className="rounded-lg bg-black/30 border border-white/5 p-2.5 flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs">
-              {/* Animated only while genuinely live; a reduced-motion user gets
-                  the label, which carries the same information. */}
-              <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-                <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-60" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-400" />
-              </span>
+              {/* The animation names the phase rather than merely asserting that
+                  one exists: reading the tree does not look like installing
+                  dependencies. Under prefers-reduced-motion the orb paints a
+                  single static frame, and the label beside it carries the same
+                  information either way. */}
+              <ThinkingOrb
+                state={orbStateForPhase(t.phase)}
+                size={20}
+                className="shrink-0"
+                aria-label={`${kind || "working"}${command ? `: ${command}` : ""}`}
+              />
               <span className="text-zinc-300">{kind || "working"}</span>
               {command && <code className="text-[11px] text-zinc-500 font-mono truncate">{command}</code>}
               {/* A timestamp that stops advancing is how a hung run tells itself
