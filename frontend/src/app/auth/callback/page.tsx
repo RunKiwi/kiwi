@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { client } from "@/lib/api";
 import { auth } from "@/lib/auth";
 import { capture, identify, recallAuthMethod } from "@/lib/analytics";
+import { ThinkingOrb } from "thinking-orbs";
 import { Logo } from "@/components/Logo";
 
 export default function AuthCallbackPage() {
@@ -73,7 +74,9 @@ export default function AuthCallbackPage() {
           </>
         ) : (
           <>
-            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+            {/* "connecting" is the literal act here — the session is being
+                established against the control plane. */}
+            <ThinkingOrb state="connecting" size={64} aria-label="Completing sign-in" />
             <p className="text-zinc-400 text-sm">Completing sign-in…</p>
           </>
         )}
