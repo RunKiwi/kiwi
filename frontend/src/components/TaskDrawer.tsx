@@ -401,9 +401,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
 
   if (!taskId && !currentJob) return null;
 
-  // Null unless a task is actually executing, so the header orb appears only
-  // while there is something to think about.
-  const headerOrb = jobOrbState(progress);
+  // Null unless a task is actually executing or its runner is coming up, so the
+  // header orb appears only while there is something to think about. Both feeds
+  // are passed: a job still cold-starting its runner has no progress at all.
+  const headerOrb = jobOrbState(progress, currentJob?.tasks ?? []);
 
   const getPhaseIcon = (task: JobTask) => {
     switch (task.status) {
