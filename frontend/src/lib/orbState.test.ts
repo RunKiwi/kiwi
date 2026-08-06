@@ -59,6 +59,51 @@ describe("jobOrbState", () => {
     assert.strictEqual(jobOrbState([{ status: "SUCCEEDED", phase: "test" }]), null);
   });
 
+  it("animates while a runner is cold-starting, which has no phase yet", () => {
+    // The progress feed 404s for a job that never started, so this state is
+    // only visible on the job's own tasks.
+    assert.strictEqual(
+      jobOrbState([], [{ status: "QUEUED", blocked_reason: "provisioning" }]),
+      "connecting",
+    );
+    assert.strictEqual(
+      jobOrbState([], [{ status: "QUEUED", blocked_reason: "awaiting_runner" }]),
+      "connecting",
+    );
+  });
+
+  it("does not animate a task that is merely throttled or blocked", () => {
+    for (const reason of [
+      "concurrency_cap",
+      "waiting_on_dependencies",
+      "compute_cap",
+      "provision_failed",
+      "no_runner",
+      "runner_offline",
+    ]) {
+      assert.strictEqual(
+        jobOrbState([], [{ status: "QUEUED", blocked_reason: reason }]),
+        null,
+        `${reason} must not imply work is happening`,
+      );
+    }
+  });
+
+  it("falls back to working when the control plane says a task runs but no phase arrived", () => {
+    assert.strictEqual(jobOrbState([], [{ status: "RUNNING" }]), "working");
+    assert.strictEqual(jobOrbState([], [{ status: "LEASED" }]), "working");
+  });
+
+  it("prefers a live phase over the job's own task status", () => {
+    assert.strictEqual(
+      jobOrbState(
+        [{ status: "RUNNING", phase: "actor:read_file" }],
+        [{ status: "QUEUED", blocked_reason: "provisioning" }],
+      ),
+      "searching",
+    );
+  });
+
   it("uses the first executing task's phase", () => {
     assert.strictEqual(
       jobOrbState([
