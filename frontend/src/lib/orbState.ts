@@ -84,14 +84,52 @@ interface RunningTask {
   phase?: string;
 }
 
+/** Minimal shape of a job task, which is where a queued task's block reason lives. */
+interface QueuedTask {
+  status: string;
+  blocked_reason?: string;
+}
+
 /**
- * The phase to show for a whole job: the first task actually executing.
+ * Block reasons that mean infrastructure is actively coming up.
  *
- * Returns null when nothing is running, which is how the caller knows to render
- * no orb at all. A queued or finished job must not appear to be thinking.
+ * On the Free tier the provisioner cold-starts a per-org daemon container on
+ * submit, and that wait is the longest in the whole product — a task can sit in
+ * `provisioning` for tens of seconds before any phase exists to report. It is
+ * real work, so it animates.
+ *
+ * Every other reason is excluded on purpose. `concurrency_cap` and
+ * `waiting_on_dependencies` mean this task is doing nothing at all, and the
+ * `problem` reasons mean it never will without intervention — animating either
+ * would be the UI implying work is happening when none is, which is the thing
+ * TaskDrawer's own comment about swapping a spinner for a static warning exists
+ * to prevent.
  */
-export function jobOrbState(tasks: RunningTask[]): OrbState | null {
-  const running = tasks.find(t => t.status === "LEASED" || t.status === "RUNNING");
-  if (!running) return null;
-  return orbStateForPhase(running.phase);
+const STARTING_UP = new Set(["provisioning", "awaiting_runner"]);
+
+/**
+ * The orb to show for a whole job, or null to show none.
+ *
+ * Three cases, in precedence order: a task reporting a live phase wins; then a
+ * task the control plane says is executing but which has not reported a phase
+ * yet; then a runner being started. Anything else — queued behind a cap,
+ * blocked, or finished — renders no orb, because none of those are thinking.
+ *
+ * `progress` and `tasks` are separate feeds: the progress endpoint 404s for a
+ * job that never started, so a job waiting on a cold-starting runner has an
+ * empty `progress` and its state is only visible on the job's own tasks.
+ */
+export function jobOrbState(
+  progress: RunningTask[],
+  tasks: QueuedTask[] = [],
+): OrbState | null {
+  const running = progress.find(t => t.status === "LEASED" || t.status === "RUNNING");
+  if (running) return orbStateForPhase(running.phase);
+
+  if (tasks.some(t => t.status === "LEASED" || t.status === "RUNNING")) return "working";
+
+  const startingUp = tasks.some(
+    t => t.status === "QUEUED" && t.blocked_reason && STARTING_UP.has(t.blocked_reason),
+  );
+  return startingUp ? "connecting" : null;
 }
