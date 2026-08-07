@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { client, type AdminStats, type AdminOrg } from "@/lib/api";
 import { ShieldAlert, Loader2 } from "lucide-react";
+import { LoadingState } from "@/components/LoadingState";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -84,11 +85,7 @@ export default function AdminPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
-      </div>
-    );
+    return <LoadingState label="Loading admin…" className="h-full" />;
   }
 
   return (
