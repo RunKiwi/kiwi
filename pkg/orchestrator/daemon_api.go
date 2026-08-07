@@ -263,7 +263,10 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	sealed, err := s.storage.SealCredentialsForDaemon(r.Context(), d.OrgID, encPub)
+	// The task and its model are known here, so the platform key can be scoped
+	// to the one provider this task needs rather than bundled unconditionally.
+	extra := s.platformCredsFor(r.Context(), d, specModel(spec))
+	sealed, err := s.storage.SealCredentialsForDaemon(r.Context(), d.OrgID, encPub, extra)
 	if err != nil {
 		log.Printf("[daemon] sealing credentials for org %s: %v", d.OrgID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -581,6 +584,12 @@ func specFromQueuedTask(task *store.QueuedTask) (agent.WorkerSpec, error) {
 		return spec, errors.New("spec has no task")
 	}
 	return spec, nil
+}
+
+// specModel reads the model a worker spec will run, which decides whether a
+// Kiwi-owned key is in scope for this lease.
+func specModel(spec agent.WorkerSpec) string {
+	return spec.Model
 }
 
 // DaemonResponse represents a single daemon in the /api/v1/daemons list response.
