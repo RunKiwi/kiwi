@@ -341,3 +341,131 @@ func TestBuildSpendPreservesMeteredJobsSemantics(t *testing.T) {
 		t.Errorf("MeteredJobs = %d, want 1", got.MeteredJobs)
 	}
 }
+
+// JobCount and MeteredJobs are rendered together as a ratio ("X of Y jobs in
+// this range carry cost data"). Counting the numerator after the funding filter
+// and the denominator before it made a fully-metered org look entirely
+// unmetered, showing the "metering was not deployed yet" empty state over jobs
+// that were all metered.
+func TestBuildSpendJobCountAndMeteredJobsUseTheSameFilter(t *testing.T) {
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 7)
+	metered := from.AddDate(0, 0, 1)
+
+	jobs := []store.Job{
+		{ID: "j1", OrgID: "o1", CreatedAt: metered, Funding: store.FundingKiwi},
+		{ID: "j2", OrgID: "o1", CreatedAt: metered, Funding: store.FundingKiwi},
+	}
+	tasks := []store.QueuedTask{
+		{ID: "t1", JobID: "j1", MeteredAt: &metered, Funding: store.FundingKiwi},
+		{ID: "t2", JobID: "j2", MeteredAt: &metered, Funding: store.FundingKiwi},
+	}
+
+	kiwi := buildSpend(from, to, jobs, tasks, store.FundingKiwi)
+	if kiwi.JobCount != 2 || kiwi.MeteredJobs != 2 {
+		t.Errorf("funding=kiwi: JobCount=%d MeteredJobs=%d, want 2 and 2", kiwi.JobCount, kiwi.MeteredJobs)
+	}
+
+	// Filtering to BYOK leaves nothing at all, and must say so consistently
+	// rather than claiming 2 jobs of which 0 were metered.
+	byok := buildSpend(from, to, jobs, tasks, store.FundingBYOK)
+	if byok.JobCount != 0 || byok.MeteredJobs != 0 {
+		t.Errorf("funding=byok: JobCount=%d MeteredJobs=%d, want 0 and 0", byok.JobCount, byok.MeteredJobs)
+	}
+}
+
+// A job and its tasks can have different funding: a Kiwi-tier planner model
+// with a BYOK worker model, or the KIWI_PLANNER_API_KEY operator override. The
+// task falls back to its job's repo when its own spec carries none, so a job
+// dropped by the filter used to leave its BYOK worker dollars with an empty
+// repo key — which bucket() discards, making the by-repo chart disagree with
+// the headline by the full amount.
+func TestBuildSpendKeepsRepoForTasksWhoseJobIsFilteredOut(t *testing.T) {
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 7)
+	metered := from.AddDate(0, 0, 1)
+
+	jobs := []store.Job{{
+		ID: "j1", OrgID: "o1", CreatedAt: metered, Funding: store.FundingKiwi,
+		Inputs: map[string]interface{}{"repo_url": "https://github.com/acme/api"},
+	}}
+	tasks := []store.QueuedTask{{
+		ID: "t1", JobID: "j1", CostUSD: 9.99, MeteredAt: &metered,
+		Funding: store.FundingBYOK,
+		Spec:    map[string]interface{}{"model": "claude-opus-4-8"},
+	}}
+
+	got := buildSpend(from, to, jobs, tasks, store.FundingBYOK)
+	if got.CostUSD != 9.99 {
+		t.Fatalf("CostUSD = %v, want 9.99", got.CostUSD)
+	}
+	var repoTotal float64
+	for _, b := range got.ByRepo {
+		repoTotal += b.TotalUSD
+	}
+	if repoTotal != got.CostUSD {
+		t.Errorf("by_repo sums to %v but the headline says %v; the chart and the total disagree",
+			repoTotal, got.CostUSD)
+	}
+}
+
+// Kiwi-funded rows have their dollars zeroed. Bucketing them anyway renders a
+// chart of $0.00 bars that reads as "these models were free" rather than "Kiwi
+// paid for these", and the empty rows consume slots against maxSpendBuckets.
+func TestBuildSpendOmitsZeroedKiwiRowsFromBreakdowns(t *testing.T) {
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 7)
+	metered := from.AddDate(0, 0, 1)
+
+	jobs := []store.Job{{
+		ID: "j1", OrgID: "o1", CreatedAt: metered, Funding: store.FundingKiwi,
+		PlannerCostUSD: 0.02,
+		Inputs: map[string]interface{}{
+			"repo_url": "https://github.com/acme/kiwi", "planner_model": "kimi-k2",
+		},
+	}}
+	tasks := []store.QueuedTask{{
+		ID: "t1", JobID: "j1", CostUSD: 0.04, TokensIn: 8000, TokensOut: 2000,
+		MeteredAt: &metered, Funding: store.FundingKiwi,
+		Spec: map[string]interface{}{"model": "kimi-k2", "provider": "openrouter"},
+	}}
+
+	got := buildSpend(from, to, jobs, tasks, "all")
+	for _, b := range got.ByModel {
+		if b.Label == "kimi-k2" {
+			t.Error("a Kiwi-funded model appears in the dollar breakdown as a $0.00 row")
+		}
+	}
+	for _, b := range got.ByProvider {
+		if b.Label == "anthropic" {
+			t.Error("an OpenRouter model was filed under anthropic; the pinned provider was ignored")
+		}
+	}
+	// Its usage is still reported — in tokens, where it belongs.
+	if got.KiwiTokensIn != 8000 || got.KiwiTokensOut != 2000 {
+		t.Errorf("Kiwi tokens = %d/%d, want 8000/2000", got.KiwiTokensIn, got.KiwiTokensOut)
+	}
+}
+
+// Rows written before the funding column existed carry "". They are legacy
+// BYOK and must survive a byok filter — the committed tests only ever exercised
+// this through "all", where the include branch short-circuits.
+func TestBuildSpendTreatsLegacyRowsAsBYOKUnderTheByokFilter(t *testing.T) {
+	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(0, 0, 7)
+	metered := from.AddDate(0, 0, 1)
+
+	jobs := []store.Job{{ID: "j1", OrgID: "o1", CreatedAt: metered, PlannerCostUSD: 1.00, Funding: ""}}
+	tasks := []store.QueuedTask{{
+		ID: "t1", JobID: "j1", CostUSD: 0.50, MeteredAt: &metered, Funding: "",
+		Spec: map[string]interface{}{"model": "claude-opus-4-8"},
+	}}
+
+	got := buildSpend(from, to, jobs, tasks, store.FundingBYOK)
+	if got.CostUSD != 1.50 {
+		t.Errorf("CostUSD = %v, want 1.50; pre-funding-column history vanished from the page", got.CostUSD)
+	}
+	if got.JobCount != 1 {
+		t.Errorf("JobCount = %d, want 1", got.JobCount)
+	}
+}
