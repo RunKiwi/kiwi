@@ -17,6 +17,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
+	"github.com/ibreakthecloud/kiwi/pkg/entitlement"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -442,6 +443,11 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var task store.QueuedTask
+	if err := s.db.WithContext(r.Context()).Where("id = ?", req.TaskID).First(&task).Error; err == nil {
+		s.meterKiwiUsage(r.Context(), &task, tokensIn, tokensOut)
+	}
+
 	log.Printf("[daemon] task %s reported %s", req.TaskID, req.Status)
 
 	// Persist the loop telemetry the daemon observed, and verify the daemon's
@@ -489,6 +495,33 @@ func (s *Server) executionMode() string {
 		return "managed"
 	}
 	return "byoc"
+}
+
+// meterKiwiUsage records the token usage against the org's allowance if the
+// work was performed on a Kiwi-owned platform key.
+func (s *Server) meterKiwiUsage(ctx context.Context, task *store.QueuedTask, tokensIn, tokensOut int64) {
+	if task.Funding != store.FundingKiwi || (tokensIn == 0 && tokensOut == 0) {
+		return
+	}
+
+	spec, err := specFromQueuedTask(task)
+	if err != nil {
+		log.Printf("[daemon] meter %s: invalid spec: %v", task.ID, err)
+		return
+	}
+	res, err := s.storage.ResolveModel(ctx, task.OrgID, specModel(spec))
+	if err != nil || !res.KiwiProvided {
+		return
+	}
+	plan, err := s.storage.GetOrgPlan(ctx, task.OrgID)
+	if err != nil {
+		log.Printf("[daemon] meter %s: failed to get plan for org %s: %v", task.ID, task.OrgID, err)
+		return
+	}
+	checker := &entitlement.Checker{Store: s.storage}
+	if err := checker.Consume(ctx, task.OrgID, plan, res.Tier, tokensIn+tokensOut); err != nil {
+		log.Printf("[daemon] meter %s: failed to draw down %s allowance: %v", task.ID, res.Tier, err)
+	}
 }
 
 // decodeX25519 turns the base64(raw 32-byte) wire form of an X25519 public key
