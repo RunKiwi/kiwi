@@ -26,7 +26,7 @@ func TestDefaultProviderRoutesModelToItsOwnKey(t *testing.T) {
 	}
 
 	for model, want := range cases {
-		actor, critic := defaultProvider(creds, model)
+		actor, critic := defaultProvider(creds, model, "")
 		if actor == nil {
 			t.Errorf("model %q: no provider selected despite every key being present", model)
 			continue
@@ -65,11 +65,11 @@ func TestDefaultProviderWithoutTheMatchingKey(t *testing.T) {
 	onlyAnthropic := map[string]string{"ANTHROPIC_API_KEY": "sk-ant-x"}
 
 	for _, model := range []string{"gpt-5-mini", "gemini-2.0-flash"} {
-		if actor, _ := defaultProvider(onlyAnthropic, model); actor != nil {
+		if actor, _ := defaultProvider(onlyAnthropic, model, ""); actor != nil {
 			t.Errorf("model %q built a provider with no key for it", model)
 		}
 	}
-	if actor, _ := defaultProvider(onlyAnthropic, "claude-opus-4-8"); actor == nil {
+	if actor, _ := defaultProvider(onlyAnthropic, "claude-opus-4-8", ""); actor == nil {
 		t.Error("the one connected provider should still work")
 	}
 }

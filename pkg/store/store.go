@@ -143,7 +143,7 @@ type Store interface {
 	GetCredentialPlaintext(ctx context.Context, orgID, name string) (string, error)
 	SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey, extra map[string]string) (string, error)
 
-	IsManagedFleet(ctx context.Context, fleetID string) (bool, error)
+	IsKiwiOperatedFleet(ctx context.Context, orgID, fleetID string) (bool, error)
 
 	EnsureGrant(ctx context.Context, orgID, tier, period string, granted int64) (*OrgTokenGrant, error)
 	ConsumeTokens(ctx context.Context, orgID, tier, period string, n int64) error

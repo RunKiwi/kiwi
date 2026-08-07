@@ -46,8 +46,11 @@ func NewDashID(prefix string) string {
 // --- Fleets ---
 
 func (s *PostgresStore) CreateFleet(ctx context.Context, orgID, name, ftype string) (*Fleet, error) {
+	// An unrecognised type falls back to BYOC, the less privileged of the two.
+	// It used to default to managed, which meant an empty or misspelled type in
+	// a request body minted a "managed" fleet on customer say-so.
 	if ftype != FleetManaged && ftype != FleetBYOC {
-		ftype = FleetManaged
+		ftype = FleetBYOC
 	}
 	f := &Fleet{ID: NewDashID("flt"), OrgID: orgID, Name: name, Type: ftype, CreatedAt: time.Now()}
 	if err := s.db.WithContext(ctx).Create(f).Error; err != nil {

@@ -44,7 +44,7 @@ func (s *Server) platformCredsFor(ctx context.Context, d *store.Daemon, model st
 		return none
 	}
 
-	managed, err := s.storage.IsManagedFleet(ctx, d.FleetID)
+	managed, err := s.storage.IsKiwiOperatedFleet(ctx, d.OrgID, d.FleetID)
 	if err != nil || !managed {
 		if err != nil {
 			log.Printf("[platform-key] fleet check for daemon %s: %v", d.ID, err)

@@ -33,7 +33,7 @@ func newExecTestDaemon(t *testing.T, fixedContent string) *Daemon {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	d.newProvider = func(creds map[string]string, model string) (provider.Provider, provider.Critic) {
+	d.newProvider = func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
 		return &fixOnceProvider{fixedContent: fixedContent}, nil // no critic
 	}
 	return d
@@ -213,7 +213,7 @@ func (p *multiFileProvider) Complete(ctx context.Context, system, user string) (
 
 func TestExecuteTask_MultiFile(t *testing.T) {
 	d := newExecTestDaemon(t, "")
-	d.newProvider = func(creds map[string]string, model string) (provider.Provider, provider.Critic) {
+	d.newProvider = func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
 		jsonEdit := `{"files":[{"path":"file1.txt","content":"file1 FIXED"},{"path":"file2.txt","content":"file2 FIXED"}]}`
 		return &multiFileProvider{jsonResponse: jsonEdit}, nil
 	}

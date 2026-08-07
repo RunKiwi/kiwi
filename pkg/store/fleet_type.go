@@ -9,38 +9,27 @@ import "context"
 // SharedFreeFleet aliases this one.
 const SharedFreeFleet = "shared-free"
 
-// IsManagedFleet reports whether a fleet is one Kiwi operates.
+// IsKiwiOperatedFleet reports whether a fleet runs on hardware Kiwi itself
+// operates. It gates whether Kiwi's own API key is sealed to a daemon.
 //
-// This gates whether Kiwi's own API key is sealed to a daemon, so it fails
-// closed: only a positive proof of Kiwi operation returns true.
+// It deliberately does NOT consult Fleet.Type. `Type == "managed"` is a label a
+// customer can write: auth.CreateDefaultFleet gives every org a managed-typed
+// fleet at signup, and CreateFleet accepts the type from the request body. A
+// customer could therefore mint a join token against their own "managed" fleet,
+// run kiwidaemon on their laptop, and be handed Kiwi's platform credential —
+// sealed to an X25519 key they generated and hold the private half of. Type
+// describes what a fleet is *for*; it is not evidence of who runs the machine.
 //
-//   - The shared free fleet is recognised by name, because it is a well-known
-//     constant that may have no row in the fleets table at all.
-//   - A fleet with a row is managed only if its Type says so.
-//   - An empty fleet id means "belongs to no specific fleet", which is not the
-//     same as "Kiwi runs it", so it is denied.
-//   - A fleet id with no matching row proves nothing, so it is denied.
+// The only fleet Kiwi provably operates today is the shared free fleet, whose
+// daemons the provisioner launches itself (pkg/provisioner). Its id is a
+// compile-time constant with no row in the fleets table, so it cannot be
+// created, renamed, or claimed through the API — CreateDaemonJoinToken's
+// ownership check rejects a fleet id the org has no row for.
 //
-// A BYOC daemon runs on customer hardware. Sealing a Kiwi key to it would hand
-// Kiwi's credential to the customer's machine, and the token counts metered
-// against that key would come from a report the same machine produces.
-func (s *PostgresStore) IsManagedFleet(ctx context.Context, fleetID string) (bool, error) {
-	if fleetID == "" {
-		return false, nil
-	}
-	if fleetID == SharedFreeFleet {
-		return true, nil
-	}
-	var fleets []Fleet
-	if err := s.db.WithContext(ctx).
-		Where("id = ?", fleetID).
-		Limit(1).
-		Find(&fleets).Error; err != nil {
-		// A lookup failure is not proof of managed operation. Deny.
-		return false, err
-	}
-	if len(fleets) == 0 {
-		return false, nil
-	}
-	return fleets[0].Type == FleetManaged, nil
+// When managed-dedicated ships, it must be recognised here by a column the
+// provisioner sets when it launches the container — never by a type the
+// customer supplies. Widening this function to trust Fleet.Type would reopen
+// the exfiltration path described above.
+func (s *PostgresStore) IsKiwiOperatedFleet(ctx context.Context, orgID, fleetID string) (bool, error) {
+	return fleetID == SharedFreeFleet, nil
 }

@@ -55,6 +55,27 @@ func NewOpenAIProviderWithModels(apiKey, actorModel, criticModel string) *OpenAI
 	}
 }
 
+// NewOpenAICompatibleProvider builds a provider against an OpenAI-compatible
+// endpoint that is not OpenAI itself — OpenRouter today, any registry row with
+// Kind == KindOpenAICompatible in general.
+//
+// The base URL is a parameter rather than an environment lookup because
+// KIWI_OPENAI_BASE_URL is deployment-wide: setting it to reach OpenRouter would
+// simultaneously redirect every real OpenAI call to the same host, with a key
+// that endpoint never issued. Two OpenAI-compatible providers can only coexist
+// if the URL travels with the client, not with the process.
+//
+// An empty baseURL falls back to NewOpenAIProviderWithModels' behaviour, so a
+// misconfigured registry row degrades to plain OpenAI rather than to a request
+// against "".
+func NewOpenAICompatibleProvider(apiKey, actorModel, criticModel, baseURL string) *OpenAIProvider {
+	p := NewOpenAIProviderWithModels(apiKey, actorModel, criticModel)
+	if v := strings.TrimRight(baseURL, "/"); v != "" {
+		p.baseURL = v
+	}
+	return p
+}
+
 // LastCostUSD reports the USD cost of the most recent API call.
 func (p *OpenAIProvider) LastCostUSD() float64 { return p.lastCost }
 

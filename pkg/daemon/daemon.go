@@ -96,7 +96,7 @@ type Daemon struct {
 	// the worker's model. Injectable so tests can drive the loop with a mock LLM
 	// instead of calling a real provider. A nil provider return means "no usable
 	// key for the selected provider" — the daemon then cannot run a real loop.
-	newProvider func(creds map[string]string, model string) (provider.Provider, provider.Critic)
+	newProvider func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic)
 }
 
 // New creates a new Daemon instance.
@@ -128,12 +128,29 @@ func New(cfg Config) (*Daemon, error) {
 //
 // One model drives both Actor and Critic for now; per-role models are a future
 // refinement once the planner emits them.
-func defaultProvider(creds map[string]string, model string) (provider.Provider, provider.Critic) {
-	prov := provider.ProviderOf(model)
+func defaultProvider(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
+	// The Control Plane resolves the provider against the model catalog and
+	// sends it on the spec. Falling back to prefix inference keeps specs written
+	// before that field existed working, but inference cannot recognise an
+	// aggregator's model ids, so a Kiwi-provided model with no Provider set
+	// would be misrouted here.
+	prov := providerID
+	if prov == "" {
+		prov = provider.ProviderOf(model)
+	}
 	key := creds[provider.CredentialNameFor(prov)]
 	if key == "" {
 		return nil, nil
 	}
+
+	// An OpenAI-compatible provider is served by the OpenAI client pointed at
+	// the registry's base URL. Without the URL the client would call
+	// api.openai.com with a key that endpoint never issued.
+	if spec, ok := provider.SpecFor(prov); ok && spec.Kind == provider.KindOpenAICompatible {
+		cp := provider.NewOpenAICompatibleProvider(key, model, model, spec.BaseURL)
+		return cp, cp
+	}
+
 	switch prov {
 	case provider.ProviderGemini:
 		gp := provider.NewGeminiProviderWithModels(key, model, model)
@@ -534,7 +551,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 
 	// Build the Actor/Critic (daemon-side, not in the sandbox). The provider is
 	// selected from the worker's model; its key is picked from the bundle.
-	actor, critic := d.newProvider(creds, spec.Model)
+	actor, critic := d.newProvider(creds, spec.Model, spec.Provider)
 
 	// actor == nil means the model's provider has no key in this org's sealed
 	// bundle (e.g. a gemini-* model but no GEMINI_API_KEY). That is a
