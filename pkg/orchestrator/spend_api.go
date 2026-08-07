@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -42,6 +43,12 @@ type SpendResponse struct {
 	TokensIn     int64   `json:"tokens_in"`
 	TokensOut    int64   `json:"tokens_out"`
 
+	// Kiwi-funded usage is reported in tokens and never in dollars. Folding it
+	// into CostUSD would show the org a bill for work it was not charged for;
+	// omitting it entirely would make its usage invisible. Two ledgers, one page.
+	KiwiTokensIn  int64 `json:"kiwi_tokens_in"`
+	KiwiTokensOut int64 `json:"kiwi_tokens_out"`
+
 	JobCount int `json:"job_count"`
 	// MeteredJobs counts jobs with at least one task carrying metered_at. It is
 	// what lets the caller tell "spent nothing" from "never measured": jobs that
@@ -49,9 +56,21 @@ type SpendResponse struct {
 	// zero must not be presented as a measurement.
 	MeteredJobs int `json:"metered_jobs"`
 
-	Daily   []SpendPoint  `json:"daily"`
-	ByRepo  []SpendBucket `json:"by_repo"`
-	ByModel []SpendBucket `json:"by_model"`
+	Daily      []SpendPoint      `json:"daily"`
+	ByRepo     []SpendBucket     `json:"by_repo"`
+	ByModel    []SpendBucket     `json:"by_model"`
+	ByProvider []SpendBucket     `json:"by_provider"`
+	Allowance  []AllowanceBucket `json:"allowance"`
+}
+
+// AllowanceBucket is one tier's Kiwi token allowance for the current period.
+// Remaining is -1 when the grant is unlimited.
+type AllowanceBucket struct {
+	Tier      string `json:"tier"`
+	Period    string `json:"period"`
+	Granted   int64  `json:"granted"`
+	Used      int64  `json:"used"`
+	Remaining int64  `json:"remaining"`
 }
 
 // handleSpend serves GET /api/v1/spend?from=&to=. The org comes from the
@@ -93,7 +112,28 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := buildSpend(from, to, jobs, tasks)
+	funding := r.URL.Query().Get("funding")
+	switch funding {
+	case "", "all", store.FundingBYOK, store.FundingKiwi:
+	default:
+		http.Error(w, "funding must be byok, kiwi, or all", http.StatusBadRequest)
+		return
+	}
+
+	resp := buildSpend(from, to, jobs, tasks, funding)
+
+	// The allowance is always the *current* period's, regardless of the range
+	// being reported: it is a live balance, not a historical total, and dating
+	// it to an arbitrary window would make it read as one.
+	period := store.CurrentPeriod(time.Now())
+	if grants, err := s.storage.ListGrants(r.Context(), claims.OrgID, period); err == nil {
+		for _, g := range grants {
+			resp.Allowance = append(resp.Allowance, AllowanceBucket{
+				Tier: g.Tier, Period: g.Period,
+				Granted: g.TokensGranted, Used: g.TokensUsed, Remaining: g.Remaining(),
+			})
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -108,14 +148,33 @@ func parseTimeOr(v string, fallback time.Time) time.Time {
 
 // buildSpend aggregates a range. Split out from the handler so the arithmetic —
 // which is where the honesty lives — is testable without a database.
-func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) SpendResponse {
+//
+// funding is "byok", "kiwi", or "all". CostUSD, PlannerUSD and WorkerUSD always
+// count BYOK rows only, whatever the filter: they mean "USD the org owes", and
+// a Kiwi-funded row was never owed.
+func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, funding string) SpendResponse {
 	resp := SpendResponse{
-		From:     from,
-		To:       to,
-		JobCount: len(jobs),
-		Daily:    make([]SpendPoint, 0),
-		ByRepo:   make([]SpendBucket, 0),
-		ByModel:  make([]SpendBucket, 0),
+		From:       from,
+		To:         to,
+		JobCount:   len(jobs),
+		Daily:      make([]SpendPoint, 0),
+		ByRepo:     make([]SpendBucket, 0),
+		ByModel:    make([]SpendBucket, 0),
+		ByProvider: make([]SpendBucket, 0),
+		Allowance:  make([]AllowanceBucket, 0),
+	}
+
+	byProvider := map[string]*spendAgg{}
+
+	// include reports whether a row passes the caller's funding filter.
+	include := func(rowFunding string) bool {
+		if rowFunding == "" {
+			rowFunding = store.FundingBYOK // rows written before funding existed
+		}
+		return funding == "" || funding == "all" || funding == rowFunding
+	}
+	isBYOK := func(rowFunding string) bool {
+		return rowFunding == "" || rowFunding == store.FundingBYOK
 	}
 
 	// Zero-fill every day in the range. A series that omits empty days rescales
@@ -157,13 +216,25 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 	// Jobs carry planner spend and agent-minutes.
 	jobRepo := map[string]string{}
 	for _, j := range jobs {
-		resp.PlannerUSD += j.PlannerCostUSD
+		if !include(j.Funding) {
+			continue
+		}
+
+		plannerCostUSD := j.PlannerCostUSD
+		if isBYOK(j.Funding) {
+			resp.PlannerUSD += j.PlannerCostUSD
+			resp.TokensIn += j.PlannerTokensIn
+			resp.TokensOut += j.PlannerTokensOut
+		} else {
+			resp.KiwiTokensIn += j.PlannerTokensIn
+			resp.KiwiTokensOut += j.PlannerTokensOut
+			plannerCostUSD = 0 // never leak Kiwi cost to user
+		}
+
 		resp.AgentMinutes += j.AgentMinutes
-		resp.TokensIn += j.PlannerTokensIn
-		resp.TokensOut += j.PlannerTokensOut
 
 		if p := pointFor(j.CreatedAt); p != nil {
-			p.PlannerUSD += j.PlannerCostUSD
+			p.PlannerUSD += plannerCostUSD
 		}
 
 		repo := ""
@@ -174,7 +245,7 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 		}
 		jobRepo[j.ID] = repo
 		if b := bucket(byRepo, repo); b != nil {
-			b.planner += j.PlannerCostUSD
+			b.planner += plannerCostUSD
 		}
 		// Planner spend belongs in the by-model breakdown too. Omitting it hides
 		// the most actionable fact on the page: the planner defaults to the most
@@ -182,7 +253,10 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 		if j.Inputs != nil {
 			if pm, ok := j.Inputs["planner_model"].(string); ok {
 				if b := bucket(byModel, pm); b != nil {
-					b.planner += j.PlannerCostUSD
+					b.planner += plannerCostUSD
+				}
+				if b := bucket(byProvider, provider.ProviderOf(pm)); b != nil {
+					b.planner += plannerCostUSD
 				}
 			}
 		}
@@ -191,16 +265,27 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 	// Tasks carry worker spend, and metered_at is the coverage signal.
 	meteredJobs := map[string]bool{}
 	for _, t := range tasks {
+		if !include(t.Funding) {
+			continue
+		}
 		if t.MeteredAt != nil {
 			meteredJobs[t.JobID] = true
 		}
-		resp.WorkerUSD += t.CostUSD
-		resp.TokensIn += t.TokensIn
-		resp.TokensOut += t.TokensOut
+
+		workerCostUSD := t.CostUSD
+		if isBYOK(t.Funding) {
+			resp.WorkerUSD += t.CostUSD
+			resp.TokensIn += t.TokensIn
+			resp.TokensOut += t.TokensOut
+		} else {
+			resp.KiwiTokensIn += t.TokensIn
+			resp.KiwiTokensOut += t.TokensOut
+			workerCostUSD = 0
+		}
 
 		if t.MeteredAt != nil {
 			if p := pointFor(*t.MeteredAt); p != nil {
-				p.WorkerUSD += t.CostUSD
+				p.WorkerUSD += workerCostUSD
 			}
 		}
 
@@ -210,10 +295,16 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 			key = jobRepo[t.JobID]
 		}
 		if b := bucket(byRepo, key); b != nil {
-			b.worker += t.CostUSD
+			b.worker += workerCostUSD
 		}
-		if b := bucket(byModel, specString(t.Spec, "model")); b != nil {
-			b.worker += t.CostUSD
+		model := specString(t.Spec, "model")
+		if b := bucket(byModel, model); b != nil {
+			b.worker += workerCostUSD
+		}
+		// Provider is derived with the same rule the daemon routes by, so the
+		// breakdown can never attribute a model to a provider that did not serve it.
+		if b := bucket(byProvider, provider.ProviderOf(model)); b != nil {
+			b.worker += workerCostUSD
 		}
 	}
 	resp.MeteredJobs = len(meteredJobs)
@@ -226,6 +317,7 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask) 
 
 	resp.ByRepo = foldBuckets(byRepo)
 	resp.ByModel = foldBuckets(byModel)
+	resp.ByProvider = foldBuckets(byProvider)
 	return resp
 }
 
