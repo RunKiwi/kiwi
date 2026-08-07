@@ -6,7 +6,7 @@ import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGi
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
-import { client, BUILTIN_MODELS, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, providerOf, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
+import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
@@ -281,7 +281,7 @@ function CommandCenterContent() {
     }
   };
 
-  const allModels = Array.from(new Set([...BUILTIN_MODELS, ...customModels.map(m => m.name)]));
+  const allModels = Array.from(new Set([...customModels.map(m => m.name)]));
   // The worker runs on the org's own provider key — only offer models it can
   // actually reach, so a task can't be launched with an unrunnable worker model.
   let workerOptions = allModels;
@@ -291,7 +291,7 @@ function CommandCenterContent() {
     const connected = (prov: string) => integrations.some(i => i.key === prov && i.connected);
     const filteredOptions = allModels.filter(m => {
       const isCustom = customModels.find(cm => cm.name === m);
-      const prov = (isCustom && isCustom.provider && isCustom.provider !== "auto") ? isCustom.provider : providerOf(m);
+      const prov = (isCustom && isCustom.provider && isCustom.provider !== "auto") ? isCustom.provider : "unknown";
       return connected(prov);
     });
     if (filteredOptions.length > 0) {
