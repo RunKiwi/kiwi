@@ -15,6 +15,7 @@ import { parseActionableError } from "@/lib/errors";
 import { sendJobCompletionNotification } from "@/lib/notifications";
 import { statusOf, CARD_BASE } from "@/lib/statusColors";
 import { capture } from "@/lib/analytics";
+import { LoadingState } from "@/components/LoadingState";
 import { shortTime, exactTime } from "@/lib/datetime";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
@@ -1143,7 +1144,7 @@ function CommandCenterContent() {
 
 export default function CommandCenter() {
   return (
-    <Suspense fallback={<div className="p-8 text-zinc-500 font-mono text-sm">Loading command center…</div>}>
+    <Suspense fallback={<LoadingState label="Loading command center…" className="min-h-[70vh]" />}>
       <CommandCenterContent />
     </Suspense>
   );
