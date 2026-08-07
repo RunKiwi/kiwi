@@ -433,6 +433,8 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/jobs", s.handleJobsList)
 	mux.HandleFunc("/api/v1/jobs/", s.handleJobStatus)
 	mux.HandleFunc("/api/v1/fleets", s.handleFleets)
+	mux.HandleFunc("/api/v1/providers", s.handleProviders)
+	mux.HandleFunc("/api/v1/catalog/models", s.handleCatalogModels)
 	mux.HandleFunc("/api/v1/models", s.handleModels)
 	mux.HandleFunc("/api/v1/models/", s.handleModels)
 	mux.HandleFunc("/api/v1/integrations", s.handleIntegrations)
