@@ -355,6 +355,9 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				// omits planning — which is the half most worth acting on, since
 				// the planner defaults to the most expensive model available.
 				"planner_model": actualModel,
+				// The resolved provider, so the spend page can attribute planner
+				// spend without re-deriving it from the model id.
+				"planner_provider": prov,
 			},
 			Funding:          funding,
 			PlannerCostUSD:   totalCost,

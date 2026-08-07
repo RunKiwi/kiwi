@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"sort"
 	"time"
@@ -95,6 +96,14 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		from = to.Add(-maxSpendRange)
 	}
 
+	funding := r.URL.Query().Get("funding")
+	switch funding {
+	case "", "all", store.FundingBYOK, store.FundingKiwi:
+	default:
+		http.Error(w, "funding must be byok, kiwi, or all", http.StatusBadRequest)
+		return
+	}
+
 	var jobs []store.Job
 	if err := s.db.WithContext(r.Context()).
 		Where("org_id = ? AND created_at >= ? AND created_at <= ?", claims.OrgID, from, to).
@@ -112,21 +121,18 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	funding := r.URL.Query().Get("funding")
-	switch funding {
-	case "", "all", store.FundingBYOK, store.FundingKiwi:
-	default:
-		http.Error(w, "funding must be byok, kiwi, or all", http.StatusBadRequest)
-		return
-	}
-
 	resp := buildSpend(from, to, jobs, tasks, funding)
 
 	// The allowance is always the *current* period's, regardless of the range
 	// being reported: it is a live balance, not a historical total, and dating
 	// it to an arbitrary window would make it read as one.
 	period := store.CurrentPeriod(time.Now())
-	if grants, err := s.storage.ListGrants(r.Context(), claims.OrgID, period); err == nil {
+	grants, gerr := s.storage.ListGrants(r.Context(), claims.OrgID, period)
+	if gerr != nil {
+		// Degrade to an empty allowance panel rather than failing the page, but
+		// say so: an empty panel and a broken query look identical otherwise.
+		log.Printf("[spend] loading grants for org %s: %v", claims.OrgID, gerr)
+	} else {
 		for _, g := range grants {
 			resp.Allowance = append(resp.Allowance, AllowanceBucket{
 				Tier: g.Tier, Period: g.Period,
@@ -156,7 +162,6 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, 
 	resp := SpendResponse{
 		From:       from,
 		To:         to,
-		JobCount:   len(jobs),
 		Daily:      make([]SpendPoint, 0),
 		ByRepo:     make([]SpendBucket, 0),
 		ByModel:    make([]SpendBucket, 0),
@@ -216,9 +221,27 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, 
 	// Jobs carry planner spend and agent-minutes.
 	jobRepo := map[string]string{}
 	for _, j := range jobs {
+		// Populated for every job, filtered or not. A task falls back to its
+		// job's repo when its own spec carries none, and a job excluded by the
+		// funding filter would otherwise leave its BYOK tasks with an empty repo
+		// key — which bucket() drops, silently losing real dollars from the
+		// by-repo breakdown while they stay in the headline total.
+		repo := ""
+		if j.Inputs != nil {
+			if u, ok := j.Inputs["repo_url"].(string); ok {
+				repo = store.ShortRepo(u)
+			}
+		}
+		jobRepo[j.ID] = repo
+
 		if !include(j.Funding) {
 			continue
 		}
+		// Counted after the filter, so JobCount and MeteredJobs always describe
+		// the same set of jobs. The frontend renders them as a ratio ("X of Y
+		// jobs carry cost data"); an unfiltered numerator over a filtered
+		// denominator made a fully-metered org look entirely unmetered.
+		resp.JobCount++
 
 		plannerCostUSD := j.PlannerCostUSD
 		if isBYOK(j.Funding) {
@@ -237,25 +260,20 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, 
 			p.PlannerUSD += plannerCostUSD
 		}
 
-		repo := ""
-		if j.Inputs != nil {
-			if u, ok := j.Inputs["repo_url"].(string); ok {
-				repo = store.ShortRepo(u)
+		if isBYOK(j.Funding) {
+			if b := bucket(byRepo, repo); b != nil {
+				b.planner += plannerCostUSD
 			}
-		}
-		jobRepo[j.ID] = repo
-		if b := bucket(byRepo, repo); b != nil {
-			b.planner += plannerCostUSD
 		}
 		// Planner spend belongs in the by-model breakdown too. Omitting it hides
 		// the most actionable fact on the page: the planner defaults to the most
 		// expensive model while workers default to the cheapest.
-		if j.Inputs != nil {
+		if j.Inputs != nil && isBYOK(j.Funding) {
 			if pm, ok := j.Inputs["planner_model"].(string); ok {
 				if b := bucket(byModel, pm); b != nil {
 					b.planner += plannerCostUSD
 				}
-				if b := bucket(byProvider, provider.ProviderOf(pm)); b != nil {
+				if b := bucket(byProvider, jobProvider(j, pm)); b != nil {
 					b.planner += plannerCostUSD
 				}
 			}
@@ -289,6 +307,13 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, 
 			}
 		}
 
+		if !isBYOK(t.Funding) {
+			// Kiwi-funded work has no dollars to break down; its ledger is the
+			// token allowance. Bucketing it anyway renders $0.00 bars that read
+			// as "this model was free" and crowds real rows out of the fold cap.
+			continue
+		}
+
 		repo := specString(t.Spec, "repo_url")
 		key := store.ShortRepo(repo)
 		if key == "" {
@@ -301,9 +326,11 @@ func buildSpend(from, to time.Time, jobs []store.Job, tasks []store.QueuedTask, 
 		if b := bucket(byModel, model); b != nil {
 			b.worker += workerCostUSD
 		}
-		// Provider is derived with the same rule the daemon routes by, so the
-		// breakdown can never attribute a model to a provider that did not serve it.
-		if b := bucket(byProvider, provider.ProviderOf(model)); b != nil {
+		// The provider the planner resolved through the catalog, pinned on the
+		// spec. ProviderOf is prefix inference and returns "anthropic" for
+		// anything it does not recognise, which would file every aggregator
+		// model under a provider that never served it.
+		if b := bucket(byProvider, taskProvider(t, model)); b != nil {
 			b.worker += workerCostUSD
 		}
 	}
@@ -356,4 +383,23 @@ func foldBuckets(m map[string]*spendAgg) []SpendBucket {
 		other.TotalUSD += b.TotalUSD
 	}
 	return append(out[:maxSpendBuckets:maxSpendBuckets], other)
+}
+
+// taskProvider reads the provider the Control Plane resolved for a task,
+// falling back to inference for tasks queued before it was recorded.
+func taskProvider(t store.QueuedTask, model string) string {
+	if p := specString(t.Spec, "provider"); p != "" {
+		return p
+	}
+	return provider.ProviderOf(model)
+}
+
+// jobProvider does the same for a job's planner model.
+func jobProvider(j store.Job, plannerModel string) string {
+	if j.Inputs != nil {
+		if p, ok := j.Inputs["planner_provider"].(string); ok && p != "" {
+			return p
+		}
+	}
+	return provider.ProviderOf(plannerModel)
 }
