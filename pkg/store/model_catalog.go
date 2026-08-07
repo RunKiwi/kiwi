@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -133,4 +134,51 @@ func (m *CatalogModel) ApplyDerived(kiwiKeyAvailable bool) {
 	m.Tier = DeriveTier(m.InputCostPerM, m.OutputCostPerM)
 	m.Selectable = DeriveSelectable(m)
 	m.KiwiProvided = kiwiKeyAvailable && m.Tier != TierUnknown
+}
+
+// How a Resolution was reached. Inference is a guess and is treated as one:
+// it can route a request, but it can never authorise Kiwi to spend money.
+const (
+	SourceCatalog  = "catalog"
+	SourceInferred = "inferred"
+)
+
+// Resolution is everything routing needs to know about a model id.
+type Resolution struct {
+	Provider     string
+	Tier         string
+	KiwiProvided bool
+	Source       string
+}
+
+// ResolveModel maps a model id to its provider for an org.
+//
+// The catalog is authoritative; provider.ProviderOf is the fallback for a miss,
+// which is what keeps existing submits and stored org_models rows working. An
+// inferred resolution is never Kiwi-funded: inference yields no price, and Kiwi
+// does not pay for a model it cannot cost.
+func (s *PostgresStore) ResolveModel(ctx context.Context, orgID, modelID string) (Resolution, error) {
+	var rows []CatalogModel
+	err := s.db.WithContext(ctx).
+		Where("model_id = ? AND org_id IN ?", modelID, []string{GlobalCatalogOrg, orgID}).
+		Order("org_id DESC").
+		Limit(1).
+		Find(&rows).Error
+	if err != nil {
+		return Resolution{}, err
+	}
+	if len(rows) > 0 {
+		m := rows[0]
+		return Resolution{
+			Provider:     m.Provider,
+			Tier:         m.Tier,
+			KiwiProvided: m.KiwiProvided,
+			Source:       SourceCatalog,
+		}, nil
+	}
+	return Resolution{
+		Provider: provider.ProviderOf(modelID),
+		Tier:     TierUnknown,
+		Source:   SourceInferred,
+	}, nil
 }
