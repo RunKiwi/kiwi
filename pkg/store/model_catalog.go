@@ -14,6 +14,11 @@ import (
 // a duplicate a real conflict.
 const GlobalCatalogOrg = ""
 
+const (
+	FundingBYOK = "byok"
+	FundingKiwi = "kiwi"
+)
+
 // CatalogModel is one model Kiwi knows about. It is the authority for routing:
 // which provider serves a model, what it costs, and whether it is usable at all.
 //

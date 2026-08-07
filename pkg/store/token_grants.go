@@ -107,3 +107,14 @@ func (s *PostgresStore) ListGrants(ctx context.Context, orgID, period string) ([
 		Find(&out).Error
 	return out, err
 }
+
+// GetOrgPlan reads an organization's plan type.
+func (s *PostgresStore) GetOrgPlan(ctx context.Context, orgID string) (string, error) {
+	var plan string
+	err := s.db.WithContext(ctx).
+		Table("organizations").
+		Where("id = ?", orgID).
+		Select("plan").
+		Scan(&plan).Error
+	return plan, err
+}

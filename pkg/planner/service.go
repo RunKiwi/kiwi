@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/entitlement"
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -121,6 +122,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	// True when planning ran on a Control-Plane key rather than the org's, in
 	// which case the org did not pay for it and must not be billed for it.
 	plannedOnOperatorKey := false
+	funding := store.FundingBYOK
 
 	sessionMode := req.Mode == agent.ModeSession
 
@@ -153,6 +155,9 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
 			return nil, err
 		}
+		if err := s.requireEntitlement(ctx, req.OrgID, actualModel); err != nil {
+			return nil, err
+		}
 	case s.planner != nil:
 		p = s.planner
 	case os.Getenv("KIWI_PLANNER") != "llm":
@@ -171,15 +176,16 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		var key string
 		if override := os.Getenv("KIWI_PLANNER_API_KEY"); override != "" {
 			key = override
+			funding = store.FundingKiwi // Operator keys are Kiwi-funded
 			plannedOnOperatorKey = true
 		} else {
-			secretName := provider.CredentialNameFor(prov)
-			var kerr error
-			key, kerr = s.store.GetCredentialPlaintext(ctx, req.OrgID, secretName)
-			if kerr != nil || key == "" {
-				// Phrased so the dashboard's error mapper recognises it as a
-				// credential problem and offers the link to Integrations.
-				return nil, fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+			if err := s.requireEntitlement(ctx, req.OrgID, actualModel); err != nil {
+				return nil, err
+			}
+			var err error
+			key, funding, err = s.resolveKey(ctx, req.OrgID, actualModel)
+			if err != nil {
+				return nil, err
 			}
 		}
 
@@ -331,6 +337,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				// the planner defaults to the most expensive model available.
 				"planner_model": actualModel,
 			},
+			Funding:          funding,
 			PlannerCostUSD:   totalCost,
 			PlannerTokensIn:  totalIn,
 			PlannerTokensOut: totalOut,
@@ -375,6 +382,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				JobID:   jobID,
 				FleetID: req.FleetID,
 				Status:  store.TaskQueued,
+				Funding: funding,
 				Spec:    spec,
 			}).Error; err != nil {
 				return fmt.Errorf("enqueue task %s: %w", taskID, err)
@@ -543,4 +551,99 @@ func (s *Service) requireProviderKey(ctx context.Context, orgID, prov string) er
 		}
 	}
 	return fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+}
+
+// resolveKey returns the API key to plan with and which budget it draws from.
+//
+// A Kiwi-funded model uses Kiwi's own key and reports funding "kiwi"; anything
+// else uses the org's stored credential and reports "byok". The funding value
+// is recorded on the job so the spend page can keep Kiwi-covered work out of
+// the dollar total the org owes.
+func (s *Service) resolveKey(ctx context.Context, orgID, model string) (string, string, error) {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err == nil && res.KiwiProvided {
+		if key, ok := provider.PlatformKeyFor(res.Provider); ok {
+			return key, store.FundingKiwi, nil
+		}
+	}
+
+	prov := provider.ProviderOf(model)
+	if err == nil && res.Provider != "" {
+		prov = res.Provider
+	}
+	secretName := provider.CredentialNameFor(prov)
+	key, kerr := s.store.GetCredentialPlaintext(ctx, orgID, secretName)
+	if kerr != nil || key == "" {
+		// Phrased so the dashboard's error mapper recognises it as a credential
+		// problem and offers the link to Integrations.
+		return "", "", fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+	}
+	return key, store.FundingBYOK, nil
+}
+
+// requireEntitlement fails a submit that asks Kiwi to pay for work it cannot.
+//
+// It runs beside requireProviderKey for the same reason that one exists: an
+// immediate, actionable error at submit beats a task that sits in the queue and
+// fails minutes later inside the daemon with a confusing reason.
+//
+// A BYOK model returns nil immediately — the org's own allowance is their own
+// business.
+func (s *Service) requireEntitlement(ctx context.Context, orgID, model string) error {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil {
+		// A lookup failure is not evidence of an entitlement problem. Let the
+		// submit through; the daemon reports the real problem if there is one.
+		return nil
+	}
+	if !res.KiwiProvided {
+		return nil
+	}
+
+	// Kiwi keys only ever reach daemons Kiwi operates, so a Kiwi-funded model
+	// on a BYOC fleet would be admitted and then fail with no key at all.
+	managed, err := s.orgHasManagedFleet(ctx, orgID)
+	if err == nil && !managed {
+		return fmt.Errorf("%s is a Kiwi-provided model and requires a Kiwi-managed fleet; use your own provider key on this fleet", model)
+	}
+
+	plan, err := s.store.GetOrgPlan(ctx, orgID)
+	if err != nil {
+		// A lookup failure is not evidence of an entitlement problem. Let the
+		// submit through rather than blocking work on a transient DB error.
+		return nil
+	}
+	checker := &entitlement.Checker{Store: s.store}
+	allowed, err := checker.Allow(ctx, orgID, plan, res.Tier)
+	if err != nil {
+		if errors.Is(err, entitlement.ErrNotGrantable) {
+			return fmt.Errorf("%s cannot be run on a Kiwi-provided key; connect your own provider key in Integrations", model)
+		}
+		return nil
+	}
+	if !allowed {
+		return fmt.Errorf("your monthly %s token allowance is exhausted; connect your own provider key in Integrations or wait for the allowance to reset", res.Tier)
+	}
+	return nil
+}
+
+// orgHasManagedFleet reports whether the org has at least one Kiwi-operated
+// fleet to run on. A free-plan org always does: it runs on the shared free fleet.
+func (s *Service) orgHasManagedFleet(ctx context.Context, orgID string) (bool, error) {
+	fleets, err := s.store.ListFleets(ctx, orgID)
+	if err != nil {
+		return true, err // Do not block a submit on a lookup failure.
+	}
+	for _, f := range fleets {
+		if f.Type == store.FleetManaged {
+			return true, nil
+		}
+	}
+	plan, err := s.store.GetOrgPlan(ctx, orgID)
+	if err != nil {
+		return true, err
+	}
+	// A free-plan org always has one: it runs on the shared free fleet, which
+	// has no fleets row of its own.
+	return plan == "free", nil
 }
