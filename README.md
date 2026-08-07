@@ -148,7 +148,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 
 `kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
 
-**LLM providers.** The daemon selects the provider from the worker's `-model`, and reads that provider's key from your stored credentials:
+**LLM providers.** The model catalog serves as the authoritative source for model-to-provider routing. When a model is requested, it is resolved against the catalog to determine its provider, tier, and whether it is funded by a Kiwi platform key. If a model is not found in the catalog, it falls back to prefix inference to keep existing submissions working. The daemon then reads that provider's key from your stored credentials:
 
 | Model id | Provider | Credential |
 | --- | --- | --- |

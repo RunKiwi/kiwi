@@ -224,3 +224,95 @@ func TestApplyDerivedFundsPriceableModelWithKey(t *testing.T) {
 		t.Error("kiwi_provided stayed true with no platform key configured")
 	}
 }
+
+// A catalog hit is authoritative.
+func TestResolveModelFromCatalog(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// kimi-k2 has no prefix that ProviderOf recognises, so inference would
+	// call it Anthropic. The catalog is what makes it route correctly.
+	if err := s.UpsertCatalogModel(ctx, &CatalogModel{
+		OrgID: GlobalCatalogOrg, ModelID: "kimi-k2", Provider: "openrouter",
+		Tier: TierEconomy, KiwiProvided: true, Selectable: true,
+		Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	got, err := s.ResolveModel(ctx, "o1", "kimi-k2")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.Provider != "openrouter" {
+		t.Errorf("Provider = %q, want openrouter", got.Provider)
+	}
+	if got.Tier != TierEconomy {
+		t.Errorf("Tier = %q, want %q", got.Tier, TierEconomy)
+	}
+	if !got.KiwiProvided {
+		t.Error("KiwiProvided = false, want true")
+	}
+	if got.Source != SourceCatalog {
+		t.Errorf("Source = %q, want %q", got.Source, SourceCatalog)
+	}
+}
+
+// An org's own row wins over the global one for the same model id.
+func TestResolveModelPrefersOrgRow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for _, m := range []*CatalogModel{
+		{OrgID: GlobalCatalogOrg, ModelID: "shared-id", Provider: "openrouter",
+			Tier: TierEconomy, Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+		{OrgID: "o1", ModelID: "shared-id", Provider: "openai",
+			Tier: TierFrontier, Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+	} {
+		if err := s.UpsertCatalogModel(ctx, m); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	got, err := s.ResolveModel(ctx, "o1", "shared-id")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.Provider != "openai" {
+		t.Errorf("Provider = %q, want openai (the org row)", got.Provider)
+	}
+}
+
+// A miss falls back to prefix inference so existing submits keep working.
+func TestResolveModelFallsBackToInference(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	cases := map[string]string{
+		"gemini-2.0-flash":  "gemini",
+		"gpt-5-mini":        "openai",
+		"claude-opus-4-8":   "anthropic",
+		"something-unknown": "anthropic",
+	}
+	for model, wantProvider := range cases {
+		got, err := s.ResolveModel(ctx, "o1", model)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", model, err)
+		}
+		if got.Provider != wantProvider {
+			t.Errorf("ResolveModel(%q).Provider = %q, want %q", model, got.Provider, wantProvider)
+		}
+		if got.Source != SourceInferred {
+			t.Errorf("ResolveModel(%q).Source = %q, want %q", model, got.Source, SourceInferred)
+		}
+		// Inference cannot price a model, so it can never authorise Kiwi spend.
+		if got.KiwiProvided {
+			t.Errorf("ResolveModel(%q) inferred a Kiwi-funded model", model)
+		}
+		if got.Tier != TierUnknown {
+			t.Errorf("ResolveModel(%q).Tier = %q, want %q", model, got.Tier, TierUnknown)
+		}
+	}
+}
