@@ -103,12 +103,15 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			spec.Model)}
 	}
 
-	// The Architect is a different model and the spec carries a resolved provider
-	// only for spec.Model, so this one falls back to inference. That is correct
-	// for the frontier models an Architect is chosen from, and it means a
-	// Kiwi-provided aggregator model cannot serve as the Architect yet — it would
-	// misroute rather than run on the wrong key.
-	architectProv, _ := d.newProvider(creds, architectModel, "")
+	// The Architect gets its own resolved provider, because it is usually a
+	// different model from a different provider than the Implementer. When the
+	// spec carries no ArchitectModel the Architect runs the worker's model, so
+	// it inherits the worker's provider too.
+	architectProvider := spec.ArchitectProvider
+	if spec.ArchitectModel == "" {
+		architectProvider = spec.Provider
+	}
+	architectProv, _ := d.newProvider(creds, architectModel, architectProvider)
 	if architectProv == nil {
 		return taskResult{detail: noKeyDetail(architectModel)}
 	}

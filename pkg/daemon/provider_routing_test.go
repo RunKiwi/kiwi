@@ -133,3 +133,49 @@ func TestIsLLMKeyRejectsNonModelCredentials(t *testing.T) {
 		}
 	}
 }
+
+// An OpenAI-compatible provider is served by the OpenAI client pointed at the
+// registry's base URL. Without the URL the client calls api.openai.com with a
+// key that endpoint never issued; without the provider on the spec the daemon
+// infers "anthropic" from an aggregator id and reaches for a key it was never
+// sent.
+func TestDefaultProviderRoutesOpenAICompatibleProviders(t *testing.T) {
+	creds := map[string]string{"OPENROUTER_API_KEY": "sk-or-test"}
+
+	// Inference alone cannot do this: ProviderOf("moonshotai/kimi-k2") is
+	// "anthropic", which looks up a credential that is not in the bundle.
+	if actor, _ := defaultProvider(creds, "moonshotai/kimi-k2", ""); actor != nil {
+		t.Error("an aggregator model resolved without a pinned provider; inference cannot know it")
+	}
+
+	actor, critic := defaultProvider(creds, "moonshotai/kimi-k2", provider.ProviderOpenRouter)
+	if actor == nil || critic == nil {
+		t.Fatal("a pinned openrouter provider did not resolve with OPENROUTER_API_KEY present")
+	}
+}
+
+// The Architect is a second model with its own provider, so it resolves
+// independently of the Implementer's.
+func TestDefaultProviderResolvesArchitectIndependently(t *testing.T) {
+	creds := map[string]string{
+		"OPENROUTER_API_KEY": "sk-or-test",
+		"ANTHROPIC_API_KEY":  "sk-ant-test",
+	}
+	impl, _ := defaultProvider(creds, "moonshotai/kimi-k2", provider.ProviderOpenRouter)
+	arch, _ := defaultProvider(creds, "claude-opus-4-8", provider.ProviderAnthropic)
+	if impl == nil {
+		t.Error("the Implementer did not resolve")
+	}
+	if arch == nil {
+		t.Error("the Architect did not resolve on a different provider")
+	}
+}
+
+// A pinned provider whose key is absent must fail rather than silently falling
+// back to another provider's key.
+func TestDefaultProviderFailsWhenThePinnedProvidersKeyIsMissing(t *testing.T) {
+	onlyAnthropic := map[string]string{"ANTHROPIC_API_KEY": "sk-ant-test"}
+	if actor, _ := defaultProvider(onlyAnthropic, "moonshotai/kimi-k2", provider.ProviderOpenRouter); actor != nil {
+		t.Error("an openrouter model ran on the Anthropic key")
+	}
+}

@@ -173,6 +173,8 @@ KIWI_PLATFORM_OPENAI_API_KEY=...
 
 A provider whose variable is unset is simply BYOK-only, and the dashboard shows it as *Coming soon* — no migration or config beyond the variable itself. Usage is capped per organisation per calendar month by a token allowance, banded by model price (`free` / `economy` / `frontier`) because a token is not a unit of cost: the same count is worth two orders of magnitude more on a frontier model than an economy one. Allowances are set per plan in `pkg/entitlement`.
 
+Session mode runs two models — an Architect that plans and reviews, and an Implementer that edits — and either or both can be Kiwi-provided. Each is routed, keyed and metered on its own: a frontier Architect over an economy Implementer draws on the frontier allowance only for the reviewer's tokens. Both must be paid for the same way, though, because a task records one payer; mixing a Kiwi-provided model with one of your own is refused at submit rather than producing a bill that cannot be attributed.
+
 These keys are sealed **only** to daemons Kiwi itself operates. A daemon running on your own hardware never receives one, and Kiwi-provided models are unavailable on a BYOC fleet — submitting one there is refused up front rather than failing later for want of a key. Set a spend cap on the upstream provider account regardless: the allowance divides usage fairly between organisations, it is not a backstop against a bug.
 
 Spend reporting keeps the two apart. The dollar figure on `/spend` counts only work billed to your own keys; work Kiwi funded is reported in tokens against the allowance, so the page never shows a total you do not owe.
