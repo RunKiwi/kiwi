@@ -79,3 +79,58 @@ func (s *PostgresStore) GetCatalogModel(ctx context.Context, orgID, modelID stri
 	}
 	return &m, nil
 }
+
+// Grantable tiers. There are three, plus TierUnknown, which is not grantable:
+// it means the model could not be priced, and Kiwi does not spend its own money
+// on a model whose cost it cannot compute.
+const (
+	TierFree     = "free"
+	TierEconomy  = "economy"
+	TierFrontier = "frontier"
+	TierUnknown  = "unknown"
+)
+
+// economyOutputCeilingPerM is the price band splitting economy from frontier,
+// in USD per million output tokens. Output is priced several times higher than
+// input across every provider, so it is the axis that decides the band.
+const economyOutputCeilingPerM = 2.00
+
+// minContextLength is the smallest window in which the loop actually works.
+// The Actor returns whole file contents as JSON and CompletionBudget() defaults
+// to 16000 output tokens, so anything smaller cannot round-trip a single-file
+// edit. A model below it does not degrade gracefully, it fails mid-task.
+const minContextLength = 32000
+
+// DeriveTier places a model in a price band. Unknown pricing yields
+// TierUnknown, which is distinct from free: a NULL price is not a zero price.
+func DeriveTier(inputPerM, outputPerM *float64) string {
+	if inputPerM == nil || outputPerM == nil {
+		return TierUnknown
+	}
+	if *inputPerM == 0 && *outputPerM == 0 {
+		return TierFree
+	}
+	if *outputPerM <= economyOutputCeilingPerM {
+		return TierEconomy
+	}
+	return TierFrontier
+}
+
+// DeriveSelectable reports whether a model can be offered in the task form.
+// Every condition must hold; each one on its own is enough to break a run.
+func DeriveSelectable(m *CatalogModel) bool {
+	return m.SupportsTools != nil && *m.SupportsTools &&
+		m.ContextLength != nil && *m.ContextLength >= minContextLength &&
+		m.Modality == "text->text" &&
+		m.MissingSince == nil
+}
+
+// ApplyDerived recomputes Tier, Selectable and KiwiProvided from the row's
+// facts. kiwiKeyAvailable reports whether Kiwi holds a key for this model's
+// provider; it is passed in rather than read from the environment so the
+// derivation stays a pure function the tests can drive directly.
+func (m *CatalogModel) ApplyDerived(kiwiKeyAvailable bool) {
+	m.Tier = DeriveTier(m.InputCostPerM, m.OutputCostPerM)
+	m.Selectable = DeriveSelectable(m)
+	m.KiwiProvided = kiwiKeyAvailable && m.Tier != TierUnknown
+}
