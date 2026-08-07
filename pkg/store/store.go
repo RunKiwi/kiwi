@@ -118,6 +118,10 @@ type Store interface {
 	ListModels(ctx context.Context, orgID string) ([]ModelEntry, error)
 	DeleteModel(ctx context.Context, orgID, id string) error
 
+	UpsertCatalogModel(ctx context.Context, m *CatalogModel) error
+	ListCatalogModels(ctx context.Context, orgID string) ([]CatalogModel, error)
+	GetCatalogModel(ctx context.Context, orgID, modelID string) (*CatalogModel, error)
+
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
 	// identity and resolves a heartbeat to an org; registration is gated by a
 	// short-lived, org-bound, single-use join token (no trust-on-first-use).

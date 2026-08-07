@@ -44,7 +44,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 			&store.QueuedTask{}, &store.Credential{},
 			&store.Daemon{}, &store.DaemonJoinToken{},
 			&store.PlanSubmission{},
-			&store.Fleet{}, &store.ModelEntry{},
+			&store.Fleet{}, &store.ModelEntry{}, &store.CatalogModel{},
 			&agentapi.JobToken{}, &store.JobLearning{},
 			&store.AgentSession{}, &store.AgentSessionEvent{},
 		); err != nil {
