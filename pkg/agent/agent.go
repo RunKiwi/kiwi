@@ -81,6 +81,19 @@ type WorkerSpec struct {
 	JobID          string   `json:"job_id"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
 
+	// Provider is the canonical provider id that serves Model, resolved by the
+	// Control Plane against the model catalog.
+	//
+	// It travels on the spec because the daemon cannot re-derive it: the daemon
+	// has no database, so its only other option is provider.ProviderOf, which is
+	// prefix inference over model ids and returns "anthropic" for anything it
+	// does not recognise. An OpenRouter id like "moonshotai/kimi-k2" would be
+	// routed to Anthropic, look up ANTHROPIC_API_KEY, find the sealed bundle
+	// holds OPENROUTER_API_KEY instead, and fail the task with no provider at all.
+	//
+	// Empty falls back to provider.ProviderOf, so every spec written before this
+	// field existed keeps routing exactly as it did.
+	Provider string `json:"provider,omitempty"`
 	// Mode selects the execution loop. Empty means ModeFileLoop, so every spec
 	// written before this field existed keeps running exactly as it did.
 	Mode string `json:"mode,omitempty"`

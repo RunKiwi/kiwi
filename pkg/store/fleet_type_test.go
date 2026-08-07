@@ -5,14 +5,19 @@ import (
 	"testing"
 )
 
-// Every ambiguous case must deny. This function decides whether Kiwi's own API
-// key is handed to a machine, so anything short of proof that Kiwi operates
-// that machine is a no.
-func TestIsManagedFleetFailsClosed(t *testing.T) {
+// This function decides whether Kiwi's own API key is handed to a machine, so
+// anything short of proof that Kiwi operates that machine must deny.
+//
+// The case that matters most is the managed-typed fleet: every org gets one at
+// signup (auth.CreateDefaultFleet), and CreateFleet takes the type from a
+// request body. If Fleet.Type were trusted here, any signed-up user could mint
+// a join token against their own "managed" fleet, run kiwidaemon anywhere, and
+// receive Kiwi's platform credential sealed to a key they hold.
+func TestIsKiwiOperatedFleetTrustsOnlyTheSharedFreeFleet(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	managed, err := s.CreateFleet(ctx, "o1", "kiwi-managed", FleetManaged)
+	managed, err := s.CreateFleet(ctx, "o1", "Managed (Default)", FleetManaged)
 	if err != nil {
 		t.Fatalf("create managed fleet: %v", err)
 	}
@@ -26,31 +31,57 @@ func TestIsManagedFleetFailsClosed(t *testing.T) {
 		fleetID string
 		want    bool
 	}{
-		{"managed fleet", managed.ID, true},
-		// The shared free fleet is a well-known id that may have no fleets row
-		// at all, so it is recognised by name before the table is consulted.
-		{"shared free fleet by name", SharedFreeFleet, true},
+		// The provisioner launches these daemons itself; the id is a constant
+		// with no fleets row, so it cannot be claimed through the API.
+		{"shared free fleet", SharedFreeFleet, true},
+
+		// A customer-owned row labelled "managed" is NOT proof of anything.
+		{"customer-created managed fleet", managed.ID, false},
 		{"byoc fleet", byoc.ID, false},
 		// "Belongs to no specific fleet" is not "Kiwi operates it".
 		{"empty fleet id", "", false},
-		// A dangling reference proves nothing about who runs the machine.
 		{"fleet id with no row", "flt_does_not_exist", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := s.IsManagedFleet(ctx, tc.fleetID)
+			got, err := s.IsKiwiOperatedFleet(ctx, "o1", tc.fleetID)
 			if err != nil {
-				t.Fatalf("IsManagedFleet(%q): %v", tc.fleetID, err)
+				t.Fatalf("IsKiwiOperatedFleet(%q): %v", tc.fleetID, err)
 			}
 			if got != tc.want {
-				t.Errorf("IsManagedFleet(%q) = %v, want %v", tc.fleetID, got, tc.want)
+				t.Errorf("IsKiwiOperatedFleet(%q) = %v, want %v", tc.fleetID, got, tc.want)
 			}
 		})
 	}
 }
 
-// The constant must be one definition. Two copies that drift would let a
-// free-fleet daemon fail the check and lose its platform key, or worse.
+// A misspelled or absent type must not mint a privileged fleet.
+func TestCreateFleetDefaultsToBYOC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for _, ftype := range []string{"", "Managed", "manged", "whatever"} {
+		f, err := s.CreateFleet(ctx, "o1", "f", ftype)
+		if err != nil {
+			t.Fatalf("CreateFleet(%q): %v", ftype, err)
+		}
+		if f.Type != FleetBYOC {
+			t.Errorf("CreateFleet(%q).Type = %q, want %q", ftype, f.Type, FleetBYOC)
+		}
+	}
+
+	// The two recognised values still round-trip.
+	for _, ftype := range []string{FleetManaged, FleetBYOC} {
+		f, err := s.CreateFleet(ctx, "o1", "f", ftype)
+		if err != nil {
+			t.Fatalf("CreateFleet(%q): %v", ftype, err)
+		}
+		if f.Type != ftype {
+			t.Errorf("CreateFleet(%q).Type = %q", ftype, f.Type)
+		}
+	}
+}
+
 func TestSharedFreeFleetConstant(t *testing.T) {
 	if SharedFreeFleet != "shared-free" {
 		t.Errorf("SharedFreeFleet = %q, want shared-free", SharedFreeFleet)

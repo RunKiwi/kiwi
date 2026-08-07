@@ -27,15 +27,30 @@ func newTestServer(t *testing.T) *Server {
 }
 
 // The core guarantee: a daemon Kiwi does not operate never receives a Kiwi key.
+//
+// seedFreeOrg is REQUIRED here even though the test is about fleets. Without an
+// organizations row the function denies at the org lookup, which sits after the
+// fleet check — so every case would pass with the fleet guard deleted entirely,
+// and the test would prove nothing. It was written that way and did exactly
+// that. Every other precondition must be satisfiable so that the fleet is the
+// only reason the answer is "no".
 func TestPlatformCredsDeniedToUnmanagedDaemons(t *testing.T) {
 	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
 
 	s := newTestServer(t)
 	ctx := context.Background()
+	seedFreeOrg(t, s, "o1")
 
 	byoc, err := s.storage.CreateFleet(ctx, "o1", "customer-cloud", store.FleetBYOC)
 	if err != nil {
 		t.Fatalf("create byoc fleet: %v", err)
+	}
+	// The exfiltration case: every org is given one of these at signup, and
+	// CreateFleet takes the type from a request body. A customer can point a
+	// join token at it and run the daemon on hardware Kiwi has never seen.
+	managed, err := s.storage.CreateFleet(ctx, "o1", "Managed (Default)", store.FleetManaged)
+	if err != nil {
+		t.Fatalf("create managed fleet: %v", err)
 	}
 	seedKiwiModel(t, s, "kimi-k2", "openrouter", store.TierEconomy)
 
@@ -43,6 +58,7 @@ func TestPlatformCredsDeniedToUnmanagedDaemons(t *testing.T) {
 		name    string
 		fleetID string
 	}{
+		{"customer-created managed fleet", managed.ID},
 		{"byoc fleet", byoc.ID},
 		{"no fleet", ""},
 		{"dangling fleet id", "flt_does_not_exist"},

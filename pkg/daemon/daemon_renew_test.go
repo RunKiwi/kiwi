@@ -92,7 +92,7 @@ func TestDaemon_LeaseRenewal(t *testing.T) {
 		t.Fatalf("New daemon failed: %v", err)
 	}
 	// Inject a slow actor so the real loop drives executeTask for ~1.5s.
-	d.newProvider = func(map[string]string, string) (provider.Provider, provider.Critic) {
+	d.newProvider = func(map[string]string, string, string) (provider.Provider, provider.Critic) {
 		return slowActor{delay: 500 * time.Millisecond}, nil
 	}
 	if err := d.Start(); err != nil {
