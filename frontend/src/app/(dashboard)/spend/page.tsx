@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import { AlertCircle, Table2, BarChart3, Gauge } from "lucide-react";
 import { client, type SpendResponse } from "@/lib/api";
+import { LoadingState } from "@/components/LoadingState";
 
 // Ranges the page offers. Values are days; "month" resolves to the 1st.
 const RANGES = [
@@ -319,7 +320,7 @@ function TableView({ data }: { data: SpendResponse }) {
 
 export default function SpendPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-zinc-500 text-sm">Loading spend…</div>}>
+    <Suspense fallback={<LoadingState label="Loading spend…" className="min-h-[70vh]" />}>
       <SpendContent />
     </Suspense>
   );
