@@ -111,3 +111,25 @@ func TestEveryProviderKeyIsWithheldFromTheSandbox(t *testing.T) {
 		}
 	}
 }
+
+// A provider in the registry whose key is not recognised here would have its
+// key handed to the container that runs model-generated code. This asserts the
+// two can never drift.
+func TestIsLLMKeyCoversEveryRegistryProvider(t *testing.T) {
+	for _, spec := range provider.Registry() {
+		if spec.Kind == "" {
+			continue
+		}
+		if !isLLMKey(spec.CredName) {
+			t.Errorf("isLLMKey(%q) = false for registry provider %q; the key would leak into the sandbox", spec.CredName, spec.ID)
+		}
+	}
+}
+
+func TestIsLLMKeyRejectsNonModelCredentials(t *testing.T) {
+	for _, name := range []string{"GITHUB_TOKEN", "GIT_TOKEN", "SLACK_TOKEN", ""} {
+		if isLLMKey(name) {
+			t.Errorf("isLLMKey(%q) = true, want false", name)
+		}
+	}
+}

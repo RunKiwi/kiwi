@@ -61,3 +61,30 @@ func TestProviderForEmptyModelStaysEmpty(t *testing.T) {
 		t.Errorf("providerForModel(\"\") = %q, want empty", got)
 	}
 }
+
+// Integrations is how the dashboard learns which provider keys are connected.
+// A registry provider missing here is invisible in the UI and unconnectable.
+func TestIntegrationSpecCoversEveryRegistryProvider(t *testing.T) {
+	present := map[string]bool{}
+	for _, spec := range integrationSpec {
+		present[spec.CredName] = true
+	}
+	for _, p := range provider.Registry() {
+		if !present[p.CredName] {
+			t.Errorf("integrationSpec is missing registry provider %q (%s)", p.ID, p.CredName)
+		}
+	}
+}
+
+// The non-LLM integrations are hand-written and must survive the change.
+func TestIntegrationSpecKeepsNonLLMEntries(t *testing.T) {
+	byKey := map[string]string{}
+	for _, spec := range integrationSpec {
+		byKey[spec.Key] = spec.Kind
+	}
+	for key, kind := range map[string]string{"github": "github", "slack": "slack", "git": "git"} {
+		if byKey[key] != kind {
+			t.Errorf("integrationSpec[%q].Kind = %q, want %q", key, byKey[key], kind)
+		}
+	}
+}
