@@ -21,6 +21,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/billing"
+	"github.com/ibreakthecloud/kiwi/pkg/catalog"
 	"github.com/ibreakthecloud/kiwi/pkg/checkpoint"
 	"github.com/ibreakthecloud/kiwi/pkg/dashboard"
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
@@ -60,6 +61,7 @@ type Server struct {
 	snapshotRoot string // where checkpoint blobs live (durable, outside the ephemeral sandbox)
 	agentAPI     *agentapi.Server
 	planner      *planner.Service
+	refresher    *catalog.Refresher
 	// credValidator confirms a provider credential is accepted before it is
 	// saved. nil skips validation (kept nil in unit tests that construct Server
 	// directly so they make no external calls); NewServer wires the real one.
@@ -106,7 +108,18 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		snapshotRoot: root,
 		// Planner defaults to the deterministic HeuristicPlanner; the
 		// frontier-model LLMPlanner is built per request in SubmitPlan.
-		planner:       planner.NewService(storage, nil, embedder),
+		planner: planner.NewService(storage, nil, embedder),
+		refresher: catalog.NewRefresher(storage, catalog.RefresherConfig{
+			PlatformListers: map[string]catalog.Lister{
+				"openrouter": catalog.OpenRouterLister{},
+			},
+			NativeListers: map[string]catalog.Lister{
+				"anthropic": catalog.AnthropicLister{},
+				"openai":    catalog.OpenAILister{},
+				"gemini":    catalog.GeminiLister{},
+			},
+			PricingLookup: nil,
+		}),
 		credValidator: defaultCredValidator,
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
@@ -513,6 +526,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return s.httpServer.Shutdown(ctx)
 	}
 	return nil
+}
+
+// RefreshCatalog forces a background update of the global model list.
+func (s *Server) RefreshCatalog(ctx context.Context) error {
+	return s.refresher.RefreshPlatform(ctx)
 }
 
 // corsMiddleware applies CORS headers to all responses and handles OPTIONS preflight.

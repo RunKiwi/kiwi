@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -58,6 +59,11 @@ func (s *Server) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to save credential", http.StatusInternalServerError)
 		return
+	}
+
+	// Trigger a background refresh of the org's catalog now that it holds a new key.
+	if s.refresher != nil {
+		go s.refresher.RefreshOrg(context.Background(), claims.OrgID)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
