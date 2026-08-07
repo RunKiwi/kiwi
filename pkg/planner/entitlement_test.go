@@ -11,6 +11,12 @@ import (
 )
 
 func newPlannerWithKiwiModel(t *testing.T) (*Service, context.Context) {
+	// A catalog row saying kiwi_provided is not enough on its own: entitlement
+	// only applies when Kiwi actually holds a key for the provider. Without
+	// this the checks correctly admit everything and the tests below pass for
+	// the wrong reason.
+	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
+
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -90,7 +96,7 @@ func newPlannerWithOrgKey(t *testing.T, keyName, keyValue string) (*Service, con
 func TestRequireEntitlementRejectsExhaustedAllowance(t *testing.T) {
 	s, ctx := newPlannerWithExhaustedAllowance(t)
 
-	err := s.requireEntitlement(ctx, "o1", "kimi-k2")
+	err := s.requireEntitlement(ctx, "o1", store.SharedFreeFleet, "kimi-k2")
 	if err == nil {
 		t.Fatal("submit was admitted with an exhausted allowance")
 	}
@@ -103,11 +109,11 @@ func TestRequireEntitlementRejectsExhaustedAllowance(t *testing.T) {
 func TestRequireEntitlementRejectsKiwiModelOnBYOCFleet(t *testing.T) {
 	s, ctx := newPlannerWithBYOCFleet(t)
 
-	err := s.requireEntitlement(ctx, "o1", "kimi-k2")
+	err := s.requireEntitlement(ctx, "o1", "flt_customer_byoc", "kimi-k2")
 	if err == nil {
 		t.Fatal("a Kiwi-funded model was admitted on a BYOC fleet")
 	}
-	if !strings.Contains(err.Error(), "managed fleet") {
+	if !strings.Contains(err.Error(), "Kiwi-managed fleet") {
 		t.Errorf("error %q does not explain the fleet requirement", err)
 	}
 }
@@ -116,7 +122,7 @@ func TestRequireEntitlementRejectsKiwiModelOnBYOCFleet(t *testing.T) {
 func TestRequireEntitlementIgnoresBYOKModels(t *testing.T) {
 	s, ctx := newPlannerWithExhaustedAllowance(t)
 
-	if err := s.requireEntitlement(ctx, "o1", "claude-opus-4-8"); err != nil {
+	if err := s.requireEntitlement(ctx, "o1", store.SharedFreeFleet, "claude-opus-4-8"); err != nil {
 		t.Fatalf("a BYOK model was blocked by the Kiwi allowance: %v", err)
 	}
 }
@@ -149,5 +155,76 @@ func TestResolveKeyFallsBackToOrgKey(t *testing.T) {
 	}
 	if key != "sk-ant-customer" {
 		t.Errorf("resolveKey returned %q, want the org key", key)
+	}
+}
+
+// A task's funding must follow the WORKER's model, not the planner's.
+//
+// It used to be the job-level planner funding, copied onto every task. On the
+// live path — the heuristic planner, which is what runs when KIWI_PLANNER is
+// unset — that value is always "byok". So a worker running on a Kiwi-funded
+// model was recorded as customer-funded, meterKiwiUsage skipped it, tokens_used
+// never moved, the allowance never exhausted, and the cap did not exist.
+func TestTaskFundingFollowsTheWorkerModel(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID:   "o1",
+		FleetID: store.SharedFreeFleet,
+		Task:    "fix the thing",
+		RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+		Model:   "kimi-k2",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	if len(res.TaskIDs) == 0 {
+		t.Fatal("no tasks enqueued")
+	}
+
+	var tasks []store.QueuedTask
+	if err := st.DB().Where("job_id = ?", res.JobID).Find(&tasks).Error; err != nil {
+		t.Fatalf("load tasks: %v", err)
+	}
+	for _, task := range tasks {
+		model, _ := task.Spec["model"].(string)
+		if model != "kimi-k2" {
+			continue
+		}
+		if task.Funding != store.FundingKiwi {
+			t.Errorf("task %s runs %s on Kiwi's key but Funding = %q; its usage will never be metered",
+				task.ID, model, task.Funding)
+		}
+		// Pinned so the daemon can route without a catalog and metering charges
+		// the tier the submit was admitted against.
+		if got, _ := task.Spec["provider"].(string); got != "openrouter" {
+			t.Errorf("task %s spec provider = %q, want openrouter", task.ID, got)
+		}
+		if got, _ := task.Spec["tier"].(string); got != store.TierEconomy {
+			t.Errorf("task %s spec tier = %q, want %q", task.ID, got, store.TierEconomy)
+		}
+	}
+}
+
+// The same path must refuse when the allowance is gone — previously it was
+// admitted, because no branch of the planner switch checked worker models.
+func TestSubmitRejectsExhaustedAllowanceOnHeuristicPath(t *testing.T) {
+	svc, ctx := newPlannerWithExhaustedAllowance(t)
+
+	_, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID:   "o1",
+		FleetID: store.SharedFreeFleet,
+		Task:    "fix the thing",
+		RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+		Model:   "kimi-k2",
+	})
+	if err == nil {
+		t.Fatal("submit admitted with an exhausted Kiwi allowance")
+	}
+	if !strings.Contains(err.Error(), "allowance") {
+		t.Errorf("error %q does not mention the allowance", err)
 	}
 }
