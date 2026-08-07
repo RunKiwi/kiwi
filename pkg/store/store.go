@@ -149,6 +149,8 @@ type Store interface {
 	ConsumeTokens(ctx context.Context, orgID, tier, period string, n int64) error
 	ListGrants(ctx context.Context, orgID, period string) ([]OrgTokenGrant, error)
 
+	GetOrgPlan(ctx context.Context, orgID string) (string, error)
+
 	// Legacy orchestrator tasks mapping (temp for V1-V2 transition)
 	UpdateTaskLogs(ctx context.Context, id string, logs string) error
 

@@ -109,9 +109,9 @@ func TestCatalogUpsertIsIdempotent(t *testing.T) {
 
 func TestDeriveTier(t *testing.T) {
 	cases := []struct {
-		name     string
-		in, out  *float64
-		want     string
+		name    string
+		in, out *float64
+		want    string
 	}{
 		{"both zero is free", f64(0), f64(0), TierFree},
 		{"cheap output is economy", f64(0.30), f64(1.20), TierEconomy},
