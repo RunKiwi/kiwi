@@ -66,27 +66,36 @@ func (s *PostgresStore) GetCredentialPlaintext(ctx context.Context, orgID, name 
 	return crypto.DecryptAtRest(cred.EncryptedValue)
 }
 
-// SealCredentialsForDaemon gathers all of an org's credentials, decrypts them
-// from at-rest storage, and re-seals them as a single JSON map to the daemon's
-// X25519 public key. The returned base64 blob is safe to carry over the SaaS
-// transport (e.g. in HeartbeatRes.EncryptedCreds): only the daemon holding the
-// matching private key can open it. Returns "" when the org has no credentials.
-func (s *PostgresStore) SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey) (string, error) {
+// SealCredentialsForDaemon gathers an org's credentials, decrypts them, and
+// seals the bundle to the daemon's X25519 public key.
+//
+// extra carries credentials that are not the org's own — today, Kiwi-owned
+// platform keys. It is passed in rather than resolved here on purpose: deciding
+// whether a daemon may receive a Kiwi key needs the fleet type, the leased
+// model, and the org's remaining allowance, none of which belong in the store's
+// credential layer. The caller decides; this function only seals.
+//
+// extra entries win over org entries of the same name, so a task routed to a
+// Kiwi-funded model uses Kiwi's key even if the org also has one connected.
+func (s *PostgresStore) SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey, extra map[string]string) (string, error) {
 	creds, err := s.ListCredentials(ctx, orgID)
 	if err != nil {
 		return "", err
 	}
-	if len(creds) == 0 {
+	if len(creds) == 0 && len(extra) == 0 {
 		return "", nil
 	}
 
-	bundle := make(map[string]string, len(creds))
+	bundle := make(map[string]string, len(creds)+len(extra))
 	for _, c := range creds {
 		pt, err := crypto.DecryptAtRest(c.EncryptedValue)
 		if err != nil {
 			return "", err
 		}
 		bundle[c.Name] = pt
+	}
+	for name, value := range extra {
+		bundle[name] = value
 	}
 
 	payload, err := json.Marshal(bundle)

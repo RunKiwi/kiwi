@@ -141,7 +141,13 @@ type Store interface {
 	SaveCredential(ctx context.Context, orgID, name, kind, plaintext string) error
 	ListCredentials(ctx context.Context, orgID string) ([]Credential, error)
 	GetCredentialPlaintext(ctx context.Context, orgID, name string) (string, error)
-	SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey) (string, error)
+	SealCredentialsForDaemon(ctx context.Context, orgID string, daemonPubKey *ecdh.PublicKey, extra map[string]string) (string, error)
+
+	IsManagedFleet(ctx context.Context, fleetID string) (bool, error)
+
+	EnsureGrant(ctx context.Context, orgID, tier, period string, granted int64) (*OrgTokenGrant, error)
+	ConsumeTokens(ctx context.Context, orgID, tier, period string, n int64) error
+	ListGrants(ctx context.Context, orgID, period string) ([]OrgTokenGrant, error)
 
 	// Legacy orchestrator tasks mapping (temp for V1-V2 transition)
 	UpdateTaskLogs(ctx context.Context, id string, logs string) error

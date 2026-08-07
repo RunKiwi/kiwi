@@ -67,7 +67,7 @@ func TestSealCredentialsForDaemon(t *testing.T) {
 		t.Fatalf("GenerateKeyPair: %v", err)
 	}
 
-	sealed, err := s.SealCredentialsForDaemon(ctx, "o1", pub)
+	sealed, err := s.SealCredentialsForDaemon(ctx, "o1", pub, nil)
 	if err != nil {
 		t.Fatalf("SealCredentialsForDaemon: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSealCredentialsForDaemon(t *testing.T) {
 func TestSealCredentialsForDaemonEmpty(t *testing.T) {
 	s := newTestStore(t)
 	pub, _, _ := crypto.GenerateKeyPair()
-	sealed, err := s.SealCredentialsForDaemon(context.Background(), "org-with-no-creds", pub)
+	sealed, err := s.SealCredentialsForDaemon(context.Background(), "org-with-no-creds", pub, nil)
 	if err != nil {
 		t.Fatalf("SealCredentialsForDaemon: %v", err)
 	}
