@@ -32,7 +32,7 @@ func TestOpenRouterListerParsesPricingAndCapability(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := (OpenRouterLister{}).List(context.Background(), srv.URL, "")
+	got, err := (OpenRouterLister{}).List(context.Background(), srv.URL+"/models", "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestOpenRouterListerRejectsNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := (OpenRouterLister{}).List(context.Background(), srv.URL, ""); err == nil {
+	if _, err := (OpenRouterLister{}).List(context.Background(), srv.URL+"/models", ""); err == nil {
 		t.Fatal("List returned nil error on a 503")
 	}
 }
@@ -104,7 +104,7 @@ func TestOpenRouterListerRejectsMalformedBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := (OpenRouterLister{}).List(context.Background(), srv.URL, ""); err == nil {
+	if _, err := (OpenRouterLister{}).List(context.Background(), srv.URL+"/models", ""); err == nil {
 		t.Fatal("List returned nil error on a malformed body")
 	}
 }
@@ -120,7 +120,7 @@ func TestOpenRouterListerLeavesBadPricingNil(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := (OpenRouterLister{}).List(context.Background(), srv.URL, "")
+	got, err := (OpenRouterLister{}).List(context.Background(), srv.URL+"/models", "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

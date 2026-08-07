@@ -187,3 +187,39 @@ func (s *PostgresStore) ResolveModel(ctx context.Context, orgID, modelID string)
 		Source:   SourceInferred,
 	}, nil
 }
+
+// MarkCatalogMissing records that a provider's refresh no longer lists a model,
+// and clears the mark on any model that reappeared.
+//
+// Scoped to one provider and one org: a refresh of OpenRouter must never touch
+// an OpenAI row, and one org's refresh must never touch another's. Rows are
+// marked rather than deleted because spend rows and execution records join to
+// them — deleting turns a past job's model into a blank in the UI.
+//
+// Callers must only reach here after a SUCCESSFUL list. Calling it with a
+// partial or empty list produced by a failed request would mark every model
+// missing and empty every picker.
+func (s *PostgresStore) MarkCatalogMissing(ctx context.Context, orgID, providerID string, seen []string, at time.Time) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		gone := tx.Model(&CatalogModel{}).
+			Where("org_id = ? AND provider = ? AND missing_since IS NULL", orgID, providerID)
+		if len(seen) > 0 {
+			gone = gone.Where("model_id NOT IN ?", seen)
+		}
+		if err := gone.Updates(map[string]interface{}{
+			"missing_since": at,
+			"selectable":    false,
+		}).Error; err != nil {
+			return err
+		}
+
+		if len(seen) == 0 {
+			return nil
+		}
+		// A model that came back must recover, or one transient omission on the
+		// provider's side hides it forever.
+		return tx.Model(&CatalogModel{}).
+			Where("org_id = ? AND provider = ? AND model_id IN ?", orgID, providerID, seen).
+			Update("missing_since", nil).Error
+	})
+}

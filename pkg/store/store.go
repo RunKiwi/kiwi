@@ -122,6 +122,7 @@ type Store interface {
 	ListCatalogModels(ctx context.Context, orgID string) ([]CatalogModel, error)
 	GetCatalogModel(ctx context.Context, orgID, modelID string) (*CatalogModel, error)
 	ResolveModel(ctx context.Context, orgID, modelID string) (Resolution, error)
+	MarkCatalogMissing(ctx context.Context, orgID, providerID string, seen []string, at time.Time) error
 
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
 	// identity and resolves a heartbeat to an org; registration is gated by a

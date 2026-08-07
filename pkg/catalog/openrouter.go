@@ -2,9 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 )
@@ -34,30 +31,16 @@ type openRouterResponse struct {
 	} `json:"data"`
 }
 
-func (OpenRouterLister) List(ctx context.Context, baseURL, apiKey string) ([]DiscoveredModel, error) {
-	url := strings.TrimRight(baseURL, "/") + "/models"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
+func (OpenRouterLister) List(ctx context.Context, endpoint, apiKey string) ([]DiscoveredModel, error) {
+	headers := map[string]string{}
 	// The endpoint is public, but sending the key when we have one keeps the
 	// response scoped to what this account can actually call.
 	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+		headers["Authorization"] = "Bearer " + apiKey
 	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openrouter models: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openrouter models: status %d", resp.StatusCode)
-	}
-
 	var body openRouterResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("openrouter models: decode: %w", err)
+	if err := getJSON(ctx, endpoint, headers, &body); err != nil {
+		return nil, err
 	}
 
 	out := make([]DiscoveredModel, 0, len(body.Data))
