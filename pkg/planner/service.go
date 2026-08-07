@@ -155,7 +155,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
 			return nil, err
 		}
-		if err := s.requireEntitlement(ctx, req.OrgID, actualModel); err != nil {
+		if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
 			return nil, err
 		}
 	case s.planner != nil:
@@ -179,7 +179,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			funding = store.FundingKiwi // Operator keys are Kiwi-funded
 			plannedOnOperatorKey = true
 		} else {
-			if err := s.requireEntitlement(ctx, req.OrgID, actualModel); err != nil {
+			if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
 				return nil, err
 			}
 			var err error
@@ -216,6 +216,25 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	plan, err := p.Plan(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+
+	// Gate the WORKER models, here, after planning, because this is the only
+	// point every branch of the switch above reaches.
+	//
+	// The per-branch checks gate `actualModel`, which is the *planner's* model.
+	// That is the wrong model and, worse, two of the three branches never ran a
+	// check at all: the heuristic branch is the live path (nothing in the
+	// deployment sets KIWI_PLANNER=llm), so a submit whose workers run on a
+	// Kiwi-funded model was admitted with no entitlement check anywhere.
+	seen := map[string]bool{}
+	for _, w := range plan.Workers {
+		if w.Model == "" || seen[w.Model] {
+			continue
+		}
+		seen[w.Model] = true
+		if err := s.requireEntitlement(ctx, req.OrgID, req.FleetID, w.Model); err != nil {
+			return nil, err
+		}
 	}
 
 	// Planner spend, attributed to the org that paid for it. When the operator
@@ -363,6 +382,25 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"ref":        req.Ref,
 				"job_id":     jobID,
 			}
+			// Resolve the worker's OWN model. The job-level `funding` above
+			// describes the planner call; a task inherits nothing from it,
+			// because the planner and the worker routinely run on different
+			// models with different providers and different payers.
+			//
+			// The resolved provider and tier are pinned onto the spec rather
+			// than re-derived later: the daemon has no catalog to resolve
+			// against, and metering must charge the tier the submit was
+			// admitted against even if a refresh reprices the model mid-run.
+			taskFunding := store.FundingBYOK
+			if res, rerr := s.store.ResolveModel(ctx, req.OrgID, w.Model); rerr == nil {
+				spec["provider"] = res.Provider
+				if res.KiwiProvided {
+					if _, ok := provider.PlatformKeyFor(res.Provider); ok {
+						spec["tier"] = res.Tier
+						taskFunding = store.FundingKiwi
+					}
+				}
+			}
 			if w.Mode != "" {
 				spec["mode"] = w.Mode
 			}
@@ -382,7 +420,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				JobID:   jobID,
 				FleetID: req.FleetID,
 				Status:  store.TaskQueued,
-				Funding: funding,
+				Funding: taskFunding,
 				Spec:    spec,
 			}).Error; err != nil {
 				return fmt.Errorf("enqueue task %s: %w", taskID, err)
@@ -589,7 +627,7 @@ func (s *Service) resolveKey(ctx context.Context, orgID, model string) (string, 
 //
 // A BYOK model returns nil immediately — the org's own allowance is their own
 // business.
-func (s *Service) requireEntitlement(ctx context.Context, orgID, model string) error {
+func (s *Service) requireEntitlement(ctx context.Context, orgID, fleetID, model string) error {
 	res, err := s.store.ResolveModel(ctx, orgID, model)
 	if err != nil {
 		// A lookup failure is not evidence of an entitlement problem. Let the
@@ -599,12 +637,39 @@ func (s *Service) requireEntitlement(ctx context.Context, orgID, model string) e
 	if !res.KiwiProvided {
 		return nil
 	}
+	// Nothing to fund if Kiwi holds no key for the provider, whatever the
+	// catalog row says. Without this, an org is refused a model it is perfectly
+	// able to run on its own key.
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return nil
+	}
 
-	// Kiwi keys only ever reach daemons Kiwi operates, so a Kiwi-funded model
-	// on a BYOC fleet would be admitted and then fail with no key at all.
-	managed, err := s.orgHasManagedFleet(ctx, orgID)
-	if err == nil && !managed {
-		return fmt.Errorf("%s is a Kiwi-provided model and requires a Kiwi-managed fleet; use your own provider key on this fleet", model)
+	// Kiwi keys only ever reach daemons Kiwi operates, so a Kiwi-funded model on
+	// any other fleet would be admitted and then fail with no key at all.
+	//
+	// This asks about the fleet the task is actually queued to, not whether the
+	// org happens to own some Kiwi-operated fleet somewhere: an org with both
+	// kinds submitting to its BYOC fleet would otherwise be admitted here and
+	// fail at heartbeat — the exact outcome this function exists to prevent.
+	if !s.fleetCanUseKiwiKeys(ctx, orgID, fleetID) {
+		return fmt.Errorf("%s is a Kiwi-provided model and runs only on a Kiwi-managed fleet; select a Kiwi-managed fleet or use your own provider key", model)
+	}
+
+	return s.requireAllowance(ctx, orgID, model)
+}
+
+// requireAllowance is the fleet-independent half of requireEntitlement.
+//
+// The planner runs on the Control Plane and calls the provider directly, so no
+// fleet is involved and no key is sealed anywhere — but the allowance still
+// applies, because the call is still made on Kiwi's credential.
+func (s *Service) requireAllowance(ctx context.Context, orgID, model string) error {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil || !res.KiwiProvided {
+		return nil
+	}
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return nil
 	}
 
 	plan, err := s.store.GetOrgPlan(ctx, orgID)
@@ -627,23 +692,21 @@ func (s *Service) requireEntitlement(ctx context.Context, orgID, model string) e
 	return nil
 }
 
-// orgHasManagedFleet reports whether the org has at least one Kiwi-operated
-// fleet to run on. A free-plan org always does: it runs on the shared free fleet.
-func (s *Service) orgHasManagedFleet(ctx context.Context, orgID string) (bool, error) {
-	fleets, err := s.store.ListFleets(ctx, orgID)
+// fleetCanUseKiwiKeys reports whether a task queued to this fleet could be
+// handed a Kiwi-owned key at lease time.
+//
+// It must agree exactly with store.IsKiwiOperatedFleet, which is the gate that
+// actually decides. Answering "yes" here for a fleet that gate will refuse
+// produces a task that queues and then dies for want of a key; answering "no"
+// for one it would accept refuses work that was perfectly runnable. Deferring
+// to the same function is the only way the two cannot drift.
+func (s *Service) fleetCanUseKiwiKeys(ctx context.Context, orgID, fleetID string) bool {
+	ok, err := s.store.IsKiwiOperatedFleet(ctx, orgID, fleetID)
 	if err != nil {
-		return true, err // Do not block a submit on a lookup failure.
+		// Do not refuse a submit over a lookup failure. The lease-time gate is
+		// the one that protects the credential; this one only protects the user
+		// from a confusing delayed failure.
+		return true
 	}
-	for _, f := range fleets {
-		if f.Type == store.FleetManaged {
-			return true, nil
-		}
-	}
-	plan, err := s.store.GetOrgPlan(ctx, orgID)
-	if err != nil {
-		return true, err
-	}
-	// A free-plan org always has one: it runs on the shared free fleet, which
-	// has no fleets row of its own.
-	return plan == "free", nil
+	return ok
 }

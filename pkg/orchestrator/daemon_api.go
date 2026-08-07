@@ -500,27 +500,44 @@ func (s *Server) executionMode() string {
 // meterKiwiUsage records the token usage against the org's allowance if the
 // work was performed on a Kiwi-owned platform key.
 func (s *Server) meterKiwiUsage(ctx context.Context, task *store.QueuedTask, tokensIn, tokensOut int64) {
-	if task.Funding != store.FundingKiwi || (tokensIn == 0 && tokensOut == 0) {
+	if task == nil || task.Funding != store.FundingKiwi || (tokensIn == 0 && tokensOut == 0) {
 		return
 	}
 
-	spec, err := specFromQueuedTask(task)
-	if err != nil {
-		log.Printf("[daemon] meter %s: invalid spec: %v", task.ID, err)
-		return
+	// The tier is read from the spec, where the planner pinned it at submit,
+	// rather than resolved again here.
+	//
+	// Re-resolving would charge whatever the catalog says *now*: a refresh that
+	// reprices a model between lease and result flips KiwiProvided to false and
+	// the usage goes uncharged, or moves it to another tier and the wrong bucket
+	// is debited. The key was handed out against the tier admitted at submit, so
+	// that is the tier that must pay for it.
+	tier, _ := task.Spec["tier"].(string)
+	if tier == "" {
+		// A task queued before the tier was pinned. Fall back to the catalog and
+		// say so — a silent skip here is a free run on Kiwi's key.
+		res, err := s.storage.ResolveModel(ctx, task.OrgID, specString(task.Spec, "model"))
+		if err != nil {
+			log.Printf("[daemon] meter %s: no pinned tier and catalog lookup failed, %d tokens go uncharged: %v",
+				task.ID, tokensIn+tokensOut, err)
+			return
+		}
+		if !res.KiwiProvided {
+			log.Printf("[daemon] meter %s: funding=kiwi but model %q is not Kiwi-provided; %d tokens go uncharged",
+				task.ID, specString(task.Spec, "model"), tokensIn+tokensOut)
+			return
+		}
+		tier = res.Tier
 	}
-	res, err := s.storage.ResolveModel(ctx, task.OrgID, specModel(spec))
-	if err != nil || !res.KiwiProvided {
-		return
-	}
+
 	plan, err := s.storage.GetOrgPlan(ctx, task.OrgID)
 	if err != nil {
 		log.Printf("[daemon] meter %s: failed to get plan for org %s: %v", task.ID, task.OrgID, err)
 		return
 	}
 	checker := &entitlement.Checker{Store: s.storage}
-	if err := checker.Consume(ctx, task.OrgID, plan, res.Tier, tokensIn+tokensOut); err != nil {
-		log.Printf("[daemon] meter %s: failed to draw down %s allowance: %v", task.ID, res.Tier, err)
+	if err := checker.Consume(ctx, task.OrgID, plan, tier, tokensIn+tokensOut); err != nil {
+		log.Printf("[daemon] meter %s: failed to draw down %s allowance: %v", task.ID, tier, err)
 	}
 }
 
