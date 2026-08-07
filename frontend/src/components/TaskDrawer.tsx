@@ -8,6 +8,7 @@ import { durationBetween, formatDuration, formatCost, formatTokens } from "@/lib
 import { ThinkingOrb } from "thinking-orbs";
 import { RunTimeline } from "@/components/RunTimeline";
 import { LiveRun } from "@/components/LiveRun";
+import { LoadingState } from "@/components/LoadingState";
 import { jobOrbState } from "@/lib/orbState";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
@@ -768,7 +769,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
             ))}
           </div>
         ) : (
-          <div className="text-zinc-500">Loading...</div>
+          <LoadingState label="Loading job details…" state="connecting" />
         )}
       </div>
     </div>
