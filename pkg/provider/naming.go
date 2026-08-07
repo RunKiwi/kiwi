@@ -26,27 +26,20 @@ var openaiModelPrefixes = []string{"gpt-", "gpt3", "gpt4", "o1", "o3", "o4", "ch
 // and the integrations catalog all resolve keys through the same table, so
 // adding a provider cannot leave one of them behind.
 func CredentialNameFor(providerID string) string {
-	switch providerID {
-	case ProviderGemini:
-		return "GEMINI_API_KEY"
-	case ProviderOpenAI:
-		return "OPENAI_API_KEY"
-	default:
-		return "ANTHROPIC_API_KEY"
+	if spec, ok := SpecFor(providerID); ok {
+		return spec.CredName
 	}
+	// Unrecognised ids fall back to Anthropic, matching ProviderOf's fallback
+	// and ModelCostUSD's. The three must agree or a model gets keyed by one
+	// provider and billed as another.
+	return "ANTHROPIC_API_KEY"
 }
 
-// DisplayNameFor returns the provider's name as written for a human, for use in
-// error messages shown on a job.
 func DisplayNameFor(providerID string) string {
-	switch providerID {
-	case ProviderGemini:
-		return "Gemini"
-	case ProviderOpenAI:
-		return "OpenAI"
-	default:
-		return "Anthropic"
+	if spec, ok := SpecFor(providerID); ok {
+		return spec.Display
 	}
+	return "Anthropic"
 }
 
 // ProviderOf maps a model id to the provider that serves it. It is the one
