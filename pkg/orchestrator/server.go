@@ -109,17 +109,11 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		// Planner defaults to the deterministic HeuristicPlanner; the
 		// frontier-model LLMPlanner is built per request in SubmitPlan.
 		planner: planner.NewService(storage, nil, embedder),
-		refresher: catalog.NewRefresher(storage, catalog.RefresherConfig{
-			PlatformListers: map[string]catalog.Lister{
-				"openrouter": catalog.OpenRouterLister{},
-			},
-			NativeListers: map[string]catalog.Lister{
-				"anthropic": catalog.AnthropicLister{},
-				"openai":    catalog.OpenAILister{},
-				"gemini":    catalog.GeminiLister{},
-			},
-			PricingLookup: nil,
-		}),
+		// Which providers are discoverable, and with which key, is decided by the
+		// registry and the environment — not by a hand-kept map here, which is
+		// how a provider ends up advertised with no lister or listed with a key
+		// Kiwi does not hold.
+		refresher:     catalog.NewRefresher(storage),
 		credValidator: defaultCredValidator,
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
@@ -530,9 +524,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// RefreshCatalog forces a background update of the global model list.
+// RefreshCatalog forces an update of the global model list.
 func (s *Server) RefreshCatalog(ctx context.Context) error {
-	return s.refresher.RefreshPlatform(ctx)
+	if s.refresher == nil {
+		return nil
+	}
+	s.refresher.RefreshPlatform(ctx)
+	return nil
 }
 
 // corsMiddleware applies CORS headers to all responses and handles OPTIONS preflight.
