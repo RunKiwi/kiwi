@@ -63,3 +63,27 @@ func TestOpenRouterIsOpenAICompatible(t *testing.T) {
 		t.Errorf("openrouter PlatformEnv = %q", spec.PlatformEnv)
 	}
 }
+
+// The Anthropic fallback for an unrecognised provider id is load-bearing:
+// ProviderOf returns anthropic for anything it does not recognise, and these
+// two functions must agree with it. Registry lookup must not change that.
+func TestNamingFallsBackToAnthropic(t *testing.T) {
+	if got := CredentialNameFor("not-a-provider"); got != "ANTHROPIC_API_KEY" {
+		t.Errorf("CredentialNameFor(unknown) = %q, want ANTHROPIC_API_KEY", got)
+	}
+	if got := DisplayNameFor("not-a-provider"); got != "Anthropic" {
+		t.Errorf("DisplayNameFor(unknown) = %q, want Anthropic", got)
+	}
+	if got := CredentialNameFor(""); got != "ANTHROPIC_API_KEY" {
+		t.Errorf("CredentialNameFor(\"\") = %q, want ANTHROPIC_API_KEY", got)
+	}
+}
+
+func TestNamingResolvesOpenRouter(t *testing.T) {
+	if got := CredentialNameFor(ProviderOpenRouter); got != "OPENROUTER_API_KEY" {
+		t.Errorf("CredentialNameFor(openrouter) = %q", got)
+	}
+	if got := DisplayNameFor(ProviderOpenRouter); got != "OpenRouter" {
+		t.Errorf("DisplayNameFor(openrouter) = %q", got)
+	}
+}
