@@ -400,12 +400,13 @@ const defaultRenewInterval = 2 * time.Minute
 // isLLMKey reports whether a credential is a model API key that must be kept out
 // of the sandbox environment.
 //
-// A provider added without an entry here would leak its key into the container
-// that runs model-generated code, so this is enumerated deliberately rather than
-// derived from a prefix — a missing name must fail a test, not silently widen
-// what the sandbox can see.
+// It delegates to the provider registry, which is the one place a provider is
+// defined. That is what makes the guarantee hold: a provider added without a
+// registry row has no credential name at all, and one added with a row is
+// covered here automatically. TestIsLLMKeyCoversEveryRegistryProvider asserts
+// the two cannot drift.
 func isLLMKey(name string) bool {
-	return name == anthropicKeyName || name == geminiKeyName || name == openaiKeyName
+	return provider.IsLLMCredential(name)
 }
 
 // executeTask provisions a workspace and runs the worker's Actor–Critic loop

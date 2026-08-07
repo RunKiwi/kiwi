@@ -116,17 +116,27 @@ func inferProvider(model string) string {
 }
 
 // integrationSpec maps an integration key to the credential name that backs it.
-var integrationSpec = []struct {
+//
+// The LLM rows are generated from the provider registry so a new provider shows
+// up in the dashboard without a second edit here; the non-LLM rows are
+// hand-written because they have no registry equivalent.
+var integrationSpec = buildIntegrationSpec()
+
+type integrationEntry struct {
 	Key      string `json:"key"`
 	CredName string `json:"-"`
 	Kind     string `json:"kind"`
-}{
-	{"github", "GITHUB_TOKEN", "github"},
-	{"slack", "SLACK_TOKEN", "slack"},
-	{"anthropic", "ANTHROPIC_API_KEY", "llm"},
-	{"gemini", "GEMINI_API_KEY", "llm"},
-	{"openai", "OPENAI_API_KEY", "llm"},
-	{"git", "GIT_TOKEN", "git"},
+}
+
+func buildIntegrationSpec() []integrationEntry {
+	out := []integrationEntry{
+		{"github", "GITHUB_TOKEN", "github"},
+		{"slack", "SLACK_TOKEN", "slack"},
+	}
+	for _, p := range provider.Registry() {
+		out = append(out, integrationEntry{p.ID, p.CredName, "llm"})
+	}
+	return append(out, integrationEntry{"git", "GIT_TOKEN", "git"})
 }
 
 // handleIntegrations serves GET /api/v1/integrations — which integrations are
