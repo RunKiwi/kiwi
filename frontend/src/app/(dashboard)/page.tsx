@@ -6,7 +6,7 @@ import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGi
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
-import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
+import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type CatalogModel, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
@@ -126,6 +126,10 @@ function CommandCenterContent() {
   // Options loaded from the control plane.
   const [fleets, setFleets] = useState<Fleet[]>([]);
   const [customModels, setCustomModels] = useState<ModelEntry[]>([]);
+  // Discovered models, which replaced the hardcoded BUILTIN_MODELS list. Each
+  // row carries the provider the catalog resolved, so the picker no longer has
+  // to guess one from the model id.
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [u, setU] = useState<UsageResponse | null>(null);
   const [integrations, setIntegrations] = useState<Integration[] | null>(null);
@@ -183,6 +187,7 @@ function CommandCenterContent() {
   useEffect(() => {
     client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
     client.listModels().then(r => setCustomModels(r.models)).catch(() => {});
+    client.listCatalogModels().then(r => setCatalogModels(r.models)).catch(() => {});
     client.getUsage().then(setU).catch(() => setU(null));
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
@@ -281,7 +286,10 @@ function CommandCenterContent() {
     }
   };
 
-  const allModels = Array.from(new Set([...customModels.map(m => m.name)]));
+  const allModels = Array.from(new Set([
+    ...catalogModels.map(m => m.model_id),
+    ...customModels.map(m => m.name),
+  ]));
   // The worker runs on the org's own provider key — only offer models it can
   // actually reach, so a task can't be launched with an unrunnable worker model.
   let workerOptions = allModels;
@@ -290,9 +298,19 @@ function CommandCenterContent() {
   if (integrations !== null) {
     const connected = (prov: string) => integrations.some(i => i.key === prov && i.connected);
     const filteredOptions = allModels.filter(m => {
+      // A Kiwi-provided model runs on Kiwi's key, so the org's own connections
+      // say nothing about whether it can be reached.
+      const fromCatalog = catalogModels.find(cm => cm.model_id === m);
+      if (fromCatalog?.kiwi_provided) return true;
+
+      // Otherwise use the provider the catalog resolved, then an explicit
+      // provider on a custom model. There is deliberately no client-side
+      // inference: that rule lives in Go, and a second copy here is how the two
+      // drift into telling users to connect the wrong key.
       const isCustom = customModels.find(cm => cm.name === m);
-      const prov = (isCustom && isCustom.provider && isCustom.provider !== "auto") ? isCustom.provider : "unknown";
-      return connected(prov);
+      const prov = fromCatalog?.provider
+        || (isCustom && isCustom.provider && isCustom.provider !== "auto" ? isCustom.provider : "");
+      return prov !== "" && connected(prov);
     });
     if (filteredOptions.length > 0) {
       workerOptions = filteredOptions;
