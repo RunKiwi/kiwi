@@ -143,7 +143,17 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		if actualModel == "" {
 			actualModel = req.Model
 		}
-		prov = provider.ProviderOf(actualModel)
+		// Resolve through the catalog rather than by inference, so an aggregator
+		// model id lands on the provider that actually serves it.
+		archFunding := store.FundingBYOK
+		if res, rerr := s.store.ResolveModel(ctx, req.OrgID, actualModel); rerr == nil && res.Provider != "" {
+			prov = res.Provider
+			if f, ferr := s.fundingFor(ctx, req.OrgID, actualModel); ferr == nil {
+				archFunding = f
+			}
+		} else {
+			prov = provider.ProviderOf(actualModel)
+		}
 		p = NewSessionPlanner()
 
 		// Submitting used to fail here for an org with no provider key, because
@@ -152,8 +162,14 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		// sits in the queue and fails minutes later inside the daemon. A presence
 		// check keeps the old answer without the old access: it asks whether the
 		// row exists, and never decrypts it.
-		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
-			return nil, err
+		//
+		// Skipped entirely for a Kiwi-provided model: Kiwi supplies that key, so
+		// demanding the org connect one of their own refuses exactly the case
+		// this feature exists to serve.
+		if archFunding != store.FundingKiwi {
+			if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
+				return nil, err
+			}
 		}
 		if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
 			return nil, err
@@ -228,12 +244,37 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	// Kiwi-funded model was admitted with no entitlement check anywhere.
 	seen := map[string]bool{}
 	for _, w := range plan.Workers {
-		if w.Model == "" || seen[w.Model] {
+		for _, model := range []string{w.Model, w.ArchitectModel} {
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			if err := s.requireEntitlement(ctx, req.OrgID, req.FleetID, model); err != nil {
+				return nil, err
+			}
+		}
+
+		// Session mode runs two models under one task, and a task records one
+		// payer. Allowing a Kiwi Architect over a BYOK Implementer would make
+		// the task's single CostUSD unattributable — part of it billed to the
+		// org, part of it not — and the spend page would either overstate what
+		// they owe or hide what Kiwi covered. Refuse up front instead.
+		if w.ArchitectModel == "" || w.ArchitectModel == w.Model {
 			continue
 		}
-		seen[w.Model] = true
-		if err := s.requireEntitlement(ctx, req.OrgID, req.FleetID, w.Model); err != nil {
-			return nil, err
+		implFunding, err := s.fundingFor(ctx, req.OrgID, w.Model)
+		if err != nil {
+			continue // A lookup failure is not grounds to refuse a submit.
+		}
+		archFunding, err := s.fundingFor(ctx, req.OrgID, w.ArchitectModel)
+		if err != nil {
+			continue
+		}
+		if implFunding != archFunding {
+			return nil, fmt.Errorf(
+				"session mode runs %s and %s under one task, so both must be paid for the same way: %s is %s and %s is %s — pick two Kiwi-provided models, or two your own keys cover",
+				w.ArchitectModel, w.Model,
+				w.ArchitectModel, fundingLabel(archFunding), w.Model, fundingLabel(implFunding))
 		}
 	}
 
@@ -409,6 +450,20 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			}
 			if w.ArchitectModel != "" {
 				spec["architect_model"] = w.ArchitectModel
+				// The Architect is a second model with its own provider, tier
+				// and payer, so it is resolved separately rather than inheriting
+				// the Implementer's. Pinning its provider is what lets a
+				// Kiwi-provided model serve as the Architect at all: the daemon
+				// has no catalog, and inference cannot recognise an aggregator's
+				// model ids.
+				if ares, aerr := s.store.ResolveModel(ctx, req.OrgID, w.ArchitectModel); aerr == nil {
+					spec["architect_provider"] = ares.Provider
+					if ares.KiwiProvided {
+						if _, ok := provider.PlatformKeyFor(ares.Provider); ok {
+							spec["architect_tier"] = ares.Tier
+						}
+					}
+				}
 			}
 			// Learnings are resolved here, on the Control Plane, because it owns
 			// the vector index — and consumed in the daemon, because in session
@@ -712,4 +767,33 @@ func (s *Service) fleetCanUseKiwiKeys(ctx context.Context, orgID, fleetID string
 		return true
 	}
 	return ok
+}
+
+// fundingFor reports which key would pay for a model: store.FundingKiwi when
+// the catalog says Kiwi funds it AND Kiwi actually holds a key for its
+// provider, store.FundingBYOK otherwise.
+//
+// It is the single answer to that question, used by admission, by the funding
+// recorded on a task, and by the session-mode consistency check — three places
+// that must not disagree about who is paying.
+func (s *Service) fundingFor(ctx context.Context, orgID, model string) (string, error) {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil {
+		return "", err
+	}
+	if !res.KiwiProvided {
+		return store.FundingBYOK, nil
+	}
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return store.FundingBYOK, nil
+	}
+	return store.FundingKiwi, nil
+}
+
+// fundingLabel renders a funding source the way a user would say it.
+func fundingLabel(funding string) string {
+	if funding == store.FundingKiwi {
+		return "Kiwi-provided"
+	}
+	return "billed to your own key"
 }

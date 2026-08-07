@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
@@ -226,5 +227,101 @@ func TestSubmitRejectsExhaustedAllowanceOnHeuristicPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "allowance") {
 		t.Errorf("error %q does not mention the allowance", err)
+	}
+}
+
+// The Architect is a second model with its own provider. Pinning it is what
+// lets a Kiwi-provided model serve as Architect at all: the daemon has no
+// catalog, and prefix inference cannot recognise an aggregator's model ids.
+func TestSessionSpecPinsArchitectRouting(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	seedKiwiCatalogModel(t, st, "big-reviewer", "anthropic", store.TierFrontier)
+	t.Setenv("KIWI_PLATFORM_ANTHROPIC_API_KEY", "sk-ant-platform")
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...", Model: "kimi-k2",
+		ArchitectModel: "big-reviewer", Mode: agent.ModeSession,
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	var tasks []store.QueuedTask
+	if err := st.DB().Where("job_id = ?", res.JobID).Find(&tasks).Error; err != nil {
+		t.Fatalf("load tasks: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatal("no tasks enqueued")
+	}
+	for _, task := range tasks {
+		if got, _ := task.Spec["architect_provider"].(string); got != "anthropic" {
+			t.Errorf("architect_provider = %q, want anthropic; the daemon would misroute it", got)
+		}
+		if got, _ := task.Spec["architect_tier"].(string); got != store.TierFrontier {
+			t.Errorf("architect_tier = %q, want %q; its tokens would be charged to the wrong bucket",
+				got, store.TierFrontier)
+		}
+		// The Implementer's own routing is unaffected.
+		if got, _ := task.Spec["provider"].(string); got != "openrouter" {
+			t.Errorf("provider = %q, want openrouter", got)
+		}
+	}
+}
+
+// One task records one payer, so a session whose two models are funded
+// differently has no honest CostUSD. Refuse at submit rather than produce a
+// spend page that either overstates what the org owes or hides what Kiwi paid.
+func TestSessionRefusesMixedFundingAcrossItsTwoModels(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+
+	// A BYOK Architect over a Kiwi-funded Implementer.
+	if err := st.SaveCredential(ctx, "o1", "ANTHROPIC_API_KEY", store.CredentialLLM, "sk-ant-customer"); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+
+	_, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...", Model: "kimi-k2",
+		ArchitectModel: "claude-opus-4-8", Mode: agent.ModeSession,
+	})
+	if err == nil {
+		t.Fatal("a session mixing a Kiwi-funded model with a BYOK one was admitted")
+	}
+	if !strings.Contains(err.Error(), "paid for the same way") {
+		t.Errorf("error %q does not explain the funding requirement", err)
+	}
+}
+
+// Two Kiwi-provided models is the case the free tier exists to serve.
+func TestSessionAcceptsTwoKiwiProvidedModels(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	seedKiwiCatalogModel(t, st, "big-reviewer", "anthropic", store.TierFrontier)
+	t.Setenv("KIWI_PLATFORM_ANTHROPIC_API_KEY", "sk-ant-platform")
+
+	if _, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...", Model: "kimi-k2",
+		ArchitectModel: "big-reviewer", Mode: agent.ModeSession,
+	}); err != nil {
+		t.Fatalf("a fully Kiwi-provided session was refused: %v", err)
+	}
+}
+
+func seedKiwiCatalogModel(t *testing.T, st *store.PostgresStore, modelID, providerID, tier string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := st.UpsertCatalogModel(context.Background(), &store.CatalogModel{
+		OrgID: store.GlobalCatalogOrg, ModelID: modelID, Provider: providerID,
+		Tier: tier, KiwiProvided: true, Selectable: true,
+		Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+	}); err != nil {
+		t.Fatalf("seed catalog model %s: %v", modelID, err)
 	}
 }

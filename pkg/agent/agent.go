@@ -104,6 +104,15 @@ type WorkerSpec struct {
 	// called constantly, so the split buys judgment where it is cheap to buy.
 	// Empty falls back to Model.
 	ArchitectModel string `json:"architect_model,omitempty"`
+	// ArchitectProvider is the canonical provider id serving ArchitectModel,
+	// resolved by the Control Plane against the model catalog — the same reason
+	// Provider exists, for the other of session mode's two models.
+	//
+	// Without it the Architect fell back to prefix inference, which cannot
+	// recognise an aggregator's model ids, so a Kiwi-provided model could route
+	// to the wrong provider and fail for want of a key it was never sent. Empty
+	// falls back to inference, which keeps older specs working.
+	ArchitectProvider string `json:"architect_provider,omitempty"`
 	// Learnings are summaries of prior jobs on this repository. The control
 	// plane resolves them (it owns the vector index) and passes them through,
 	// because in ModeSession it no longer plans and so no longer consumes them

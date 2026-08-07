@@ -24,9 +24,27 @@ import (
 //
 // The result is scoped to the one provider the leased task needs, rather than
 // every platform key Kiwi holds.
-func (s *Server) platformCredsFor(ctx context.Context, d *store.Daemon, model string) map[string]string {
+func (s *Server) platformCredsFor(ctx context.Context, d *store.Daemon, models ...string) map[string]string {
 	none := map[string]string{}
-	if d == nil || model == "" {
+	if d == nil {
+		return none
+	}
+	out := map[string]string{}
+	for _, model := range models {
+		for name, key := range s.platformCredFor(ctx, d, model) {
+			out[name] = key
+		}
+	}
+	return out
+}
+
+// platformCredFor answers the question for one model. Session mode runs two —
+// an Architect and an Implementer, routinely on different providers — and each
+// is gated on its own merits: a Kiwi-funded Architect over a BYOK Implementer
+// yields exactly one platform key, for the Architect's provider only.
+func (s *Server) platformCredFor(ctx context.Context, d *store.Daemon, model string) map[string]string {
+	none := map[string]string{}
+	if model == "" {
 		return none
 	}
 
