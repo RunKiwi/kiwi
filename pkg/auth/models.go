@@ -10,8 +10,9 @@ import (
 )
 
 // SharedFreeFleet is the well-known fleet id every free-tier daemon joins. Free
-// work is routed to it; see the Free Tier RFC.
-const SharedFreeFleet = "shared-free"
+// work is routed to it. Defined in pkg/store so the fleet-type check and this
+// constant can never disagree.
+const SharedFreeFleet = store.SharedFreeFleet
 
 // Organization represents a tenant in the multi-tenant system.
 type Organization struct {
