@@ -126,6 +126,8 @@ type Job struct {
 	Inputs           map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"inputs"`
 	SandboxRef       *string                `json:"sandbox_ref"`
 	CostUSD          float64                `gorm:"not null;default:0" json:"cost_usd"`
+	// Funding records which key paid for planning: FundingBYOK or FundingKiwi.
+	Funding          string                 `gorm:"not null;default:'byok'" json:"funding"`
 	PlannerCostUSD   float64                `gorm:"not null;default:0" json:"planner_cost_usd"`
 	PlannerTokensIn  int64                  `gorm:"not null;default:0" json:"planner_tokens_in"`
 	PlannerTokensOut int64                  `gorm:"not null;default:0" json:"planner_tokens_out"`
