@@ -178,11 +178,53 @@ function SpendContent() {
       {header}
       {rangeBar}
 
+      {data.allowance && data.allowance.length > 0 && (
+        <div className="glass-panel p-6 mb-4">
+          <h2 className="text-sm font-medium text-white mb-4">Kiwi Tokens</h2>
+          <p className="text-xs text-zinc-400 mb-6 max-w-2xl">
+            Tokens provided directly by Kiwi under your plan. Work metered here is fully managed
+            and incurs no usage charges on your BYOK providers.
+          </p>
+          <div className="flex flex-col gap-6">
+            {data.allowance.map((a, i) => {
+              const pct = a.granted === -1 ? 100 : Math.min(100, (a.used / a.granted) * 100);
+              return (
+                <div key={i}>
+                  <div className="flex justify-between items-baseline mb-2">
+                    <span className="text-sm font-medium text-zinc-300 capitalize">Current {a.period} Allowance</span>
+                    <span className="text-sm text-zinc-400">
+                      <span className="text-white font-medium">{a.used.toLocaleString()}</span>
+                      {" / "}
+                      {a.granted === -1 ? "Unlimited" : a.granted.toLocaleString()} used
+                    </span>
+                  </div>
+                  <div className="w-full bg-zinc-800/50 rounded-full h-2 overflow-hidden border border-white/5">
+                    <div className="bg-[#93C645] h-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mt-6">
+            <div className="p-4 rounded-lg bg-zinc-900/50 border border-white/5">
+              <div className="text-2xl font-light text-white">{data.kiwi_tokens_in.toLocaleString()}</div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens in (this range)</div>
+            </div>
+            <div className="p-4 rounded-lg bg-zinc-900/50 border border-white/5">
+              <div className="text-2xl font-light text-white">{data.kiwi_tokens_out.toLocaleString()}</div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens out (this range)</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero. When coverage is partial the figure is a floor, and says so —
           a total that silently excludes unmeasured jobs is a wrong number. */}
       <div className="glass-panel p-6 mb-4">
+        <h2 className="text-sm font-medium text-white mb-4">BYOK Costs</h2>
         <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">
-          {partial ? "At least" : "Total"}
+          {partial ? "At least" : "Total owed to providers"}
         </div>
         <div className="text-[48px] leading-none font-semibold text-white">{usd(data.cost_usd)}</div>
         {partial && (
@@ -250,6 +292,7 @@ function SpendContent() {
 
           <Breakdown title="Cost by repository" rows={data.by_repo} />
           <Breakdown title="Cost by model" rows={data.by_model} />
+          <Breakdown title="Cost by provider" rows={data.by_provider} />
         </div>
       )}
     </div>
@@ -314,6 +357,7 @@ function TableView({ data }: { data: SpendResponse }) {
     <div className="flex flex-col gap-4">
       {section("Cost by repository", data.by_repo)}
       {section("Cost by model", data.by_model)}
+      {section("Cost by provider", data.by_provider)}
     </div>
   );
 }
