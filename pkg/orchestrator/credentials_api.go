@@ -1,9 +1,12 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 )
@@ -58,6 +61,27 @@ func (s *Server) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to save credential", http.StatusInternalServerError)
 		return
+	}
+
+	// Discover this provider's models now rather than at the next daily refresh:
+	// someone who just pasted a key expects to see their models.
+	//
+	// Scoped to the provider that changed — refreshing all of them would make
+	// unrelated API calls with unrelated keys on every save. Detached from the
+	// request context and given its own deadline, because that context is
+	// cancelled the moment the response is written, and holding the response
+	// open for a third-party call would make saving a key as slow and as
+	// failure-prone as the provider is.
+	if s.refresher != nil {
+		orgID, credName, credValue := claims.OrgID, req.Name, req.Value
+		refresher := s.refresher
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := refresher.RefreshOrgProvider(ctx, orgID, credName, credValue); err != nil {
+				log.Printf("[catalog] on-save discovery for org %s (%s): %v", orgID, credName, err)
+			}
+		}()
 	}
 
 	w.WriteHeader(http.StatusNoContent)

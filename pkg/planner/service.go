@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/entitlement"
 	"github.com/ibreakthecloud/kiwi/pkg/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -121,6 +122,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	// True when planning ran on a Control-Plane key rather than the org's, in
 	// which case the org did not pay for it and must not be billed for it.
 	plannedOnOperatorKey := false
+	funding := store.FundingBYOK
 
 	sessionMode := req.Mode == agent.ModeSession
 
@@ -141,7 +143,17 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		if actualModel == "" {
 			actualModel = req.Model
 		}
-		prov = provider.ProviderOf(actualModel)
+		// Resolve through the catalog rather than by inference, so an aggregator
+		// model id lands on the provider that actually serves it.
+		archFunding := store.FundingBYOK
+		if res, rerr := s.store.ResolveModel(ctx, req.OrgID, actualModel); rerr == nil && res.Provider != "" {
+			prov = res.Provider
+			if f, ferr := s.fundingFor(ctx, req.OrgID, actualModel); ferr == nil {
+				archFunding = f
+			}
+		} else {
+			prov = provider.ProviderOf(actualModel)
+		}
 		p = NewSessionPlanner()
 
 		// Submitting used to fail here for an org with no provider key, because
@@ -150,7 +162,16 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		// sits in the queue and fails minutes later inside the daemon. A presence
 		// check keeps the old answer without the old access: it asks whether the
 		// row exists, and never decrypts it.
-		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
+		//
+		// Skipped entirely for a Kiwi-provided model: Kiwi supplies that key, so
+		// demanding the org connect one of their own refuses exactly the case
+		// this feature exists to serve.
+		if archFunding != store.FundingKiwi {
+			if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
 			return nil, err
 		}
 	case s.planner != nil:
@@ -171,15 +192,16 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		var key string
 		if override := os.Getenv("KIWI_PLANNER_API_KEY"); override != "" {
 			key = override
+			funding = store.FundingKiwi // Operator keys are Kiwi-funded
 			plannedOnOperatorKey = true
 		} else {
-			secretName := provider.CredentialNameFor(prov)
-			var kerr error
-			key, kerr = s.store.GetCredentialPlaintext(ctx, req.OrgID, secretName)
-			if kerr != nil || key == "" {
-				// Phrased so the dashboard's error mapper recognises it as a
-				// credential problem and offers the link to Integrations.
-				return nil, fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+			if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
+				return nil, err
+			}
+			var err error
+			key, funding, err = s.resolveKey(ctx, req.OrgID, actualModel)
+			if err != nil {
+				return nil, err
 			}
 		}
 
@@ -210,6 +232,50 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	plan, err := p.Plan(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+
+	// Gate the WORKER models, here, after planning, because this is the only
+	// point every branch of the switch above reaches.
+	//
+	// The per-branch checks gate `actualModel`, which is the *planner's* model.
+	// That is the wrong model and, worse, two of the three branches never ran a
+	// check at all: the heuristic branch is the live path (nothing in the
+	// deployment sets KIWI_PLANNER=llm), so a submit whose workers run on a
+	// Kiwi-funded model was admitted with no entitlement check anywhere.
+	seen := map[string]bool{}
+	for _, w := range plan.Workers {
+		for _, model := range []string{w.Model, w.ArchitectModel} {
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			if err := s.requireEntitlement(ctx, req.OrgID, req.FleetID, model); err != nil {
+				return nil, err
+			}
+		}
+
+		// Session mode runs two models under one task, and a task records one
+		// payer. Allowing a Kiwi Architect over a BYOK Implementer would make
+		// the task's single CostUSD unattributable — part of it billed to the
+		// org, part of it not — and the spend page would either overstate what
+		// they owe or hide what Kiwi covered. Refuse up front instead.
+		if w.ArchitectModel == "" || w.ArchitectModel == w.Model {
+			continue
+		}
+		implFunding, err := s.fundingFor(ctx, req.OrgID, w.Model)
+		if err != nil {
+			continue // A lookup failure is not grounds to refuse a submit.
+		}
+		archFunding, err := s.fundingFor(ctx, req.OrgID, w.ArchitectModel)
+		if err != nil {
+			continue
+		}
+		if implFunding != archFunding {
+			return nil, fmt.Errorf(
+				"session mode runs %s and %s under one task, so both must be paid for the same way: %s is %s and %s is %s — pick two Kiwi-provided models, or two your own keys cover",
+				w.ArchitectModel, w.Model,
+				w.ArchitectModel, fundingLabel(archFunding), w.Model, fundingLabel(implFunding))
+		}
 	}
 
 	// Planner spend, attributed to the org that paid for it. When the operator
@@ -330,7 +396,11 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				// omits planning — which is the half most worth acting on, since
 				// the planner defaults to the most expensive model available.
 				"planner_model": actualModel,
+				// The resolved provider, so the spend page can attribute planner
+				// spend without re-deriving it from the model id.
+				"planner_provider": prov,
 			},
+			Funding:          funding,
 			PlannerCostUSD:   totalCost,
 			PlannerTokensIn:  totalIn,
 			PlannerTokensOut: totalOut,
@@ -356,11 +426,44 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"ref":        req.Ref,
 				"job_id":     jobID,
 			}
+			// Resolve the worker's OWN model. The job-level `funding` above
+			// describes the planner call; a task inherits nothing from it,
+			// because the planner and the worker routinely run on different
+			// models with different providers and different payers.
+			//
+			// The resolved provider and tier are pinned onto the spec rather
+			// than re-derived later: the daemon has no catalog to resolve
+			// against, and metering must charge the tier the submit was
+			// admitted against even if a refresh reprices the model mid-run.
+			taskFunding := store.FundingBYOK
+			if res, rerr := s.store.ResolveModel(ctx, req.OrgID, w.Model); rerr == nil {
+				spec["provider"] = res.Provider
+				if res.KiwiProvided {
+					if _, ok := provider.PlatformKeyFor(res.Provider); ok {
+						spec["tier"] = res.Tier
+						taskFunding = store.FundingKiwi
+					}
+				}
+			}
 			if w.Mode != "" {
 				spec["mode"] = w.Mode
 			}
 			if w.ArchitectModel != "" {
 				spec["architect_model"] = w.ArchitectModel
+				// The Architect is a second model with its own provider, tier
+				// and payer, so it is resolved separately rather than inheriting
+				// the Implementer's. Pinning its provider is what lets a
+				// Kiwi-provided model serve as the Architect at all: the daemon
+				// has no catalog, and inference cannot recognise an aggregator's
+				// model ids.
+				if ares, aerr := s.store.ResolveModel(ctx, req.OrgID, w.ArchitectModel); aerr == nil {
+					spec["architect_provider"] = ares.Provider
+					if ares.KiwiProvided {
+						if _, ok := provider.PlatformKeyFor(ares.Provider); ok {
+							spec["architect_tier"] = ares.Tier
+						}
+					}
+				}
 			}
 			// Learnings are resolved here, on the Control Plane, because it owns
 			// the vector index — and consumed in the daemon, because in session
@@ -375,6 +478,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				JobID:   jobID,
 				FleetID: req.FleetID,
 				Status:  store.TaskQueued,
+				Funding: taskFunding,
 				Spec:    spec,
 			}).Error; err != nil {
 				return fmt.Errorf("enqueue task %s: %w", taskID, err)
@@ -543,4 +647,153 @@ func (s *Service) requireProviderKey(ctx context.Context, orgID, prov string) er
 		}
 	}
 	return fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+}
+
+// resolveKey returns the API key to plan with and which budget it draws from.
+//
+// A Kiwi-funded model uses Kiwi's own key and reports funding "kiwi"; anything
+// else uses the org's stored credential and reports "byok". The funding value
+// is recorded on the job so the spend page can keep Kiwi-covered work out of
+// the dollar total the org owes.
+func (s *Service) resolveKey(ctx context.Context, orgID, model string) (string, string, error) {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err == nil && res.KiwiProvided {
+		if key, ok := provider.PlatformKeyFor(res.Provider); ok {
+			return key, store.FundingKiwi, nil
+		}
+	}
+
+	prov := provider.ProviderOf(model)
+	if err == nil && res.Provider != "" {
+		prov = res.Provider
+	}
+	secretName := provider.CredentialNameFor(prov)
+	key, kerr := s.store.GetCredentialPlaintext(ctx, orgID, secretName)
+	if kerr != nil || key == "" {
+		// Phrased so the dashboard's error mapper recognises it as a credential
+		// problem and offers the link to Integrations.
+		return "", "", fmt.Errorf("no %s provider key connected for planning: add one in Integrations", prov)
+	}
+	return key, store.FundingBYOK, nil
+}
+
+// requireEntitlement fails a submit that asks Kiwi to pay for work it cannot.
+//
+// It runs beside requireProviderKey for the same reason that one exists: an
+// immediate, actionable error at submit beats a task that sits in the queue and
+// fails minutes later inside the daemon with a confusing reason.
+//
+// A BYOK model returns nil immediately — the org's own allowance is their own
+// business.
+func (s *Service) requireEntitlement(ctx context.Context, orgID, fleetID, model string) error {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil {
+		// A lookup failure is not evidence of an entitlement problem. Let the
+		// submit through; the daemon reports the real problem if there is one.
+		return nil
+	}
+	if !res.KiwiProvided {
+		return nil
+	}
+	// Nothing to fund if Kiwi holds no key for the provider, whatever the
+	// catalog row says. Without this, an org is refused a model it is perfectly
+	// able to run on its own key.
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return nil
+	}
+
+	// Kiwi keys only ever reach daemons Kiwi operates, so a Kiwi-funded model on
+	// any other fleet would be admitted and then fail with no key at all.
+	//
+	// This asks about the fleet the task is actually queued to, not whether the
+	// org happens to own some Kiwi-operated fleet somewhere: an org with both
+	// kinds submitting to its BYOC fleet would otherwise be admitted here and
+	// fail at heartbeat — the exact outcome this function exists to prevent.
+	if !s.fleetCanUseKiwiKeys(ctx, orgID, fleetID) {
+		return fmt.Errorf("%s is a Kiwi-provided model and runs only on a Kiwi-managed fleet; select a Kiwi-managed fleet or use your own provider key", model)
+	}
+
+	return s.requireAllowance(ctx, orgID, model)
+}
+
+// requireAllowance is the fleet-independent half of requireEntitlement.
+//
+// The planner runs on the Control Plane and calls the provider directly, so no
+// fleet is involved and no key is sealed anywhere — but the allowance still
+// applies, because the call is still made on Kiwi's credential.
+func (s *Service) requireAllowance(ctx context.Context, orgID, model string) error {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil || !res.KiwiProvided {
+		return nil
+	}
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return nil
+	}
+
+	plan, err := s.store.GetOrgPlan(ctx, orgID)
+	if err != nil {
+		// A lookup failure is not evidence of an entitlement problem. Let the
+		// submit through rather than blocking work on a transient DB error.
+		return nil
+	}
+	checker := &entitlement.Checker{Store: s.store}
+	allowed, err := checker.Allow(ctx, orgID, plan, res.Tier)
+	if err != nil {
+		if errors.Is(err, entitlement.ErrNotGrantable) {
+			return fmt.Errorf("%s cannot be run on a Kiwi-provided key; connect your own provider key in Integrations", model)
+		}
+		return nil
+	}
+	if !allowed {
+		return fmt.Errorf("your monthly %s token allowance is exhausted; connect your own provider key in Integrations or wait for the allowance to reset", res.Tier)
+	}
+	return nil
+}
+
+// fleetCanUseKiwiKeys reports whether a task queued to this fleet could be
+// handed a Kiwi-owned key at lease time.
+//
+// It must agree exactly with store.IsKiwiOperatedFleet, which is the gate that
+// actually decides. Answering "yes" here for a fleet that gate will refuse
+// produces a task that queues and then dies for want of a key; answering "no"
+// for one it would accept refuses work that was perfectly runnable. Deferring
+// to the same function is the only way the two cannot drift.
+func (s *Service) fleetCanUseKiwiKeys(ctx context.Context, orgID, fleetID string) bool {
+	ok, err := s.store.IsKiwiOperatedFleet(ctx, orgID, fleetID)
+	if err != nil {
+		// Do not refuse a submit over a lookup failure. The lease-time gate is
+		// the one that protects the credential; this one only protects the user
+		// from a confusing delayed failure.
+		return true
+	}
+	return ok
+}
+
+// fundingFor reports which key would pay for a model: store.FundingKiwi when
+// the catalog says Kiwi funds it AND Kiwi actually holds a key for its
+// provider, store.FundingBYOK otherwise.
+//
+// It is the single answer to that question, used by admission, by the funding
+// recorded on a task, and by the session-mode consistency check — three places
+// that must not disagree about who is paying.
+func (s *Service) fundingFor(ctx context.Context, orgID, model string) (string, error) {
+	res, err := s.store.ResolveModel(ctx, orgID, model)
+	if err != nil {
+		return "", err
+	}
+	if !res.KiwiProvided {
+		return store.FundingBYOK, nil
+	}
+	if _, ok := provider.PlatformKeyFor(res.Provider); !ok {
+		return store.FundingBYOK, nil
+	}
+	return store.FundingKiwi, nil
+}
+
+// fundingLabel renders a funding source the way a user would say it.
+func fundingLabel(funding string) string {
+	if funding == store.FundingKiwi {
+		return "Kiwi-provided"
+	}
+	return "billed to your own key"
 }

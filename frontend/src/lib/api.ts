@@ -227,6 +227,28 @@ export interface Daemon {
   created_at: string;
 }
 
+export interface ProviderInfo {
+  id: string;
+  display: string;
+  kind: string;
+  connected: boolean;
+  kiwi_available: boolean;
+}
+
+export interface CatalogModel {
+  org_id: string;
+  model_id: string;
+  provider: string;
+  display_name: string;
+  input_cost_per_m: number | null;
+  output_cost_per_m: number | null;
+  context_length: number | null;
+  supports_tools: boolean | null;
+  tier: "free" | "economy" | "frontier" | "unknown";
+  kiwi_provided: boolean;
+  selectable: boolean;
+}
+
 export interface ValidateResponse {
   user_id: string;
   org_id: string;
@@ -258,6 +280,8 @@ export interface SpendResponse {
   agent_minutes: number;
   tokens_in: number;
   tokens_out: number;
+  kiwi_tokens_in: number;
+  kiwi_tokens_out: number;
   job_count: number;
   /**
    * Jobs with at least one metered task. Below job_count, the total is a floor
@@ -268,6 +292,16 @@ export interface SpendResponse {
   daily: SpendPoint[];
   by_repo: SpendBucket[];
   by_model: SpendBucket[];
+  by_provider: SpendBucket[];
+  allowance?: AllowanceBucket[];
+}
+
+export interface AllowanceBucket {
+  tier: string;
+  period: string;
+  granted: number;
+  used: number;
+  remaining: number;
 }
 
 export interface UsageResponse {
@@ -376,8 +410,8 @@ export const client = {
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
 
-  getSpend: (from: string, to: string) =>
-    fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  getSpend: (from: string, to: string, funding?: string) =>
+    fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${funding ? `&funding=${encodeURIComponent(funding)}` : ""}`),
 
   // Admin APIs
   getAdminStats: () => fetchApi<AdminStats>("/admin/stats"),
@@ -477,6 +511,9 @@ export const client = {
   listIntegrations: () =>
     fetchApi<{ integrations: Integration[] }>("/api/v1/integrations"),
 
+  listProviders: () => fetchApi<{ providers: ProviderInfo[] }>("/api/v1/providers"),
+  listCatalogModels: () => fetchApi<{ models: CatalogModel[] }>("/api/v1/catalog/models"),
+
   listGithubRepos: () =>
     fetchApi<{ repos: GithubRepo[] }>("/api/v1/github/repos"),
 
@@ -489,15 +526,6 @@ export const client = {
       body: JSON.stringify({ fleet_id: fleetId ?? "" }),
     }),
 };
-
-// Built-in model ids offered even before an org adds custom ones. The daemon
-// routes each to a provider by its id prefix — see providerOf.
-export const BUILTIN_MODELS = [
-  "claude-opus-4-8",
-  "claude-haiku-4-5-20251001",
-  "gemini-2.0-flash",
-  "gpt-5-mini",
-];
 
 // Curated models we recommend, grouped by provider. Shown on the Models page for
 // one-click add so people don't have to hand-type ids. (Automatic discovery from
@@ -538,11 +566,6 @@ export const RECOMMENDED_MODELS: RecommendedModel[] = [
 export const DEFAULT_PLANNER_MODEL = "claude-opus-4-8";
 export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
 
-// Mirrors provider.ProviderOf in the Go tree, which is what the daemon actually
-// routes on. The two must agree: this decides which key the UI tells you to
-// connect, and that one decides which key the task then needs.
-const OPENAI_MODEL_PREFIXES = ["gpt-", "gpt3", "gpt4", "o1", "o3", "o4", "chatgpt", "text-embedding-3"];
-
 // How each provider id is written for a human. "OpenAI" does not survive CSS
 // capitalize (it renders "Openai"), so the label is data, not a text-transform.
 export const PROVIDER_LABELS: Record<string, string> = {
@@ -553,13 +576,6 @@ export const PROVIDER_LABELS: Record<string, string> = {
 
 export function providerLabel(id: string): string {
   return PROVIDER_LABELS[id] ?? id;
-}
-
-export function providerOf(id: string): string {
-  const m = id.toLowerCase();
-  if (m.startsWith("gemini")) return "gemini";
-  if (OPENAI_MODEL_PREFIXES.some((p) => m.startsWith(p))) return "openai";
-  return "anthropic";
 }
 
 export const SUPPORT_EMAIL = "support@runkiwi.dev";

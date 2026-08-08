@@ -23,10 +23,16 @@ func TestFleetsAndModelsAreOrgScoped(t *testing.T) {
 		t.Errorf("orgA should see only its fleet, got %+v", fa)
 	}
 
-	// Invalid type falls back to managed.
+	// Invalid type falls back to BYOC, the less privileged of the two. This
+	// assertion used to require "managed" — which meant a misspelled type in a
+	// request body minted a privileged fleet on customer say-so. See
+	// TestIsKiwiOperatedFleetTrustsOnlyTheSharedFreeFleet.
 	f, err := s.CreateFleet(ctx, "orgA", "bad-type", "bogus")
-	if f.Type != FleetManaged {
-		t.Errorf("invalid fleet type should default to managed, got %q", f.Type)
+	if err != nil {
+		t.Fatalf("CreateFleet: %v", err)
+	}
+	if f.Type != FleetBYOC {
+		t.Errorf("invalid fleet type should default to byoc, got %q", f.Type)
 	}
 
 	m, err := s.CreateModel(ctx, "orgA", "gemini-2.0-flash", "gemini")

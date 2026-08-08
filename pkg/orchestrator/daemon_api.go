@@ -17,6 +17,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
+	"github.com/ibreakthecloud/kiwi/pkg/entitlement"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -263,7 +264,13 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	sealed, err := s.storage.SealCredentialsForDaemon(r.Context(), d.OrgID, encPub)
+	// The task and its model are known here, so the platform key can be scoped
+	// to the one provider this task needs rather than bundled unconditionally.
+	// Both of session mode's models, because each may be Kiwi-funded on a
+	// different provider. specArchitectModel is empty outside session mode and
+	// for a session that reuses the worker's model, which costs one no-op.
+	extra := s.platformCredsFor(r.Context(), d, specModel(spec), specArchitectModel(spec))
+	sealed, err := s.storage.SealCredentialsForDaemon(r.Context(), d.OrgID, encPub, extra)
 	if err != nil {
 		log.Printf("[daemon] sealing credentials for org %s: %v", d.OrgID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -410,10 +417,21 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 
 	var costUSD float64
 	var tokensIn, tokensOut int64
+	// Session mode runs two models, which may sit in different price tiers, so
+	// their tokens are counted apart as well as together. The daemon already
+	// tags the Architect's calls as the "critic" phase (see sessionPhase), so
+	// the split needs no extra wire field — charging a session's whole usage to
+	// one tier would drain a small frontier allowance with cheap implementer
+	// work, or bill frontier work at economy rates.
+	var architectIn, architectOut int64
 	for _, ev := range req.Events {
 		costUSD += ev.CostUSD
 		tokensIn += ev.InputTokens
 		tokensOut += ev.OutputTokens
+		if ev.Phase == "critic" {
+			architectIn += ev.InputTokens
+			architectOut += ev.OutputTokens
+		}
 	}
 
 	ok, err := s.storage.CompleteTask(r.Context(), store.TaskCompletion{
@@ -437,6 +455,11 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		// a zombie cannot overwrite the winner's outcome.
 		http.Error(w, "lease no longer valid", http.StatusConflict)
 		return
+	}
+
+	var task store.QueuedTask
+	if err := s.db.WithContext(r.Context()).Where("id = ?", req.TaskID).First(&task).Error; err == nil {
+		s.meterKiwiUsage(r.Context(), &task, tokensIn, tokensOut, architectIn, architectOut)
 	}
 
 	log.Printf("[daemon] task %s reported %s", req.TaskID, req.Status)
@@ -486,6 +509,82 @@ func (s *Server) executionMode() string {
 		return "managed"
 	}
 	return "byoc"
+}
+
+// meterKiwiUsage records the token usage against the org's allowance if the
+// work was performed on a Kiwi-owned platform key.
+// architectIn/architectOut are the subset of the totals spent by session mode's
+// Architect, which may sit in a different price tier from the Implementer. They
+// are zero for file_loop tasks, where there is only one model.
+func (s *Server) meterKiwiUsage(ctx context.Context, task *store.QueuedTask, tokensIn, tokensOut, architectIn, architectOut int64) {
+	if task == nil || task.Funding != store.FundingKiwi || (tokensIn == 0 && tokensOut == 0) {
+		return
+	}
+
+	// Charge the Architect against its own tier first, then whatever is left
+	// against the Implementer's. Both roles are Kiwi-funded whenever the task
+	// is: admission refuses a session whose two models have different payers,
+	// precisely so this single Funding field means something.
+	if archTier, ok := task.Spec["architect_tier"].(string); ok && archTier != "" && architectIn+architectOut > 0 {
+		s.consumeTier(ctx, task, archTier, architectIn+architectOut)
+		tokensIn -= architectIn
+		tokensOut -= architectOut
+		if tokensIn < 0 {
+			tokensIn = 0
+		}
+		if tokensOut < 0 {
+			tokensOut = 0
+		}
+		if tokensIn+tokensOut == 0 {
+			return
+		}
+	}
+
+	// The tier is read from the spec, where the planner pinned it at submit,
+	// rather than resolved again here.
+	//
+	// Re-resolving would charge whatever the catalog says *now*: a refresh that
+	// reprices a model between lease and result flips KiwiProvided to false and
+	// the usage goes uncharged, or moves it to another tier and the wrong bucket
+	// is debited. The key was handed out against the tier admitted at submit, so
+	// that is the tier that must pay for it.
+	tier, _ := task.Spec["tier"].(string)
+	if tier == "" {
+		// A task queued before the tier was pinned. Fall back to the catalog and
+		// say so — a silent skip here is a free run on Kiwi's key.
+		res, err := s.storage.ResolveModel(ctx, task.OrgID, specString(task.Spec, "model"))
+		if err != nil {
+			log.Printf("[daemon] meter %s: no pinned tier and catalog lookup failed, %d tokens go uncharged: %v",
+				task.ID, tokensIn+tokensOut, err)
+			return
+		}
+		if !res.KiwiProvided {
+			log.Printf("[daemon] meter %s: funding=kiwi but model %q is not Kiwi-provided; %d tokens go uncharged",
+				task.ID, specString(task.Spec, "model"), tokensIn+tokensOut)
+			return
+		}
+		tier = res.Tier
+	}
+
+	s.consumeTier(ctx, task, tier, tokensIn+tokensOut)
+}
+
+// consumeTier draws tokens down against one tier's allowance, logging rather
+// than returning: the task did finish, and failing the result report would
+// strand a completed run.
+func (s *Server) consumeTier(ctx context.Context, task *store.QueuedTask, tier string, tokens int64) {
+	if tier == "" || tokens <= 0 {
+		return
+	}
+	plan, err := s.storage.GetOrgPlan(ctx, task.OrgID)
+	if err != nil {
+		log.Printf("[daemon] meter %s: failed to get plan for org %s: %v", task.ID, task.OrgID, err)
+		return
+	}
+	checker := &entitlement.Checker{Store: s.storage}
+	if err := checker.Consume(ctx, task.OrgID, plan, tier, tokens); err != nil {
+		log.Printf("[daemon] meter %s: failed to draw down %s allowance: %v", task.ID, tier, err)
+	}
 }
 
 // decodeX25519 turns the base64(raw 32-byte) wire form of an X25519 public key
@@ -581,6 +680,16 @@ func specFromQueuedTask(task *store.QueuedTask) (agent.WorkerSpec, error) {
 		return spec, errors.New("spec has no task")
 	}
 	return spec, nil
+}
+
+// specModel reads the model a worker spec will run, which decides whether a
+// Kiwi-owned key is in scope for this lease.
+func specArchitectModel(spec agent.WorkerSpec) string {
+	return spec.ArchitectModel
+}
+
+func specModel(spec agent.WorkerSpec) string {
+	return spec.Model
 }
 
 // DaemonResponse represents a single daemon in the /api/v1/daemons list response.

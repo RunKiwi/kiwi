@@ -477,12 +477,14 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 		PriorLearnings:  task.Learnings,
 		MaxRoundsBudget: cfg.MaxRounds,
 	})
-	r.trackArchitect(st)
+	planUsage := r.trackArchitect(st)
 	if err != nil {
-		r.emit(st, Event{Phase: "plan", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+		r.emit(st, Event{Phase: "plan", Outcome: "error", Detail: err.Error(), DurationMs: ms(start),
+			InputTokens: planUsage.InputTokens, OutputTokens: planUsage.OutputTokens, CostUSD: planUsage.CostUSD})
 		return r.result(st, false, fmt.Sprintf("planning failed: %v", err)), err
 	}
-	r.emit(st, Event{Phase: "plan", Outcome: "proposed", Detail: spec.Objective, DurationMs: ms(start), CostUSD: st.architect.CostUSD})
+	r.emit(st, Event{Phase: "plan", Outcome: "proposed", Detail: spec.Objective, DurationMs: ms(start),
+		InputTokens: planUsage.InputTokens, OutputTokens: planUsage.OutputTokens, CostUSD: planUsage.CostUSD})
 	if spec.Verdict == VerdictAbandon {
 		r.logf("[session] the architect declined the task: %s\n", spec.Rationale)
 		return r.result(st, false, "the task was not attempted: "+spec.Rationale), nil
@@ -585,12 +587,14 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 			History:         st.history,
 			RoundsRemaining: cfg.MaxRounds - st.round,
 		})
-		r.trackArchitect(st)
+		reviewUsage := r.trackArchitect(st)
 		if err != nil {
-			r.emit(st, Event{Round: st.round, Phase: "review", Outcome: "error", Detail: err.Error(), DurationMs: ms(start)})
+			r.emit(st, Event{Round: st.round, Phase: "review", Outcome: "error", Detail: err.Error(), DurationMs: ms(start),
+				InputTokens: reviewUsage.InputTokens, OutputTokens: reviewUsage.OutputTokens, CostUSD: reviewUsage.CostUSD})
 			return r.result(st, false, fmt.Sprintf("review failed: %v", err)), err
 		}
-		r.emit(st, Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start)})
+		r.emit(st, Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start),
+			InputTokens: reviewUsage.InputTokens, OutputTokens: reviewUsage.OutputTokens, CostUSD: reviewUsage.CostUSD})
 
 		st.history = append(st.history, fmt.Sprintf("- round %d: asked for %q; verification %s; reviewer said %s — %s",
 			st.round, firstLine(st.spec.Objective), passFail(passed), review.Verdict, firstLine(review.Rationale)))
@@ -946,13 +950,29 @@ func (st *state) total() provider.ToolUsage {
 	return t
 }
 
-// trackArchitect refreshes the Architect's cumulative usage. Architect.Usage
-// reports a running total, so it is assigned rather than accumulated.
-func (r *Runner) trackArchitect(st *state) {
+// trackArchitect refreshes the Architect's cumulative usage and returns what
+// the call just made cost. Architect.Usage reports a running total, so it is
+// assigned rather than accumulated, and the delta is the difference.
+//
+// The delta is what the emitted event carries. Reporting the running total on
+// each event instead double-counts every earlier call when a consumer sums the
+// stream — and the Control Plane does exactly that to meter a task, so the
+// difference decides whether an allowance is charged correctly or many times
+// over.
+func (r *Runner) trackArchitect(st *state) provider.ToolUsage {
 	if r.Architect == nil {
-		return
+		return provider.ToolUsage{}
 	}
-	st.architect = r.Architect.Usage()
+	total := r.Architect.Usage()
+	delta := provider.ToolUsage{
+		InputTokens:      total.InputTokens - st.architect.InputTokens,
+		OutputTokens:     total.OutputTokens - st.architect.OutputTokens,
+		CacheReadTokens:  total.CacheReadTokens - st.architect.CacheReadTokens,
+		CacheWriteTokens: total.CacheWriteTokens - st.architect.CacheWriteTokens,
+		CostUSD:          total.CostUSD - st.architect.CostUSD,
+	}
+	st.architect = total
+	return delta
 }
 
 // trackImplementer folds one turn's usage into the session total. A

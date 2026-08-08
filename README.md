@@ -148,7 +148,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 
 `kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
 
-**LLM providers.** The daemon selects the provider from the worker's `-model`, and reads that provider's key from your stored credentials:
+**LLM providers.** The model catalog serves as the authoritative source for model-to-provider routing. When a model is requested, it is resolved against the catalog to determine its provider, tier, and whether it is funded by a Kiwi platform key. If a model is not found in the catalog, it falls back to prefix inference to keep existing submissions working. The daemon then reads that provider's key from your stored credentials:
 
 | Model id | Provider | Credential |
 | --- | --- | --- |
@@ -159,6 +159,25 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 Anthropic's **adaptive thinking** is requested only for models that support it (Claude 4.6 and later, see `pkg/provider/thinking.go`). It arrived with that generation, and older models reject it outright with `400 adaptive thinking is not supported on this model` rather than ignoring the field, so sending it unconditionally broke every task on `claude-haiku-4-5`, the default worker model. Unknown models get no thinking rather than a guess: losing thinking costs quality on one call, guessing wrong fails the task.
 
 The same rule decides which key the planner uses, how a call is priced, and which provider the signed execution record names. It is one function (`provider.ProviderOf`) rather than a rule repeated per component. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
+
+**Model discovery.** Rather than a hand-kept list, each provider's model list is read from its own API — at boot, once a day, and immediately when you save a key. Discovered models land in `model_catalog` with their pricing, context window and tool support, and only models that can actually drive the Actor–Critic loop (tool-capable, 32k+ context, text-to-text) are offered in the task form. A provider that is unreachable during a refresh leaves its existing rows untouched: a stale catalog is a much better failure than an empty one. Models that disappear from a provider's list are marked rather than deleted, so past jobs still name the model they ran.
+
+**Kiwi-provided models.** An operator can supply Kiwi's own API keys so users can run tasks without bringing their own:
+
+```bash
+KIWI_PLATFORM_OPENROUTER_API_KEY=...   # one key reaches many model families
+KIWI_PLATFORM_ANTHROPIC_API_KEY=...
+KIWI_PLATFORM_GEMINI_API_KEY=...
+KIWI_PLATFORM_OPENAI_API_KEY=...
+```
+
+A provider whose variable is unset is simply BYOK-only, and the dashboard shows it as *Coming soon* — no migration or config beyond the variable itself. Usage is capped per organisation per calendar month by a token allowance, banded by model price (`free` / `economy` / `frontier`) because a token is not a unit of cost: the same count is worth two orders of magnitude more on a frontier model than an economy one. Allowances are set per plan in `pkg/entitlement`.
+
+Session mode runs two models — an Architect that plans and reviews, and an Implementer that edits — and either or both can be Kiwi-provided. Each is routed, keyed and metered on its own: a frontier Architect over an economy Implementer draws on the frontier allowance only for the reviewer's tokens. Both must be paid for the same way, though, because a task records one payer; mixing a Kiwi-provided model with one of your own is refused at submit rather than producing a bill that cannot be attributed.
+
+These keys are sealed **only** to daemons Kiwi itself operates. A daemon running on your own hardware never receives one, and Kiwi-provided models are unavailable on a BYOC fleet — submitting one there is refused up front rather than failing later for want of a key. Set a spend cap on the upstream provider account regardless: the allowance divides usage fairly between organisations, it is not a backstop against a bug.
+
+Spend reporting keeps the two apart. The dollar figure on `/spend` counts only work billed to your own keys; work Kiwi funded is reported in tokens against the allowance, so the page never shows a total you do not owe.
 
 **Transient provider failures are retried** (`pkg/provider/retry.go`): `429` and `5xx` are retried with exponential backoff and jitter, honouring the provider's own `Retry-After` when it sends one, and never sleeping past the caller's deadline. This matters most for session mode, since a session makes dozens of calls per round, so meeting at least one throttle is close to certain, and without a retry a single blip discarded a task that had already spent minutes and dollars. A retried-away failure is not billed: usage is recorded from the decoded response, which the swallowed attempts never reach. Only Gemini and OpenAI are wrapped; the Anthropic provider uses the official SDK, which already retries.
 

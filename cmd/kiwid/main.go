@@ -103,6 +103,27 @@ func main() {
 		// configured. The matching wake-up happens on submit, in the api role.
 		server.StartFleetHostSweeper(ctx)
 
+		go func() {
+			slog.Info("Running initial catalog refresh")
+			if err := server.RefreshCatalog(ctx); err != nil {
+				slog.Error("Initial catalog refresh failed", "err", err)
+			}
+
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					slog.Info("Running scheduled catalog refresh")
+					if err := server.RefreshCatalog(ctx); err != nil {
+						slog.Error("Scheduled catalog refresh failed", "err", err)
+					}
+				}
+			}
+		}()
+
 		// How long a task may sit QUEUED before it's failed (e.g. no fleet ever
 		// connected to run it). Configurable via KIWI_QUEUE_TTL; default 30m.
 		queueTTL := 30 * time.Minute

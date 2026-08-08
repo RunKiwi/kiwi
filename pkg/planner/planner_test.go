@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *store.PostgresStore {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}, &auth.Organization{}, &store.Job{}, &auth.ProvisioningRequest{}, &store.JobLearning{}, &store.Credential{}); err != nil {
+	if err := db.AutoMigrate(&store.Manifest{}, &store.QueuedTask{}, &store.PlanSubmission{}, &store.OrgLimits{}, &auth.Organization{}, &store.Job{}, &auth.ProvisioningRequest{}, &store.JobLearning{}, &store.Credential{}, &store.CatalogModel{}, &store.Fleet{}, &store.OrgTokenGrant{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return store.NewPostgresStore(db)

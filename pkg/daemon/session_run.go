@@ -89,7 +89,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	// They are resolved separately because they are usually different models and
 	// may be different providers — the routing rule is the same one the rest of
 	// Kiwi uses, so a model's key is found the same way here as anywhere else.
-	workerProv, _ := d.newProvider(creds, spec.Model)
+	workerProv, _ := d.newProvider(creds, spec.Model, spec.Provider)
 	if workerProv == nil {
 		return taskResult{detail: noKeyDetail(spec.Model)}
 	}
@@ -103,7 +103,15 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			spec.Model)}
 	}
 
-	architectProv, _ := d.newProvider(creds, architectModel)
+	// The Architect gets its own resolved provider, because it is usually a
+	// different model from a different provider than the Implementer. When the
+	// spec carries no ArchitectModel the Architect runs the worker's model, so
+	// it inherits the worker's provider too.
+	architectProvider := spec.ArchitectProvider
+	if spec.ArchitectModel == "" {
+		architectProvider = spec.Provider
+	}
+	architectProv, _ := d.newProvider(creds, architectModel, architectProvider)
 	if architectProv == nil {
 		return taskResult{detail: noKeyDetail(architectModel)}
 	}

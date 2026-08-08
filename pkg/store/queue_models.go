@@ -73,6 +73,7 @@ type QueuedTask struct {
 	ResultURL      *string    `json:"result_url"`
 	ResultDetail   *string    `json:"result_detail"`
 	CostUSD        float64    `gorm:"not null;default:0" json:"cost_usd"`
+	Funding        string     `gorm:"not null;default:'byok'" json:"funding"`
 	TokensIn       int64      `gorm:"not null;default:0" json:"tokens_in"`
 	TokensOut      int64      `gorm:"not null;default:0" json:"tokens_out"`
 	MeteredAt      *time.Time `json:"metered_at"`

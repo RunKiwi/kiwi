@@ -79,7 +79,7 @@ func TestDiscoverTargetFiles(t *testing.T) {
 
 func TestExecuteTaskEmptyDiscoveryHonestFailure(t *testing.T) {
 	d := newExecTestDaemon(t, "")
-	d.newProvider = func(creds map[string]string, model string) (provider.Provider, provider.Critic) {
+	d.newProvider = func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
 		return &mockProviderJSON{response: `[]`}, nil
 	}
 	specID := "no-file-task-discovery"
