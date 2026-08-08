@@ -5,6 +5,10 @@
 package orchestrator
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -471,5 +475,90 @@ func TestBuildSpendTreatsLegacyRowsAsBYOKUnderTheByokFilter(t *testing.T) {
 	}
 	if got.JobCount != 1 {
 		t.Errorf("JobCount = %d, want 1", got.JobCount)
+	}
+}
+
+// A brand-new org has no grant rows — they are created lazily on first use.
+// The page must still show what the plan entitles them to; answering "no
+// allowance" when the truth is "full allowance, none used" is the difference
+// between a user knowing their quota and assuming they have none.
+func TestSpendReportsFullAllowanceBeforeAnyUsage(t *testing.T) {
+	s := newTestServer(t)
+	seedFreeOrg(t, s, "o1")
+
+	req := authed(http.MethodGet, "/api/v1/spend", "", "o1")
+	rec := httptest.NewRecorder()
+	s.handleSpend(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got SpendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if got.Plan != "free" {
+		t.Errorf("Plan = %q, want free", got.Plan)
+	}
+	if len(got.Allowance) == 0 {
+		t.Fatal("no allowance reported for an org that has never run a task; the quota is invisible")
+	}
+
+	byTier := map[string]AllowanceBucket{}
+	for _, a := range got.Allowance {
+		byTier[a.Tier] = a
+	}
+	for _, tier := range []string{store.TierFree, store.TierEconomy, store.TierFrontier} {
+		b, ok := byTier[tier]
+		if !ok {
+			t.Errorf("class %q missing from the allowance", tier)
+			continue
+		}
+		if b.Granted <= 0 {
+			t.Errorf("class %q granted = %d, want the plan's allowance", tier, b.Granted)
+		}
+		if b.Used != 0 {
+			t.Errorf("class %q used = %d, want 0", tier, b.Used)
+		}
+		if b.Remaining != b.Granted {
+			t.Errorf("class %q remaining = %d, want %d", tier, b.Remaining, b.Granted)
+		}
+	}
+}
+
+// Once usage exists it must be reflected, and remaining must never go negative.
+func TestSpendAllowanceReflectsUsage(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+	seedFreeOrg(t, s, "o1")
+
+	period := store.CurrentPeriod(timeNow())
+	if _, err := s.storage.EnsureGrant(ctx, "o1", store.TierEconomy, period, 1_000_000); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	// Overspend the bucket; remaining must clamp at zero, not report negative.
+	if err := s.storage.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 1_200_000); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	req := authed(http.MethodGet, "/api/v1/spend", "", "o1")
+	rec := httptest.NewRecorder()
+	s.handleSpend(rec, req)
+
+	var got SpendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, a := range got.Allowance {
+		if a.Tier != store.TierEconomy {
+			continue
+		}
+		if a.Used != 1_200_000 {
+			t.Errorf("used = %d, want 1200000", a.Used)
+		}
+		if a.Remaining != 0 {
+			t.Errorf("remaining = %d, want 0 (clamped, never negative)", a.Remaining)
+		}
 	}
 }

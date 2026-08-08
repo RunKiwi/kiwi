@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { client, RECOMMENDED_MODELS, providerLabel, type ModelEntry, type RecommendedModel, type ProviderInfo, type CatalogModel, type SpendResponse } from "@/lib/api";
+import { client, RECOMMENDED_MODELS, providerLabel, modelClassLabel, planLabel, formatTokens, MODEL_CLASS_BLURB, CLASS_ORDER, type ModelEntry, type RecommendedModel, type ProviderInfo, type CatalogModel, type SpendResponse } from "@/lib/api";
 import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles, Box } from "lucide-react";
 import { Select } from "@/components/Select";
 import Link from "next/link";
+
+// Allowances reset on the first of the following month.
+function nextResetLabel(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  if (!y || !m) return "next month";
+  const d = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export default function ModelsPage() {
   const [models, setModels] = useState<ModelEntry[]>([]);
@@ -91,43 +99,59 @@ export default function ModelsPage() {
           <Box className="w-3.5 h-3.5 text-[#3b82f6]" /> Kiwi-Provided
         </h2>
         
-        {spend && spend.allowance && spend.allowance.length > 0 && (
+        {spend?.allowance_stale && (
+          <div className="mb-6 p-4 glass-panel border border-amber-500/20 rounded-xl text-sm text-amber-400/90">
+            Your usage could not be read just now, so the remaining balances below are hidden rather than
+            shown understated. Reload in a moment.
+          </div>
+        )}
+
+        {spend && !spend.allowance_stale && spend.allowance && spend.allowance.length > 0 && (
           <div className="mb-6 p-6 glass-panel border border-white/10 rounded-xl">
-            <h3 className="text-sm font-medium text-white mb-4">Kiwi Token Allowance</h3>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="text-sm font-medium text-white">Your monthly allowance</h3>
+              {spend.plan && <span className="text-xs text-zinc-500">{planLabel(spend.plan)}</span>}
+            </div>
+            <p className="text-xs text-zinc-500 mb-5">
+              Tokens Kiwi pays for, reset each month. Models you connect your own key for are unlimited
+              and draw on none of this.
+            </p>
             <div className="flex flex-col gap-5">
-              {spend.allowance.map((a, i) => {
-                const pct = a.granted === -1 ? 100 : Math.min(100, (a.used / a.granted) * 100);
+              {spend.allowance.map(a => {
+                const unlimited = a.granted < 0;
+                const exhausted = !unlimited && a.remaining <= 0;
+                const pct = unlimited ? 0 : Math.min(100, (a.used / Math.max(a.granted, 1)) * 100);
                 return (
-                  <div key={i}>
-                    <div className="flex justify-between items-baseline mb-2">
-                      <span className="text-sm font-medium text-zinc-300 capitalize">Current {a.period}</span>
-                      <span className="text-sm text-zinc-400">
-                        <span className="text-white font-medium">{a.used.toLocaleString()}</span>
-                        {" / "}
-                        {a.granted === -1 ? "Unlimited" : a.granted.toLocaleString()} used
+                  <div key={a.tier}>
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm font-medium text-zinc-200">{modelClassLabel(a.tier)}</span>
+                      <span className={`text-sm ${exhausted ? "text-red-400" : "text-zinc-400"}`}>
+                        {unlimited ? (
+                          "Unlimited"
+                        ) : exhausted ? (
+                          "Exhausted until " + nextResetLabel(a.period)
+                        ) : (
+                          <>
+                            <span className="text-white font-medium">{formatTokens(a.remaining)}</span> left
+                            <span className="text-zinc-600"> of {formatTokens(a.granted)}</span>
+                          </>
+                        )}
                       </span>
                     </div>
+                    <div className="text-[11px] text-zinc-600 mb-2">{MODEL_CLASS_BLURB[a.tier]}</div>
                     <div className="w-full bg-zinc-800/50 rounded-full h-2 overflow-hidden border border-white/5">
-                      <div className="bg-[#93C645] h-full transition-all" style={{ width: `${pct}%` }} />
+                      <div
+                        className={`h-full transition-all ${exhausted ? "bg-red-500/70" : "bg-[#93C645]"}`}
+                        style={{ width: `${unlimited ? 100 : pct}%` }}
+                      />
                     </div>
                   </div>
                 );
               })}
             </div>
-            
-            <div className="grid grid-cols-2 gap-4 mt-5">
-              <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5">
-                <div className="text-xl font-light text-white">{spend.kiwi_tokens_in.toLocaleString()}</div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens in (30d)</div>
-              </div>
-              <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5">
-                <div className="text-xl font-light text-white">{spend.kiwi_tokens_out.toLocaleString()}</div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens out (30d)</div>
-              </div>
-            </div>
           </div>
         )}
-        
+
         {providers.map(p => {
           if (p.kiwi_available) return null;
           return (
@@ -137,9 +161,27 @@ export default function ModelsPage() {
           );
         })}
 
-        {Object.entries(kiwiProvided).sort(([a], [b]) => a.localeCompare(b)).map(([tier, tierModels]) => (
-          <div key={tier} className="mb-6">
-            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">{tier} Tier</h3>
+        {CLASS_ORDER.filter(tier => kiwiProvided[tier]?.length).map(tier => {
+          const tierModels = kiwiProvided[tier];
+          const a = spend?.allowance?.find(x => x.tier === tier);
+          const unlimited = a ? a.granted < 0 : false;
+          const exhausted = !!a && !unlimited && a.remaining <= 0;
+          return (
+          <div key={tier} className={`mb-6 ${exhausted ? "opacity-50" : ""}`}>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                {modelClassLabel(tier)} · {tierModels.length} model{tierModels.length === 1 ? "" : "s"}
+              </h3>
+              {a && (
+                <span className={`text-xs ${exhausted ? "text-red-400" : "text-zinc-500"}`}>
+                  {unlimited
+                    ? "Unlimited"
+                    : exhausted
+                      ? "No tokens left this month"
+                      : formatTokens(a.remaining) + " tokens left"}
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tierModels.map(m => (
                 <div key={m.model_id} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center justify-between gap-3">
@@ -147,14 +189,19 @@ export default function ModelsPage() {
                     <div className="text-sm text-white truncate">{m.display_name}</div>
                     <div className="text-xs text-zinc-500 truncate">{providerLabel(m.provider)}</div>
                   </div>
-                  <button disabled className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors border-blue-500/20 bg-blue-500/10 text-blue-400 cursor-default">
-                    <Check className="w-3.5 h-3.5" /> Included
+                  <button disabled className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border cursor-default ${
+                    exhausted
+                      ? "border-white/5 bg-white/5 text-zinc-500"
+                      : "border-blue-500/20 bg-blue-500/10 text-blue-400"
+                  }`}>
+                    {exhausted ? "Out of tokens" : <><Check className="w-3.5 h-3.5" /> Included</>}
                   </button>
                 </div>
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
         {Object.keys(kiwiProvided).length === 0 && !providers.some(p => !p.kiwi_available) && (
           <p className="text-zinc-500 text-sm">No Kiwi-provided models available.</p>
         )}

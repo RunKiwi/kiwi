@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
+	"github.com/ibreakthecloud/kiwi/ee/entitlement"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
@@ -66,6 +67,13 @@ type SpendResponse struct {
 	ByModel    []SpendBucket     `json:"by_model"`
 	ByProvider []SpendBucket     `json:"by_provider"`
 	Allowance  []AllowanceBucket `json:"allowance"`
+	// Plan is the org's billing plan, so the page can name it without a second
+	// call. Billing plans are "plans"; model price bands are "classes". They
+	// were both called tiers, which made "Free tier" mean two different things.
+	Plan string `json:"plan"`
+	// AllowanceStale reports that usage could not be read, so Allowance is
+	// omitted rather than shown with an understated Used.
+	AllowanceStale bool `json:"allowance_stale,omitempty"`
 }
 
 // AllowanceBucket is one tier's Kiwi token allowance for the current period.
@@ -131,17 +139,46 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 	// being reported: it is a live balance, not a historical total, and dating
 	// it to an arbitrary window would make it read as one.
 	period := store.CurrentPeriod(time.Now())
-	grants, gerr := s.storage.ListGrants(r.Context(), claims.OrgID, period)
-	if gerr != nil {
-		// Degrade to an empty allowance panel rather than failing the page, but
-		// say so: an empty panel and a broken query look identical otherwise.
+	plan, perr := s.storage.GetOrgPlan(r.Context(), claims.OrgID)
+	if perr != nil {
+		log.Printf("[spend] loading plan for org %s: %v", claims.OrgID, perr)
+	}
+	resp.Plan = plan
+
+	// Report every class the plan grants, not only the ones with a row.
+	//
+	// Grants are created lazily on first use, so an org that has not yet run a
+	// Kiwi-funded task has no rows at all — and the page answered "you have no
+	// allowance" when the truth was "you have your full allowance and have used
+	// none of it". The plan is the source of truth for what was granted; the
+	// rows only ever contribute usage.
+	used := map[string]int64{}
+	if grants, gerr := s.storage.ListGrants(r.Context(), claims.OrgID, period); gerr != nil {
+		// Usage is unknown, but the entitlement still is not. Showing the grant
+		// with zero usage overstates what is left, so say nothing rather than
+		// something wrong.
 		log.Printf("[spend] loading grants for org %s: %v", claims.OrgID, gerr)
+		resp.AllowanceStale = true
 	} else {
 		for _, g := range grants {
-			resp.Allowance = append(resp.Allowance, AllowanceBucket{
-				Tier: g.Tier, Period: g.Period,
-				Granted: g.TokensGranted, Used: g.TokensUsed, Remaining: g.Remaining(),
-			})
+			used[g.Tier] = g.TokensUsed
+		}
+	}
+	if !resp.AllowanceStale {
+		for _, g := range entitlement.PlanGrants(plan) {
+			b := AllowanceBucket{
+				Tier: g.Tier, Period: period,
+				Granted: g.Tokens, Used: used[g.Tier],
+			}
+			switch {
+			case g.Tokens == store.Unlimited:
+				b.Remaining = store.Unlimited
+			case b.Used >= g.Tokens:
+				b.Remaining = 0
+			default:
+				b.Remaining = g.Tokens - b.Used
+			}
+			resp.Allowance = append(resp.Allowance, b)
 		}
 	}
 

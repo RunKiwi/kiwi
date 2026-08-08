@@ -24,6 +24,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 	if err := db.AutoMigrate(
 		&auth.Organization{}, &store.Fleet{}, &store.ModelEntry{}, &store.CatalogModel{}, &store.OrgTokenGrant{},
+		&store.Job{}, &store.QueuedTask{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
