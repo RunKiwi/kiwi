@@ -158,6 +158,7 @@ export default function AdminPage() {
             <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
               Usage by Provider
             </h2>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                 <tr>
@@ -182,11 +183,13 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
             <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
               Usage by Model
             </h2>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                 <tr>
@@ -211,6 +214,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -228,6 +232,7 @@ export default function AdminPage() {
       </div>
       
       <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
             <tr>
@@ -295,6 +300,7 @@ export default function AdminPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
