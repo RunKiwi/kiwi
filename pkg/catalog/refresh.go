@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -140,6 +141,7 @@ func (r *Refresher) refresh(ctx context.Context, orgID string, spec provider.Spe
 
 	at := r.clock()
 	seen := make([]string, 0, len(discovered))
+	var writeErr error
 	for i := range discovered {
 		d := discovered[i]
 		// Native list endpoints report ids and little else, so price and
@@ -165,14 +167,32 @@ func (r *Refresher) refresh(ctx context.Context, orgID string, spec provider.Spe
 		m.ApplyDerived(kiwiKeyAvailable)
 
 		if err := r.store.UpsertCatalogModel(ctx, m); err != nil {
-			// One bad row must not abandon the rest of the list.
+			// One bad row must not abandon the rest of the list — the other
+			// models are still worth writing — but it does mean `seen` is now
+			// an incomplete record of what the provider serves.
 			log.Printf("[catalog] upsert %s/%s: %v", orgID, m.ModelID, err)
+			writeErr = err
 			continue
 		}
 		seen = append(seen, d.ID)
 	}
 
-	// The list succeeded, so absence is now meaningful.
+	// Reconcile ONLY if every model we saw was written.
+	//
+	// MarkCatalogMissing treats anything outside `seen` as gone, so a `seen`
+	// shortened by write failures marks live models missing — and when every
+	// write fails it is empty, which retires the provider's entire catalogue.
+	// That is not hypothetical: a migration adding a column was deployed late,
+	// every upsert failed on the missing column, and one refresh flipped 400
+	// models to selectable=false. The picker emptied and the Models page showed
+	// nothing, from a schema drift that should have been inert.
+	//
+	// The lister failing is already handled above. This is the other half:
+	// absence is only evidence when the writes that establish presence worked.
+	if writeErr != nil {
+		return fmt.Errorf("refresh %s for org %q: %d of %d models written, skipping reconcile: %w",
+			spec.ID, orgID, len(seen), len(discovered), writeErr)
+	}
 	return r.store.MarkCatalogMissing(ctx, orgID, spec.ID, seen, at)
 }
 

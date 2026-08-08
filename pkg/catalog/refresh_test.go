@@ -18,6 +18,9 @@ type fakeStore struct {
 	upserted  []store.CatalogModel
 	markCalls int
 	markedSet []string
+	// upsertErr fails writes, standing in for a schema the deployed code is
+	// ahead of — the real case being a migration that had not been run yet.
+	upsertErr error
 }
 
 func newFakeStore() *fakeStore {
@@ -33,6 +36,9 @@ func (f *fakeStore) GetCredentialPlaintext(_ context.Context, _, name string) (s
 }
 
 func (f *fakeStore) UpsertCatalogModel(_ context.Context, m *store.CatalogModel) error {
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
 	f.upserted = append(f.upserted, *m)
 	return nil
 }
@@ -248,4 +254,71 @@ func TestRefreshPlatformSkipsProvidersWithNoKey(t *testing.T) {
 		t.Errorf("refreshed with no platform key configured: %d upserts, %d marks",
 			len(fs.upserted), fs.markCalls)
 	}
+}
+
+// Absence is only evidence when the writes that establish presence worked.
+//
+// MarkCatalogMissing treats anything outside `seen` as retired. If writes fail,
+// `seen` is short — and when they all fail it is empty, which retires the whole
+// catalogue. This happened: a migration adding a column was deployed late,
+// every upsert failed on the missing column, and a single refresh flipped 400
+// live models to selectable=false. The model picker emptied out and the Models
+// page went blank, from schema drift that should have been inert.
+func TestRefreshDoesNotReconcileWhenWritesFail(t *testing.T) {
+	fs := newFakeStore()
+	fs.upsertErr = errors.New(`ERROR: column "description" of relation "model_catalog" does not exist`)
+	r := NewRefresher(fs)
+
+	err := r.refresh(context.Background(), store.GlobalCatalogOrg, openRouterSpec(t), stubLister{models: []DiscoveredModel{
+		{ID: "a", ContextLength: ptrI(128000), Modality: "text->text", SupportsTools: ptrB(true),
+			InputCostPerM: ptrF(0.2), OutputCostPerM: ptrF(1)},
+		{ID: "b", ContextLength: ptrI(128000), Modality: "text->text", SupportsTools: ptrB(true),
+			InputCostPerM: ptrF(0.2), OutputCostPerM: ptrF(1)},
+	}}, "k", true)
+
+	if err == nil {
+		t.Fatal("refresh returned nil when every write failed")
+	}
+	if fs.markCalls != 0 {
+		t.Fatalf("MarkCatalogMissing called %d times after failed writes; "+
+			"an empty seen list retires every model the provider serves", fs.markCalls)
+	}
+}
+
+// A partial failure is just as dangerous: the models that did write survive,
+// the ones that did not would be marked missing despite the provider serving
+// them.
+func TestRefreshDoesNotReconcileOnPartialWriteFailure(t *testing.T) {
+	fs := &partialFailStore{fakeStore: newFakeStore(), failOn: "b"}
+	r := NewRefresher(fs)
+
+	err := r.refresh(context.Background(), store.GlobalCatalogOrg, openRouterSpec(t), stubLister{models: []DiscoveredModel{
+		{ID: "a", ContextLength: ptrI(128000), Modality: "text->text", SupportsTools: ptrB(true),
+			InputCostPerM: ptrF(0.2), OutputCostPerM: ptrF(1)},
+		{ID: "b", ContextLength: ptrI(128000), Modality: "text->text", SupportsTools: ptrB(true),
+			InputCostPerM: ptrF(0.2), OutputCostPerM: ptrF(1)},
+	}}, "k", true)
+
+	if err == nil {
+		t.Fatal("refresh returned nil when one write failed")
+	}
+	// The rest of the list is still written — one bad row must not abandon it.
+	if len(fs.upserted) != 1 {
+		t.Errorf("wrote %d rows, want 1 (the row that could be written)", len(fs.upserted))
+	}
+	if fs.markCalls != 0 {
+		t.Errorf("MarkCatalogMissing called with an incomplete seen list; model %q would be retired while the provider still serves it", "b")
+	}
+}
+
+type partialFailStore struct {
+	*fakeStore
+	failOn string
+}
+
+func (p *partialFailStore) UpsertCatalogModel(ctx context.Context, m *store.CatalogModel) error {
+	if m.ModelID == p.failOn {
+		return errors.New("write failed")
+	}
+	return p.fakeStore.UpsertCatalogModel(ctx, m)
 }
