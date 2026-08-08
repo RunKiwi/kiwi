@@ -80,7 +80,7 @@ jobs:
         run: go build -v -o kiwi ./cmd/kiwi
 
       - name: Build Control Plane Daemon
-        run: go build -v -o kiwid ./cmd/kiwid
+        run: go build -v -o kiwid ./ee/cmd/kiwid
 
       - name: Build BYOC Data Plane Daemon
         run: go build -v -o kiwidaemon ./cmd/kiwidaemon

@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: LicenseRef-Kiwi-BSL-1.1
+// Copyright (c) 2026 RunKiwi. Licensed under the Business Source License 1.1.
+// See ee/LICENSE. This is Control Plane code and is NOT Apache-2.0.
+
+package orchestrator
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"encoding/json"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/ibreakthecloud/kiwi/ee/auth"
+)
+
+func multipartTask(t *testing.T) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("task", "fix")
+	_ = mw.WriteField("file", "a.go")
+	_ = mw.WriteField("test_cmd", "go test ./...")
+	fw, _ := mw.CreateFormFile("codebase", "c.zip")
+	// minimal valid zip
+	var zbuf bytes.Buffer
+	zw := zip.NewWriter(&zbuf)
+	w, _ := zw.Create("a.go")
+	_, _ = w.Write([]byte("package a\n"))
+	_ = zw.Close()
+	_, _ = fw.Write(zbuf.Bytes())
+	_ = mw.Close()
+	return &buf, mw.FormDataContentType()
+}
+
+// testClaims returns a UserClaims context for use in tests.
+func testClaims() context.Context {
+	claims := &auth.UserClaims{
+		UserID: "test-user",
+		Email:  "test@example.com",
+		Name:   "Test User",
+		OrgID:  "test-org",
+		Role:   "member",
+	}
+	return auth.ContextWithClaims(context.Background(), claims)
+}
+
+func postTask(t *testing.T, s *Server, key string) map[string]string {
+	t.Helper()
+	body, ctype := multipartTask(t)
+	req := httptest.NewRequest(http.MethodPost, "/tasks", body)
+	req.Header.Set("Content-Type", ctype)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	// Inject auth claims into the request context.
+	req = req.WithContext(testClaims())
+	rw := httptest.NewRecorder()
+	s.handleTasks(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rw.Code, rw.Body.String())
+	}
+	var out map[string]string
+	_ = json.Unmarshal(rw.Body.Bytes(), &out)
+	return out
+}
+
+func TestIdempotentSubmit(t *testing.T) {
+	db := newTestDB(t)
+	st := store.NewPostgresStore(db)
+	s := &Server{db: db, storage: st}
+	s.launchFn = func(taskID, sandboxPath string, manifest *store.Manifest) {} // no engine
+
+	// Create the mock org so CanRun() passes
+	org := auth.Organization{
+		ID:              "test-org",
+		Name:            "Test Org",
+		ActivationState: "active",
+	}
+	db.Create(&org)
+
+	first := postTask(t, s, "dup-key")
+	second := postTask(t, s, "dup-key")
+	if first["task_id"] != second["task_id"] {
+		t.Errorf("same key must dedupe: %s vs %s", first["task_id"], second["task_id"])
+	}
+
+	other := postTask(t, s, "different-key")
+	if other["task_id"] == first["task_id"] {
+		t.Errorf("different key must create a new task")
+	}
+
+	var count int64
+	db.Model(&TaskState{}).Count(&count)
+	if count != 2 {
+		t.Errorf("expected 2 rows (dup-key once + different-key), got %d", count)
+	}
+}
