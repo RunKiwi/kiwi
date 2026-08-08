@@ -40,7 +40,7 @@ you ──▶ Control Plane ──lease──▶ Data Plane daemon ──▶ you
         plan · queue · seal      loop · sandbox · git
 ```
 
-- **Control Plane** (`cmd/kiwid`, `pkg/orchestrator`): API, auth, the planner that turns one task into a DAG of `worker-spec` payloads, a Postgres **lease queue** that releases a worker only once its dependencies have succeeded, and sealed credential storage. Runs as split roles (`-role api | orchestrator | migrate | all`). It never executes your code. → [Control Plane](https://docs.runkiwi.dev/control-plane), [Planner](https://docs.runkiwi.dev/planner), [DAGs](https://docs.runkiwi.dev/dags)
+- **Control Plane** (`ee/cmd/kiwid`, `ee/orchestrator` — BSL, see [License](#license)): API, auth, the planner that turns one task into a DAG of `worker-spec` payloads, a Postgres **lease queue** that releases a worker only once its dependencies have succeeded, and sealed credential storage. Runs as split roles (`-role api | orchestrator | migrate | all`). It never executes your code. → [Control Plane](https://docs.runkiwi.dev/control-plane), [Planner](https://docs.runkiwi.dev/planner), [DAGs](https://docs.runkiwi.dev/dags)
 - **Data Plane** (`cmd/kiwidaemon`, `pkg/daemon`): a pull-model daemon that polls over HTTPS, opens its org's credentials in memory, provisions a workspace with `git worktree` from a cached bare clone, runs the loop, and opens the PR. Outbound connections only, so it sits inside a customer VPC with no inbound firewall holes. → [Data Plane](https://docs.runkiwi.dev/data-plane)
 - **Two execution loops.** **File Loop** is the default: an Actor proposes a patch, a Critic reviews it before anything reaches disk, and your test command verifies. **Session mode** (`mode: session`) is for open-ended work: an Architect sets each round's objective and reviews the diff while an Implementer works the repo with real tools. → [Session mode](https://docs.runkiwi.dev/session-mode)
 - **The task is the goal; the test is a guard.** Your description is what Kiwi tries to achieve. The test command proves the change broke nothing, and is never the definition of done. A green suite is no reason to skip the work, a run that changes no code is reported as a failure, and while the suite is red the agent may not edit the failing test.
@@ -93,7 +93,7 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 
 ```bash
 go build -ldflags="-linkmode=external" -o kiwi        cmd/kiwi/main.go        && codesign -s - -f ./kiwi         # CLI
-go build -ldflags="-linkmode=external" -o kiwid       cmd/kiwid/main.go       && codesign -s - -f ./kiwid        # Control Plane
+go build -ldflags="-linkmode=external" -o kiwid       ee/cmd/kiwid/main.go       && codesign -s - -f ./kiwid        # Control Plane
 go build -ldflags="-linkmode=external" -o kiwidaemon  cmd/kiwidaemon/main.go  && codesign -s - -f ./kiwidaemon   # Data Plane daemon
 ```
 
@@ -268,4 +268,15 @@ Every PR modifying the codebase must keep this README current. If no update is n
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE). Copyright © 2026 RunKiwi.
+Kiwi is open core. Two licences, split along one line: **the Data Plane and the engine are Apache-2.0; the multi-tenant Control Plane is not.**
+
+| | Licence | What it covers |
+| --- | --- | --- |
+| Everything outside `ee/` | [Apache 2.0](LICENSE) | `kiwidaemon`, `kiwi`, `kiwi-agent`, the Actor–Critic loop, the sandbox, the provider clients, the execution record, model discovery, the store |
+| `ee/` | [BSL 1.1](ee/LICENSE) | The Control Plane: `kiwid`, orchestration, planning, orgs and auth, billing, entitlements, provisioning, fleet control |
+
+**If you run Kiwi in your own cloud, the part you run is Apache-2.0.** `cmd/kiwidaemon` — the daemon that clones your repo, runs the loop, and executes your tests — depends on nothing under `ee/`. That is enforced by a test (`pkg/licensing_boundary_test.go`), not by convention, so it cannot quietly stop being true.
+
+The BSL permits reading, modifying, and running the Control Plane, including in production for your own organisation's work. What it does not permit is offering it to third parties as a hosted service. Each version converts to Apache-2.0 four years after publication.
+
+Copyright © 2026 RunKiwi. Contributions are accepted under the [DCO](CONTRIBUTING.md).
