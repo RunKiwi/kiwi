@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { client, type AdminStats, type AdminOrg } from "@/lib/api";
-import { ShieldAlert, Loader2 } from "lucide-react";
+import { ShieldAlert, Loader2, Plus, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { LoadingState } from "@/components/LoadingState";
 
 export default function AdminPage() {
@@ -84,6 +85,24 @@ export default function AdminPage() {
     }
   };
 
+  const createOrg = async () => {
+    const name = prompt("Enter new organization name:");
+    if (!name) return;
+    
+    setBusy("create_org");
+    try {
+      const org = await client.createAdminOrg(name);
+      setOrgs([org, ...orgs]);
+      if (stats) {
+        setStats({ ...stats, total_orgs: stats.total_orgs + 1 });
+      }
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) {
     return <LoadingState label="Loading admin…" className="h-full" />;
   }
@@ -133,7 +152,18 @@ export default function AdminPage() {
         </div>
       )}
 
-      <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Organizations</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Organizations</h2>
+        <button
+          onClick={createOrg}
+          disabled={!!busy}
+          className="flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-3 py-1.5 transition-colors"
+        >
+          {busy === "create_org" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+          Create Organization
+        </button>
+      </div>
+      
       <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
         <table className="w-full text-sm text-left">
           <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
@@ -191,6 +221,12 @@ export default function AdminPage() {
                   >
                     {busy === `${org.id}-activate` || busy === `${org.id}-suspend` ? <Loader2 className="w-3 h-3 animate-spin inline" /> : org.activation_state === 'active' ? 'Suspend' : 'Activate'}
                   </button>
+                  <Link
+                    href={`/admin/orgs/${org.id}`}
+                    className="inline-flex items-center gap-1 text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded px-2 py-1 transition-colors"
+                  >
+                    Manage <ArrowRight className="w-3 h-3" />
+                  </Link>
                 </td>
               </tr>
             ))}

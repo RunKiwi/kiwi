@@ -376,6 +376,36 @@ export interface AdminOrg {
   created_at: string;
 }
 
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  org_id: string;
+  role: string;
+  created_at: string;
+}
+
+export interface AdminAuditLog {
+  id: number;
+  org_id: string;
+  user_id: string;
+  user_email: string;
+  action: string;
+  resource: string;
+  resource_id: string;
+  details: string;
+  client_ip: string;
+  created_at: string;
+}
+
+export interface AdminProviderConfig {
+  org_id: string;
+  provider_name: string;
+  actor_model: string;
+  critic_model: string;
+  api_key?: string;
+}
+
 const getBaseUrl = () => {
   return process.env.NEXT_PUBLIC_KIWI_API_URL || "http://localhost:8080";
 };
@@ -460,10 +490,16 @@ export const client = {
   // Admin APIs
   getAdminStats: () => fetchApi<AdminStats>("/admin/stats"),
   listAdminOrgs: () => fetchApi<AdminOrg[]>("/admin/orgs"),
+  createAdminOrg: (name: string) => fetchApi<AdminOrg>("/admin/orgs", { method: "POST", body: JSON.stringify({ name }) }),
   setOrgPlan: (orgId: string, plan: string) => fetchApi<void>(`/admin/orgs/${orgId}/plan`, { method: "POST", body: JSON.stringify({ plan }) }),
   grantOrgMinutes: (orgId: string, agent_minutes: number) => fetchApi<void>(`/admin/orgs/${orgId}/grant`, { method: "POST", body: JSON.stringify({ agent_minutes }) }),
   activateOrg: (orgId: string) => fetchApi<void>(`/admin/orgs/${orgId}/activate`, { method: "POST" }),
   suspendOrg: (orgId: string) => fetchApi<void>(`/admin/orgs/${orgId}/suspend`, { method: "POST" }),
+  listAdminOrgUsers: (orgId: string) => fetchApi<AdminUser[]>(`/admin/orgs/${orgId}/users`),
+  createAdminOrgUser: (orgId: string, email: string, name: string, role: string) => fetchApi<AdminUser>(`/admin/orgs/${orgId}/users`, { method: "POST", body: JSON.stringify({ email, name, role }) }),
+  getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
+  getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
+  setAdminOrgProviderConfig: (orgId: string, config: Partial<AdminProviderConfig>) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`, { method: "PUT", body: JSON.stringify(config) }),
 
   // Starts a Stripe Checkout Session for the Pro upgrade and returns the hosted
   // checkout URL to redirect to. 503 when billing isn't configured.
