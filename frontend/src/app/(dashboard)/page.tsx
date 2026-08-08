@@ -6,7 +6,7 @@ import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGi
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
-import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, type Fleet, type ModelEntry, type CatalogModel, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
+import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, modelClassLabel, formatTokens, MODEL_CLASS_BLURB, type Fleet, type ModelEntry, type CatalogModel, type AllowanceBucket, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
@@ -130,6 +130,11 @@ function CommandCenterContent() {
   // row carries the provider the catalog resolved, so the picker no longer has
   // to guess one from the model id.
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  // The picker needs to say how much of each class's monthly allowance is left,
+  // which is the one fact that decides whether a model is actually usable right
+  // now. It lives on the spend endpoint because that is where allowances are
+  // computed; duplicating that maths here would let the two disagree.
+  const [allowance, setAllowance] = useState<AllowanceBucket[]>([]);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [u, setU] = useState<UsageResponse | null>(null);
   const [integrations, setIntegrations] = useState<Integration[] | null>(null);
@@ -188,6 +193,13 @@ function CommandCenterContent() {
     client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
     client.listModels().then(r => setCustomModels(r.models)).catch(() => {});
     client.listCatalogModels().then(r => setCatalogModels(r.models)).catch(() => {});
+    {
+      const to = new Date();
+      const from = new Date(to.getTime() - 30 * 864e5);
+      client.getSpend(from.toISOString(), to.toISOString())
+        .then(r => setAllowance(r.allowance ?? []))
+        .catch(() => {});
+    }
     client.getUsage().then(setU).catch(() => setU(null));
     // GitHub repos are best-effort — only available once the integration is connected.
     client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
@@ -324,6 +336,94 @@ function CommandCenterContent() {
   // cannot reach would fail at submit, after the user had already committed to
   // the task.
   const plannerOptions = workerOptions;
+
+  // A model id alone ("moonshotai/kimi-k2") says nothing about what it costs,
+  // what it is for, or whether there is any budget left for it. The picker
+  // carries the class as a trailing hint on every row, and a detail panel for
+  // whichever row is highlighted.
+  const catalogById = useMemo(() => {
+    const m = new Map<string, CatalogModel>();
+    for (const c of catalogModels) m.set(c.model_id, c);
+    return m;
+  }, [catalogModels]);
+
+  const allowanceByClass = useMemo(() => {
+    const m = new Map<string, AllowanceBucket>();
+    for (const a of allowance) m.set(a.tier, a);
+    return m;
+  }, [allowance]);
+
+  const modelOption = (id: string) => {
+    const c = catalogById.get(id);
+    return {
+      value: id,
+      label: id,
+      // BYOK models draw on no Kiwi allowance, so they are marked as running on
+      // the org's own key rather than given a class they do not belong to.
+      hint: c ? (c.kiwi_provided ? modelClassLabel(c.tier) : "your key") : undefined,
+    };
+  };
+
+  const renderModelDetail = (o: { value: string }) => {
+    const c = catalogById.get(o.value);
+    if (!c) {
+      return (
+        <div className="px-2.5 py-1 text-[11px] text-zinc-500">
+          Not in the catalog — it will run if one of your connected keys serves it.
+        </div>
+      );
+    }
+    const a = c.kiwi_provided ? allowanceByClass.get(c.tier) : undefined;
+    const unlimited = a ? a.granted < 0 : false;
+    const exhausted = !!a && !unlimited && a.remaining <= 0;
+    const price =
+      c.input_cost_per_m == null || c.output_cost_per_m == null
+        ? null
+        : c.input_cost_per_m === 0 && c.output_cost_per_m === 0
+          ? "free"
+          : `$${c.input_cost_per_m}/M in · $${c.output_cost_per_m}/M out`;
+
+    return (
+      <div className="px-2.5 py-1.5">
+        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+          {c.kiwi_provided ? (
+            <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+              {modelClassLabel(c.tier)}
+            </span>
+          ) : (
+            <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
+              Your key
+            </span>
+          )}
+          {a && (
+            <span className={`text-[11px] ${exhausted ? "text-red-400" : "text-zinc-400"}`}>
+              {unlimited
+                ? "Unlimited"
+                : exhausted
+                  ? "No tokens left this month"
+                  : `${formatTokens(a.remaining)} tokens left this month`}
+            </span>
+          )}
+          {!c.kiwi_provided && (
+            <span className="text-[11px] text-zinc-500">Billed to you · no Kiwi allowance used</span>
+          )}
+        </div>
+
+        {c.description ? (
+          <p className="text-[11px] leading-relaxed text-zinc-400 mb-1.5">{c.description}</p>
+        ) : c.kiwi_provided ? (
+          <p className="text-[11px] leading-relaxed text-zinc-500 mb-1.5">{MODEL_CLASS_BLURB[c.tier]}</p>
+        ) : null}
+
+        <div className="flex items-center gap-3 text-[11px] text-zinc-500 tabular-nums flex-wrap">
+          {price && <span>{price}</span>}
+          {c.context_length != null && <span>{formatTokens(c.context_length)} context</span>}
+          <span className="text-zinc-600">{c.provider}</span>
+        </div>
+      </div>
+    );
+  };
+
 
   const handleSubmit = async () => {
     setSubmitError("");
@@ -583,7 +683,8 @@ function CommandCenterContent() {
               variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
               icon={<span className="pdot" style={{ background: "#93C645" }} />}
               value={plannerModel} onChange={setPlannerModel}
-              options={plannerOptions.map(m => ({ value: m, label: m }))}
+              options={plannerOptions.map(modelOption)}
+              renderDetail={renderModelDetail}
             />
           )}
 
@@ -592,7 +693,8 @@ function CommandCenterContent() {
             variant="chip" searchable label="Work" ariaLabel="Worker model"
             icon={<span className="pdot" style={{ background: "#E8A153" }} />}
             value={workerModel} onChange={setWorkerModel}
-            options={workerOptions.map(m => ({ value: m, label: m }))}
+            options={workerOptions.map(modelOption)}
+            renderDetail={renderModelDetail}
           />
 
           {/* Advanced toggle */}
@@ -699,7 +801,8 @@ function CommandCenterContent() {
                 <label className={labelClass}>Architect model <span className="text-zinc-600 normal-case font-normal">(plans &amp; reviews)</span></label>
                 <Select
                   ariaLabel="Architect model" searchable value={architectModel} onChange={setArchitectModel}
-                  options={[{ value: "", label: `Same as worker (${workerModel})` }, ...workerOptions.map(m => ({ value: m, label: m }))]}
+                  options={[{ value: "", label: `Same as worker (${workerModel})` }, ...workerOptions.map(modelOption)]}
+                  renderDetail={renderModelDetail}
                 />
               </div>
             )}

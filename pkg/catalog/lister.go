@@ -26,6 +26,7 @@ import (
 type DiscoveredModel struct {
 	ID             string
 	DisplayName    string
+	Description    string
 	InputCostPerM  *float64
 	OutputCostPerM *float64
 	ContextLength  *int

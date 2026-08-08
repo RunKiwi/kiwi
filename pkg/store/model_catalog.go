@@ -26,10 +26,13 @@ const (
 // from zero. A model with a NULL price is not free — it is unpriceable, which
 // is why it is never funded by a Kiwi key.
 type CatalogModel struct {
-	OrgID          string     `gorm:"primaryKey;column:org_id" json:"org_id"`
-	ModelID        string     `gorm:"primaryKey;column:model_id" json:"model_id"`
-	Provider       string     `gorm:"not null" json:"provider"`
-	DisplayName    string     `gorm:"not null;default:''" json:"display_name"`
+	OrgID       string `gorm:"primaryKey;column:org_id" json:"org_id"`
+	ModelID     string `gorm:"primaryKey;column:model_id" json:"model_id"`
+	Provider    string `gorm:"not null" json:"provider"`
+	DisplayName string `gorm:"not null;default:''" json:"display_name"`
+	// Description is the provider's own summary of what the model is for,
+	// truncated at store time. Empty for providers that do not supply one.
+	Description    string     `gorm:"not null;default:''" json:"description"`
 	InputCostPerM  *float64   `json:"input_cost_per_m"`
 	OutputCostPerM *float64   `json:"output_cost_per_m"`
 	ContextLength  *int       `json:"context_length"`
@@ -53,7 +56,7 @@ func (s *PostgresStore) UpsertCatalogModel(ctx context.Context, m *CatalogModel)
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "org_id"}, {Name: "model_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"provider", "display_name", "input_cost_per_m", "output_cost_per_m",
+			"provider", "display_name", "description", "input_cost_per_m", "output_cost_per_m",
 			"context_length", "supports_tools", "modality", "tier",
 			"kiwi_provided", "selectable", "source", "last_seen_at", "missing_since",
 		}),
