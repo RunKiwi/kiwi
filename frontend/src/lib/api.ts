@@ -294,6 +294,49 @@ export interface SpendResponse {
   by_model: SpendBucket[];
   by_provider: SpendBucket[];
   allowance?: AllowanceBucket[];
+  plan?: string;
+  allowance_stale?: boolean;
+}
+
+// Billing plans are "plans"; model price bands are "classes". They used to
+// share the word "tier", which made "Free tier" mean either the plan a customer
+// is on or the band a model sits in — and on the Models page both appeared on
+// screen at once. The wire format still says `tier`; only the label changes.
+export const MODEL_CLASS_LABEL: Record<string, string> = {
+  free: "No-cost",
+  economy: "Economy",
+  frontier: "Frontier",
+  unknown: "Unpriced",
+};
+
+// Cheapest first, so the biggest allowance leads and the scarce one reads as
+// the exception. Exported so the Models and Spend pages cannot disagree about
+// the order — they show the same three bars.
+export const CLASS_ORDER = ["free", "economy", "frontier"];
+
+export function modelClassLabel(tier: string): string {
+  return MODEL_CLASS_LABEL[tier] ?? tier;
+}
+
+// What each class is for, in one line, so the wildly different allowances
+// (10M vs 50k tokens) read as deliberate rather than arbitrary.
+export const MODEL_CLASS_BLURB: Record<string, string> = {
+  free: "Models that cost nothing to run.",
+  economy: "Cheap models — the default for most work.",
+  frontier: "The most capable models, and the most expensive.",
+  unknown: "Price unknown, so Kiwi cannot fund these.",
+};
+
+export function planLabel(plan: string): string {
+  if (!plan) return "";
+  return plan.charAt(0).toUpperCase() + plan.slice(1) + " plan";
+}
+
+export function formatTokens(n: number): string {
+  if (n < 0) return "Unlimited";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1) + "k";
+  return String(n);
 }
 
 export interface AllowanceBucket {

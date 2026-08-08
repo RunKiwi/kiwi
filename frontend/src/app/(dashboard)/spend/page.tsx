@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, CartesianGrid, Cell,
 } from "recharts";
 import { AlertCircle, Table2, BarChart3, Gauge } from "lucide-react";
-import { client, type SpendResponse } from "@/lib/api";
+import { client, modelClassLabel, planLabel, formatTokens, CLASS_ORDER, type SpendResponse } from "@/lib/api";
 import { LoadingState } from "@/components/LoadingState";
 
 // Ranges the page offers. Values are days; "month" resolves to the 1st.
@@ -178,46 +178,94 @@ function SpendContent() {
       {header}
       {rangeBar}
 
-      {data.allowance && data.allowance.length > 0 && (
-        <div className="glass-panel p-6 mb-4">
-          <h2 className="text-sm font-medium text-white mb-4">Kiwi Tokens</h2>
-          <p className="text-xs text-zinc-400 mb-6 max-w-2xl">
-            Tokens provided directly by Kiwi under your plan. Work metered here is fully managed
-            and incurs no usage charges on your BYOK providers.
-          </p>
-          <div className="flex flex-col gap-6">
-            {data.allowance.map((a, i) => {
-              const pct = a.granted === -1 ? 100 : Math.min(100, (a.used / a.granted) * 100);
-              return (
-                <div key={i}>
-                  <div className="flex justify-between items-baseline mb-2">
-                    <span className="text-sm font-medium text-zinc-300 capitalize">Current {a.period} Allowance</span>
-                    <span className="text-sm text-zinc-400">
-                      <span className="text-white font-medium">{a.used.toLocaleString()}</span>
-                      {" / "}
-                      {a.granted === -1 ? "Unlimited" : a.granted.toLocaleString()} used
-                    </span>
-                  </div>
-                  <div className="w-full bg-zinc-800/50 rounded-full h-2 overflow-hidden border border-white/5">
-                    <div className="bg-[#93C645] h-full transition-all" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
+      {/* Two ledgers, side by side. They are different currencies on purpose:
+          the left is money the org owes, the right is a quota Kiwi funds. A
+          single combined figure would either bill them for work they were not
+          charged for, or hide the work Kiwi covered. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="glass-panel p-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="text-sm font-medium text-white">Your keys</h2>
+            <span className="text-[10px] text-zinc-600 uppercase tracking-widest">Billed to you</span>
           </div>
-          
-          <div className="grid grid-cols-2 gap-4 mt-6">
-            <div className="p-4 rounded-lg bg-zinc-900/50 border border-white/5">
-              <div className="text-2xl font-light text-white">{data.kiwi_tokens_in.toLocaleString()}</div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens in (this range)</div>
+          <p className="text-xs text-zinc-500 mb-5">
+            Work run on provider keys you connected. This is the only figure you are charged for,
+            and it lands on your own provider invoice.
+          </p>
+          <div className="text-4xl font-light text-white mb-1">
+            ${data.cost_usd.toFixed(2)}
+          </div>
+          <div className="text-xs text-zinc-500 mb-5">
+            planner ${data.planner_usd.toFixed(2)} · worker ${data.worker_usd.toFixed(2)}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5">
+              <div className="text-lg font-light text-white">{formatTokens(data.tokens_in)}</div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens in</div>
             </div>
-            <div className="p-4 rounded-lg bg-zinc-900/50 border border-white/5">
-              <div className="text-2xl font-light text-white">{data.kiwi_tokens_out.toLocaleString()}</div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens out (this range)</div>
+            <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5">
+              <div className="text-lg font-light text-white">{formatTokens(data.tokens_out)}</div>
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Tokens out</div>
             </div>
           </div>
         </div>
-      )}
+
+        <div className="glass-panel p-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="text-sm font-medium text-white">Kiwi-provided</h2>
+            <span className="text-[10px] text-zinc-600 uppercase tracking-widest">
+              {data.plan ? planLabel(data.plan) : "Covered by Kiwi"}
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 mb-5">
+            Work run on Kiwi&apos;s keys. Costs you nothing; it draws on a monthly token allowance
+            that resets on the 1st.
+          </p>
+
+          {data.allowance_stale ? (
+            <div className="text-sm text-amber-400/90">
+              Usage could not be read just now, so balances are hidden rather than shown understated.
+            </div>
+          ) : data.allowance && data.allowance.length > 0 ? (
+            <div className="flex flex-col gap-4">
+              {CLASS_ORDER.filter(t => data.allowance!.some(a => a.tier === t)).map(t => {
+                const a = data.allowance!.find(x => x.tier === t)!;
+                const unlimited = a.granted < 0;
+                const exhausted = !unlimited && a.remaining <= 0;
+                const pct = unlimited ? 100 : Math.min(100, (a.used / Math.max(a.granted, 1)) * 100);
+                return (
+                  <div key={t}>
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm text-zinc-200">{modelClassLabel(t)}</span>
+                      <span className={`text-xs ${exhausted ? "text-red-400" : "text-zinc-400"}`}>
+                        {unlimited ? "Unlimited" : (
+                          <>
+                            <span className="text-white">{formatTokens(a.remaining)}</span> left
+                            <span className="text-zinc-600"> of {formatTokens(a.granted)}</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    <div className="w-full bg-zinc-800/50 rounded-full h-1.5 overflow-hidden border border-white/5">
+                      <div
+                        className={`h-full transition-all ${exhausted ? "bg-red-500/70" : "bg-[#93C645]"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="text-xs text-zinc-500 pt-1">
+                {formatTokens(data.kiwi_tokens_in)} in · {formatTokens(data.kiwi_tokens_out)} out in this range
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-zinc-500">
+              No Kiwi-provided models are available on this deployment yet.
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Hero. When coverage is partial the figure is a floor, and says so —
           a total that silently excludes unmeasured jobs is a wrong number. */}
