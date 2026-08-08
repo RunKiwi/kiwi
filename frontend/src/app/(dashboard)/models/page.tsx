@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { client, RECOMMENDED_MODELS, providerLabel, modelClassLabel, planLabel, formatTokens, MODEL_CLASS_BLURB, CLASS_ORDER, type ModelEntry, type RecommendedModel, type ProviderInfo, type CatalogModel, type SpendResponse } from "@/lib/api";
-import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles, Box } from "lucide-react";
+import { Cpu, Plus, Trash2, Loader2, AlertCircle, Check, Sparkles, Box, ChevronRight } from "lucide-react";
 import { Select } from "@/components/Select";
 import Link from "next/link";
 
@@ -14,6 +14,16 @@ function nextResetLabel(period: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// Price per million tokens, which is the thing that actually distinguishes
+// these models from each other and explains why the allowances differ so much.
+function priceLabel(m: CatalogModel): string {
+  const i = m.input_cost_per_m;
+  const o = m.output_cost_per_m;
+  if (i == null || o == null) return "price unknown";
+  if (i === 0 && o === 0) return "free";
+  return `$${i}/M in · $${o}/M out`;
+}
+
 export default function ModelsPage() {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -22,6 +32,7 @@ export default function ModelsPage() {
   const [name, setName] = useState("");
   const [provider, setProvider] = useState("");
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -161,45 +172,69 @@ export default function ModelsPage() {
           );
         })}
 
+        {/* Collapsed by default. Rendering 105 cards flat, each stamped
+            "Included", is what made a Free-plan account look like it had
+            unlimited access to everything: the badge was the loudest thing on
+            screen and it said yes 105 times. What actually differs between
+            these models is what they cost you out of a fixed budget, so that
+            is what the closed state shows. */}
         {CLASS_ORDER.filter(tier => kiwiProvided[tier]?.length).map(tier => {
           const tierModels = kiwiProvided[tier];
           const a = spend?.allowance?.find(x => x.tier === tier);
           const unlimited = a ? a.granted < 0 : false;
           const exhausted = !!a && !unlimited && a.remaining <= 0;
+          const open = !!expanded[tier];
           return (
-          <div key={tier} className={`mb-6 ${exhausted ? "opacity-50" : ""}`}>
-            <div className="flex items-baseline justify-between mb-2">
-              <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
-                {modelClassLabel(tier)} · {tierModels.length} model{tierModels.length === 1 ? "" : "s"}
-              </h3>
-              {a && (
-                <span className={`text-xs ${exhausted ? "text-red-400" : "text-zinc-500"}`}>
-                  {unlimited
-                    ? "Unlimited"
-                    : exhausted
-                      ? "No tokens left this month"
-                      : formatTokens(a.remaining) + " tokens left"}
-                </span>
+            <div key={tier} className="mb-3 glass-panel border border-white/10 rounded-xl overflow-hidden">
+              <button
+                onClick={() => setExpanded(e => ({ ...e, [tier]: !e[tier] }))}
+                aria-expanded={open}
+                className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.03] transition-colors"
+              >
+                <ChevronRight className={`w-4 h-4 shrink-0 text-zinc-500 transition-transform ${open ? "rotate-90" : ""}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-white">{modelClassLabel(tier)}</span>
+                    <span className="text-xs text-zinc-500">{tierModels.length} models</span>
+                  </div>
+                  <div className="text-[11px] text-zinc-600 mt-0.5">{MODEL_CLASS_BLURB[tier]}</div>
+                </div>
+                {a && (
+                  <div className="shrink-0 text-right">
+                    <div className={`text-sm ${exhausted ? "text-red-400" : "text-white"}`}>
+                      {unlimited ? "Unlimited" : exhausted ? "0 left" : formatTokens(a.remaining) + " left"}
+                    </div>
+                    {!unlimited && (
+                      <div className="text-[10px] text-zinc-600 uppercase tracking-widest">
+                        of {formatTokens(a.granted)} / mo
+                      </div>
+                    )}
+                  </div>
+                )}
+              </button>
+
+              {open && (
+                <div className="border-t border-white/5 divide-y divide-white/5">
+                  {exhausted && (
+                    <div className="px-4 py-2.5 text-xs text-red-400/90 bg-red-500/5">
+                      This month&apos;s allowance is spent. These models will run again next month, or
+                      immediately on your own provider key.
+                    </div>
+                  )}
+                  {tierModels.map(m => (
+                    <div key={m.model_id} className="px-4 py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm text-zinc-200 break-words">{m.display_name}</div>
+                        <div className="text-[11px] text-zinc-600">{providerLabel(m.provider)}</div>
+                      </div>
+                      <div className="shrink-0 text-right text-[11px] text-zinc-500 tabular-nums">
+                        {priceLabel(m)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {tierModels.map(m => (
-                <div key={m.model_id} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm text-white truncate">{m.display_name}</div>
-                    <div className="text-xs text-zinc-500 truncate">{providerLabel(m.provider)}</div>
-                  </div>
-                  <button disabled className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border cursor-default ${
-                    exhausted
-                      ? "border-white/5 bg-white/5 text-zinc-500"
-                      : "border-blue-500/20 bg-blue-500/10 text-blue-400"
-                  }`}>
-                    {exhausted ? "Out of tokens" : <><Check className="w-3.5 h-3.5" /> Included</>}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
           );
         })}
         {Object.keys(kiwiProvided).length === 0 && !providers.some(p => !p.kiwi_available) && (
