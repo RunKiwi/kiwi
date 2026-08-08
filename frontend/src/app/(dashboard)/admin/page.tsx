@@ -108,7 +108,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-white">
+    <div className="p-8 max-w-7xl mx-auto min-h-full flex flex-col text-white">
       <div className="mb-8">
         <h1 className="text-3xl font-light tracking-tight mb-2 flex items-center gap-2">
           <ShieldAlert className="w-8 h-8 text-red-500" />

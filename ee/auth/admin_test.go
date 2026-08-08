@@ -267,3 +267,118 @@ func TestAdminStats_ModelUsage(t *testing.T) {
 		t.Errorf("expected openai in provider_usage, got %+v", resp.ProviderUsage)
 	}
 }
+
+func TestAdminOrgModelUsage(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&store.Job{}, &store.QueuedTask{}); err != nil {
+		t.Fatalf("migrate store models: %v", err)
+	}
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	db.Create(&Organization{ID: "org-a", Name: "Org A"})
+	db.Create(&Organization{ID: "org-b", Name: "Org B"})
+	db.Create(&User{ID: "u1", OrgID: "org-a", Email: "alice@example.com", Name: "Alice"})
+	db.Create(&User{ID: "u2", OrgID: "org-a", Email: "bob@example.com", Name: "Bob"})
+
+	// Alice's job: one succeeded, one failed task.
+	db.Create(&store.Job{
+		ID: "job-1", OrgID: "org-a", UserID: "u1", Status: "SUCCEEDED",
+		Inputs:  map[string]interface{}{"planner_model": "claude-sonnet-4-5"},
+		Funding: store.FundingBYOK, PlannerCostUSD: 1.0,
+	})
+	db.Create(&store.QueuedTask{
+		ID: "task-1", OrgID: "org-a", JobID: "job-1", Status: "SUCCEEDED",
+		Spec: map[string]interface{}{"model": "claude-sonnet-4-5"}, Funding: store.FundingBYOK, CostUSD: 0.5,
+	})
+	db.Create(&store.QueuedTask{
+		ID: "task-2", OrgID: "org-a", JobID: "job-1", Status: "FAILED",
+		Spec: map[string]interface{}{"model": "claude-sonnet-4-5"}, Funding: store.FundingBYOK, CostUSD: 0.2,
+	})
+
+	// Bob's job in the same org, Kiwi-funded.
+	db.Create(&store.Job{
+		ID: "job-2", OrgID: "org-a", UserID: "u2", Status: "SUCCEEDED",
+		Inputs: map[string]interface{}{"planner_model": "gpt-5"}, Funding: store.FundingKiwi, PlannerCostUSD: 0.4,
+	})
+	db.Create(&store.QueuedTask{
+		ID: "task-3", OrgID: "org-a", JobID: "job-2", Status: "SUCCEEDED",
+		Spec: map[string]interface{}{"model": "gpt-5"}, Funding: store.FundingKiwi, CostUSD: 0.6,
+	})
+
+	// A job in the OTHER org — must not leak into org-a's numbers.
+	db.Create(&store.Job{
+		ID: "job-3", OrgID: "org-b", UserID: "u3", Status: "SUCCEEDED",
+		Inputs: map[string]interface{}{"planner_model": "claude-sonnet-4-5"}, Funding: store.FundingBYOK, PlannerCostUSD: 99,
+	})
+	db.Create(&store.QueuedTask{
+		ID: "task-4", OrgID: "org-b", JobID: "job-3", Status: "SUCCEEDED",
+		Spec: map[string]interface{}{"model": "claude-sonnet-4-5"}, Funding: store.FundingBYOK, CostUSD: 99,
+	})
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+	req := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-a/model_usage", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		ModelUsage    []AdminUsageRow     `json:"model_usage"`
+		ProviderUsage []AdminUsageRow     `json:"provider_usage"`
+		TasksByStatus map[string]int64    `json:"tasks_by_status"`
+		PerUser       []AdminUserUsageRow `json:"per_user"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Scoping: org-b's $99 job must not appear anywhere in org-a's response.
+	for _, row := range resp.ModelUsage {
+		if row.CostUSD >= 99 {
+			t.Fatalf("org-b's cost leaked into org-a's model_usage: %+v", row)
+		}
+	}
+
+	if got, want := resp.TasksByStatus["SUCCEEDED"], int64(2); got != want {
+		t.Errorf("expected 2 succeeded tasks, got %d", got)
+	}
+	if got, want := resp.TasksByStatus["FAILED"], int64(1); got != want {
+		t.Errorf("expected 1 failed task, got %d", got)
+	}
+
+	byUser := map[string]AdminUserUsageRow{}
+	for _, row := range resp.PerUser {
+		byUser[row.UserID] = row
+	}
+
+	alice, ok := byUser["u1"]
+	if !ok {
+		t.Fatalf("expected u1 (alice) in per_user, got %+v", resp.PerUser)
+	}
+	if alice.Email != "alice@example.com" {
+		t.Errorf("expected alice's email resolved, got %q", alice.Email)
+	}
+	if alice.TaskCount != 2 || alice.Succeeded != 1 || alice.Failed != 1 {
+		t.Errorf("expected alice: 2 tasks (1 succeeded, 1 failed), got %+v", alice)
+	}
+	if got, want := alice.CostUSD, 1.7; got != want { // 1.0 planner + 0.5 + 0.2 worker
+		t.Errorf("expected alice cost %.2f, got %.2f", want, got)
+	}
+	if alice.KiwiCostUSD != 0 {
+		t.Errorf("expected alice's cost to be entirely byok, got kiwi=%.2f", alice.KiwiCostUSD)
+	}
+
+	bob, ok := byUser["u2"]
+	if !ok {
+		t.Fatalf("expected u2 (bob) in per_user, got %+v", resp.PerUser)
+	}
+	if bob.TaskCount != 1 || bob.Succeeded != 1 {
+		t.Errorf("expected bob: 1 succeeded task, got %+v", bob)
+	}
+	if got, want := bob.KiwiCostUSD, 1.0; got != want { // 0.4 planner + 0.6 worker, all kiwi-funded
+		t.Errorf("expected bob's kiwi cost %.2f, got %.2f", want, got)
+	}
+}

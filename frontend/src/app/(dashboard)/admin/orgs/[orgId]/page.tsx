@@ -2,8 +2,8 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig } from "@/lib/api";
-import { Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus, BarChart3 } from "lucide-react";
 import { LoadingState } from "@/components/LoadingState";
 import Link from "next/link";
 
@@ -15,8 +15,9 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
   const [org, setOrg] = useState<AdminOrg | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"users" | "audit" | "provider">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider">("users");
   const [busy, setBusy] = useState<string | null>(null);
 
   // New user form
@@ -40,8 +41,9 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
         client.listAdminOrgs().then(orgs => orgs.find(o => o.id === orgId) || null),
         client.listAdminOrgUsers(orgId),
         client.getAdminOrgAuditLogs(orgId),
-        client.getAdminOrgProviderConfig(orgId).catch(() => null)
-      ]).then(([o, usrs, logs, prov]) => {
+        client.getAdminOrgProviderConfig(orgId).catch(() => null),
+        client.getAdminOrgModelUsage(orgId).catch(() => null)
+      ]).then(([o, usrs, logs, prov, usage]) => {
         if (!o) {
           router.push("/admin");
           return;
@@ -49,6 +51,7 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
         setOrg(o);
         setUsers(usrs);
         setAuditLogs(logs);
+        setModelUsage(usage);
 
         if (prov) {
           setProvName(prov.provider_name);
@@ -135,7 +138,13 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
         >
           <Users className="w-4 h-4" /> Users
         </button>
-        <button 
+        <button
+          onClick={() => setActiveTab("usage")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'usage' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <BarChart3 className="w-4 h-4" /> Usage
+        </button>
+        <button
           onClick={() => setActiveTab("provider")}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'provider' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
         >
@@ -204,6 +213,131 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
                   {users.length === 0 && (
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'usage' && (
+          <div className="space-y-6">
+            {modelUsage && Object.keys(modelUsage.tasks_by_status).length > 0 && (
+              <div className="glass-panel p-5 border border-white/10 rounded-xl">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Task Queue</h2>
+                <div className="flex gap-6">
+                  {Object.entries(modelUsage.tasks_by_status).map(([status, count]) => (
+                    <div key={status} className="flex items-baseline gap-2">
+                      <span className="text-2xl font-light">{count}</span>
+                      <span className="text-xs text-zinc-400">{status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                  Usage by Provider
+                </h2>
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                    <tr>
+                      <th className="px-4 py-2">Provider</th>
+                      <th className="px-4 py-2 text-right">Tasks</th>
+                      <th className="px-4 py-2 text-right">Cost</th>
+                      <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {(modelUsage?.provider_usage ?? []).map((row) => (
+                      <tr key={row.provider} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-2 font-medium">{providerLabel(row.provider)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                        <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    {(!modelUsage || modelUsage.provider_usage.length === 0) && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                  Usage by Model
+                </h2>
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                    <tr>
+                      <th className="px-4 py-2">Model</th>
+                      <th className="px-4 py-2 text-right">Tasks</th>
+                      <th className="px-4 py-2 text-right">Cost</th>
+                      <th className="px-4 py-2 text-right">Tokens</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {(modelUsage?.model_usage ?? []).map((row) => (
+                      <tr key={row.model} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-2 font-medium font-mono text-xs">{row.model}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                        <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-400">
+                          {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                        </td>
+                      </tr>
+                    ))}
+                    {(!modelUsage || modelUsage.model_usage.length === 0) && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+              <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                Usage by User
+              </h2>
+              <table className="w-full text-sm text-left">
+                <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2">User</th>
+                    <th className="px-4 py-2 text-right">Tasks</th>
+                    <th className="px-4 py-2 text-right">Succeeded</th>
+                    <th className="px-4 py-2 text-right">Failed</th>
+                    <th className="px-4 py-2 text-right">Cost</th>
+                    <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                    <th className="px-4 py-2 text-right">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {(modelUsage?.per_user ?? []).map((row) => (
+                    <tr key={row.user_id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 py-2">
+                        <div className="font-medium">{row.email || row.user_id}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">{row.user_id}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                      <td className="px-4 py-2 text-right text-green-400">{row.succeeded}</td>
+                      <td className="px-4 py-2 text-right text-red-400">{row.failed}</td>
+                      <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-right text-zinc-400">
+                        {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                      </td>
+                    </tr>
+                  ))}
+                  {(!modelUsage || modelUsage.per_user.length === 0) && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
                     </tr>
                   )}
                 </tbody>
