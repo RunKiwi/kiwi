@@ -4,7 +4,7 @@ import Link from "next/link";
 import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { ChevronRight, ChevronLeft } from "lucide-react";
+import { ChevronRight, ChevronLeft, Menu, X as CloseIcon } from "lucide-react";
 import { useAuth, auth } from "@/lib/auth";
 import { identify } from "@/lib/analytics";
 import { Logo } from "@/components/Logo";
@@ -41,6 +41,12 @@ export default function DashboardLayout({
 
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
   const [plan, setPlan] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (isAuthenticated === false) {
@@ -89,13 +95,41 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <aside className={`shrink-0 flex flex-col p-3 z-10 bg-[#0B141D]/80 backdrop-blur-xl border-r border-white/[0.06] transition-[width] duration-300 ${isCollapsed ? "w-[76px]" : "w-64"}`}>
-        <div className="flex items-center gap-2.5 px-2 py-4 mb-4">
-          <div className="w-9 h-9 shrink-0 rounded-xl bg-[#0E1A24] border border-[#93C645]/20 shadow-[0_0_18px_rgba(147,198,69,0.30)] flex items-center justify-center">
-            <Logo className="w-5 h-5 text-[#93C645]" />
+      {/* Mobile Header */}
+      <div className="md:hidden flex items-center justify-between p-3 border-b border-white/[0.06] bg-[#0B141D]/90 backdrop-blur-xl absolute top-0 w-full z-30">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-[#0E1A24] border border-[#93C645]/20 shadow-[0_0_12px_rgba(147,198,69,0.30)] flex items-center justify-center">
+            <Logo className="w-4 h-4 text-[#93C645]" />
           </div>
-          {!isCollapsed && <span className="text-lg font-semibold tracking-tight text-white whitespace-nowrap overflow-hidden">Kiwi</span>}
+          <span className="text-[15px] font-semibold tracking-tight text-white">Kiwi</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-1.5 text-zinc-400 hover:text-white bg-white/5 rounded-md">
+          <Menu className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Mobile Menu Backdrop */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" 
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`fixed md:relative inset-y-0 left-0 z-50 md:z-10 bg-[#0B141D]/90 md:bg-[#0B141D]/80 backdrop-blur-xl border-r border-white/[0.06] shrink-0 flex flex-col p-3 transition-transform md:transition-[width] duration-300 ${
+        isMobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      } ${isCollapsed ? "md:w-[76px] w-64" : "w-64"}`}>
+        <div className="flex items-center justify-between px-2 py-4 mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 shrink-0 rounded-xl bg-[#0E1A24] border border-[#93C645]/20 shadow-[0_0_18px_rgba(147,198,69,0.30)] flex items-center justify-center">
+              <Logo className="w-5 h-5 text-[#93C645]" />
+            </div>
+            {!isCollapsed && <span className="text-lg font-semibold tracking-tight text-white whitespace-nowrap overflow-hidden">Kiwi</span>}
+          </div>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-zinc-400 hover:text-white p-1">
+            <CloseIcon className="w-5 h-5" />
+          </button>
         </div>
 
         <nav className="flex-1 space-y-1">
@@ -160,7 +194,7 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
+      <main className="flex-1 flex flex-col overflow-hidden relative pt-[60px] md:pt-0">
         <ActivationBanner />
         <FreePlanBanner plan={plan} />
         <div className="flex-1 overflow-y-auto">{children}</div>
