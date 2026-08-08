@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { client, type AdminStats, type AdminOrg } from "@/lib/api";
+import { client, type AdminStats, type AdminOrg, formatTokens, providerLabel } from "@/lib/api";
 import { ShieldAlert, Loader2, Plus, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { LoadingState } from "@/components/LoadingState";
@@ -148,6 +148,69 @@ export default function AdminPage() {
                 <span className="font-medium">{count}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {stats && (stats.provider_usage.length > 0 || stats.model_usage.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+          <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+            <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+              Usage by Provider
+            </h2>
+            <table className="w-full text-sm text-left">
+              <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                <tr>
+                  <th className="px-4 py-2">Provider</th>
+                  <th className="px-4 py-2 text-right">Tasks</th>
+                  <th className="px-4 py-2 text-right">Cost</th>
+                  <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                  <th className="px-4 py-2 text-right">Tokens</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {stats.provider_usage.map((row) => (
+                  <tr key={row.provider} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-2 font-medium">{providerLabel(row.provider)}</td>
+                    <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                    <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right text-zinc-400">
+                      {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+            <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+              Usage by Model
+            </h2>
+            <table className="w-full text-sm text-left">
+              <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                <tr>
+                  <th className="px-4 py-2">Model</th>
+                  <th className="px-4 py-2 text-right">Tasks</th>
+                  <th className="px-4 py-2 text-right">Cost</th>
+                  <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                  <th className="px-4 py-2 text-right">Tokens</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {stats.model_usage.map((row) => (
+                  <tr key={row.model} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-2 font-medium font-mono text-xs">{row.model}</td>
+                    <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                    <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right text-zinc-400">
+                      {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

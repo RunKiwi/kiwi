@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 func TestAdminRouter_Auth(t *testing.T) {
@@ -169,5 +171,99 @@ func TestAdminAPIEndpoints(t *testing.T) {
 	db.First(&limits, "org_id = ?", "test-org-1")
 	if limits.MaxAgentMinutesPerMonth != 600 {
 		t.Errorf("expected 600 limits, got %f", limits.MaxAgentMinutesPerMonth)
+	}
+}
+
+func TestAdminStats_ModelUsage(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&store.Job{}, &store.QueuedTask{}); err != nil {
+		t.Fatalf("migrate store models: %v", err)
+	}
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	// Two orgs, so the aggregation must be platform-wide, not scoped to one.
+	db.Create(&Organization{ID: "org-a", Name: "Org A"})
+	db.Create(&Organization{ID: "org-b", Name: "Org B"})
+
+	// A BYOK job: planner spend on a claude model, real dollars.
+	db.Create(&store.Job{
+		ID: "job-1", OrgID: "org-a", UserID: "u1", Status: "SUCCEEDED",
+		Inputs:  map[string]interface{}{"planner_model": "claude-sonnet-4-5"},
+		Funding: store.FundingBYOK, PlannerCostUSD: 1.5, PlannerTokensIn: 1000, PlannerTokensOut: 500,
+	})
+	// A Kiwi-funded job on the same model: real cost still recorded, but it
+	// must land in KiwiCostUSD, not be indistinguishable from billed spend.
+	db.Create(&store.Job{
+		ID: "job-2", OrgID: "org-b", UserID: "u2", Status: "SUCCEEDED",
+		Inputs:  map[string]interface{}{"planner_model": "claude-sonnet-4-5"},
+		Funding: store.FundingKiwi, PlannerCostUSD: 0.3, PlannerTokensIn: 200, PlannerTokensOut: 100,
+	})
+	// A worker task on a different provider entirely.
+	db.Create(&store.QueuedTask{
+		ID: "task-1", OrgID: "org-a", JobID: "job-1", Status: "SUCCEEDED",
+		Spec:    map[string]interface{}{"model": "gpt-5"},
+		Funding: store.FundingBYOK, CostUSD: 2.0, TokensIn: 3000, TokensOut: 1000,
+	})
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+	req := httptest.NewRequest(http.MethodGet, "/admin/stats", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		ModelUsage    []AdminUsageRow `json:"model_usage"`
+		ProviderUsage []AdminUsageRow `json:"provider_usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	byModel := map[string]AdminUsageRow{}
+	for _, row := range resp.ModelUsage {
+		byModel[row.Model] = row
+	}
+
+	sonnet, ok := byModel["claude-sonnet-4-5"]
+	if !ok {
+		t.Fatalf("expected claude-sonnet-4-5 in model_usage, got %+v", resp.ModelUsage)
+	}
+	if sonnet.Provider != "anthropic" {
+		t.Errorf("expected provider anthropic, got %s", sonnet.Provider)
+	}
+	if sonnet.TaskCount != 2 {
+		t.Errorf("expected 2 rows aggregated (both orgs), got %d", sonnet.TaskCount)
+	}
+	if got, want := sonnet.CostUSD, 1.8; got != want {
+		t.Errorf("expected total cost %.2f (byok + kiwi), got %.2f", want, got)
+	}
+	if got, want := sonnet.KiwiCostUSD, 0.3; got != want {
+		t.Errorf("expected kiwi-only cost %.2f, got %.2f", want, got)
+	}
+
+	gpt, ok := byModel["gpt-5"]
+	if !ok {
+		t.Fatalf("expected gpt-5 in model_usage, got %+v", resp.ModelUsage)
+	}
+	if gpt.Provider != "openai" {
+		t.Errorf("expected provider openai, got %s", gpt.Provider)
+	}
+	if gpt.KiwiCostUSD != 0 {
+		t.Errorf("expected no kiwi cost for a byok task, got %.2f", gpt.KiwiCostUSD)
+	}
+
+	byProvider := map[string]AdminUsageRow{}
+	for _, row := range resp.ProviderUsage {
+		byProvider[row.Provider] = row
+	}
+	if got, want := byProvider["anthropic"].CostUSD, 1.8; got != want {
+		t.Errorf("expected anthropic provider total %.2f, got %.2f", want, got)
+	}
+	if _, ok := byProvider["openai"]; !ok {
+		t.Errorf("expected openai in provider_usage, got %+v", resp.ProviderUsage)
 	}
 }

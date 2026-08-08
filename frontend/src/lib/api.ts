@@ -358,6 +358,18 @@ export interface UsageResponse {
   is_super_admin?: boolean;
 }
 
+export interface AdminUsageRow {
+  model?: string;
+  provider: string;
+  task_count: number;
+  cost_usd: number;
+  // kiwi_cost_usd is the subset of cost_usd spent on Kiwi-funded (free tier)
+  // work — never billed to anyone, so it is the number to watch for abuse.
+  kiwi_cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
 export interface AdminStats {
   total_orgs: number;
   orgs_by_plan: Record<string, number>;
@@ -366,6 +378,8 @@ export interface AdminStats {
   signups_last_30_days: number;
   total_agent_minutes: number;
   tasks_by_status: Record<string, number>;
+  model_usage: AdminUsageRow[];
+  provider_usage: AdminUsageRow[];
 }
 
 export interface AdminOrg {

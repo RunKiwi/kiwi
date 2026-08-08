@@ -12,11 +12,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/audit"
 	"github.com/ibreakthecloud/kiwi/ee/billing"
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -630,6 +633,21 @@ func handleOrgAuditLogsAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(logs)
 }
 
+// AdminUsageRow is one row of the platform-wide model or provider usage
+// breakdown: CostUSD is the real dollar cost recorded at metering time
+// regardless of who funded it, and KiwiCostUSD is the subset of that spent on
+// Kiwi-funded (free tier) work — the number a super-admin actually needs to
+// watch for abuse, since it is never billed back to anyone.
+type AdminUsageRow struct {
+	Model       string  `json:"model,omitempty"`
+	Provider    string  `json:"provider"`
+	TaskCount   int64   `json:"task_count"`
+	CostUSD     float64 `json:"cost_usd"`
+	KiwiCostUSD float64 `json:"kiwi_cost_usd"`
+	TokensIn    int64   `json:"tokens_in"`
+	TokensOut   int64   `json:"tokens_out"`
+}
+
 func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 	var resp struct {
 		TotalOrgs             int64            `json:"total_orgs"`
@@ -639,6 +657,8 @@ func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		SignupsLast30Days     int64            `json:"signups_last_30_days"`
 		TotalAgentMinutes     float64          `json:"total_agent_minutes"`
 		TasksByStatus         map[string]int64 `json:"tasks_by_status"`
+		ModelUsage            []AdminUsageRow  `json:"model_usage"`
+		ProviderUsage         []AdminUsageRow  `json:"provider_usage"`
 	}
 	resp.OrgsByPlan = make(map[string]int64)
 	resp.OrgsByActivationState = make(map[string]int64)
@@ -679,8 +699,103 @@ func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 		resp.TasksByStatus[tc.Status] = tc.Count
 	}
 
+	resp.ModelUsage, resp.ProviderUsage = adminModelUsage(db)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// adminModelUsage aggregates worker and planner spend across every org into
+// per-model and per-provider totals. It reads full rows rather than grouping
+// on the model/planner_model JSON path in SQL, because that path only exists
+// as Postgres jsonb in production but the test suite runs on SQLite — the
+// same tradeoff buildSpend makes for the per-org /api/v1/spend breakdown.
+func adminModelUsage(db *gorm.DB) (byModel []AdminUsageRow, byProvider []AdminUsageRow) {
+	type modelAgg struct {
+		taskCount   int64
+		costUSD     float64
+		kiwiCostUSD float64
+		tokensIn    int64
+		tokensOut   int64
+	}
+	agg := map[string]*modelAgg{}
+	bump := func(model, funding string, cost float64, tokensIn, tokensOut int64) {
+		if model == "" {
+			return
+		}
+		a, ok := agg[model]
+		if !ok {
+			a = &modelAgg{}
+			agg[model] = a
+		}
+		a.taskCount++
+		a.costUSD += cost
+		if funding == store.FundingKiwi {
+			a.kiwiCostUSD += cost
+		}
+		a.tokensIn += tokensIn
+		a.tokensOut += tokensOut
+	}
+
+	var taskRows []struct {
+		Spec      map[string]interface{} `gorm:"serializer:json"`
+		Funding   string
+		CostUSD   float64
+		TokensIn  int64
+		TokensOut int64
+	}
+	db.Table("queued_tasks").Select("spec, funding, cost_usd, tokens_in, tokens_out").Find(&taskRows)
+	for _, t := range taskRows {
+		model, _ := t.Spec["model"].(string)
+		bump(model, t.Funding, t.CostUSD, t.TokensIn, t.TokensOut)
+	}
+
+	var jobRows []struct {
+		Inputs           map[string]interface{} `gorm:"serializer:json"`
+		Funding          string
+		PlannerCostUSD   float64
+		PlannerTokensIn  int64
+		PlannerTokensOut int64
+	}
+	db.Table("jobs").Select("inputs, funding, planner_cost_usd, planner_tokens_in, planner_tokens_out").Find(&jobRows)
+	for _, j := range jobRows {
+		model, _ := j.Inputs["planner_model"].(string)
+		bump(model, j.Funding, j.PlannerCostUSD, j.PlannerTokensIn, j.PlannerTokensOut)
+	}
+
+	providerAgg := map[string]*modelAgg{}
+	byModel = make([]AdminUsageRow, 0, len(agg))
+	for model, a := range agg {
+		p := provider.ProviderOf(model)
+		byModel = append(byModel, AdminUsageRow{
+			Model: model, Provider: p, TaskCount: a.taskCount,
+			CostUSD: a.costUSD, KiwiCostUSD: a.kiwiCostUSD,
+			TokensIn: a.tokensIn, TokensOut: a.tokensOut,
+		})
+		pa, ok := providerAgg[p]
+		if !ok {
+			pa = &modelAgg{}
+			providerAgg[p] = pa
+		}
+		pa.taskCount += a.taskCount
+		pa.costUSD += a.costUSD
+		pa.kiwiCostUSD += a.kiwiCostUSD
+		pa.tokensIn += a.tokensIn
+		pa.tokensOut += a.tokensOut
+	}
+	sort.Slice(byModel, func(i, j int) bool { return byModel[i].CostUSD > byModel[j].CostUSD })
+
+	byProvider = make([]AdminUsageRow, 0, len(providerAgg))
+	for p, a := range providerAgg {
+		byProvider = append(byProvider, AdminUsageRow{
+			Provider: p, TaskCount: a.taskCount,
+			CostUSD: a.costUSD, KiwiCostUSD: a.kiwiCostUSD,
+			TokensIn: a.tokensIn, TokensOut: a.tokensOut,
+		})
+	}
+	sort.Slice(byProvider, func(i, j int) bool { return byProvider[i].CostUSD > byProvider[j].CostUSD })
+
+	return byModel, byProvider
 }
 
 func handleUpdateOrgPlan(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
