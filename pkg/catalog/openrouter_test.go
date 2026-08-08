@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -129,5 +130,54 @@ func TestOpenRouterListerLeavesBadPricingNil(t *testing.T) {
 	}
 	if got[0].OutputCostPerM != nil {
 		t.Errorf("negative price parsed to %v, want nil", got[0].OutputCostPerM)
+	}
+}
+
+// Descriptions come from the provider, not from Kiwi. They are normalised and
+// bounded because they are rendered inside a dropdown panel, where an
+// unbounded paragraph is worse than showing nothing.
+func TestTruncateDescription(t *testing.T) {
+	if got := truncateDescription("  a   b \n c  "); got != "a b c" {
+		t.Errorf("whitespace not collapsed: %q", got)
+	}
+	if got := truncateDescription(""); got != "" {
+		t.Errorf("empty description became %q", got)
+	}
+
+	short := "A compact model for everyday work."
+	if got := truncateDescription(short); got != short {
+		t.Errorf("a short description was altered: %q", got)
+	}
+
+	long := strings.Repeat("alpha beta ", 200)
+	got := truncateDescription(long)
+	if len([]rune(got)) > maxDescriptionLen+1 {
+		t.Errorf("length %d exceeds the cap", len([]rune(got)))
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncated description does not end with an ellipsis: %q", got[len(got)-20:])
+	}
+	// Cut on a word boundary, so the ellipsis never lands mid-word.
+	if strings.Contains(got, "alp…") || strings.Contains(got, "bet…") {
+		t.Errorf("cut mid-word: %q", got[len(got)-20:])
+	}
+}
+
+func TestOpenRouterListerCapturesDescription(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"x","name":"X","context_length":100000,
+		  "description":"A  large\nMoE model for coding.",
+		  "architecture":{"modality":"text->text"},
+		  "pricing":{"prompt":"0.0000006","completion":"0.0000025"},
+		  "supported_parameters":["tools"]}]}`))
+	}))
+	defer srv.Close()
+
+	got, err := (OpenRouterLister{}).List(context.Background(), srv.URL+"/models", "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got[0].Description != "A large MoE model for coding." {
+		t.Errorf("Description = %q", got[0].Description)
 	}
 }

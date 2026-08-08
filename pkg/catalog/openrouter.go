@@ -19,6 +19,7 @@ type openRouterResponse struct {
 	Data []struct {
 		ID           string `json:"id"`
 		Name         string `json:"name"`
+		Description  string `json:"description"`
 		ContextLen   int    `json:"context_length"`
 		Architecture struct {
 			Modality string `json:"modality"`
@@ -48,6 +49,7 @@ func (OpenRouterLister) List(ctx context.Context, endpoint, apiKey string) ([]Di
 		d := DiscoveredModel{
 			ID:             m.ID,
 			DisplayName:    m.Name,
+			Description:    truncateDescription(m.Description),
 			Modality:       m.Architecture.Modality,
 			InputCostPerM:  parsePerTokenPrice(m.Pricing.Prompt),
 			OutputCostPerM: parsePerTokenPrice(m.Pricing.Completion),
@@ -85,4 +87,22 @@ func hasParameter(params []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// maxDescriptionLen bounds what is stored. Provider descriptions are usually a
+// couple of sentences, but nothing guarantees that, and this value is rendered
+// in a dropdown panel where a wall of text is worse than none.
+const maxDescriptionLen = 400
+
+func truncateDescription(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= maxDescriptionLen {
+		return s
+	}
+	// Cut on a word boundary so the ellipsis does not land mid-word.
+	cut := strings.LastIndex(s[:maxDescriptionLen], " ")
+	if cut < maxDescriptionLen/2 {
+		cut = maxDescriptionLen
+	}
+	return s[:cut] + "\u2026"
 }

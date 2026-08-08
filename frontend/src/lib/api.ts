@@ -240,6 +240,7 @@ export interface CatalogModel {
   model_id: string;
   provider: string;
   display_name: string;
+  description: string;
   input_cost_per_m: number | null;
   output_cost_per_m: number | null;
   context_length: number | null;

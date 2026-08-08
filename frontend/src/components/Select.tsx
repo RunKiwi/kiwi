@@ -23,6 +23,16 @@ interface SelectProps {
   className?: string;
   /** Accessible name when there's no visible label. */
   ariaLabel?: string;
+  /**
+   * Renders a detail panel under the list for whichever option is currently
+   * highlighted — by hover, by arrow key, or by being the current selection
+   * when the menu opens.
+   *
+   * A callback rather than a field on SelectOption so the caller only builds
+   * the panel for the one row being looked at. With a hundred-odd models that
+   * is the difference between one node and a hundred.
+   */
+  renderDetail?: (option: SelectOption) => React.ReactNode;
 }
 
 // A single custom dropdown used across the dashboard: navy glass menu, green
@@ -37,6 +47,7 @@ export function Select({
   variant = "field",
   label,
   icon,
+  renderDetail,
   className = "",
   ariaLabel,
 }: SelectProps) {
@@ -218,6 +229,9 @@ export function Select({
               })
             )}
           </div>
+          {renderDetail && filtered[active] && (
+            <div className="mt-1 pt-2.5 border-t border-white/10">{renderDetail(filtered[active])}</div>
+          )}
         </div>
       )}
     </div>

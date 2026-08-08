@@ -225,7 +225,10 @@ export default function ModelsPage() {
                     <div key={m.model_id} className="px-4 py-3 flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-sm text-zinc-200 break-words">{m.display_name}</div>
-                        <div className="text-[11px] text-zinc-600">{providerLabel(m.provider)}</div>
+                        {m.description && (
+                          <div className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{m.description}</div>
+                        )}
+                        <div className="text-[11px] text-zinc-600 mt-0.5">{providerLabel(m.provider)}</div>
                       </div>
                       <div className="shrink-0 text-right text-[11px] text-zinc-500 tabular-nums">
                         {priceLabel(m)}

@@ -152,6 +152,7 @@ func (r *Refresher) refresh(ctx context.Context, orgID string, spec provider.Spe
 			ModelID:        d.ID,
 			Provider:       spec.ID,
 			DisplayName:    d.DisplayName,
+			Description:    d.Description,
 			InputCostPerM:  d.InputCostPerM,
 			OutputCostPerM: d.OutputCostPerM,
 			ContextLength:  d.ContextLength,
