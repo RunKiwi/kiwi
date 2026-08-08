@@ -468,10 +468,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         aria-modal="true"
         aria-labelledby="drawer-heading"
         tabIndex={-1}
-        className={`fixed inset-y-0 right-0 w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 w-full sm:w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Drawer Header */}
-        <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/40">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-white/5 bg-black/40">
           <div className="flex items-center gap-4">
             {/* Present only while a task is genuinely executing — a queued or
                 finished job must not look like it is thinking. jobOrbState
@@ -592,7 +592,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         );
       })()}
 
-      <div className="flex-1 flex flex-col overflow-y-auto p-6 text-white gap-6">
+      <div className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 text-white gap-6">
         {/* What is happening right now — and, when a finished job produced no
             record, what happened at all.
 

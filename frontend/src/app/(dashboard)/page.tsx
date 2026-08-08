@@ -625,7 +625,7 @@ function CommandCenterContent() {
   const selectedRepo = repos.find(r => r.url === repoUrl)?.full_name ?? "";
 
   return (
-    <div className="p-8 max-w-6xl mx-auto h-full flex flex-col">
+    <div className="p-3 md:p-8 max-w-6xl mx-auto h-full flex flex-col">
       <div className="mb-8">
         <p className="eyebrow mb-3"><span className="dot"></span> Tasks</p>
         <h1 className="text-[32px] font-semibold tracking-tight text-white mb-2">What should the swarm build?</h1>
