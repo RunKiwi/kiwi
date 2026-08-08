@@ -420,6 +420,25 @@ export interface AdminProviderConfig {
   api_key?: string;
 }
 
+export interface AdminUserUsageRow {
+  user_id: string;
+  email: string;
+  task_count: number;
+  succeeded: number;
+  failed: number;
+  cost_usd: number;
+  kiwi_cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export interface AdminOrgModelUsage {
+  model_usage: AdminUsageRow[];
+  provider_usage: AdminUsageRow[];
+  tasks_by_status: Record<string, number>;
+  per_user: AdminUserUsageRow[];
+}
+
 const getBaseUrl = () => {
   return process.env.NEXT_PUBLIC_KIWI_API_URL || "http://localhost:8080";
 };
@@ -512,6 +531,7 @@ export const client = {
   listAdminOrgUsers: (orgId: string) => fetchApi<AdminUser[]>(`/admin/orgs/${orgId}/users`),
   createAdminOrgUser: (orgId: string, email: string, name: string, role: string) => fetchApi<AdminUser>(`/admin/orgs/${orgId}/users`, { method: "POST", body: JSON.stringify({ email, name, role }) }),
   getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
+  getAdminOrgModelUsage: (orgId: string) => fetchApi<AdminOrgModelUsage>(`/admin/orgs/${orgId}/model_usage`),
   getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
   setAdminOrgProviderConfig: (orgId: string, config: Partial<AdminProviderConfig>) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`, { method: "PUT", body: JSON.stringify(config) }),
 

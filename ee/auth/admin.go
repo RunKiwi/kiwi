@@ -101,6 +101,14 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 			handleOrgAuditLogsAdmin(db, w, r, orgID)
 
+		case len(parts) == 2 && parts[1] == "model_usage":
+			orgID := parts[0]
+			if r.Method != http.MethodGet {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleOrgModelUsageAdmin(db, w, r, orgID)
+
 		case len(parts) == 2 && parts[1] == "provider":
 			orgID := parts[0]
 			switch r.Method {
@@ -662,7 +670,6 @@ func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	resp.OrgsByPlan = make(map[string]int64)
 	resp.OrgsByActivationState = make(map[string]int64)
-	resp.TasksByStatus = make(map[string]int64)
 
 	db.Model(&Organization{}).Count(&resp.TotalOrgs)
 
@@ -690,27 +697,40 @@ func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
 
 	db.Table("jobs").Select("COALESCE(SUM(agent_minutes), 0)").Scan(&resp.TotalAgentMinutes)
 
-	var taskCounts []struct {
-		Status string
-		Count  int64
-	}
-	db.Table("queued_tasks").Select("status, count(*) as count").Group("status").Scan(&taskCounts)
-	for _, tc := range taskCounts {
-		resp.TasksByStatus[tc.Status] = tc.Count
-	}
-
-	resp.ModelUsage, resp.ProviderUsage = adminModelUsage(db)
+	resp.TasksByStatus = adminTaskStatusCounts(db, "")
+	resp.ModelUsage, resp.ProviderUsage = adminModelUsage(db, "")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
-// adminModelUsage aggregates worker and planner spend across every org into
-// per-model and per-provider totals. It reads full rows rather than grouping
-// on the model/planner_model JSON path in SQL, because that path only exists
-// as Postgres jsonb in production but the test suite runs on SQLite — the
-// same tradeoff buildSpend makes for the per-org /api/v1/spend breakdown.
-func adminModelUsage(db *gorm.DB) (byModel []AdminUsageRow, byProvider []AdminUsageRow) {
+// adminTaskStatusCounts counts queued_tasks by status, scoped to orgID when
+// non-empty. This is the same "task" unit the platform-wide task queue widget
+// counts, so a per-org breakdown stays comparable to it.
+func adminTaskStatusCounts(db *gorm.DB, orgID string) map[string]int64 {
+	q := db.Table("queued_tasks")
+	if orgID != "" {
+		q = q.Where("org_id = ?", orgID)
+	}
+	var counts []struct {
+		Status string
+		Count  int64
+	}
+	q.Select("status, count(*) as count").Group("status").Scan(&counts)
+	out := make(map[string]int64, len(counts))
+	for _, c := range counts {
+		out[c.Status] = c.Count
+	}
+	return out
+}
+
+// adminModelUsage aggregates worker and planner spend into per-model and
+// per-provider totals, scoped to orgID when non-empty (empty means
+// platform-wide). It reads full rows rather than grouping on the
+// model/planner_model JSON path in SQL, because that path only exists as
+// Postgres jsonb in production but the test suite runs on SQLite — the same
+// tradeoff buildSpend makes for the per-org /api/v1/spend breakdown.
+func adminModelUsage(db *gorm.DB, orgID string) (byModel []AdminUsageRow, byProvider []AdminUsageRow) {
 	type modelAgg struct {
 		taskCount   int64
 		costUSD     float64
@@ -744,7 +764,11 @@ func adminModelUsage(db *gorm.DB) (byModel []AdminUsageRow, byProvider []AdminUs
 		TokensIn  int64
 		TokensOut int64
 	}
-	db.Table("queued_tasks").Select("spec, funding, cost_usd, tokens_in, tokens_out").Find(&taskRows)
+	taskQuery := db.Table("queued_tasks").Select("spec, funding, cost_usd, tokens_in, tokens_out")
+	if orgID != "" {
+		taskQuery = taskQuery.Where("org_id = ?", orgID)
+	}
+	taskQuery.Find(&taskRows)
 	for _, t := range taskRows {
 		model, _ := t.Spec["model"].(string)
 		bump(model, t.Funding, t.CostUSD, t.TokensIn, t.TokensOut)
@@ -757,7 +781,11 @@ func adminModelUsage(db *gorm.DB) (byModel []AdminUsageRow, byProvider []AdminUs
 		PlannerTokensIn  int64
 		PlannerTokensOut int64
 	}
-	db.Table("jobs").Select("inputs, funding, planner_cost_usd, planner_tokens_in, planner_tokens_out").Find(&jobRows)
+	jobQuery := db.Table("jobs").Select("inputs, funding, planner_cost_usd, planner_tokens_in, planner_tokens_out")
+	if orgID != "" {
+		jobQuery = jobQuery.Where("org_id = ?", orgID)
+	}
+	jobQuery.Find(&jobRows)
 	for _, j := range jobRows {
 		model, _ := j.Inputs["planner_model"].(string)
 		bump(model, j.Funding, j.PlannerCostUSD, j.PlannerTokensIn, j.PlannerTokensOut)
@@ -796,6 +824,147 @@ func adminModelUsage(db *gorm.DB) (byModel []AdminUsageRow, byProvider []AdminUs
 	sort.Slice(byProvider, func(i, j int) bool { return byProvider[i].CostUSD > byProvider[j].CostUSD })
 
 	return byModel, byProvider
+}
+
+// AdminUserUsageRow is one user's task and cost breakdown within an org.
+type AdminUserUsageRow struct {
+	UserID      string  `json:"user_id"`
+	Email       string  `json:"email"`
+	TaskCount   int64   `json:"task_count"`
+	Succeeded   int64   `json:"succeeded"`
+	Failed      int64   `json:"failed"`
+	CostUSD     float64 `json:"cost_usd"`
+	KiwiCostUSD float64 `json:"kiwi_cost_usd"`
+	TokensIn    int64   `json:"tokens_in"`
+	TokensOut   int64   `json:"tokens_out"`
+}
+
+// adminPerUserUsage breaks an org's cost and task counts down by the user who
+// submitted them. queued_tasks does not carry user_id itself — only the job it
+// belongs to does — so tasks are attributed via their job's user_id. TaskCount
+// is deliberately sourced from queued_tasks (not jobs), matching the "task"
+// unit adminTaskStatusCounts and the platform-wide queue widget use; job rows
+// only contribute planner cost/tokens, not an extra count.
+func adminPerUserUsage(db *gorm.DB, orgID string) []AdminUserUsageRow {
+	type userAgg struct {
+		taskCount, succeeded, failed int64
+		costUSD, kiwiCostUSD         float64
+		tokensIn, tokensOut          int64
+	}
+	agg := map[string]*userAgg{}
+	ensure := func(userID string) *userAgg {
+		a, ok := agg[userID]
+		if !ok {
+			a = &userAgg{}
+			agg[userID] = a
+		}
+		return a
+	}
+
+	var jobRows []struct {
+		ID               string
+		UserID           string
+		Funding          string
+		PlannerCostUSD   float64
+		PlannerTokensIn  int64
+		PlannerTokensOut int64
+	}
+	db.Table("jobs").Select("id, user_id, funding, planner_cost_usd, planner_tokens_in, planner_tokens_out").
+		Where("org_id = ?", orgID).Find(&jobRows)
+
+	jobUser := make(map[string]string, len(jobRows))
+	for _, j := range jobRows {
+		jobUser[j.ID] = j.UserID
+		if j.UserID == "" {
+			continue
+		}
+		a := ensure(j.UserID)
+		a.costUSD += j.PlannerCostUSD
+		if j.Funding == store.FundingKiwi {
+			a.kiwiCostUSD += j.PlannerCostUSD
+		}
+		a.tokensIn += j.PlannerTokensIn
+		a.tokensOut += j.PlannerTokensOut
+	}
+
+	var taskRows []struct {
+		JobID     string
+		Status    string
+		Funding   string
+		CostUSD   float64
+		TokensIn  int64
+		TokensOut int64
+	}
+	db.Table("queued_tasks").Select("job_id, status, funding, cost_usd, tokens_in, tokens_out").
+		Where("org_id = ?", orgID).Find(&taskRows)
+
+	for _, t := range taskRows {
+		userID := jobUser[t.JobID]
+		if userID == "" {
+			continue
+		}
+		a := ensure(userID)
+		a.taskCount++
+		switch t.Status {
+		case "SUCCEEDED":
+			a.succeeded++
+		case "FAILED":
+			a.failed++
+		}
+		a.costUSD += t.CostUSD
+		if t.Funding == store.FundingKiwi {
+			a.kiwiCostUSD += t.CostUSD
+		}
+		a.tokensIn += t.TokensIn
+		a.tokensOut += t.TokensOut
+	}
+
+	var users []User
+	db.Where("org_id = ?", orgID).Find(&users)
+	emailByID := make(map[string]string, len(users))
+	for _, u := range users {
+		emailByID[u.ID] = u.Email
+	}
+
+	out := make([]AdminUserUsageRow, 0, len(agg))
+	for userID, a := range agg {
+		out = append(out, AdminUserUsageRow{
+			UserID: userID, Email: emailByID[userID],
+			TaskCount: a.taskCount, Succeeded: a.succeeded, Failed: a.failed,
+			CostUSD: a.costUSD, KiwiCostUSD: a.kiwiCostUSD,
+			TokensIn: a.tokensIn, TokensOut: a.tokensOut,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CostUSD > out[j].CostUSD })
+	return out
+}
+
+// handleOrgModelUsageAdmin serves GET /admin/orgs/{orgID}/model_usage: the
+// same model/provider/task-status breakdown handleAdminStats reports
+// platform-wide, scoped to one org, plus a per-user split of it.
+func handleOrgModelUsageAdmin(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	modelUsage, providerUsage := adminModelUsage(db, orgID)
+
+	resp := struct {
+		ModelUsage    []AdminUsageRow     `json:"model_usage"`
+		ProviderUsage []AdminUsageRow     `json:"provider_usage"`
+		TasksByStatus map[string]int64    `json:"tasks_by_status"`
+		PerUser       []AdminUserUsageRow `json:"per_user"`
+	}{
+		ModelUsage:    modelUsage,
+		ProviderUsage: providerUsage,
+		TasksByStatus: adminTaskStatusCounts(db, orgID),
+		PerUser:       adminPerUserUsage(db, orgID),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleUpdateOrgPlan(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
