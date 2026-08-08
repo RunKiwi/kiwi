@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, formatTokens, providerLabel } from "@/lib/api";
-import { Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus, BarChart3 } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound } from "lucide-react";
 import { LoadingState } from "@/components/LoadingState";
 import Link from "next/link";
 
@@ -24,6 +24,13 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState("member");
+
+  // API keys, expanded per user
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [keysByUser, setKeysByUser] = useState<Record<string, AdminAPIKey[]>>({});
+  const [keysLoading, setKeysLoading] = useState<string | null>(null);
+  const [newKey, setNewKey] = useState<{ userId: string; plaintext: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   
   // Provider form
   const [provName, setProvName] = useState("");
@@ -85,6 +92,66 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
     } finally {
       setBusy(null);
     }
+  };
+
+  const toggleKeys = (userId: string) => {
+    setNewKey(null);
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      return;
+    }
+    setExpandedUserId(userId);
+    if (!keysByUser[userId]) {
+      setKeysLoading(userId);
+      client.listAdminUserAPIKeys(orgId, userId)
+        .then(keys => setKeysByUser(prev => ({ ...prev, [userId]: keys })))
+        .catch(() => setKeysByUser(prev => ({ ...prev, [userId]: [] })))
+        .finally(() => setKeysLoading(null));
+    }
+  };
+
+  const handleGenerateKey = async (userId: string) => {
+    const label = prompt("Label for this key (e.g. \"cli\"):", "cli");
+    if (label === null) return;
+
+    setBusy(`genkey-${userId}`);
+    try {
+      const created = await client.createAdminUserAPIKey(orgId, userId, label || "default");
+      setNewKey({ userId, plaintext: created.key });
+      setCopied(false);
+      setKeysByUser(prev => ({
+        ...prev,
+        [userId]: [
+          { id: created.key_id, user_id: userId, label: created.label, created_at: created.created_at, expires_at: created.expires_at ?? undefined },
+          ...(prev[userId] ?? []),
+        ],
+      }));
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRevokeKey = async (userId: string, keyId: string) => {
+    if (!confirm("Revoke this key? Anything using it will stop working immediately.")) return;
+
+    setBusy(`revoke-${keyId}`);
+    try {
+      await client.revokeAdminUserAPIKey(orgId, userId, keyId);
+      setKeysByUser(prev => ({ ...prev, [userId]: (prev[userId] ?? []).filter(k => k.id !== keyId) }));
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyKey = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   const handleSaveProvider = async (e: React.FormEvent) => {
@@ -195,24 +262,109 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">Joined</th>
+                    <th className="px-4 py-3 text-right">API Keys</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {users.map(user => (
-                    <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-4 py-3 font-medium">{user.name}</td>
-                      <td className="px-4 py-3 text-zinc-300">{user.email}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs ${user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/10 text-zinc-300'}`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-zinc-400">{new Date(user.created_at).toLocaleDateString()}</td>
-                    </tr>
+                    <Fragment key={user.id}>
+                      <tr className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-3 font-medium">{user.name}</td>
+                        <td className="px-4 py-3 text-zinc-300">{user.email}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs ${user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/10 text-zinc-300'}`}>
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-zinc-400">{new Date(user.created_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => toggleKeys(user.id)}
+                            className="inline-flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-2 py-1 transition-colors"
+                          >
+                            <KeyRound className="w-3 h-3" /> Keys
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedUserId === user.id && (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-4 bg-black/20">
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">API Keys for {user.email}</h3>
+                              <button
+                                onClick={() => handleGenerateKey(user.id)}
+                                disabled={busy === `genkey-${user.id}`}
+                                className="flex items-center gap-1 text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded px-2 py-1 transition-colors"
+                              >
+                                {busy === `genkey-${user.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                Generate Key
+                              </button>
+                            </div>
+
+                            {newKey && newKey.userId === user.id && (
+                              <div className="mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                                <p className="text-xs text-amber-400 mb-2">
+                                  Shown once — copy it now. It is not stored in plaintext and cannot be retrieved again, only revoked.
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <code className="flex-1 text-xs font-mono text-white break-all bg-black/30 px-2 py-1.5 rounded">
+                                    {newKey.plaintext}
+                                  </code>
+                                  <button
+                                    onClick={() => copyKey(newKey.plaintext)}
+                                    className="text-xs bg-white/10 hover:bg-white/20 rounded px-2 py-1.5 shrink-0 transition-colors"
+                                  >
+                                    {copied ? "Copied!" : "Copy"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {keysLoading === user.id ? (
+                              <div className="text-xs text-zinc-500">Loading keys…</div>
+                            ) : (
+                              <table className="w-full text-xs text-left">
+                                <thead className="text-zinc-500">
+                                  <tr>
+                                    <th className="py-1 pr-4 font-medium">Label</th>
+                                    <th className="py-1 pr-4 font-medium">Created</th>
+                                    <th className="py-1 pr-4 font-medium">Expires</th>
+                                    <th className="py-1 text-right font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                  {(keysByUser[user.id] ?? []).map(key => (
+                                    <tr key={key.id}>
+                                      <td className="py-1.5 pr-4">{key.label || "default"}</td>
+                                      <td className="py-1.5 pr-4 text-zinc-400">{new Date(key.created_at).toLocaleDateString()}</td>
+                                      <td className="py-1.5 pr-4 text-zinc-400">{key.expires_at ? new Date(key.expires_at).toLocaleDateString() : "Never"}</td>
+                                      <td className="py-1.5 text-right">
+                                        <button
+                                          onClick={() => handleRevokeKey(user.id, key.id)}
+                                          disabled={busy === `revoke-${key.id}`}
+                                          className="text-red-400 hover:text-red-300 transition-colors"
+                                        >
+                                          {busy === `revoke-${key.id}` ? <Loader2 className="w-3 h-3 animate-spin inline" /> : "Revoke"}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {(keysByUser[user.id] ?? []).length === 0 && (
+                                    <tr>
+                                      <td colSpan={4} className="py-2 text-zinc-500">No active keys.</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                   {users.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
+                      <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
                     </tr>
                   )}
                 </tbody>

@@ -420,6 +420,24 @@ export interface AdminProviderConfig {
   api_key?: string;
 }
 
+export interface AdminAPIKey {
+  id: string;
+  user_id: string;
+  label: string;
+  created_at: string;
+  expires_at?: string;
+  revoked_at?: string;
+}
+
+export interface AdminAPIKeyCreated {
+  key_id: string;
+  key: string;
+  label: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
 export interface AdminUserUsageRow {
   user_id: string;
   email: string;
@@ -530,6 +548,9 @@ export const client = {
   suspendOrg: (orgId: string) => fetchApi<void>(`/admin/orgs/${orgId}/suspend`, { method: "POST" }),
   listAdminOrgUsers: (orgId: string) => fetchApi<AdminUser[]>(`/admin/orgs/${orgId}/users`),
   createAdminOrgUser: (orgId: string, email: string, name: string, role: string) => fetchApi<AdminUser>(`/admin/orgs/${orgId}/users`, { method: "POST", body: JSON.stringify({ email, name, role }) }),
+  listAdminUserAPIKeys: (orgId: string, userId: string) => fetchApi<AdminAPIKey[]>(`/admin/orgs/${orgId}/users/${userId}/keys`),
+  createAdminUserAPIKey: (orgId: string, userId: string, label: string) => fetchApi<AdminAPIKeyCreated>(`/admin/orgs/${orgId}/users/${userId}/keys`, { method: "POST", body: JSON.stringify({ label }) }),
+  revokeAdminUserAPIKey: (orgId: string, userId: string, keyId: string) => fetchApi<void>(`/admin/orgs/${orgId}/users/${userId}/keys/${keyId}`, { method: "DELETE" }),
   getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
   getAdminOrgModelUsage: (orgId: string) => fetchApi<AdminOrgModelUsage>(`/admin/orgs/${orgId}/model_usage`),
   getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
