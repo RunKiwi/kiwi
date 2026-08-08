@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig } from "@/lib/api";
-import { ShieldAlert, Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus } from "lucide-react";
+import { Loader2, ArrowLeft, Users, Activity, Settings, Database, Plus } from "lucide-react";
 import { LoadingState } from "@/components/LoadingState";
 import Link from "next/link";
 
@@ -15,7 +15,6 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
   const [org, setOrg] = useState<AdminOrg | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
-  const [providerConfig, setProviderConfig] = useState<AdminProviderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"users" | "audit" | "provider">("users");
   const [busy, setBusy] = useState<string | null>(null);
@@ -50,8 +49,7 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
         setOrg(o);
         setUsers(usrs);
         setAuditLogs(logs);
-        setProviderConfig(prov);
-        
+
         if (prov) {
           setProvName(prov.provider_name);
           setProvActor(prov.actor_model || "");
@@ -79,8 +77,8 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
       setNewName("");
       setNewRole("member");
       alert("User created successfully!");
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -100,12 +98,11 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
         update.api_key = provKey;
       }
       
-      const p = await client.setAdminOrgProviderConfig(orgId, update);
-      setProviderConfig(p);
+      await client.setAdminOrgProviderConfig(orgId, update);
       setProvKey(""); // clear key field after save
       alert("Provider configuration updated successfully!");
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
