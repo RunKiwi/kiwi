@@ -382,3 +382,59 @@ func TestAdminOrgModelUsage(t *testing.T) {
 		t.Errorf("expected bob's kiwi cost %.2f, got %.2f", want, got)
 	}
 }
+
+func TestAPIKeyHandlers_RejectCrossOrgUser(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	orgA := Organization{ID: "org-a", Name: "Org A"}
+	orgB := Organization{ID: "org-b", Name: "Org B"}
+	db.Create(&orgA)
+	db.Create(&orgB)
+	userInB := User{ID: "user-b", Email: "b@example.com", Name: "User B", OrgID: "org-b", Role: "member"}
+	db.Create(&userInB)
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// Create a key for a user in org B via org A's path — must be rejected.
+	reqCreate := httptest.NewRequest(http.MethodPost, "/admin/orgs/org-a/users/user-b/keys", bytes.NewReader([]byte(`{"label":"test"}`))).WithContext(ctx)
+	wCreate := httptest.NewRecorder()
+	mux.ServeHTTP(wCreate, reqCreate)
+	if wCreate.Code != http.StatusNotFound {
+		t.Errorf("expected 404 creating key for cross-org user, got %d: %s", wCreate.Code, wCreate.Body.String())
+	}
+
+	// List keys for a user in org B via org A's path — must be rejected.
+	reqList := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-a/users/user-b/keys", nil).WithContext(ctx)
+	wList := httptest.NewRecorder()
+	mux.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusNotFound {
+		t.Errorf("expected 404 listing keys for cross-org user, got %d: %s", wList.Code, wList.Body.String())
+	}
+
+	// Revoke a key belonging to a user in org B via org A's path — must be rejected.
+	_, key, err := GenerateAPIKey(userInB.ID, "b-key", nil)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	if err := db.Create(key).Error; err != nil {
+		t.Fatalf("save key: %v", err)
+	}
+	reqRevoke := httptest.NewRequest(http.MethodDelete, "/admin/orgs/org-a/users/user-b/keys/"+key.ID, nil).WithContext(ctx)
+	wRevoke := httptest.NewRecorder()
+	mux.ServeHTTP(wRevoke, reqRevoke)
+	if wRevoke.Code != http.StatusNotFound {
+		t.Errorf("expected 404 revoking cross-org key, got %d: %s", wRevoke.Code, wRevoke.Body.String())
+	}
+
+	// The key must still be active — the rejected revoke must not have taken effect.
+	var stillActive APIKey
+	if err := db.First(&stillActive, "id = ?", key.ID).Error; err != nil {
+		t.Fatalf("key vanished: %v", err)
+	}
+	if stillActive.RevokedAt != nil {
+		t.Errorf("cross-org revoke must not have taken effect, but revoked_at is set")
+	}
+}

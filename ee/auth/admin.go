@@ -132,20 +132,22 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 4 && parts[1] == "users" && parts[3] == "keys":
+			orgID := parts[0]
 			userID := parts[2]
 			switch r.Method {
 			case http.MethodPost:
-				handleCreateAPIKey(db, w, r, userID)
+				handleCreateAPIKey(db, w, r, orgID, userID)
 			case http.MethodGet:
-				handleListAPIKeys(db, w, r, userID)
+				handleListAPIKeys(db, w, r, orgID, userID)
 			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
 		case len(parts) == 5 && parts[1] == "users" && parts[3] == "keys":
+			orgID := parts[0]
 			keyID := parts[4]
 			if r.Method == http.MethodDelete {
-				handleRevokeAPIKey(db, w, r, keyID)
+				handleRevokeAPIKey(db, w, r, orgID, keyID)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -415,10 +417,12 @@ func handleListUsers(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID 
 	json.NewEncoder(w).Encode(users)
 }
 
-func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, userID string) {
-	// Verify user exists.
+func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, userID string) {
+	// Verify user exists and belongs to orgID — without this, an org-scoped
+	// admin (authorized only for their own orgID) could mint a key for a
+	// user in a different org just by supplying that user's ID.
 	var user User
-	if err := db.First(&user, "id = ?", userID).Error; err != nil {
+	if err := db.First(&user, "id = ?", userID).Error; err != nil || user.OrgID != orgID {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
@@ -471,7 +475,12 @@ func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, use
 	})
 }
 
-func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, userID string) {
+func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, userID string) {
+	var user User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil || user.OrgID != orgID {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
 	var keys []APIKey
 	if err := db.Where("user_id = ? AND revoked_at IS NULL", userID).Order("created_at desc").Find(&keys).Error; err != nil {
 		http.Error(w, "Failed to list keys", http.StatusInternalServerError)
@@ -481,7 +490,18 @@ func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, user
 	json.NewEncoder(w).Encode(keys)
 }
 
-func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, keyID string) {
+func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, keyID string) {
+	var key APIKey
+	if err := db.First(&key, "id = ?", keyID).Error; err != nil {
+		http.Error(w, "Key not found or already revoked", http.StatusNotFound)
+		return
+	}
+	var user User
+	if err := db.First(&user, "id = ?", key.UserID).Error; err != nil || user.OrgID != orgID {
+		http.Error(w, "Key not found or already revoked", http.StatusNotFound)
+		return
+	}
+
 	now := time.Now()
 	result := db.Model(&APIKey{}).Where("id = ? AND revoked_at IS NULL", keyID).Update("revoked_at", &now)
 	if result.Error != nil {
