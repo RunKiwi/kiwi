@@ -466,22 +466,65 @@ func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
 		body          string
 		wantOwnStatus int // -1 means "anything but 403" — used where the handler's
 		// own internal behavior is out of scope for this test
+
+		// pathFor, when set, is called once per assertion (own-org, cross-org,
+		// member) to create a fresh resource and return the path to act on it,
+		// overriding path. Used for routes that consume their target on success
+		// (revoke, approve, deny) so one assertion's action can never affect
+		// another's expected outcome.
+		pathFor func(t *testing.T) string
 	}
 
 	cases := []routeCase{
-		{"users list", http.MethodGet, "/admin/orgs/org-a/users", "", http.StatusOK},
-		{"keys list", http.MethodGet, "/admin/orgs/org-a/users/user-a-1/keys", "", http.StatusOK},
-		{"audit", http.MethodGet, "/admin/orgs/org-a/audit", "", http.StatusOK},
-		{"usage", http.MethodGet, "/admin/orgs/org-a/usage", "", -1},
-		{"model_usage", http.MethodGet, "/admin/orgs/org-a/model_usage", "", -1},
-		{"provider get", http.MethodGet, "/admin/orgs/org-a/provider", "", http.StatusOK},
-		{"join_requests list", http.MethodGet, "/admin/orgs/org-a/join_requests", "", http.StatusOK},
-		{"domain_join", http.MethodPut, "/admin/orgs/org-a/domain_join", `{"domain_join":true}`, http.StatusOK},
+		{name: "users list", method: http.MethodGet, path: "/admin/orgs/org-a/users", wantOwnStatus: http.StatusOK},
+		{name: "keys list", method: http.MethodGet, path: "/admin/orgs/org-a/users/user-a-1/keys", wantOwnStatus: http.StatusOK},
+		{name: "keys revoke", method: http.MethodDelete, wantOwnStatus: http.StatusNoContent, pathFor: func(t *testing.T) string {
+			_, key, err := GenerateAPIKey(userA.ID, "revoke-test", nil)
+			if err != nil {
+				t.Fatalf("generate key: %v", err)
+			}
+			if err := db.Create(key).Error; err != nil {
+				t.Fatalf("save key: %v", err)
+			}
+			return "/admin/orgs/org-a/users/user-a-1/keys/" + key.ID
+		}},
+		{name: "audit", method: http.MethodGet, path: "/admin/orgs/org-a/audit", wantOwnStatus: http.StatusOK},
+		{name: "usage", method: http.MethodGet, path: "/admin/orgs/org-a/usage", wantOwnStatus: -1},
+		{name: "model_usage", method: http.MethodGet, path: "/admin/orgs/org-a/model_usage", wantOwnStatus: -1},
+		{name: "provider get", method: http.MethodGet, path: "/admin/orgs/org-a/provider", wantOwnStatus: http.StatusOK},
+		{name: "join_requests list", method: http.MethodGet, path: "/admin/orgs/org-a/join_requests", wantOwnStatus: http.StatusOK},
+		{name: "join_requests approve", method: http.MethodPost, wantOwnStatus: http.StatusOK, pathFor: func(t *testing.T) string {
+			id, err := generateHexID(4)
+			if err != nil {
+				t.Fatalf("generate join request id: %v", err)
+			}
+			jr := OrgJoinRequest{ID: "req-approve-" + id, OrgID: "org-a", UserEmail: "joiner-" + id + "@example.com", Status: "pending"}
+			if err := db.Create(&jr).Error; err != nil {
+				t.Fatalf("create join request: %v", err)
+			}
+			return "/admin/orgs/org-a/join_requests/" + jr.ID + "/approve"
+		}},
+		{name: "join_requests deny", method: http.MethodPost, wantOwnStatus: http.StatusOK, pathFor: func(t *testing.T) string {
+			id, err := generateHexID(4)
+			if err != nil {
+				t.Fatalf("generate join request id: %v", err)
+			}
+			jr := OrgJoinRequest{ID: "req-deny-" + id, OrgID: "org-a", UserEmail: "joiner-" + id + "@example.com", Status: "pending"}
+			if err := db.Create(&jr).Error; err != nil {
+				t.Fatalf("create join request: %v", err)
+			}
+			return "/admin/orgs/org-a/join_requests/" + jr.ID + "/deny"
+		}},
+		{name: "domain_join", method: http.MethodPut, path: "/admin/orgs/org-a/domain_join", body: `{"domain_join":true}`, wantOwnStatus: http.StatusOK},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reqOwn := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			ownPath := tc.path
+			if tc.pathFor != nil {
+				ownPath = tc.pathFor(t)
+			}
+			reqOwn := httptest.NewRequest(tc.method, ownPath, bytes.NewReader([]byte(tc.body)))
 			reqOwn = reqOwn.WithContext(ContextWithClaims(reqOwn.Context(), adminA))
 			wOwn := httptest.NewRecorder()
 			mux.ServeHTTP(wOwn, reqOwn)
@@ -492,7 +535,11 @@ func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
 				t.Errorf("expected %d for own-org %s, got %d: %s", tc.wantOwnStatus, tc.name, wOwn.Code, wOwn.Body.String())
 			}
 
-			reqCross := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			crossPath := tc.path
+			if tc.pathFor != nil {
+				crossPath = tc.pathFor(t)
+			}
+			reqCross := httptest.NewRequest(tc.method, crossPath, bytes.NewReader([]byte(tc.body)))
 			reqCross = reqCross.WithContext(ContextWithClaims(reqCross.Context(), adminB))
 			wCross := httptest.NewRecorder()
 			mux.ServeHTTP(wCross, reqCross)
@@ -500,7 +547,11 @@ func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
 				t.Errorf("cross-org admin should be rejected on %s, got %d", tc.name, wCross.Code)
 			}
 
-			reqMember := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			memberPath := tc.path
+			if tc.pathFor != nil {
+				memberPath = tc.pathFor(t)
+			}
+			reqMember := httptest.NewRequest(tc.method, memberPath, bytes.NewReader([]byte(tc.body)))
 			reqMember = reqMember.WithContext(ContextWithClaims(reqMember.Context(), memberA))
 			wMember := httptest.NewRecorder()
 			mux.ServeHTTP(wMember, reqMember)
