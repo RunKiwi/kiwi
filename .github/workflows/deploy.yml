@@ -137,3 +137,35 @@ jobs:
             NEXT_PUBLIC_POSTHOG_HOST=${{ vars.POSTHOG_HOST }}
           tags: |
             ${{ env.ARTIFACT_REPO }}/frontend:${{ steps.sha.outputs.short }}
+
+  migrate:
+    name: Run database migrations
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Update and execute kiwi-migrate job
+        env:
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs update kiwi-migrate \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --image "$IMAGE" \
+            --quiet
+
+          gcloud run jobs execute kiwi-migrate \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --wait \
+            --quiet
