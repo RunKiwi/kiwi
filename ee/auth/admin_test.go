@@ -580,3 +580,63 @@ func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
 		t.Errorf("org-admin must not be able to change their own org's plan, got %d", wPlan.Code)
 	}
 }
+
+func TestUpdateOrgName(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	org := Organization{ID: "org-rename", Name: "Old Name"}
+	db.Create(&org)
+	other := Organization{ID: "org-other", Name: "Taken Name"}
+	db.Create(&other)
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// Success.
+	req := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"New Name"}`))).WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated Organization
+	db.First(&updated, "id = ?", "org-rename")
+	if updated.Name != "New Name" {
+		t.Errorf("expected renamed org, got %q", updated.Name)
+	}
+
+	// Empty name rejected.
+	reqEmpty := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"   "}`))).WithContext(ctx)
+	wEmpty := httptest.NewRecorder()
+	mux.ServeHTTP(wEmpty, reqEmpty)
+	if wEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty name, got %d", wEmpty.Code)
+	}
+
+	// Duplicate name rejected.
+	reqDup := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"Taken Name"}`))).WithContext(ctx)
+	wDup := httptest.NewRecorder()
+	mux.ServeHTTP(wDup, reqDup)
+	if wDup.Code != http.StatusConflict {
+		t.Errorf("expected 409 for duplicate name, got %d", wDup.Code)
+	}
+
+	// Org-admin can rename their own org.
+	adminClaims := &UserClaims{UserID: "admin-1", OrgID: "org-rename", Role: "admin"}
+	reqSelf := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"Self Renamed"}`))).WithContext(ContextWithClaims(context.Background(), adminClaims))
+	wSelf := httptest.NewRecorder()
+	mux.ServeHTTP(wSelf, reqSelf)
+	if wSelf.Code != http.StatusOK {
+		t.Errorf("expected org-admin to rename own org, got %d: %s", wSelf.Code, wSelf.Body.String())
+	}
+
+	// Org-admin cannot rename a different org.
+	reqOther := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-other/name", bytes.NewReader([]byte(`{"name":"Hijacked"}`))).WithContext(ContextWithClaims(context.Background(), adminClaims))
+	wOther := httptest.NewRecorder()
+	mux.ServeHTTP(wOther, reqOther)
+	if wOther.Code != http.StatusForbidden {
+		t.Errorf("expected 403 renaming a different org, got %d", wOther.Code)
+	}
+}

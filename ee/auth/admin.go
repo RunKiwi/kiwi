@@ -257,6 +257,18 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
+		case len(parts) == 2 && parts[1] == "name":
+			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
+			if r.Method == http.MethodPut {
+				handleUpdateOrgName(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
 		default:
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
@@ -1115,4 +1127,40 @@ func handleGrantOrgMinutes(db *gorm.DB, w http.ResponseWriter, r *http.Request, 
 
 	_ = LogAuditEvent(db, r, "UPDATE", "ORG_GRANT", orgID, fmt.Sprintf("Admin granted %.2f agent minutes", body.AgentMinutes))
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleUpdateOrgName(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		http.Error(w, "Bad request: 'name' is required", http.StatusBadRequest)
+		return
+	}
+
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	org.Name = name
+	if err := db.Save(&org).Error; err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "Organization name already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "Failed to rename organization", http.StatusInternalServerError)
+		return
+	}
+
+	_ = LogAuditEvent(db, r, "UPDATE", "ORG_NAME", orgID, fmt.Sprintf("Renamed organization to %q", org.Name))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(org)
 }
