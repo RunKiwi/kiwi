@@ -69,11 +69,14 @@ func authorizeOrgAccess(r *http.Request, orgID string) bool {
 
 In the `/admin/orgs/` route switch in `AdminRouter`, change the gate from
 `isAdminAuthorized(r)` to `authorizeOrgAccess(r, orgID)` for exactly these
-eight route groups (identified by the existing `parts` path-parsing):
+nine route groups (identified by the existing `parts` path-parsing):
 - `users` (`len(parts) == 2 && parts[1] == "users"`)
 - `users/{userID}/keys[/{keyID}]` (the two 4- and 5-part cases)
 - `audit`
 - `usage`
+- `model_usage` (added post-hoc — see the 2026-08-09 addendum at the top of
+  this doc's Frontend design section: a `model_usage` endpoint and its
+  consuming "Usage" tab landed on `main` after this spec was first drafted)
 - `provider`
 - `join_requests[/{reqID}/approve|deny]`
 - `domain_join`
@@ -143,6 +146,20 @@ one action needs the new route above. Otherwise this change is
 authorization plus the one hardening fix.
 
 ## Frontend design
+
+> **2026-08-09 addendum, written during implementation planning:** between
+> this spec's approval and the start of implementation, three PRs landed on
+> `main` that this spec didn't anticipate — most relevantly, a
+> `GET /admin/orgs/{orgID}/model_usage` endpoint and a "Usage" tab on the
+> super-admin org-detail page that consumes it (provider/model/per-user cost
+> breakdowns), plus a full inline API-key generate/revoke UI folded into that
+> page's Users tab. This supersedes the paragraph below for `usage`
+> specifically: `model_usage` is the endpoint the real UI now calls, so it
+> is added to the self-service gate list (see Backend design) alongside
+> `usage`. Unlike `usage`, gating `model_usage` isn't a no-op — it makes the
+> existing Usage tab actually work for org-admins once `OrgManagementPanel`
+> is extracted with `org`/`onOrgUpdate` props (still no *new* UI needed,
+> since the tab already exists). The plan document reflects this.
 
 No new UI for `GET /admin/orgs/{orgID}/usage`: it has zero frontend
 consumers today (not even the super-admin org-detail page calls it), and the
