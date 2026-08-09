@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, formatTokens, providerLabel } from "@/lib/api";
-import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, type AdminJoinRequest, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X, ShieldCheck } from "lucide-react";
 
 export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgUpdate: (org: AdminOrg) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
+  const [joinRequests, setJoinRequests] = useState<AdminJoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider" | "access">("users");
   const [busy, setBusy] = useState<string | null>(null);
 
   // New user form
@@ -40,10 +41,12 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
       client.getAdminOrgAuditLogs(org.id),
       client.getAdminOrgProviderConfig(org.id).catch(() => null),
       client.getAdminOrgModelUsage(org.id).catch(() => null),
-    ]).then(([usrs, logs, prov, usage]) => {
+      client.listJoinRequests(org.id).catch(() => []),
+    ]).then(([usrs, logs, prov, usage, reqs]) => {
       setUsers(usrs);
       setAuditLogs(logs);
       setModelUsage(usage);
+      setJoinRequests(reqs);
 
       if (prov) {
         setProvName(prov.provider_name);
@@ -183,6 +186,42 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
     }
   };
 
+  const handleToggleDomainJoin = async () => {
+    setBusy("domain_join");
+    try {
+      const updated = await client.setDomainJoin(org.id, !org.domain_join);
+      onOrgUpdate(updated);
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleApproveJoinRequest = async (reqId: string) => {
+    setBusy(`approve-${reqId}`);
+    try {
+      await client.approveJoinRequest(org.id, reqId);
+      setJoinRequests(joinRequests.filter(r => r.id !== reqId));
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDenyJoinRequest = async (reqId: string) => {
+    setBusy(`deny-${reqId}`);
+    try {
+      await client.denyJoinRequest(org.id, reqId);
+      setJoinRequests(joinRequests.filter(r => r.id !== reqId));
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-zinc-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading org details…</div>;
   }
@@ -246,6 +285,12 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'audit' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
         >
           <Activity className="w-4 h-4" /> Audit Logs
+        </button>
+        <button
+          onClick={() => setActiveTab("access")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'access' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <ShieldCheck className="w-4 h-4" /> Access
         </button>
       </div>
 
@@ -615,6 +660,82 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                 )}
               </tbody>
             </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'access' && (
+          <div className="space-y-6">
+            <div className="glass-panel p-6 border border-white/10 rounded-xl max-w-2xl">
+              <h2 className="text-lg font-medium mb-2 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5" /> Domain join
+              </h2>
+              <p className="text-sm text-zinc-400 mb-4">
+                {org.primary_domain
+                  ? `When on, anyone signing up with an @${org.primary_domain} email joins this org immediately, without approval.`
+                  : "This org has no primary domain set — domain join has no effect until one is configured."}
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={org.domain_join}
+                disabled={busy === "domain_join"}
+                onClick={handleToggleDomainJoin}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                  org.domain_join
+                    ? "border-green-500/40 bg-green-500/20 text-green-300"
+                    : "border-white/10 bg-white/5 text-zinc-400 hover:text-white"
+                }`}
+              >
+                {busy === "domain_join" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>{org.domain_join ? "On" : "Off"}</span>
+              </button>
+            </div>
+
+            <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/10">
+                <h2 className="text-lg font-medium">Pending join requests</h2>
+              </div>
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Requested</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {joinRequests.map(req => (
+                    <tr key={req.id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 py-3 font-medium">{req.user_email}</td>
+                      <td className="px-4 py-3 text-zinc-400">{new Date(req.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-right space-x-2">
+                        <button
+                          onClick={() => handleApproveJoinRequest(req.id)}
+                          disabled={!!busy}
+                          className="text-xs bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 rounded px-2 py-1 transition-colors"
+                        >
+                          {busy === `approve-${req.id}` ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Approve'}
+                        </button>
+                        <button
+                          onClick={() => handleDenyJoinRequest(req.id)}
+                          disabled={!!busy}
+                          className="text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded px-2 py-1 transition-colors"
+                        >
+                          {busy === `deny-${req.id}` ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Deny'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {joinRequests.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-8 text-center text-zinc-500">No pending join requests.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              </div>
             </div>
           </div>
         )}
