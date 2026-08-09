@@ -291,11 +291,15 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		orgName := claims.OrgID
 		activationState := "inactive"
 		plan := "free"
+		domainJoin := false
+		primaryDomain := ""
 		var org Organization
 		if err := db.First(&org, "id = ?", claims.OrgID).Error; err == nil {
 			orgName = org.Name
 			activationState = org.ActivationState
 			plan = org.Plan
+			domainJoin = org.DomainJoin
+			primaryDomain = org.PrimaryDomain
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -308,6 +312,8 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			"role":             claims.Role,
 			"activation_state": activationState,
 			"plan":             plan,
+			"domain_join":      domainJoin,
+			"primary_domain":   primaryDomain,
 		})
 	})
 }

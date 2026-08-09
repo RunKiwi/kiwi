@@ -640,3 +640,32 @@ func TestUpdateOrgName(t *testing.T) {
 		t.Errorf("expected 403 renaming a different org, got %d", wOther.Code)
 	}
 }
+
+func TestAuthValidate_IncludesDomainJoinFields(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	org := Organization{ID: "org-validate", Name: "Validate Org", DomainJoin: true, PrimaryDomain: "example.com"}
+	db.Create(&org)
+
+	claims := &UserClaims{UserID: "user-1", OrgID: "org-validate", Role: "admin"}
+	req := httptest.NewRequest(http.MethodGet, "/auth/validate", nil).WithContext(ContextWithClaims(context.Background(), claims))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		DomainJoin    bool   `json:"domain_join"`
+		PrimaryDomain string `json:"primary_domain"`
+		Role          string `json:"role"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.DomainJoin || resp.PrimaryDomain != "example.com" || resp.Role != "admin" {
+		t.Errorf("unexpected validate response: %+v", resp)
+	}
+}
