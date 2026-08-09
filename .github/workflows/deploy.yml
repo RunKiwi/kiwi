@@ -169,3 +169,98 @@ jobs:
             --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
             --wait \
             --quiet
+
+  deploy-api:
+    name: Deploy kiwi-api
+    needs: [migrate, build-and-push]
+    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
+    with:
+      service: kiwi-api
+      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/kiwid:${{ needs.build-and-push.outputs.sha }}
+      project: kiwi-prod-502913
+      region: us-central1
+      tag: canary-${{ needs.build-and-push.outputs.sha }}
+    secrets:
+      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+  deploy-orchestrator:
+    name: Deploy kiwi-orchestrator
+    needs: [deploy-api, build-and-push]
+    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
+    with:
+      service: kiwi-orchestrator
+      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/kiwid:${{ needs.build-and-push.outputs.sha }}
+      project: kiwi-prod-502913
+      region: us-central1
+      tag: canary-${{ needs.build-and-push.outputs.sha }}
+    secrets:
+      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+  deploy-frontend:
+    name: Deploy kiwi-frontend
+    needs: [deploy-orchestrator, build-and-push]
+    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
+    with:
+      service: kiwi-frontend
+      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/frontend:${{ needs.build-and-push.outputs.sha }}
+      project: kiwi-prod-502913
+      region: us-central1
+      tag: canary-${{ needs.build-and-push.outputs.sha }}
+    secrets:
+      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+  refresh-fleet:
+    name: Refresh free-fleet daemon image
+    needs: [deploy-frontend, build-and-push]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Restart fleet daemon-image + provisioner services, verify digest
+        env:
+          EXPECTED_IMAGE: ${{ env.ARTIFACT_REPO }}/kiwidaemon:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          EXPECTED_DIGEST=$(gcloud artifacts docker images describe "$EXPECTED_IMAGE" \
+            --format='value(image_summary.digest)')
+          echo "expecting fleet host to be running digest: ${EXPECTED_DIGEST}"
+
+          REMOTE_OUTPUT=$(gcloud compute ssh "${{ env.FLEET_VM_NAME }}" \
+            --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" \
+            --tunnel-through-iap \
+            --command 'sudo systemctl start kiwi-daemon-image.service && \
+                       sudo systemctl restart kiwi-provisioner.service && \
+                       echo "DAEMON_IMAGE_STATUS=$(systemctl is-active kiwi-daemon-image.service)" && \
+                       echo "PROVISIONER_STATUS=$(systemctl is-active kiwi-provisioner.service)" && \
+                       echo "DIGEST=$(sudo docker image inspect kiwidaemon:latest --format "{{index .RepoDigests 0}}")"')
+
+          echo "$REMOTE_OUTPUT"
+
+          PROVISIONER_STATUS=$(echo "$REMOTE_OUTPUT" | grep -o 'PROVISIONER_STATUS=.*' | cut -d= -f2)
+          ACTUAL_DIGEST=$(echo "$REMOTE_OUTPUT" | grep -o 'DIGEST=.*@sha256:[a-f0-9]*' | grep -o 'sha256:[a-f0-9]*')
+
+          if [ "$PROVISIONER_STATUS" != "active" ]; then
+            echo "::error::kiwi-provisioner.service is not active after refresh on ${{ env.FLEET_VM_NAME }}; manual intervention required"
+            exit 1
+          fi
+
+          if [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
+            echo "::error::fleet host kiwidaemon:latest digest (${ACTUAL_DIGEST}) does not match the digest just pushed (${EXPECTED_DIGEST}); manual intervention required on ${{ env.FLEET_VM_NAME }}"
+            exit 1
+          fi
+
+          echo "fleet host refreshed and verified at digest ${ACTUAL_DIGEST}"
