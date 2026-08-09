@@ -14,6 +14,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/ee/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -436,5 +437,95 @@ func TestAPIKeyHandlers_RejectCrossOrgUser(t *testing.T) {
 	}
 	if stillActive.RevokedAt != nil {
 		t.Errorf("cross-org revoke must not have taken effect, but revoked_at is set")
+	}
+}
+
+func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&audit.AuditLog{}); err != nil {
+		t.Fatalf("migrate audit table: %v", err)
+	}
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	orgA := Organization{ID: "org-a", Name: "Org A", Plan: "free"}
+	orgB := Organization{ID: "org-b", Name: "Org B", Plan: "free"}
+	db.Create(&orgA)
+	db.Create(&orgB)
+	userA := User{ID: "user-a-1", Email: "a1@example.com", Name: "User A1", OrgID: "org-a", Role: "member"}
+	db.Create(&userA)
+
+	adminA := &UserClaims{UserID: "admin-a", OrgID: "org-a", Role: "admin"}
+	adminB := &UserClaims{UserID: "admin-b", OrgID: "org-b", Role: "admin"}
+	memberA := &UserClaims{UserID: "member-a", OrgID: "org-a", Role: "member"}
+
+	type routeCase struct {
+		name          string
+		method        string
+		path          string
+		body          string
+		wantOwnStatus int // -1 means "anything but 403" — used where the handler's
+		// own internal behavior is out of scope for this test
+	}
+
+	cases := []routeCase{
+		{"users list", http.MethodGet, "/admin/orgs/org-a/users", "", http.StatusOK},
+		{"keys list", http.MethodGet, "/admin/orgs/org-a/users/user-a-1/keys", "", http.StatusOK},
+		{"audit", http.MethodGet, "/admin/orgs/org-a/audit", "", http.StatusOK},
+		{"usage", http.MethodGet, "/admin/orgs/org-a/usage", "", -1},
+		{"model_usage", http.MethodGet, "/admin/orgs/org-a/model_usage", "", -1},
+		{"provider get", http.MethodGet, "/admin/orgs/org-a/provider", "", http.StatusOK},
+		{"join_requests list", http.MethodGet, "/admin/orgs/org-a/join_requests", "", http.StatusOK},
+		{"domain_join", http.MethodPut, "/admin/orgs/org-a/domain_join", `{"domain_join":true}`, http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reqOwn := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			reqOwn = reqOwn.WithContext(ContextWithClaims(reqOwn.Context(), adminA))
+			wOwn := httptest.NewRecorder()
+			mux.ServeHTTP(wOwn, reqOwn)
+			if wOwn.Code == http.StatusForbidden {
+				t.Errorf("org-admin should access own org's %s, got 403: %s", tc.name, wOwn.Body.String())
+			}
+			if tc.wantOwnStatus != -1 && wOwn.Code != tc.wantOwnStatus {
+				t.Errorf("expected %d for own-org %s, got %d: %s", tc.wantOwnStatus, tc.name, wOwn.Code, wOwn.Body.String())
+			}
+
+			reqCross := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			reqCross = reqCross.WithContext(ContextWithClaims(reqCross.Context(), adminB))
+			wCross := httptest.NewRecorder()
+			mux.ServeHTTP(wCross, reqCross)
+			if wCross.Code != http.StatusForbidden {
+				t.Errorf("cross-org admin should be rejected on %s, got %d", tc.name, wCross.Code)
+			}
+
+			reqMember := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			reqMember = reqMember.WithContext(ContextWithClaims(reqMember.Context(), memberA))
+			wMember := httptest.NewRecorder()
+			mux.ServeHTTP(wMember, reqMember)
+			if wMember.Code != http.StatusForbidden {
+				t.Errorf("member should be rejected on %s, got %d", tc.name, wMember.Code)
+			}
+		})
+	}
+
+	// Super-admin regression: still works on any org via the bootstrap token.
+	t.Setenv("KIWI_SERVER_TOKEN", "super-secret")
+	reqSuper := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-b/users", nil)
+	reqSuper.Header.Set("Authorization", "Bearer super-secret")
+	wSuper := httptest.NewRecorder()
+	mux.ServeHTTP(wSuper, reqSuper)
+	if wSuper.Code != http.StatusOK {
+		t.Errorf("super-admin should still access any org, got %d", wSuper.Code)
+	}
+
+	// Lifecycle actions stay super-admin-only even for an org's own admin.
+	reqPlan := httptest.NewRequest(http.MethodPost, "/admin/orgs/org-a/plan", bytes.NewReader([]byte(`{"plan":"pro"}`)))
+	reqPlan = reqPlan.WithContext(ContextWithClaims(reqPlan.Context(), adminA))
+	wPlan := httptest.NewRecorder()
+	mux.ServeHTTP(wPlan, reqPlan)
+	if wPlan.Code != http.StatusForbidden {
+		t.Errorf("org-admin must not be able to change their own org's plan, got %d", wPlan.Code)
 	}
 }

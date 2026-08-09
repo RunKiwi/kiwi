@@ -59,17 +59,16 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("/admin/orgs/", func(w http.ResponseWriter, r *http.Request) {
-		if !isAdminAuthorized(r) {
-			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
-			return
-		}
-
 		// /admin/orgs/{orgID}/users[/{userID}/keys[/{keyID}]]
 		path := strings.TrimPrefix(r.URL.Path, "/admin/orgs/")
 		parts := strings.Split(path, "/")
 
 		switch {
 		case len(parts) == 2 && parts[1] == "activate":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleActivateOrg(db, w, r, orgID)
@@ -78,6 +77,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 2 && parts[1] == "suspend":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleSuspendOrg(db, w, r, orgID)
@@ -87,6 +90,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "usage":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -95,6 +102,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "audit":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -103,6 +114,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "model_usage":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -111,6 +126,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "provider":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPut:
 				handleSaveProviderConfig(db, w, r, orgID)
@@ -122,6 +141,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "users":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPost:
 				handleCreateUser(db, w, r, orgID)
@@ -134,6 +157,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 4 && parts[1] == "users" && parts[3] == "keys":
 			orgID := parts[0]
 			userID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPost:
 				handleCreateAPIKey(db, w, r, orgID, userID)
@@ -146,6 +173,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 5 && parts[1] == "users" && parts[3] == "keys":
 			orgID := parts[0]
 			keyID := parts[4]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodDelete {
 				handleRevokeAPIKey(db, w, r, orgID, keyID)
 			} else {
@@ -153,6 +184,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 2 && parts[1] == "plan":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleUpdateOrgPlan(db, w, r, orgID)
@@ -161,6 +196,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 2 && parts[1] == "grant":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleGrantOrgMinutes(db, w, r, orgID)
@@ -170,6 +209,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "join_requests":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodGet {
 				handleListJoinRequests(db, w, r, orgID)
 			} else {
@@ -179,6 +222,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "approve":
 			orgID := parts[0]
 			reqID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPost {
 				handleApproveJoinRequest(db, w, r, orgID, reqID)
 			} else {
@@ -188,6 +235,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "deny":
 			orgID := parts[0]
 			reqID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPost {
 				handleDenyJoinRequest(db, w, r, orgID, reqID)
 			} else {
@@ -196,6 +247,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "domain_join":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPut {
 				handleToggleDomainJoin(db, w, r, orgID)
 			} else {
@@ -272,6 +327,16 @@ func isAdminAuthorized(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// authorizeOrgAccess grants access to super-admins (via isAdminAuthorized) or
+// to an org-scoped admin acting on their own org.
+func authorizeOrgAccess(r *http.Request, orgID string) bool {
+	if isAdminAuthorized(r) {
+		return true
+	}
+	claims := ClaimsFromContext(r.Context())
+	return claims != nil && claims.IsAdmin() && claims.OrgID == orgID
 }
 
 func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
