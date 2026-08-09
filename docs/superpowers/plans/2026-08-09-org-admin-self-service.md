@@ -4,7 +4,7 @@
 
 **Goal:** Let an org-scoped admin (`User.Role == "admin"`) self-serve users/keys/audit-logs/usage/provider-config/join-requests/domain-join/rename for their own org, without touching the global super-admin-only lifecycle actions (create org, plan, grants, activate/suspend).
 
-**Architecture:** A new `authorizeOrgAccess(r, orgID)` helper sits alongside the existing `isAdminAuthorized(r)` in `ee/auth/admin.go`. Eight route groups under `/admin/orgs/{orgID}/...` switch their gate from the former to the latter; the four lifecycle routes keep the super-admin-only gate. One new endpoint (`PUT /admin/orgs/{orgID}/name`) is added for renaming, and `/auth/validate` gains two fields so the self-service frontend page can seed its UI without calling the super-admin-only "list all orgs" endpoint. On the frontend, the existing super-admin org-detail page's UI is extracted into a shared, prop-driven `OrgManagementPanel` component, reused by both the existing super-admin page and a new self-service `/team` page.
+**Architecture:** A new `authorizeOrgAccess(r, orgID)` helper sits alongside the existing `isAdminAuthorized(r)` in `ee/auth/admin.go`. Nine route groups under `/admin/orgs/{orgID}/...` switch their gate from the former to the latter (including `model_usage`, an endpoint that landed on `main` after this plan was first drafted — see the drift notes on Tasks 2, 6, and 7); the four lifecycle routes keep the super-admin-only gate. One new endpoint (`PUT /admin/orgs/{orgID}/name`) is added for renaming, and `/auth/validate` gains two fields so the self-service frontend page can seed its UI without calling the super-admin-only "list all orgs" endpoint. On the frontend, the existing super-admin org-detail page's UI is extracted into a shared, prop-driven `OrgManagementPanel` component, reused by both the existing super-admin page and a new self-service `/team` page.
 
 **Tech Stack:** Go 1.25 + GORM + SQLite (tests) / Postgres (prod) for the backend (`ee/auth`, BSL-licensed); Next.js (App Router) + TypeScript + Tailwind for the frontend (`frontend/`).
 
@@ -306,7 +306,13 @@ EOF
 
 ---
 
-### Task 2: Add `authorizeOrgAccess` and relax the gate on eight route groups
+### Task 2: Add `authorizeOrgAccess` and relax the gate on nine route groups
+
+**Drift note (found during SDD setup, 2026-08-09):** `main` gained a
+`GET /admin/orgs/{orgID}/model_usage` route (and its consuming "Usage" tab
+on the frontend) after this plan was written. It's included below as a
+ninth self-service route group, gated the same way as `usage`. Everything
+else in this task is unchanged from the original plan.
 
 **Files:**
 - Modify: `ee/auth/admin.go:27-195` (`AdminRouter`'s `/admin/orgs/` handler and route switch)
@@ -316,7 +322,7 @@ EOF
 - Consumes: `handleCreateAPIKey(db, w, r, orgID, userID string)`, `handleListAPIKeys(db, w, r, orgID, userID string)`, `handleRevokeAPIKey(db, w, r, orgID, keyID string)` from Task 1.
 - Produces: `authorizeOrgAccess(r *http.Request, orgID string) bool` — Task 3 uses this for the new rename route.
 
-Today `isAdminAuthorized(r)` is checked once, at the very top of the `/admin/orgs/` handler, before the path is even parsed. This task moves that parsing above the check and pushes the authorization decision into each `case`, so eight of the twelve route groups can use a new, more permissive check while the other four keep the original one.
+Today `isAdminAuthorized(r)` is checked once, at the very top of the `/admin/orgs/` handler, before the path is even parsed. This task moves that parsing above the check and pushes the authorization decision into each `case`, so nine of the thirteen route groups can use a new, more permissive check while the other four keep the original one.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -356,6 +362,7 @@ func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
 		{"keys list", http.MethodGet, "/admin/orgs/org-a/users/user-a-1/keys", "", http.StatusOK},
 		{"audit", http.MethodGet, "/admin/orgs/org-a/audit", "", http.StatusOK},
 		{"usage", http.MethodGet, "/admin/orgs/org-a/usage", "", -1},
+		{"model_usage", http.MethodGet, "/admin/orgs/org-a/model_usage", "", -1},
 		{"provider get", http.MethodGet, "/admin/orgs/org-a/provider", "", http.StatusOK},
 		{"join_requests list", http.MethodGet, "/admin/orgs/org-a/join_requests", "", http.StatusOK},
 		{"domain_join", http.MethodPut, "/admin/orgs/org-a/domain_join", `{"domain_join":true}`, http.StatusOK},
@@ -529,7 +536,7 @@ with:
 
 (The fourth super-admin-only route, top-level create/list at `/admin/orgs` — not `/admin/orgs/`, a separate `mux.HandleFunc` registration — already has its own unchanged `isAdminAuthorized` check and needs no edit.)
 
-- [ ] **Step 6: Add `authorizeOrgAccess` to the eight self-service routes**
+- [ ] **Step 6: Add `authorizeOrgAccess` to the nine self-service routes**
 
 Replace:
 
@@ -543,6 +550,26 @@ with:
 
 ```go
 		case len(parts) == 2 && parts[1] == "usage":
+			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
+			if r.Method != http.MethodGet {
+```
+
+Replace (this route did not exist when the plan was first drafted — it was added by a PR that landed on `main` during planning; verify the exact surrounding text against the current file before applying, since `handleOrgModelUsageAdmin`'s body is not otherwise touched by this task):
+
+```go
+		case len(parts) == 2 && parts[1] == "model_usage":
+			orgID := parts[0]
+			if r.Method != http.MethodGet {
+```
+
+with:
+
+```go
+		case len(parts) == 2 && parts[1] == "model_usage":
 			orgID := parts[0]
 			if !authorizeOrgAccess(r, orgID) {
 				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
@@ -770,10 +797,11 @@ git commit -m "$(cat <<'EOF'
 feat(auth): let org-scoped admins self-serve their own org
 
 Adds authorizeOrgAccess alongside the existing super-admin-only
-isAdminAuthorized, and switches the gate on eight route groups
-(users, keys, audit, usage, provider, join_requests, domain_join) so
-an org's own admin can act on their own org — closing the gap where
-join requests and domain-join approval required a Kiwi operator.
+isAdminAuthorized, and switches the gate on nine route groups
+(users, keys, audit, usage, model_usage, provider, join_requests,
+domain_join) so an org's own admin can act on their own org —
+closing the gap where join requests and domain-join approval
+required a Kiwi operator, and making the Usage tab work for them too.
 Lifecycle routes (create org, activate/suspend, plan, grant) are
 untouched and stay super-admin-only.
 EOF
@@ -1201,19 +1229,17 @@ export interface AdminJoinRequest {
 
 - [ ] **Step 3: Add the five new `client.*` functions**
 
+**Drift note (found during SDD setup, 2026-08-09):** `main` gained a `getAdminOrgModelUsage` client function (and its backing `AdminOrgModelUsage`/`AdminUsageRow` types) between `getAdminOrgAuditLogs` and `getAdminOrgProviderConfig`, and gained `listAdminUserAPIKeys`/`createAdminUserAPIKey`/`revokeAdminUserAPIKey` (replacing the functions this plan originally expected at those names) elsewhere in the same object. None of that conflicts with this task — anchor on `setAdminOrgProviderConfig` alone, which is untouched, rather than assuming it's still adjacent to `getAdminOrgAuditLogs`.
+
 In `frontend/src/lib/api.ts`, replace:
 
 ```ts
-  getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
-  getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
   setAdminOrgProviderConfig: (orgId: string, config: Partial<AdminProviderConfig>) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`, { method: "PUT", body: JSON.stringify(config) }),
 ```
 
 with:
 
 ```ts
-  getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
-  getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
   setAdminOrgProviderConfig: (orgId: string, config: Partial<AdminProviderConfig>) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`, { method: "PUT", body: JSON.stringify(config) }),
   listJoinRequests: (orgId: string) => fetchApi<AdminJoinRequest[]>(`/admin/orgs/${orgId}/join_requests`),
   approveJoinRequest: (orgId: string, reqId: string) => fetchApi<void>(`/admin/orgs/${orgId}/join_requests/${reqId}/approve`, { method: "POST" }),
@@ -1246,39 +1272,48 @@ EOF
 
 ### Task 6: Extract `OrgManagementPanel` (pure refactor)
 
+**Drift note (found during SDD setup, 2026-08-09):** this task was originally written against a 305-line version of `admin/orgs/[orgId]/page.tsx`. Two PRs landed on `main` during planning and grew it to 600 lines: a "Usage" tab (provider/model/per-user cost breakdowns, backed by `client.getAdminOrgModelUsage`) and a full inline API-key management UI folded into the Users tab (expand/collapse per user, generate/revoke, via `client.listAdminUserAPIKeys`/`createAdminUserAPIKey`/`revokeAdminUserAPIKey` — these replaced the `listAdminAPIKeys`-style names this plan originally assumed). Below is rewritten against the actual current file — it extracts *four* tabs (Users, Usage, Provider Config, Audit Logs), not three. **Before running Step 1, re-read the live file** (`frontend/src/app/(dashboard)/admin/orgs/[orgId]/page.tsx`) and diff it against the code below — if it has changed again, adapt the extraction to match the live file's actual behavior; the live file is the source of truth, this plan is not.
+
 **Files:**
 - Create: `frontend/src/components/OrgManagementPanel.tsx`
 - Modify: `frontend/src/app/(dashboard)/admin/orgs/[orgId]/page.tsx`
 
 **Interfaces:**
-- Consumes: `client.listAdminOrgUsers`, `client.createAdminOrgUser`, `client.getAdminOrgAuditLogs`, `client.getAdminOrgProviderConfig`, `client.setAdminOrgProviderConfig`, `client.renameOrg` (Task 5); types `AdminOrg`, `AdminUser`, `AdminAuditLog`, `AdminProviderConfig` (existing + Task 5).
-- Produces: `OrgManagementPanel({ org: AdminOrg, onOrgUpdate: (org: AdminOrg) => void })` — a React component. Task 7 adds a fourth tab to it. Tasks 8–9 render it.
+- Consumes: `client.listAdminOrgUsers`, `client.createAdminOrgUser`, `client.listAdminUserAPIKeys`, `client.createAdminUserAPIKey`, `client.revokeAdminUserAPIKey`, `client.getAdminOrgAuditLogs`, `client.getAdminOrgModelUsage`, `client.getAdminOrgProviderConfig`, `client.setAdminOrgProviderConfig`, `client.renameOrg` (Task 5); types `AdminOrg`, `AdminUser`, `AdminAuditLog`, `AdminProviderConfig`, `AdminAPIKey`, `AdminOrgModelUsage`, `formatTokens`, `providerLabel` (existing + Task 5).
+- Produces: `OrgManagementPanel({ org: AdminOrg, onOrgUpdate: (org: AdminOrg) => void })` — a React component. Task 7 adds a fifth tab to it. Task 8 renders it.
 
-This step moves the existing three-tab UI (Users, Provider Config, Audit Logs) out of the page and into a component that takes `org`/`onOrgUpdate` as props instead of fetching org metadata itself — the two future call sites (super-admin page, self-service page) obtain that metadata differently. It also adds the inline-rename control in the header. No new tab yet — that's Task 7. Behavior for the three existing tabs must be unchanged; this is a refactor, not a rewrite.
+This step moves the existing four-tab UI (Users — with its inline API-key management, Usage, Provider Config, Audit Logs) out of the page and into a component that takes `org`/`onOrgUpdate` as props instead of fetching org metadata itself — the two call sites (super-admin page, self-service page in Task 8) obtain that metadata differently. It also adds the inline-rename control in the header. No new tab yet — that's Task 7. Behavior for the four existing tabs must be unchanged; this is a refactor, not a rewrite.
 
-There is no component test framework in this repo (confirmed: no `testing-library`/`jest`/`vitest` in `frontend/package.json`), so this task's "test cycle" is `npm run build` (type-check) plus the manual pass in Task 10.
+There is no component test framework in this repo (confirmed: no `testing-library`/`jest`/`vitest` in `frontend/package.json`), so this task's "test cycle" is `npm run build` (type-check) plus the manual pass in Task 9.
 
 - [ ] **Step 1: Create `OrgManagementPanel.tsx`**
 
 ```tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig } from "@/lib/api";
-import { Loader2, Users, Activity, Settings, Database, Plus, Pencil, Check, X } from "lucide-react";
+import { useEffect, useState, Fragment } from "react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X } from "lucide-react";
 
 export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgUpdate: (org: AdminOrg) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
-  const [providerConfig, setProviderConfig] = useState<AdminProviderConfig | null>(null);
+  const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"users" | "audit" | "provider">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider">("users");
   const [busy, setBusy] = useState<string | null>(null);
 
   // New user form
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState("member");
+
+  // API keys, expanded per user
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [keysByUser, setKeysByUser] = useState<Record<string, AdminAPIKey[]>>({});
+  const [keysLoading, setKeysLoading] = useState<string | null>(null);
+  const [newKey, setNewKey] = useState<{ userId: string; plaintext: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Provider form
   const [provName, setProvName] = useState("");
@@ -1295,10 +1330,11 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
       client.listAdminOrgUsers(org.id),
       client.getAdminOrgAuditLogs(org.id),
       client.getAdminOrgProviderConfig(org.id).catch(() => null),
-    ]).then(([usrs, logs, prov]) => {
+      client.getAdminOrgModelUsage(org.id).catch(() => null),
+    ]).then(([usrs, logs, prov, usage]) => {
       setUsers(usrs);
       setAuditLogs(logs);
-      setProviderConfig(prov);
+      setModelUsage(usage);
 
       if (prov) {
         setProvName(prov.provider_name);
@@ -1328,11 +1364,71 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
       setNewName("");
       setNewRole("member");
       alert("User created successfully!");
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
+  };
+
+  const toggleKeys = (userId: string) => {
+    setNewKey(null);
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      return;
+    }
+    setExpandedUserId(userId);
+    if (!keysByUser[userId]) {
+      setKeysLoading(userId);
+      client.listAdminUserAPIKeys(org.id, userId)
+        .then(keys => setKeysByUser(prev => ({ ...prev, [userId]: keys })))
+        .catch(() => setKeysByUser(prev => ({ ...prev, [userId]: [] })))
+        .finally(() => setKeysLoading(null));
+    }
+  };
+
+  const handleGenerateKey = async (userId: string) => {
+    const label = prompt("Label for this key (e.g. \"cli\"):", "cli");
+    if (label === null) return;
+
+    setBusy(`genkey-${userId}`);
+    try {
+      const created = await client.createAdminUserAPIKey(org.id, userId, label || "default");
+      setNewKey({ userId, plaintext: created.key });
+      setCopied(false);
+      setKeysByUser(prev => ({
+        ...prev,
+        [userId]: [
+          { id: created.key_id, user_id: userId, label: created.label, created_at: created.created_at, expires_at: created.expires_at ?? undefined },
+          ...(prev[userId] ?? []),
+        ],
+      }));
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRevokeKey = async (userId: string, keyId: string) => {
+    if (!confirm("Revoke this key? Anything using it will stop working immediately.")) return;
+
+    setBusy(`revoke-${keyId}`);
+    try {
+      await client.revokeAdminUserAPIKey(org.id, userId, keyId);
+      setKeysByUser(prev => ({ ...prev, [userId]: (prev[userId] ?? []).filter(k => k.id !== keyId) }));
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyKey = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   const handleSaveProvider = async (e: React.FormEvent) => {
@@ -1349,12 +1445,11 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
         update.api_key = provKey;
       }
 
-      const p = await client.setAdminOrgProviderConfig(org.id, update);
-      setProviderConfig(p);
+      await client.setAdminOrgProviderConfig(org.id, update);
       setProvKey(""); // clear key field after save
       alert("Provider configuration updated successfully!");
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -1372,8 +1467,8 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
       const updated = await client.renameOrg(org.id, trimmed);
       onOrgUpdate(updated);
       setRenaming(false);
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -1426,6 +1521,12 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
           <Users className="w-4 h-4" /> Users
         </button>
         <button
+          onClick={() => setActiveTab("usage")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'usage' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <BarChart3 className="w-4 h-4" /> Usage
+        </button>
+        <button
           onClick={() => setActiveTab("provider")}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'provider' ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
         >
@@ -1469,6 +1570,7 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
             </div>
 
             <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                   <tr>
@@ -1476,28 +1578,247 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">Joined</th>
+                    <th className="px-4 py-3 text-right">API Keys</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {users.map(user => (
-                    <tr key={user.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-4 py-3 font-medium">{user.name}</td>
-                      <td className="px-4 py-3 text-zinc-300">{user.email}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs ${user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/10 text-zinc-300'}`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-zinc-400">{new Date(user.created_at).toLocaleDateString()}</td>
-                    </tr>
+                    <Fragment key={user.id}>
+                      <tr className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-3 font-medium">{user.name}</td>
+                        <td className="px-4 py-3 text-zinc-300">{user.email}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs ${user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/10 text-zinc-300'}`}>
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-zinc-400">{new Date(user.created_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => toggleKeys(user.id)}
+                            className="inline-flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-2 py-1 transition-colors"
+                          >
+                            <KeyRound className="w-3 h-3" /> Keys
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedUserId === user.id && (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-4 bg-black/20">
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">API Keys for {user.email}</h3>
+                              <button
+                                onClick={() => handleGenerateKey(user.id)}
+                                disabled={busy === `genkey-${user.id}`}
+                                className="flex items-center gap-1 text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded px-2 py-1 transition-colors"
+                              >
+                                {busy === `genkey-${user.id}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                Generate Key
+                              </button>
+                            </div>
+
+                            {newKey && newKey.userId === user.id && (
+                              <div className="mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                                <p className="text-xs text-amber-400 mb-2">
+                                  Shown once — copy it now. It is not stored in plaintext and cannot be retrieved again, only revoked.
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <code className="flex-1 text-xs font-mono text-white break-all bg-black/30 px-2 py-1.5 rounded">
+                                    {newKey.plaintext}
+                                  </code>
+                                  <button
+                                    onClick={() => copyKey(newKey.plaintext)}
+                                    className="text-xs bg-white/10 hover:bg-white/20 rounded px-2 py-1.5 shrink-0 transition-colors"
+                                  >
+                                    {copied ? "Copied!" : "Copy"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {keysLoading === user.id ? (
+                              <div className="text-xs text-zinc-500">Loading keys…</div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                              <table className="w-full text-xs text-left">
+                                <thead className="text-zinc-500">
+                                  <tr>
+                                    <th className="py-1 pr-4 font-medium">Label</th>
+                                    <th className="py-1 pr-4 font-medium">Created</th>
+                                    <th className="py-1 pr-4 font-medium">Expires</th>
+                                    <th className="py-1 text-right font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                  {(keysByUser[user.id] ?? []).map(key => (
+                                    <tr key={key.id}>
+                                      <td className="py-1.5 pr-4">{key.label || "default"}</td>
+                                      <td className="py-1.5 pr-4 text-zinc-400">{new Date(key.created_at).toLocaleDateString()}</td>
+                                      <td className="py-1.5 pr-4 text-zinc-400">{key.expires_at ? new Date(key.expires_at).toLocaleDateString() : "Never"}</td>
+                                      <td className="py-1.5 text-right">
+                                        <button
+                                          onClick={() => handleRevokeKey(user.id, key.id)}
+                                          disabled={busy === `revoke-${key.id}`}
+                                          className="text-red-400 hover:text-red-300 transition-colors"
+                                        >
+                                          {busy === `revoke-${key.id}` ? <Loader2 className="w-3 h-3 animate-spin inline" /> : "Revoke"}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {(keysByUser[user.id] ?? []).length === 0 && (
+                                    <tr>
+                                      <td colSpan={4} className="py-2 text-zinc-500">No active keys.</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                   {users.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
+                      <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
                     </tr>
                   )}
                 </tbody>
               </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'usage' && (
+          <div className="space-y-6">
+            {modelUsage && Object.keys(modelUsage.tasks_by_status).length > 0 && (
+              <div className="glass-panel p-5 border border-white/10 rounded-xl">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Task Queue</h2>
+                <div className="flex gap-6">
+                  {Object.entries(modelUsage.tasks_by_status).map(([status, count]) => (
+                    <div key={status} className="flex items-baseline gap-2">
+                      <span className="text-2xl font-light">{count}</span>
+                      <span className="text-xs text-zinc-400">{status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                  Usage by Provider
+                </h2>
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                    <tr>
+                      <th className="px-4 py-2">Provider</th>
+                      <th className="px-4 py-2 text-right">Tasks</th>
+                      <th className="px-4 py-2 text-right">Cost</th>
+                      <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {(modelUsage?.provider_usage ?? []).map((row) => (
+                      <tr key={row.provider} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-2 font-medium">{providerLabel(row.provider)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                        <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    {(!modelUsage || modelUsage.provider_usage.length === 0) && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                </div>
+              </div>
+              <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                  Usage by Model
+                </h2>
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                    <tr>
+                      <th className="px-4 py-2">Model</th>
+                      <th className="px-4 py-2 text-right">Tasks</th>
+                      <th className="px-4 py-2 text-right">Cost</th>
+                      <th className="px-4 py-2 text-right">Tokens</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {(modelUsage?.model_usage ?? []).map((row) => (
+                      <tr key={row.model} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-2 font-medium font-mono text-xs">{row.model}</td>
+                        <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                        <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                        <td className="px-4 py-2 text-right text-zinc-400">
+                          {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                        </td>
+                      </tr>
+                    ))}
+                    {(!modelUsage || modelUsage.model_usage.length === 0) && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+              <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4 pt-4 pb-3">
+                Usage by User
+              </h2>
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2">User</th>
+                    <th className="px-4 py-2 text-right">Tasks</th>
+                    <th className="px-4 py-2 text-right">Succeeded</th>
+                    <th className="px-4 py-2 text-right">Failed</th>
+                    <th className="px-4 py-2 text-right">Cost</th>
+                    <th className="px-4 py-2 text-right">Kiwi-funded</th>
+                    <th className="px-4 py-2 text-right">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {(modelUsage?.per_user ?? []).map((row) => (
+                    <tr key={row.user_id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 py-2">
+                        <div className="font-medium">{row.email || row.user_id}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">{row.user_id}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right text-zinc-300">{row.task_count}</td>
+                      <td className="px-4 py-2 text-right text-green-400">{row.succeeded}</td>
+                      <td className="px-4 py-2 text-right text-red-400">{row.failed}</td>
+                      <td className="px-4 py-2 text-right">${row.cost_usd.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-right text-zinc-400">${row.kiwi_cost_usd.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-right text-zinc-400">
+                        {formatTokens(row.tokens_in)} in / {formatTokens(row.tokens_out)} out
+                      </td>
+                    </tr>
+                  ))}
+                  {(!modelUsage || modelUsage.per_user.length === 0) && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No usage recorded yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              </div>
             </div>
           </div>
         )}
@@ -1545,6 +1866,7 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
 
         {activeTab === 'audit' && (
           <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                 <tr>
@@ -1584,6 +1906,7 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
@@ -1661,10 +1984,11 @@ git add frontend/src/components/OrgManagementPanel.tsx "frontend/src/app/(dashbo
 git commit -m "$(cat <<'EOF'
 refactor(frontend): extract OrgManagementPanel from admin org page
 
-Pure extraction — same three tabs, same behavior — plus an
-inline-rename control on the header (new: no rename endpoint existed
-before this feature). Takes org/onOrgUpdate as props instead of
-fetching org metadata itself, since the upcoming self-service page
+Pure extraction — same four tabs (Users with inline API-key
+management, Usage, Provider Config, Audit Logs), same behavior —
+plus an inline-rename control on the header (new: no rename endpoint
+existed before this feature). Takes org/onOrgUpdate as props instead
+of fetching org metadata itself, since the upcoming self-service page
 can't call the super-admin-only listAdminOrgs the old page used.
 EOF
 )"
@@ -1674,12 +1998,14 @@ EOF
 
 ### Task 7: Add the Access tab (join requests + domain-join)
 
+**Drift note (found during SDD setup, 2026-08-09):** this task's before/after snippets are rewritten to match Task 6's rewritten output — a `modelUsage` state and a `usage` tab exist where this task originally expected a `providerConfig` state (the real `OrgManagementPanel` never stores the provider config response; it only seeds the form on load). The `"access"` tab is now a fifth tab, appended after the (unchanged) Audit Logs button.
+
 **Files:**
 - Modify: `frontend/src/components/OrgManagementPanel.tsx`
 
 **Interfaces:**
 - Consumes: `client.listJoinRequests`, `client.approveJoinRequest`, `client.denyJoinRequest`, `client.setDomainJoin` (Task 5); `AdminJoinRequest` type (Task 5).
-- Produces: nothing new downstream — this completes `OrgManagementPanel` for Tasks 8–9.
+- Produces: nothing new downstream — this completes `OrgManagementPanel` for Task 8.
 
 This is the UI that has never existed before, for anyone — no join-request or domain-join surface exists in the frontend today, super-admin included.
 
@@ -1688,34 +2014,33 @@ This is the UI that has never existed before, for anyone — no join-request or 
 In `frontend/src/components/OrgManagementPanel.tsx`, update the tab type and add join-request state. Replace:
 
 ```tsx
-import { Loader2, Users, Activity, Settings, Database, Plus, Pencil, Check, X } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X } from "lucide-react";
 
 export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgUpdate: (org: AdminOrg) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
-  const [providerConfig, setProviderConfig] = useState<AdminProviderConfig | null>(null);
+  const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"users" | "audit" | "provider">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider">("users");
   const [busy, setBusy] = useState<string | null>(null);
 ```
 
 with:
 
 ```tsx
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminJoinRequest } from "@/lib/api";
-import { Loader2, Users, Activity, Settings, Database, Plus, Pencil, Check, X, ShieldCheck } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, type AdminJoinRequest, formatTokens, providerLabel } from "@/lib/api";
+import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X, ShieldCheck } from "lucide-react";
 
 export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgUpdate: (org: AdminOrg) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
-  const [providerConfig, setProviderConfig] = useState<AdminProviderConfig | null>(null);
+  const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
   const [joinRequests, setJoinRequests] = useState<AdminJoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"users" | "audit" | "provider" | "access">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider" | "access">("users");
   const [busy, setBusy] = useState<string | null>(null);
 ```
-
-(Note: the `client` and `AdminOrg`/`AdminUser`/`AdminAuditLog`/`AdminProviderConfig` import already exists in the file from Task 6 — this replaces that whole import line to add `AdminJoinRequest`, so make sure the result is a single import statement, not two.)
 
 Replace the data-fetching `useEffect`:
 
@@ -1725,10 +2050,11 @@ Replace the data-fetching `useEffect`:
       client.listAdminOrgUsers(org.id),
       client.getAdminOrgAuditLogs(org.id),
       client.getAdminOrgProviderConfig(org.id).catch(() => null),
-    ]).then(([usrs, logs, prov]) => {
+      client.getAdminOrgModelUsage(org.id).catch(() => null),
+    ]).then(([usrs, logs, prov, usage]) => {
       setUsers(usrs);
       setAuditLogs(logs);
-      setProviderConfig(prov);
+      setModelUsage(usage);
 
       if (prov) {
         setProvName(prov.provider_name);
@@ -1751,11 +2077,12 @@ with:
       client.listAdminOrgUsers(org.id),
       client.getAdminOrgAuditLogs(org.id),
       client.getAdminOrgProviderConfig(org.id).catch(() => null),
+      client.getAdminOrgModelUsage(org.id).catch(() => null),
       client.listJoinRequests(org.id).catch(() => []),
-    ]).then(([usrs, logs, prov, reqs]) => {
+    ]).then(([usrs, logs, prov, usage, reqs]) => {
       setUsers(usrs);
       setAuditLogs(logs);
-      setProviderConfig(prov);
+      setModelUsage(usage);
       setJoinRequests(reqs);
 
       if (prov) {
@@ -1850,6 +2177,7 @@ Replace the closing of the tab content area:
 ```tsx
         {activeTab === 'audit' && (
           <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                 <tr>
@@ -1889,6 +2217,7 @@ Replace the closing of the tab content area:
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
@@ -1902,6 +2231,7 @@ with:
 ```tsx
         {activeTab === 'audit' && (
           <div className="glass-panel border border-white/10 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                 <tr>
@@ -1941,6 +2271,7 @@ with:
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -1976,6 +2307,7 @@ with:
               <div className="px-6 py-4 border-b border-white/10">
                 <h2 className="text-lg font-medium">Pending join requests</h2>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="bg-white/5 border-b border-white/10 text-xs font-medium text-zinc-400">
                   <tr>
@@ -2014,6 +2346,7 @@ with:
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -2210,7 +2543,7 @@ Using the bootstrap `KIWI_SERVER_TOKEN` against `/admin/orgs`, create two orgs (
 
 Logged in as Org Alpha's admin:
 - The sidebar shows a "Team" entry; the sidebar's "Admin" entry does not appear.
-- `/team` loads Org Alpha's own panel (no org picker). Users tab: create a user, confirm it appears. Provider Config tab: save a config, confirm it persists on reload. Audit Logs tab: confirm the user-creation and provider-config actions appear. Access tab: toggle domain-join on/off, confirm it persists on reload; if a join request exists (see Step 4), approve and deny each show up correctly.
+- `/team` loads Org Alpha's own panel (no org picker). Users tab: create a user, confirm it appears; expand a user's "Keys" row, generate a key, confirm the plaintext banner and copy button work, then revoke it and confirm it disappears. Usage tab: confirm it loads without a 403 (data may be empty on a fresh org — that's fine, the point is the request succeeds). Provider Config tab: save a config, confirm it persists on reload. Audit Logs tab: confirm the user-creation and provider-config actions appear. Access tab: toggle domain-join on/off, confirm it persists on reload; if a join request exists (see Step 4), approve and deny each show up correctly.
 - Rename the org via the pencil icon in the header; confirm the new name persists after a reload and appears correctly wherever the org name is displayed elsewhere in the dashboard (e.g. Settings page).
 - Manually navigate to `/admin` and to `/admin/orgs/{Org-Beta-ID}` — both must redirect to `/`.
 
@@ -2222,7 +2555,7 @@ Logged in as Org Alpha's member:
 
 - [ ] **Step 5: Verify cross-org isolation**
 
-Logged in as Org Beta's admin, attempt (via a direct authenticated request, e.g. curl with Org Beta's admin API key) each of: `GET /admin/orgs/{Org-Alpha-ID}/users`, `GET /admin/orgs/{Org-Alpha-ID}/audit`, `PUT /admin/orgs/{Org-Alpha-ID}/domain_join`, `PUT /admin/orgs/{Org-Alpha-ID}/name`. Every one must return `403`.
+Logged in as Org Beta's admin, attempt (via a direct authenticated request, e.g. curl with Org Beta's admin API key) each of: `GET /admin/orgs/{Org-Alpha-ID}/users`, `GET /admin/orgs/{Org-Alpha-ID}/audit`, `GET /admin/orgs/{Org-Alpha-ID}/model_usage`, `PUT /admin/orgs/{Org-Alpha-ID}/domain_join`, `PUT /admin/orgs/{Org-Alpha-ID}/name`. Every one must return `403`.
 
 - [ ] **Step 6: Verify the super-admin path is unaffected**
 
