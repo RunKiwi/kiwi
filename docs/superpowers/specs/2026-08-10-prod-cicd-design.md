@@ -190,10 +190,19 @@ closely end-to-end, before treating subsequent merges as fire-and-forget.
 ## File layout
 
 - `.github/workflows/deploy.yml` — the pipeline described above.
+- `.github/workflows/_deploy-cloud-run-canary.yml` — the canary-deploy steps
+  factored into a reusable `workflow_call` workflow, since the same logic
+  runs for `kiwi-api`, `kiwi-orchestrator`, and `kiwi-frontend`.
 - `deploy/gcp/bootstrap-cicd.sh` — one-time WIF/SA/IAM setup script (human-run).
-- `deploy/README.md` — updated: the manual steps become "how the automated
-  pipeline works," with a trimmed emergency/manual-override section retained
-  for incident use, not as the primary path.
+- `deploy/gcp/control-plane/README.md` — updated, not `deploy/README.md`.
+  Correction found while planning: `deploy/README.md` documents only the
+  self-host single-VM `docker-compose` runbook and never mentions GCP Cloud
+  Run at all; the manual Cloud Run deploy steps this design automates live in
+  `deploy/gcp/control-plane/README.md`. That file gets a new "Continuous
+  Deployment" section (pipeline now owns routine version bumps; Terraform
+  still owns provisioning) with a trimmed manual-override note retained for
+  incident use. `README.md` gets a one-line pointer from its existing
+  "Free-tier deployment" section.
 
 ## Out of scope for this design
 
