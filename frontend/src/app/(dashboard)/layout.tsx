@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt } from "lucide-react";
+import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt, Users } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft, Menu, X as CloseIcon } from "lucide-react";
@@ -40,6 +40,7 @@ export default function DashboardLayout({
   const [orgName, setOrgName] = useState<string | null>("");
 
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const [isOrgAdmin, setIsOrgAdmin] = useState<boolean>(false);
   const [plan, setPlan] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -57,6 +58,7 @@ export default function DashboardLayout({
       client.getUsage().then(usage => {
         setIsSuperAdmin(!!usage.is_super_admin);
         setPlan(usage.plan);
+        client.validate().then(v => setIsOrgAdmin(v.role === "admin")).catch(() => {});
         // A returning user arrives with a token and never passes through
         // /auth/callback, so this is the only place their events get attached
         // to them. Re-identifying an already-identified user is a no-op that
@@ -88,6 +90,10 @@ export default function DashboardLayout({
     { name: "Integrations", href: "/integrations", icon: Link2 },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
+
+  if (isOrgAdmin || isSuperAdmin) {
+    navItems.push({ name: "Team", href: "/team", icon: Users });
+  }
 
   if (isSuperAdmin) {
     navItems.push({ name: "Admin", href: "/admin", icon: Shield });

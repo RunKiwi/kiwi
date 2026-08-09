@@ -14,6 +14,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/ee/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -380,5 +381,291 @@ func TestAdminOrgModelUsage(t *testing.T) {
 	}
 	if got, want := bob.KiwiCostUSD, 1.0; got != want { // 0.4 planner + 0.6 worker, all kiwi-funded
 		t.Errorf("expected bob's kiwi cost %.2f, got %.2f", want, got)
+	}
+}
+
+func TestAPIKeyHandlers_RejectCrossOrgUser(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	orgA := Organization{ID: "org-a", Name: "Org A"}
+	orgB := Organization{ID: "org-b", Name: "Org B"}
+	db.Create(&orgA)
+	db.Create(&orgB)
+	userInB := User{ID: "user-b", Email: "b@example.com", Name: "User B", OrgID: "org-b", Role: "member"}
+	db.Create(&userInB)
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// Create a key for a user in org B via org A's path — must be rejected.
+	reqCreate := httptest.NewRequest(http.MethodPost, "/admin/orgs/org-a/users/user-b/keys", bytes.NewReader([]byte(`{"label":"test"}`))).WithContext(ctx)
+	wCreate := httptest.NewRecorder()
+	mux.ServeHTTP(wCreate, reqCreate)
+	if wCreate.Code != http.StatusNotFound {
+		t.Errorf("expected 404 creating key for cross-org user, got %d: %s", wCreate.Code, wCreate.Body.String())
+	}
+
+	// List keys for a user in org B via org A's path — must be rejected.
+	reqList := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-a/users/user-b/keys", nil).WithContext(ctx)
+	wList := httptest.NewRecorder()
+	mux.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusNotFound {
+		t.Errorf("expected 404 listing keys for cross-org user, got %d: %s", wList.Code, wList.Body.String())
+	}
+
+	// Revoke a key belonging to a user in org B via org A's path — must be rejected.
+	_, key, err := GenerateAPIKey(userInB.ID, "b-key", nil)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	if err := db.Create(key).Error; err != nil {
+		t.Fatalf("save key: %v", err)
+	}
+	reqRevoke := httptest.NewRequest(http.MethodDelete, "/admin/orgs/org-a/users/user-b/keys/"+key.ID, nil).WithContext(ctx)
+	wRevoke := httptest.NewRecorder()
+	mux.ServeHTTP(wRevoke, reqRevoke)
+	if wRevoke.Code != http.StatusNotFound {
+		t.Errorf("expected 404 revoking cross-org key, got %d: %s", wRevoke.Code, wRevoke.Body.String())
+	}
+
+	// The key must still be active — the rejected revoke must not have taken effect.
+	var stillActive APIKey
+	if err := db.First(&stillActive, "id = ?", key.ID).Error; err != nil {
+		t.Fatalf("key vanished: %v", err)
+	}
+	if stillActive.RevokedAt != nil {
+		t.Errorf("cross-org revoke must not have taken effect, but revoked_at is set")
+	}
+}
+
+func TestAdminRouter_OrgScopedSelfService(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&audit.AuditLog{}); err != nil {
+		t.Fatalf("migrate audit table: %v", err)
+	}
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	orgA := Organization{ID: "org-a", Name: "Org A", Plan: "free"}
+	orgB := Organization{ID: "org-b", Name: "Org B", Plan: "free"}
+	db.Create(&orgA)
+	db.Create(&orgB)
+	userA := User{ID: "user-a-1", Email: "a1@example.com", Name: "User A1", OrgID: "org-a", Role: "member"}
+	db.Create(&userA)
+
+	adminA := &UserClaims{UserID: "admin-a", OrgID: "org-a", Role: "admin"}
+	adminB := &UserClaims{UserID: "admin-b", OrgID: "org-b", Role: "admin"}
+	memberA := &UserClaims{UserID: "member-a", OrgID: "org-a", Role: "member"}
+
+	type routeCase struct {
+		name          string
+		method        string
+		path          string
+		body          string
+		wantOwnStatus int // -1 means "anything but 403" — used where the handler's
+		// own internal behavior is out of scope for this test
+
+		// pathFor, when set, is called once per assertion (own-org, cross-org,
+		// member) to create a fresh resource and return the path to act on it,
+		// overriding path. Used for routes that consume their target on success
+		// (revoke, approve, deny) so one assertion's action can never affect
+		// another's expected outcome.
+		pathFor func(t *testing.T) string
+	}
+
+	cases := []routeCase{
+		{name: "users list", method: http.MethodGet, path: "/admin/orgs/org-a/users", wantOwnStatus: http.StatusOK},
+		{name: "keys list", method: http.MethodGet, path: "/admin/orgs/org-a/users/user-a-1/keys", wantOwnStatus: http.StatusOK},
+		{name: "keys revoke", method: http.MethodDelete, wantOwnStatus: http.StatusNoContent, pathFor: func(t *testing.T) string {
+			_, key, err := GenerateAPIKey(userA.ID, "revoke-test", nil)
+			if err != nil {
+				t.Fatalf("generate key: %v", err)
+			}
+			if err := db.Create(key).Error; err != nil {
+				t.Fatalf("save key: %v", err)
+			}
+			return "/admin/orgs/org-a/users/user-a-1/keys/" + key.ID
+		}},
+		{name: "audit", method: http.MethodGet, path: "/admin/orgs/org-a/audit", wantOwnStatus: http.StatusOK},
+		{name: "usage", method: http.MethodGet, path: "/admin/orgs/org-a/usage", wantOwnStatus: -1},
+		{name: "model_usage", method: http.MethodGet, path: "/admin/orgs/org-a/model_usage", wantOwnStatus: -1},
+		{name: "provider get", method: http.MethodGet, path: "/admin/orgs/org-a/provider", wantOwnStatus: http.StatusOK},
+		{name: "join_requests list", method: http.MethodGet, path: "/admin/orgs/org-a/join_requests", wantOwnStatus: http.StatusOK},
+		{name: "join_requests approve", method: http.MethodPost, wantOwnStatus: http.StatusOK, pathFor: func(t *testing.T) string {
+			id, err := generateHexID(4)
+			if err != nil {
+				t.Fatalf("generate join request id: %v", err)
+			}
+			jr := OrgJoinRequest{ID: "req-approve-" + id, OrgID: "org-a", UserEmail: "joiner-" + id + "@example.com", Status: "pending"}
+			if err := db.Create(&jr).Error; err != nil {
+				t.Fatalf("create join request: %v", err)
+			}
+			return "/admin/orgs/org-a/join_requests/" + jr.ID + "/approve"
+		}},
+		{name: "join_requests deny", method: http.MethodPost, wantOwnStatus: http.StatusOK, pathFor: func(t *testing.T) string {
+			id, err := generateHexID(4)
+			if err != nil {
+				t.Fatalf("generate join request id: %v", err)
+			}
+			jr := OrgJoinRequest{ID: "req-deny-" + id, OrgID: "org-a", UserEmail: "joiner-" + id + "@example.com", Status: "pending"}
+			if err := db.Create(&jr).Error; err != nil {
+				t.Fatalf("create join request: %v", err)
+			}
+			return "/admin/orgs/org-a/join_requests/" + jr.ID + "/deny"
+		}},
+		{name: "domain_join", method: http.MethodPut, path: "/admin/orgs/org-a/domain_join", body: `{"domain_join":true}`, wantOwnStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ownPath := tc.path
+			if tc.pathFor != nil {
+				ownPath = tc.pathFor(t)
+			}
+			reqOwn := httptest.NewRequest(tc.method, ownPath, bytes.NewReader([]byte(tc.body)))
+			reqOwn = reqOwn.WithContext(ContextWithClaims(reqOwn.Context(), adminA))
+			wOwn := httptest.NewRecorder()
+			mux.ServeHTTP(wOwn, reqOwn)
+			if wOwn.Code == http.StatusForbidden {
+				t.Errorf("org-admin should access own org's %s, got 403: %s", tc.name, wOwn.Body.String())
+			}
+			if tc.wantOwnStatus != -1 && wOwn.Code != tc.wantOwnStatus {
+				t.Errorf("expected %d for own-org %s, got %d: %s", tc.wantOwnStatus, tc.name, wOwn.Code, wOwn.Body.String())
+			}
+
+			crossPath := tc.path
+			if tc.pathFor != nil {
+				crossPath = tc.pathFor(t)
+			}
+			reqCross := httptest.NewRequest(tc.method, crossPath, bytes.NewReader([]byte(tc.body)))
+			reqCross = reqCross.WithContext(ContextWithClaims(reqCross.Context(), adminB))
+			wCross := httptest.NewRecorder()
+			mux.ServeHTTP(wCross, reqCross)
+			if wCross.Code != http.StatusForbidden {
+				t.Errorf("cross-org admin should be rejected on %s, got %d", tc.name, wCross.Code)
+			}
+
+			memberPath := tc.path
+			if tc.pathFor != nil {
+				memberPath = tc.pathFor(t)
+			}
+			reqMember := httptest.NewRequest(tc.method, memberPath, bytes.NewReader([]byte(tc.body)))
+			reqMember = reqMember.WithContext(ContextWithClaims(reqMember.Context(), memberA))
+			wMember := httptest.NewRecorder()
+			mux.ServeHTTP(wMember, reqMember)
+			if wMember.Code != http.StatusForbidden {
+				t.Errorf("member should be rejected on %s, got %d", tc.name, wMember.Code)
+			}
+		})
+	}
+
+	// Super-admin regression: still works on any org via the bootstrap token.
+	t.Setenv("KIWI_SERVER_TOKEN", "super-secret")
+	reqSuper := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-b/users", nil)
+	reqSuper.Header.Set("Authorization", "Bearer super-secret")
+	wSuper := httptest.NewRecorder()
+	mux.ServeHTTP(wSuper, reqSuper)
+	if wSuper.Code != http.StatusOK {
+		t.Errorf("super-admin should still access any org, got %d", wSuper.Code)
+	}
+
+	// Lifecycle actions stay super-admin-only even for an org's own admin.
+	reqPlan := httptest.NewRequest(http.MethodPost, "/admin/orgs/org-a/plan", bytes.NewReader([]byte(`{"plan":"pro"}`)))
+	reqPlan = reqPlan.WithContext(ContextWithClaims(reqPlan.Context(), adminA))
+	wPlan := httptest.NewRecorder()
+	mux.ServeHTTP(wPlan, reqPlan)
+	if wPlan.Code != http.StatusForbidden {
+		t.Errorf("org-admin must not be able to change their own org's plan, got %d", wPlan.Code)
+	}
+}
+
+func TestUpdateOrgName(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	org := Organization{ID: "org-rename", Name: "Old Name"}
+	db.Create(&org)
+	other := Organization{ID: "org-other", Name: "Taken Name"}
+	db.Create(&other)
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// Success.
+	req := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"New Name"}`))).WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated Organization
+	db.First(&updated, "id = ?", "org-rename")
+	if updated.Name != "New Name" {
+		t.Errorf("expected renamed org, got %q", updated.Name)
+	}
+
+	// Empty name rejected.
+	reqEmpty := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"   "}`))).WithContext(ctx)
+	wEmpty := httptest.NewRecorder()
+	mux.ServeHTTP(wEmpty, reqEmpty)
+	if wEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty name, got %d", wEmpty.Code)
+	}
+
+	// Duplicate name rejected.
+	reqDup := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"Taken Name"}`))).WithContext(ctx)
+	wDup := httptest.NewRecorder()
+	mux.ServeHTTP(wDup, reqDup)
+	if wDup.Code != http.StatusConflict {
+		t.Errorf("expected 409 for duplicate name, got %d", wDup.Code)
+	}
+
+	// Org-admin can rename their own org.
+	adminClaims := &UserClaims{UserID: "admin-1", OrgID: "org-rename", Role: "admin"}
+	reqSelf := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-rename/name", bytes.NewReader([]byte(`{"name":"Self Renamed"}`))).WithContext(ContextWithClaims(context.Background(), adminClaims))
+	wSelf := httptest.NewRecorder()
+	mux.ServeHTTP(wSelf, reqSelf)
+	if wSelf.Code != http.StatusOK {
+		t.Errorf("expected org-admin to rename own org, got %d: %s", wSelf.Code, wSelf.Body.String())
+	}
+
+	// Org-admin cannot rename a different org.
+	reqOther := httptest.NewRequest(http.MethodPut, "/admin/orgs/org-other/name", bytes.NewReader([]byte(`{"name":"Hijacked"}`))).WithContext(ContextWithClaims(context.Background(), adminClaims))
+	wOther := httptest.NewRecorder()
+	mux.ServeHTTP(wOther, reqOther)
+	if wOther.Code != http.StatusForbidden {
+		t.Errorf("expected 403 renaming a different org, got %d", wOther.Code)
+	}
+}
+
+func TestAuthValidate_IncludesDomainJoinFields(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	org := Organization{ID: "org-validate", Name: "Validate Org", DomainJoin: true, PrimaryDomain: "example.com"}
+	db.Create(&org)
+
+	claims := &UserClaims{UserID: "user-1", OrgID: "org-validate", Role: "admin"}
+	req := httptest.NewRequest(http.MethodGet, "/auth/validate", nil).WithContext(ContextWithClaims(context.Background(), claims))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		DomainJoin    bool   `json:"domain_join"`
+		PrimaryDomain string `json:"primary_domain"`
+		Role          string `json:"role"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.DomainJoin || resp.PrimaryDomain != "example.com" || resp.Role != "admin" {
+		t.Errorf("unexpected validate response: %+v", resp)
 	}
 }

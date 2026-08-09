@@ -24,9 +24,12 @@ import (
 )
 
 // AdminRouter registers admin-only API endpoints for managing orgs, users, and
-// keys. Every endpoint is gated by isAdminAuthorized, which grants access only
-// to a global super-admin (KIWI_SUPER_ADMIN_EMAILS) or the KIWI_SERVER_TOKEN —
-// never an org-scoped "admin" role.
+// keys. Access is two-tier: most routes are gated by authorizeOrgAccess, which
+// accepts either a global super-admin (KIWI_SUPER_ADMIN_EMAILS, or the
+// KIWI_SERVER_TOKEN) or an org-scoped "admin" role acting on their own org. A
+// small set of org-lifecycle routes — activate, suspend, plan, grant — plus
+// the top-level org create/list and /admin/stats remain gated by
+// isAdminAuthorized directly, so only a super-admin can reach them.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	mux.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
@@ -59,17 +62,16 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("/admin/orgs/", func(w http.ResponseWriter, r *http.Request) {
-		if !isAdminAuthorized(r) {
-			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
-			return
-		}
-
 		// /admin/orgs/{orgID}/users[/{userID}/keys[/{keyID}]]
 		path := strings.TrimPrefix(r.URL.Path, "/admin/orgs/")
 		parts := strings.Split(path, "/")
 
 		switch {
 		case len(parts) == 2 && parts[1] == "activate":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleActivateOrg(db, w, r, orgID)
@@ -78,6 +80,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 2 && parts[1] == "suspend":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleSuspendOrg(db, w, r, orgID)
@@ -87,6 +93,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "usage":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -95,6 +105,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "audit":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -103,6 +117,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "model_usage":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -111,6 +129,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "provider":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPut:
 				handleSaveProviderConfig(db, w, r, orgID)
@@ -122,6 +144,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "users":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPost:
 				handleCreateUser(db, w, r, orgID)
@@ -132,25 +158,39 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 4 && parts[1] == "users" && parts[3] == "keys":
+			orgID := parts[0]
 			userID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			switch r.Method {
 			case http.MethodPost:
-				handleCreateAPIKey(db, w, r, userID)
+				handleCreateAPIKey(db, w, r, orgID, userID)
 			case http.MethodGet:
-				handleListAPIKeys(db, w, r, userID)
+				handleListAPIKeys(db, w, r, orgID, userID)
 			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
 		case len(parts) == 5 && parts[1] == "users" && parts[3] == "keys":
+			orgID := parts[0]
 			keyID := parts[4]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodDelete {
-				handleRevokeAPIKey(db, w, r, keyID)
+				handleRevokeAPIKey(db, w, r, orgID, keyID)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
 		case len(parts) == 2 && parts[1] == "plan":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleUpdateOrgPlan(db, w, r, orgID)
@@ -159,6 +199,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			}
 
 		case len(parts) == 2 && parts[1] == "grant":
+			if !isAdminAuthorized(r) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			orgID := parts[0]
 			if r.Method == http.MethodPost {
 				handleGrantOrgMinutes(db, w, r, orgID)
@@ -168,6 +212,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "join_requests":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodGet {
 				handleListJoinRequests(db, w, r, orgID)
 			} else {
@@ -177,6 +225,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "approve":
 			orgID := parts[0]
 			reqID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPost {
 				handleApproveJoinRequest(db, w, r, orgID, reqID)
 			} else {
@@ -186,6 +238,10 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		case len(parts) == 4 && parts[1] == "join_requests" && parts[3] == "deny":
 			orgID := parts[0]
 			reqID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPost {
 				handleDenyJoinRequest(db, w, r, orgID, reqID)
 			} else {
@@ -194,8 +250,24 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 
 		case len(parts) == 2 && parts[1] == "domain_join":
 			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
 			if r.Method == http.MethodPut {
 				handleToggleDomainJoin(db, w, r, orgID)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case len(parts) == 2 && parts[1] == "name":
+			orgID := parts[0]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
+			if r.Method == http.MethodPut {
+				handleUpdateOrgName(db, w, r, orgID)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -222,11 +294,15 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		orgName := claims.OrgID
 		activationState := "inactive"
 		plan := "free"
+		domainJoin := false
+		primaryDomain := ""
 		var org Organization
 		if err := db.First(&org, "id = ?", claims.OrgID).Error; err == nil {
 			orgName = org.Name
 			activationState = org.ActivationState
 			plan = org.Plan
+			domainJoin = org.DomainJoin
+			primaryDomain = org.PrimaryDomain
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -239,6 +315,8 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			"role":             claims.Role,
 			"activation_state": activationState,
 			"plan":             plan,
+			"domain_join":      domainJoin,
+			"primary_domain":   primaryDomain,
 		})
 	})
 }
@@ -270,6 +348,16 @@ func isAdminAuthorized(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// authorizeOrgAccess grants access to super-admins (via isAdminAuthorized) or
+// to an org-scoped admin acting on their own org.
+func authorizeOrgAccess(r *http.Request, orgID string) bool {
+	if isAdminAuthorized(r) {
+		return true
+	}
+	claims := ClaimsFromContext(r.Context())
+	return claims != nil && claims.IsAdmin() && claims.OrgID == orgID
 }
 
 func handleCreateOrg(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
@@ -415,10 +503,12 @@ func handleListUsers(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID 
 	json.NewEncoder(w).Encode(users)
 }
 
-func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, userID string) {
-	// Verify user exists.
+func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, userID string) {
+	// Verify user exists and belongs to orgID — without this, an org-scoped
+	// admin (authorized only for their own orgID) could mint a key for a
+	// user in a different org just by supplying that user's ID.
 	var user User
-	if err := db.First(&user, "id = ?", userID).Error; err != nil {
+	if err := db.First(&user, "id = ?", userID).Error; err != nil || user.OrgID != orgID {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
@@ -471,7 +561,12 @@ func handleCreateAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, use
 	})
 }
 
-func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, userID string) {
+func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, userID string) {
+	var user User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil || user.OrgID != orgID {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
 	var keys []APIKey
 	if err := db.Where("user_id = ? AND revoked_at IS NULL", userID).Order("created_at desc").Find(&keys).Error; err != nil {
 		http.Error(w, "Failed to list keys", http.StatusInternalServerError)
@@ -481,7 +576,18 @@ func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, user
 	json.NewEncoder(w).Encode(keys)
 }
 
-func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, keyID string) {
+func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, keyID string) {
+	var key APIKey
+	if err := db.First(&key, "id = ?", keyID).Error; err != nil {
+		http.Error(w, "Key not found or already revoked", http.StatusNotFound)
+		return
+	}
+	var user User
+	if err := db.First(&user, "id = ?", key.UserID).Error; err != nil || user.OrgID != orgID {
+		http.Error(w, "Key not found or already revoked", http.StatusNotFound)
+		return
+	}
+
 	now := time.Now()
 	result := db.Model(&APIKey{}).Where("id = ? AND revoked_at IS NULL", keyID).Update("revoked_at", &now)
 	if result.Error != nil {
@@ -1030,4 +1136,48 @@ func handleGrantOrgMinutes(db *gorm.DB, w http.ResponseWriter, r *http.Request, 
 
 	_ = LogAuditEvent(db, r, "UPDATE", "ORG_GRANT", orgID, fmt.Sprintf("Admin granted %.2f agent minutes", body.AgentMinutes))
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleUpdateOrgName(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID string) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		http.Error(w, "Bad request: 'name' is required", http.StatusBadRequest)
+		return
+	}
+
+	var org Organization
+	if err := db.First(&org, "id = ?", orgID).Error; err != nil {
+		http.Error(w, "Organization not found", http.StatusNotFound)
+		return
+	}
+
+	// A targeted update, not db.Save(&org): Save rewrites every column from the
+	// value read microseconds earlier, so a concurrent suspend/grant/plan-change
+	// landing between the read above and the write would be silently reverted.
+	if err := db.Model(&Organization{}).Where("id = ?", orgID).Update("name", name).Error; err != nil {
+		// Postgres reports "duplicate key value violates unique constraint"
+		// (lowercase); SQLite reports "UNIQUE constraint failed". Check both
+		// cases rather than relying on GORM's TranslateError, which isn't
+		// enabled anywhere in this codebase.
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "unique") {
+			http.Error(w, "Organization name already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "Failed to rename organization", http.StatusInternalServerError)
+		return
+	}
+	org.Name = name
+
+	_ = LogAuditEvent(db, r, "UPDATE", "ORG_NAME", orgID, fmt.Sprintf("Renamed organization to %q", org.Name))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(org)
 }

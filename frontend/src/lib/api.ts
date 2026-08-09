@@ -256,6 +256,9 @@ export interface ValidateResponse {
   org_name: string;
   activation_state: string;
   plan: string;
+  role: string;
+  domain_join: boolean;
+  primary_domain: string;
 }
 
 export interface SpendBucket {
@@ -387,6 +390,18 @@ export interface AdminOrg {
   name: string;
   plan: string;
   activation_state: string;
+  domain_join: boolean;
+  primary_domain: string;
+  // Omitted when an AdminOrg is built from /auth/validate (self-service),
+  // which doesn't return it — OrgManagementPanel never displays it.
+  created_at?: string;
+}
+
+export interface AdminJoinRequest {
+  id: string;
+  org_id: string;
+  user_email: string;
+  status: string;
   created_at: string;
 }
 
@@ -523,7 +538,12 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     return null as unknown as T;
   }
 
-  return response.json() as Promise<T>;
+  // A 200 can still have an empty body (e.g. handlers that call
+  // w.WriteHeader(http.StatusOK) without writing JSON) — response.json() would
+  // throw "Unexpected end of JSON input" on that, so read as text first and
+  // only parse when there's something to parse.
+  const raw = await response.text();
+  return (raw ? JSON.parse(raw) : null) as T;
 }
 
 export interface AuthProvidersResponse {
@@ -555,6 +575,11 @@ export const client = {
   getAdminOrgModelUsage: (orgId: string) => fetchApi<AdminOrgModelUsage>(`/admin/orgs/${orgId}/model_usage`),
   getAdminOrgProviderConfig: (orgId: string) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`),
   setAdminOrgProviderConfig: (orgId: string, config: Partial<AdminProviderConfig>) => fetchApi<AdminProviderConfig>(`/admin/orgs/${orgId}/provider`, { method: "PUT", body: JSON.stringify(config) }),
+  listJoinRequests: (orgId: string) => fetchApi<AdminJoinRequest[]>(`/admin/orgs/${orgId}/join_requests`),
+  approveJoinRequest: (orgId: string, reqId: string) => fetchApi<void>(`/admin/orgs/${orgId}/join_requests/${reqId}/approve`, { method: "POST" }),
+  denyJoinRequest: (orgId: string, reqId: string) => fetchApi<void>(`/admin/orgs/${orgId}/join_requests/${reqId}/deny`, { method: "POST" }),
+  setDomainJoin: (orgId: string, domainJoin: boolean) => fetchApi<AdminOrg>(`/admin/orgs/${orgId}/domain_join`, { method: "PUT", body: JSON.stringify({ domain_join: domainJoin }) }),
+  renameOrg: (orgId: string, name: string) => fetchApi<AdminOrg>(`/admin/orgs/${orgId}/name`, { method: "PUT", body: JSON.stringify({ name }) }),
 
   // Starts a Stripe Checkout Session for the Pro upgrade and returns the hosted
   // checkout URL to redirect to. 503 when billing isn't configured.
