@@ -80,3 +80,32 @@ Wait for the job to complete successfully.
 *   Check that the Load Balancer is provisioning the SSL certificate (this can take 15-30 minutes).
 *   Verify the `/healthz` and `/readyz` endpoints on the API domain.
 *   Access the frontend domain to ensure the UI loads.
+
+## Continuous Deployment
+
+Steps 1 and 4 of the runbook above ("Build and Push Images" and re-running
+`gcloud run deploy` for a new version) are automated by
+[`.github/workflows/deploy.yml`](../../../.github/workflows/deploy.yml) on
+every merge to `main`. It builds and pushes `kiwid`, `kiwidaemon`, and
+`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` →
+`kiwi-orchestrator` → `kiwi-frontend` as a canary revision each: deployed
+with `--no-traffic`, health-checked on its own URL, promoted to 100%
+traffic, re-verified, and automatically rolled back to the previous revision
+if either check fails. It finishes by refreshing the free-fleet VM's
+`kiwidaemon:latest` and restarting `kiwi-daemon-image.service` +
+`kiwi-provisioner.service`.
+
+This Terraform module still owns *provisioning* — creating the services,
+networking, and IAM the first time, or changing their shape (env vars,
+scaling, secrets). Routine version bumps go through `deploy.yml`, not
+`terraform apply`.
+
+One-time setup for the pipeline's GCP credentials (Workload Identity
+Federation, a scoped deploy service account) lives in
+[`deploy/gcp/bootstrap-cicd.sh`](../bootstrap-cicd.sh); run it once, then set
+the `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SA_EMAIL`, and
+`POSTHOG_KEY` GitHub Actions repo secrets it prints.
+
+**Manual override:** the steps in the runbook above still work for an
+emergency out-of-band deploy — `deploy.yml` is a wrapper around the same
+`gcloud` commands, not a replacement for knowing them.
