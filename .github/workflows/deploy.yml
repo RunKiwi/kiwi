@@ -39,6 +39,9 @@ jobs:
       - name: Go test
         run: CGO_ENABLED=0 go test ./pkg/...
 
+      - name: Go build (all packages)
+        run: CGO_ENABLED=0 go build ./...
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
