@@ -24,9 +24,12 @@ import (
 )
 
 // AdminRouter registers admin-only API endpoints for managing orgs, users, and
-// keys. Every endpoint is gated by isAdminAuthorized, which grants access only
-// to a global super-admin (KIWI_SUPER_ADMIN_EMAILS) or the KIWI_SERVER_TOKEN —
-// never an org-scoped "admin" role.
+// keys. Access is two-tier: most routes are gated by authorizeOrgAccess, which
+// accepts either a global super-admin (KIWI_SUPER_ADMIN_EMAILS, or the
+// KIWI_SERVER_TOKEN) or an org-scoped "admin" role acting on their own org. A
+// small set of org-lifecycle routes — activate, suspend, plan, grant — plus
+// the top-level org create/list and /admin/stats remain gated by
+// isAdminAuthorized directly, so only a super-admin can reach them.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 	mux.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
@@ -1155,15 +1158,23 @@ func handleUpdateOrgName(db *gorm.DB, w http.ResponseWriter, r *http.Request, or
 		return
 	}
 
-	org.Name = name
-	if err := db.Save(&org).Error; err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+	// A targeted update, not db.Save(&org): Save rewrites every column from the
+	// value read microseconds earlier, so a concurrent suspend/grant/plan-change
+	// landing between the read above and the write would be silently reverted.
+	if err := db.Model(&Organization{}).Where("id = ?", orgID).Update("name", name).Error; err != nil {
+		// Postgres reports "duplicate key value violates unique constraint"
+		// (lowercase); SQLite reports "UNIQUE constraint failed". Check both
+		// cases rather than relying on GORM's TranslateError, which isn't
+		// enabled anywhere in this codebase.
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "unique") {
 			http.Error(w, "Organization name already exists", http.StatusConflict)
 			return
 		}
 		http.Error(w, "Failed to rename organization", http.StatusInternalServerError)
 		return
 	}
+	org.Name = name
 
 	_ = LogAuditEvent(db, r, "UPDATE", "ORG_NAME", orgID, fmt.Sprintf("Renamed organization to %q", org.Name))
 
