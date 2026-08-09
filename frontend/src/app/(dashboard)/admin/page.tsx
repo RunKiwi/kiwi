@@ -261,7 +261,7 @@ export default function AdminPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-zinc-400">
-                  {new Date(org.created_at).toLocaleDateString()}
+                  {new Date(org.created_at!).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3 text-right space-x-2">
                   <button
