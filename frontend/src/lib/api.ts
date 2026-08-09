@@ -538,7 +538,12 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     return null as unknown as T;
   }
 
-  return response.json() as Promise<T>;
+  // A 200 can still have an empty body (e.g. handlers that call
+  // w.WriteHeader(http.StatusOK) without writing JSON) — response.json() would
+  // throw "Unexpected end of JSON input" on that, so read as text first and
+  // only parse when there's something to parse.
+  const raw = await response.text();
+  return (raw ? JSON.parse(raw) : null) as T;
 }
 
 export interface AuthProvidersResponse {

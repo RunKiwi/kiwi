@@ -10,6 +10,7 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
   const [modelUsage, setModelUsage] = useState<AdminOrgModelUsage | null>(null);
   const [joinRequests, setJoinRequests] = useState<AdminJoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState<"users" | "usage" | "audit" | "provider" | "access">("users");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -57,12 +58,11 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
       }
 
       setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+      setLoadError(true);
     });
   }, [org.id]);
-
-  useEffect(() => {
-    setNameDraft(org.name);
-  }, [org.name]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,8 +191,8 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
     try {
       const updated = await client.setDomainJoin(org.id, !org.domain_join);
       onOrgUpdate(updated);
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -203,8 +203,8 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
     try {
       await client.approveJoinRequest(org.id, reqId);
       setJoinRequests(joinRequests.filter(r => r.id !== reqId));
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -215,8 +215,8 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
     try {
       await client.denyJoinRequest(org.id, reqId);
       setJoinRequests(joinRequests.filter(r => r.id !== reqId));
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err) {
+      alert("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(null);
     }
@@ -224,6 +224,10 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
 
   if (loading) {
     return <div className="p-8 text-zinc-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading org details…</div>;
+  }
+
+  if (loadError) {
+    return <div className="p-8 text-red-400">Failed to load org details.</div>;
   }
 
   return (
@@ -251,7 +255,7 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
             ) : (
               <h1 className="text-3xl font-light tracking-tight mb-2 flex items-center gap-2">
                 {org.name}
-                <button onClick={() => setRenaming(true)} className="text-zinc-500 hover:text-white transition-colors" title="Rename organization">
+                <button onClick={() => { setNameDraft(org.name); setRenaming(true); }} className="text-zinc-500 hover:text-white transition-colors" title="Rename organization">
                   <Pencil className="w-4 h-4" />
                 </button>
               </h1>

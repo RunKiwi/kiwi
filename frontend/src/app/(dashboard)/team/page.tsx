@@ -12,10 +12,13 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    client.validate().then(v => {
-      if (v.role !== "admin") {
+    Promise.all([client.validate(), client.getUsage()]).then(([v, u]) => {
+      if (v.role !== "admin" && !u.is_super_admin) {
         // Real enforcement is server-side regardless — this just keeps a
-        // member from landing on a page that will 403 on every request.
+        // member from landing on a page that will 403 on every request. A
+        // super-admin passes even with role "member" (e.g. auto-joined a
+        // company org) because authorizeOrgAccess falls back to
+        // isAdminAuthorized, which accepts super-admins on any org.
         router.push("/");
         return;
       }
