@@ -103,8 +103,10 @@ scaling, secrets). Routine version bumps go through `deploy.yml`, not
 One-time setup for the pipeline's GCP credentials (Workload Identity
 Federation, a scoped deploy service account) lives in
 [`deploy/gcp/bootstrap-cicd.sh`](../bootstrap-cicd.sh); run it once, then set
-the `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SA_EMAIL`, and
-`POSTHOG_KEY` GitHub Actions repo secrets it prints.
+the `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SA_EMAIL` GitHub Actions
+repo secrets it prints, plus `POSTHOG_KEY` (from `frontend/.env.local`) —
+the script reminds you to set this one but does not compute or print a
+value for it.
 
 **Manual override:** the steps in the runbook above still work for an
 emergency out-of-band deploy — `deploy.yml` is a wrapper around the same
