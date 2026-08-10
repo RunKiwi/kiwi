@@ -56,6 +56,12 @@ gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA_EMAIL" \
   --role "roles/iam.workloadIdentityUser" \
   --member "principalSet://iam.googleapis.com/${POOL_NUMBER}/attribute.repository/${GITHUB_REPO}"
 
+echo "==> Allowing the deploy identity to act as the Cloud Run runtime service account (required for gcloud run deploy / gcloud run jobs update)"
+gcloud iam service-accounts add-iam-policy-binding "kiwi-cloudrun-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --project "$PROJECT_ID" \
+  --role "roles/iam.serviceAccountUser" \
+  --member "serviceAccount:${DEPLOY_SA_EMAIL}"
+
 echo "==> Granting Cloud Run deploy permissions"
 for SERVICE in kiwi-api kiwi-orchestrator kiwi-frontend; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
@@ -85,11 +91,34 @@ gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
 gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
   --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
-  --role "roles/compute.osLogin"
+  --role "roles/compute.osAdminLogin"
+
+gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
+  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+  --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
+  --role "roles/compute.viewer"
+
+FLEET_WAKE_ROLE_ID="kiwiDeployFleetWake"
+echo "==> Creating (if needed) a minimal custom role granting only compute.instances.start, for waking the fleet VM when it's autoscaled to zero"
+if ! gcloud iam roles describe "$FLEET_WAKE_ROLE_ID" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud iam roles create "$FLEET_WAKE_ROLE_ID" \
+    --project "$PROJECT_ID" \
+    --title "Kiwi Deploy: Fleet VM Wake" \
+    --description "Allows starting the free-fleet VM only; used by deploy.yml's refresh-fleet job" \
+    --permissions "compute.instances.start" \
+    --stage GA
+fi
+
+gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
+  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+  --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
+  --role "projects/${PROJECT_ID}/roles/${FLEET_WAKE_ROLE_ID}"
 
 echo
 echo "==> Done. Add these as GitHub Actions repo secrets:"
 echo "GCP_WORKLOAD_IDENTITY_PROVIDER=${POOL_NUMBER}/providers/${PROVIDER_ID}"
 echo "GCP_DEPLOY_SA_EMAIL=${DEPLOY_SA_EMAIL}"
 echo
-echo "Also set POSTHOG_KEY (from frontend/.env.local) as a repo secret."
+echo "Also set as GitHub Actions repo configuration:"
+echo "  - POSTHOG_KEY (secret, from frontend/.env.local)"
+echo "  - POSTHOG_HOST (variable, not secret — Settings > Secrets and variables > Actions > Variables)"
