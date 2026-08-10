@@ -211,3 +211,46 @@ closely end-to-end, before treating subsequent merges as fire-and-forget.
 - A reusable `opsctl deploy` CLI (noted above as a good future step).
 - Slack/Discord failure notifications — GitHub's native failure notifications
   (e.g. email) are the v1 mechanism; nothing requested beyond that.
+
+## Amendments after final review (2026-08-10)
+
+The final whole-branch review found this design applied one canary pattern
+uniformly to three services that are not actually uniform. Corrected:
+
+- **`kiwi-frontend` has no `/healthz`/`/readyz` route.** The original design
+  wrongly assumed all three services shared `kiwid`'s router; `kiwi-frontend`
+  is a standalone Next.js app. Fix: add real `/healthz` and `/readyz` route
+  handlers to the frontend app so the canary check has something to hit.
+- **`kiwi-orchestrator` is not publicly invokable, and is a `min=max=1`
+  singleton whose own code states two concurrent instances is unsafe**
+  (task recovery re-launches `RUNNING`/`PENDING` jobs on boot; the
+  fleet-autostop idle sweeper is a singleton by design). The `--no-traffic`
+  canary pattern both requires public HTTP access it doesn't have and
+  deliberately holds a second live instance open for the health-check
+  window. Fix: `kiwi-orchestrator` is deployed directly (no `--no-traffic`
+  hold-open, no separate canary revision) and verified via
+  `gcloud run revisions describe` polling the revision's `Ready` condition
+  instead of an HTTP health check; rollback on failure still uses
+  `update-traffic` to the prior revision. It does not go through the
+  `_deploy-cloud-run-canary.yml` reusable workflow — that workflow remains
+  api/frontend-only, for services with a public HTTP surface.
+- **The free-fleet VM autoscales to zero when idle** (enabled 2026-08-04;
+  `CLAUDE.md` §1 is stale on this point). `refresh-fleet` now starts the VM
+  first and waits for it to be SSH-reachable before restarting the systemd
+  units; the existing idle sweeper puts it back to sleep afterward, so the
+  cost impact is one bounded idle window per merge, not a permanent
+  always-on VM.
+
+Also fixed in the same pass (implementation bugs found by the same review,
+not design changes): missing `permissions: id-token: write` on the three
+Cloud Run deploy jobs (reusable-workflow callers cannot elevate permissions
+the calling job doesn't grant); `bootstrap-cicd.sh` was missing
+`roles/iam.serviceAccountUser` (actAs) on the Cloud Run runtime service
+account, granted `roles/compute.osLogin` where sudo access actually requires
+`roles/compute.osAdminLogin`, and lacked `roles/compute.viewer` for SSH and
+`compute.instances.start` for the fleet-VM wake step; no `concurrency:`
+group serializing pipeline runs, so two merges in quick succession could
+race on prod; canary traffic tags were never cleaned up after promotion,
+an unbounded accumulation that eventually breaks every future deploy; the
+migrate job's failure path didn't print the "forward-only, no
+auto-rollback" message this design originally required.
