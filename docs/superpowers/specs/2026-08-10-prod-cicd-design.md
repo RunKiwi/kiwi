@@ -258,3 +258,42 @@ race on prod; canary traffic tags were never cleaned up after promotion,
 an unbounded accumulation that eventually breaks every future deploy; the
 migrate job's failure path didn't print the "forward-only, no
 auto-rollback" message this design originally required.
+
+## Second amendment: the canary pattern doesn't work in this environment (2026-08-10)
+
+The first real run on `main`, after all of the above fixes, got as far as
+`kiwi-api`'s canary deploy and failed there: the new revision deployed
+successfully, but curling its direct per-revision URL
+(`https://canary-<sha>---kiwi-api-<hash>.a.run.app/healthz`) returned a 404
+from Google's own edge infrastructure — confirmed by curling it directly
+and getting Google's generic 404 page, not the application's. The revision
+never received traffic (correct, safe behavior — production was untouched
+throughout), but every future canary deploy of `kiwi-api` would fail the
+same way.
+
+Root cause (not fully confirmed — no `gcloud` access to inspect the live
+service's ingress setting from this session): `kiwi-api` and `kiwi-frontend`
+are fronted by an external HTTPS load balancer via a serverless NEG
+(`deploy/gcp/control-plane/main.tf`), and the live services likely restrict
+`ingress` to load-balancer-only traffic, which is not visible in this
+Terraform file — the same kind of drift as the fleet-host autostop config,
+which also exists only in the live project, not in version control. A
+restricted-ingress Cloud Run service returns exactly this generic 404 for
+direct `*.run.app` requests, deliberately, to avoid confirming even that
+the service exists to unauthorized traffic.
+
+Given this, the human decided not to spend further turns confirming the
+exact ingress setting and instead to make the health-check strategy
+ingress-agnostic entirely: `kiwi-api` and `kiwi-frontend` now use the same
+direct-deploy strategy already built (and already proven working, twice)
+for `kiwi-orchestrator` — a plain `gcloud run deploy`, no `--no-traffic`,
+no tag, no curl, relying entirely on Cloud Run's own built-in readiness
+gate. The `_deploy-cloud-run-canary.yml` reusable workflow and everything
+in this document describing a curl-based canary for api/frontend
+specifically (traffic tags, `--to-latest` promotion, tag cleanup,
+post-cutover rollback) no longer exists in the implementation — all three
+Cloud Run services now deploy identically. This is a real reduction in
+verification depth (Cloud Run's readiness gate confirms the container
+started and is accepting connections, not that `/healthz`'s specific
+business logic returns 200), traded for a pipeline that actually completes
+a real deploy instead of failing at the same step forever.

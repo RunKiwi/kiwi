@@ -194,27 +194,32 @@ jobs:
   deploy-api:
     name: Deploy kiwi-api
     needs: [migrate, build-and-push]
-    # `with:` on a reusable-workflow call cannot reference this workflow's
-    # `env:` context (GitHub Actions limitation) — these literals must be
-    # kept in sync with the env: block above by hand.
-    #
-    # `permissions:` here is required too: a reusable workflow can only
-    # downgrade the permissions of the job that calls it, never elevate
-    # them, so `_deploy-cloud-run-canary.yml`'s own `id-token: write` has
-    # no effect unless the caller job grants it as well.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
-    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
-    with:
-      service: kiwi-api
-      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/kiwid:${{ needs.build-and-push.outputs.sha }}
-      project: kiwi-prod-502913
-      region: us-central1
-      tag: canary-${{ needs.build-and-push.outputs.sha }}
-    secrets:
-      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy kiwi-api directly (no canary — confirmed 2026-08-10 that direct per-revision *.run.app URLs 404 at Google's edge for this service, so a curl-based canary health check can never pass)
+        env:
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "deploying kiwi-api directly: gcloud run deploy blocks until the new revision is Ready before routing traffic to it, and leaves the prior revision serving if the new one never becomes ready"
+          gcloud run deploy kiwi-api \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --image "$IMAGE" \
+            --quiet
+          echo "kiwi-api deploy succeeded"
 
   deploy-orchestrator:
     name: Deploy kiwi-orchestrator
@@ -234,12 +239,12 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy kiwi-orchestrator directly (no public HTTP surface, singleton — cannot use the canary pattern)
+      - name: Deploy kiwi-orchestrator directly (no public HTTP surface, singleton — a held-open canary instance is unsafe here too)
         env:
           IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
         run: |
           set -euo pipefail
-          echo "deploying kiwi-orchestrator directly: gcloud run deploy blocks until the new revision is Ready before routing any traffic to it, and leaves the prior revision serving if the new one never becomes ready — this service is a min=max=1 singleton where a held-open second instance (the canary pattern used for kiwi-api/kiwi-frontend) is unsafe, and it has no public HTTP invoker to health-check anyway"
+          echo "deploying kiwi-orchestrator directly: gcloud run deploy blocks until the new revision is Ready before routing any traffic to it, and leaves the prior revision serving if the new one never becomes ready"
           gcloud run deploy kiwi-orchestrator \
             --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
             --image "$IMAGE" \
@@ -249,19 +254,32 @@ jobs:
   deploy-frontend:
     name: Deploy kiwi-frontend
     needs: [deploy-orchestrator, build-and-push]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
-    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
-    with:
-      service: kiwi-frontend
-      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/frontend:${{ needs.build-and-push.outputs.sha }}
-      project: kiwi-prod-502913
-      region: us-central1
-      tag: canary-${{ needs.build-and-push.outputs.sha }}
-    secrets:
-      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy kiwi-frontend directly (same ingress restriction as kiwi-api — see deploy-api above)
+        env:
+          IMAGE: ${{ env.ARTIFACT_REPO }}/frontend:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "deploying kiwi-frontend directly: gcloud run deploy blocks until the new revision is Ready before routing traffic to it, and leaves the prior revision serving if the new one never becomes ready"
+          gcloud run deploy kiwi-frontend \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --image "$IMAGE" \
+            --quiet
+          echo "kiwi-frontend deploy succeeded"
 
   refresh-fleet:
     name: Refresh free-fleet daemon image
