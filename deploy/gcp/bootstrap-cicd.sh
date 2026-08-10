@@ -95,12 +95,21 @@ gcloud artifacts repositories add-iam-policy-binding "$ARTIFACT_REPO" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
   --role "roles/artifactregistry.writer"
 
-echo "==> Granting IAP tunnel + OS Login access, scoped to the fleet VM only"
-gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
-  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+# Compute Engine's resource-level IAM only accepts a curated allowlist of
+# roles at the instance scope — confirmed live: `roles/iap.tunnelResourceAccessor`
+# bound via `gcloud compute instances add-iam-policy-binding` fails with
+# "Role ... is not supported for this resource". Grant it at the project
+# level instead. kiwi-prod-502913 has exactly one Compute Engine instance
+# (kiwi-free-fleet) today, so this is not a practical widening yet, but it
+# is IAP tunnel access to any instance in the project, not just this one —
+# revisit if a second instance is ever added.
+echo "==> Granting project-level IAP tunnel access (roles/iap.tunnelResourceAccessor is not grantable at instance scope)"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
-  --role "roles/iap.tunnelResourceAccessor"
+  --role "roles/iap.tunnelResourceAccessor" \
+  --condition=None
 
+echo "==> Granting OS Login (sudo) access, scoped to the fleet VM only"
 gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
   --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
@@ -129,10 +138,17 @@ if ! gcloud iam roles describe "$FLEET_WAKE_ROLE_ID" --project "$PROJECT_ID" >/d
     --stage GA
 fi
 
-gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
-  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+# Instance-scoped custom-role bindings are only accepted by Compute Engine
+# when every permission in the role is on its OS-Login-specific allowlist —
+# `compute.instances.start` isn't, so (per the same restriction that broke
+# the iap.tunnelResourceAccessor grant above) binding this at instance
+# scope would fail the same way. Grant at the project level instead; same
+# one-instance caveat as above applies.
+echo "==> Granting the fleet-wake role at project level (custom roles with non-OS-Login permissions aren't grantable at instance scope)"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
-  --role "projects/${PROJECT_ID}/roles/${FLEET_WAKE_ROLE_ID}"
+  --role "projects/${PROJECT_ID}/roles/${FLEET_WAKE_ROLE_ID}" \
+  --condition=None
 
 echo
 echo "==> Done. Add these as GitHub Actions repo secrets:"
