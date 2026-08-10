@@ -70,7 +70,7 @@ terraform apply -var-file=terraform.tfvars
 Before routing traffic to a newly deployed API, run the migration job:
 
 ```bash
-gcloud run jobs execute kiwi-migrate --region us-central1
+gcloud beta run jobs execute kiwi-migrate --region us-central1
 ```
 
 Wait for the job to complete successfully.

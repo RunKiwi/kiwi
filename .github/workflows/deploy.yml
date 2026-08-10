@@ -172,12 +172,12 @@ jobs:
           IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
         run: |
           set -euo pipefail
-          gcloud run jobs update kiwi-migrate \
+          gcloud beta run jobs update kiwi-migrate \
             --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
             --image "$IMAGE" \
             --quiet
 
-          if ! gcloud run jobs execute kiwi-migrate \
+          if ! gcloud beta run jobs execute kiwi-migrate \
               --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
               --wait \
               --quiet; then

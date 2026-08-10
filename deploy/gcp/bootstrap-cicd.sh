@@ -84,7 +84,7 @@ for SERVICE in kiwi-api kiwi-orchestrator kiwi-frontend; do
 done
 
 echo "==> Granting Cloud Run job (migrate) permissions"
-gcloud run jobs add-iam-policy-binding kiwi-migrate \
+gcloud beta run jobs add-iam-policy-binding kiwi-migrate \
   --project "$PROJECT_ID" --region "$REGION" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
   --role "roles/run.developer"
