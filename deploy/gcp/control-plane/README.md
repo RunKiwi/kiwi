@@ -88,20 +88,26 @@ above, plus the Cloud Run service updates step 3's `terraform apply` would
 otherwise be used for, are automated by
 [`.github/workflows/deploy.yml`](../../../.github/workflows/deploy.yml) on
 every merge to `main`. It builds and pushes `kiwid`, `kiwidaemon`, and
-`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` and
-`kiwi-frontend` each as a canary revision: deployed with `--no-traffic`,
-health-checked on its own URL, promoted to 100% traffic, re-verified, and
-automatically rolled back to the previous revision if the post-cutover
-check fails (the pre-cutover canary check simply leaves prod traffic
-untouched, since it never moved). `kiwi-orchestrator` is deployed
-differently — see below. It finishes by refreshing the
-free-fleet VM's `kiwidaemon:latest`, starting `kiwi-daemon-image.service` and
-restarting `kiwi-provisioner.service` — waking the VM first via
-`gcloud compute instances start` if it was idle and autoscaled to zero.
-`kiwi-orchestrator` is deployed directly rather than through the canary
-pattern above — it has no public HTTP surface to health-check and is a
-singleton where two concurrent instances is unsafe, so `gcloud run deploy`'s
-own built-in readiness gate is used instead.
+`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` → `kiwi-orchestrator`
+→ `kiwi-frontend` in sequence, each with a plain `gcloud run deploy`:
+this blocks until the new revision is Ready before routing any traffic to
+it, and leaves the prior revision serving untouched if the new one never
+becomes ready — so a broken deploy never reaches production traffic, without
+needing a separate health check. All three services use this same direct
+deploy, not a `--no-traffic` canary with an HTTP health check on the
+revision's own URL: that approach was tried first and abandoned — confirmed
+2026-08-10 that `kiwi-api`'s direct per-revision `*.run.app` URL 404s at
+Google's edge before ever reaching the container (this project fronts
+`kiwi-api`/`kiwi-frontend` with an external HTTPS load balancer; direct
+Cloud Run URLs appear to be unreachable as a result), so a curl-based
+canary check could never pass. `kiwi-orchestrator` was already on this
+direct-deploy path regardless, since it has no public HTTP surface to
+health-check and is a singleton where two concurrent instances (what a
+held-open canary revision would mean) is unsafe. It finishes by refreshing
+the free-fleet VM's `kiwidaemon:latest`, starting
+`kiwi-daemon-image.service` and restarting `kiwi-provisioner.service` —
+waking the VM first via `gcloud compute instances start` if it was idle and
+autoscaled to zero.
 
 This Terraform module still owns *provisioning* — creating the services,
 networking, and IAM the first time, or changing their shape (env vars,
