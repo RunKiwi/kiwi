@@ -80,6 +80,7 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.sha.outputs.short }}
+      kiwidaemon_digest: ${{ steps.push-kiwidaemon.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -122,6 +123,7 @@ jobs:
             ${{ env.ARTIFACT_REPO }}/kiwid:${{ steps.sha.outputs.short }}
 
       - name: Build and push kiwidaemon
+        id: push-kiwidaemon
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -330,14 +332,18 @@ jobs:
 
       - name: Restart fleet daemon-image + provisioner services, verify digest
         env:
-          EXPECTED_IMAGE: ${{ env.ARTIFACT_REPO }}/kiwidaemon:${{ needs.build-and-push.outputs.sha }}
+          # Read directly from build-and-push's own docker/build-push-action
+          # output rather than re-querying Artifact Registry — avoids both
+          # an extra live API call and the containeranalysis.occurrences.list
+          # permission `gcloud artifacts docker images describe` turned out
+          # to require (confirmed live 2026-08-10; not granted, and not
+          # actually needed for this).
+          EXPECTED_DIGEST: ${{ needs.build-and-push.outputs.kiwidaemon_digest }}
         run: |
           set -euo pipefail
 
-          EXPECTED_DIGEST=$(gcloud artifacts docker images describe "$EXPECTED_IMAGE" \
-            --format='value(image_summary.digest)')
           if [ -z "$EXPECTED_DIGEST" ]; then
-            echo "::error::could not resolve digest for ${EXPECTED_IMAGE}; refusing to compare against an empty value"
+            echo "::error::build-and-push did not produce a kiwidaemon digest; refusing to compare against an empty value"
             exit 1
           fi
           echo "expecting fleet host to be running digest: ${EXPECTED_DIGEST}"
