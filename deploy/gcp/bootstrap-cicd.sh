@@ -109,6 +109,20 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role "roles/iap.tunnelResourceAccessor" \
   --condition=None
 
+# Confirmed live: without this, `gcloud compute ssh` ignores the OS Login
+# IAM roles below entirely and falls back to legacy metadata-based SSH
+# keys, which needs a `compute.instances.setMetadata` grant this identity
+# deliberately does not have (broader, and unauditable compared to OS
+# Login). Enabling OS Login is non-disruptive to a running instance and
+# does not require a reboot, but it does mean anyone who currently SSHes
+# into this VM via a manually-added metadata key needs an OS Login IAM
+# role of their own afterward — confirm that's true for existing operators
+# before running this against a VM other people access.
+echo "==> Enabling OS Login on the fleet VM instance (required for the OS Login IAM roles below to take effect)"
+gcloud compute instances add-metadata "$FLEET_VM_NAME" \
+  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+  --metadata enable-oslogin=TRUE
+
 echo "==> Granting OS Login (sudo) access, scoped to the fleet VM only"
 gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
   --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
