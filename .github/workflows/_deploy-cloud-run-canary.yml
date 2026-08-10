@@ -31,6 +31,7 @@ jobs:
   canary-deploy:
     name: Canary deploy ${{ inputs.service }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       id-token: write
       contents: read
@@ -82,12 +83,14 @@ jobs:
             --tag "$TAG" \
             --quiet
 
-          CANARY_URL=$(gcloud run services describe "$SERVICE" \
+          CANARY_JSON=$(gcloud run services describe "$SERVICE" \
             --project "$PROJECT" --region "$REGION" --format=json \
-            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | .url')
+            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | "\(.url)\t\(.revisionName)"')
+          CANARY_URL=$(printf '%s' "$CANARY_JSON" | cut -f1)
+          NEW_REVISION=$(printf '%s' "$CANARY_JSON" | cut -f2)
 
-          if [ -z "$CANARY_URL" ]; then
-            echo "::error::could not resolve canary URL for tag ${TAG} on service ${SERVICE}"
+          if [ -z "$CANARY_URL" ] || [ -z "$NEW_REVISION" ]; then
+            echo "::error::could not resolve canary URL/revision for tag ${TAG} on service ${SERVICE}"
             exit 1
           fi
 
@@ -98,16 +101,20 @@ jobs:
             exit 1
           fi
 
-          echo "canary healthy, shifting 100% traffic to the new revision"
+          echo "canary healthy, shifting 100% traffic to ${NEW_REVISION}"
           gcloud run services update-traffic "$SERVICE" \
             --project "$PROJECT" --region "$REGION" \
-            --to-latest --quiet
+            --to-revisions "${NEW_REVISION}=100" --quiet
 
           PUBLIC_URL=$(gcloud run services describe "$SERVICE" \
             --project "$PROJECT" --region "$REGION" --format='value(status.url)')
 
           if check_health "$PUBLIC_URL"; then
             echo "deploy of ${SERVICE} succeeded"
+            echo "cleaning up canary tag ${TAG}"
+            gcloud run services update-traffic "$SERVICE" \
+              --project "$PROJECT" --region "$REGION" \
+              --remove-tags "$TAG" --quiet || echo "::warning::failed to remove canary tag ${TAG} on ${SERVICE}, non-fatal"
             exit 0
           fi
 
