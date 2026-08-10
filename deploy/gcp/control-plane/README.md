@@ -88,12 +88,13 @@ above, plus the Cloud Run service updates step 3's `terraform apply` would
 otherwise be used for, are automated by
 [`.github/workflows/deploy.yml`](../../../.github/workflows/deploy.yml) on
 every merge to `main`. It builds and pushes `kiwid`, `kiwidaemon`, and
-`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` →
-`kiwi-orchestrator` → `kiwi-frontend` as a canary revision each: deployed
-with `--no-traffic`, health-checked on its own URL, promoted to 100%
-traffic, re-verified, and automatically rolled back to the previous revision
-if the post-cutover check fails (the pre-cutover canary check simply leaves
-prod traffic untouched, since it never moved). It finishes by refreshing the
+`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` and
+`kiwi-frontend` each as a canary revision: deployed with `--no-traffic`,
+health-checked on its own URL, promoted to 100% traffic, re-verified, and
+automatically rolled back to the previous revision if the post-cutover
+check fails (the pre-cutover canary check simply leaves prod traffic
+untouched, since it never moved). `kiwi-orchestrator` is deployed
+differently — see below. It finishes by refreshing the
 free-fleet VM's `kiwidaemon:latest`, starting `kiwi-daemon-image.service` and
 restarting `kiwi-provisioner.service` — waking the VM first via
 `gcloud compute instances start` if it was idle and autoscaled to zero.

@@ -228,12 +228,16 @@ uniformly to three services that are not actually uniform. Corrected:
   canary pattern both requires public HTTP access it doesn't have and
   deliberately holds a second live instance open for the health-check
   window. Fix: `kiwi-orchestrator` is deployed directly (no `--no-traffic`
-  hold-open, no separate canary revision) and verified via
-  `gcloud run revisions describe` polling the revision's `Ready` condition
-  instead of an HTTP health check; rollback on failure still uses
-  `update-traffic` to the prior revision. It does not go through the
-  `_deploy-cloud-run-canary.yml` reusable workflow — that workflow remains
-  api/frontend-only, for services with a public HTTP surface.
+  hold-open, no separate canary revision, no HTTP health check) via a plain
+  `gcloud run deploy`, relying on Cloud Run's own built-in behavior —
+  `gcloud run deploy` blocks until the new revision is Ready and only then
+  routes traffic to it, leaving the prior revision serving untouched if the
+  new one never becomes healthy. There is no separate explicit rollback
+  step for this job, because none is needed: unlike the canary jobs, a
+  failed `gcloud run deploy` here never moves traffic in the first place.
+  It does not go through the `_deploy-cloud-run-canary.yml` reusable
+  workflow — that workflow remains api/frontend-only, for services with a
+  public HTTP surface.
 - **The free-fleet VM autoscales to zero when idle** (enabled 2026-08-04;
   `CLAUDE.md` §1 is stale on this point). `refresh-fleet` now starts the VM
   first and waits for it to be SSH-reachable before restarting the systemd

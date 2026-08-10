@@ -136,8 +136,6 @@ jobs:
 
       - name: Build and push frontend
         uses: docker/build-push-action@v5
-        env:
-          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
         with:
           context: frontend
           file: frontend/Dockerfile
@@ -146,7 +144,7 @@ jobs:
           provenance: false
           build-args: |
             NEXT_PUBLIC_KIWI_API_URL=https://api.runkiwi.dev
-            NEXT_PUBLIC_POSTHOG_KEY=${{ env.POSTHOG_KEY }}
+            NEXT_PUBLIC_POSTHOG_KEY=${{ secrets.POSTHOG_KEY }}
             NEXT_PUBLIC_POSTHOG_HOST=${{ vars.POSTHOG_HOST }}
           tags: |
             ${{ env.ARTIFACT_REPO }}/frontend:${{ steps.sha.outputs.short }}
@@ -193,6 +191,14 @@ jobs:
     # `with:` on a reusable-workflow call cannot reference this workflow's
     # `env:` context (GitHub Actions limitation) — these literals must be
     # kept in sync with the env: block above by hand.
+    #
+    # `permissions:` here is required too: a reusable workflow can only
+    # downgrade the permissions of the job that calls it, never elevate
+    # them, so `_deploy-cloud-run-canary.yml`'s own `id-token: write` has
+    # no effect unless the caller job grants it as well.
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_deploy-cloud-run-canary.yml
     with:
       service: kiwi-api
@@ -237,6 +243,9 @@ jobs:
   deploy-frontend:
     name: Deploy kiwi-frontend
     needs: [deploy-orchestrator, build-and-push]
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_deploy-cloud-run-canary.yml
     with:
       service: kiwi-frontend
@@ -277,16 +286,22 @@ jobs:
             echo "starting ${{ env.FLEET_VM_NAME }}..."
             gcloud compute instances start "${{ env.FLEET_VM_NAME }}" \
               --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" --quiet
+            SSH_READY=""
             for attempt in $(seq 1 20); do
               if gcloud compute ssh "${{ env.FLEET_VM_NAME }}" \
                    --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" \
-                   --tunnel-through-iap --quiet --command 'true' 2>/dev/null; then
+                   --tunnel-through-iap --quiet --command 'true'; then
                 echo "fleet VM is SSH-reachable"
+                SSH_READY=1
                 break
               fi
               echo "waiting for fleet VM to become SSH-reachable, attempt ${attempt}/20..."
               sleep 10
             done
+            if [ -z "$SSH_READY" ]; then
+              echo "::error::${{ env.FLEET_VM_NAME }} did not become SSH-reachable after starting it; manual intervention required"
+              exit 1
+            fi
           fi
 
       - name: Restart fleet daemon-image + provisioner services, verify digest

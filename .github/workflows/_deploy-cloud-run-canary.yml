@@ -83,14 +83,19 @@ jobs:
             --tag "$TAG" \
             --quiet
 
-          CANARY_JSON=$(gcloud run services describe "$SERVICE" \
-            --project "$PROJECT" --region "$REGION" --format=json \
-            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | "\(.url)\t\(.revisionName)"')
-          CANARY_URL=$(printf '%s' "$CANARY_JSON" | cut -f1)
-          NEW_REVISION=$(printf '%s' "$CANARY_JSON" | cut -f2)
+          cleanup_tag() {
+            gcloud run services update-traffic "$SERVICE" \
+              --project "$PROJECT" --region "$REGION" \
+              --remove-tags "$TAG" --quiet \
+              || echo "::warning::failed to remove canary tag ${TAG} on ${SERVICE}, non-fatal"
+          }
 
-          if [ -z "$CANARY_URL" ] || [ -z "$NEW_REVISION" ]; then
-            echo "::error::could not resolve canary URL/revision for tag ${TAG} on service ${SERVICE}"
+          CANARY_URL=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" --format=json \
+            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | .url')
+
+          if [ -z "$CANARY_URL" ]; then
+            echo "::error::could not resolve canary URL for tag ${TAG} on service ${SERVICE}"
             exit 1
           fi
 
@@ -98,13 +103,23 @@ jobs:
 
           if ! check_health "$CANARY_URL"; then
             echo "::error::canary revision for ${SERVICE} failed health checks; leaving prod traffic untouched"
+            cleanup_tag
             exit 1
           fi
 
-          echo "canary healthy, shifting 100% traffic to ${NEW_REVISION}"
+          # This workflow only ever runs one at a time per service — the
+          # calling workflow (deploy.yml) sets `concurrency: {group:
+          # deploy-prod}`, which serializes whole pipeline runs — so
+          # `--to-latest` cannot race with a concurrent run's promotion the
+          # way it could without that guarantee. `--to-latest` is used
+          # (rather than pinning to this run's specific revision) so a
+          # manual `gcloud run deploy` during an incident keeps working
+          # exactly as documented in deploy/gcp/control-plane/README.md's
+          # "Manual override" section.
+          echo "canary healthy, shifting 100% traffic to the new revision"
           gcloud run services update-traffic "$SERVICE" \
             --project "$PROJECT" --region "$REGION" \
-            --to-revisions "${NEW_REVISION}=100" --quiet
+            --to-latest --quiet
 
           PUBLIC_URL=$(gcloud run services describe "$SERVICE" \
             --project "$PROJECT" --region "$REGION" --format='value(status.url)')
@@ -112,9 +127,7 @@ jobs:
           if check_health "$PUBLIC_URL"; then
             echo "deploy of ${SERVICE} succeeded"
             echo "cleaning up canary tag ${TAG}"
-            gcloud run services update-traffic "$SERVICE" \
-              --project "$PROJECT" --region "$REGION" \
-              --remove-tags "$TAG" --quiet || echo "::warning::failed to remove canary tag ${TAG} on ${SERVICE}, non-fatal"
+            cleanup_tag
             exit 0
           fi
 
@@ -122,6 +135,7 @@ jobs:
 
           if [ -z "$PREV_REVISION" ]; then
             echo "::error::no previous revision recorded, cannot auto-rollback ${SERVICE}; manual intervention required"
+            cleanup_tag
             exit 1
           fi
 
@@ -129,4 +143,5 @@ jobs:
           gcloud run services update-traffic "$SERVICE" \
             --project "$PROJECT" --region "$REGION" \
             --to-revisions "${PREV_REVISION}=100" --quiet
+          cleanup_tag
           exit 1

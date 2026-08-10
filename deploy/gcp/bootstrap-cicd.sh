@@ -62,6 +62,19 @@ gcloud iam service-accounts add-iam-policy-binding "kiwi-cloudrun-sa@${PROJECT_I
   --role "roles/iam.serviceAccountUser" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}"
 
+# kiwi-frontend's Terraform config sets no explicit `service_account`,
+# unlike kiwi-api/kiwi-orchestrator/kiwi-migrate (which all run as
+# kiwi-cloudrun-sa, granted above) — so it runs as the project's default
+# compute service account instead, and `gcloud run deploy kiwi-frontend`
+# needs actAs on that identity too.
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+DEFAULT_COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+echo "==> Allowing the deploy identity to act as kiwi-frontend's runtime service account (${DEFAULT_COMPUTE_SA})"
+gcloud iam service-accounts add-iam-policy-binding "$DEFAULT_COMPUTE_SA" \
+  --project "$PROJECT_ID" \
+  --role "roles/iam.serviceAccountUser" \
+  --member "serviceAccount:${DEPLOY_SA_EMAIL}"
+
 echo "==> Granting Cloud Run deploy permissions"
 for SERVICE in kiwi-api kiwi-orchestrator kiwi-frontend; do
   gcloud run services add-iam-policy-binding "$SERVICE" \
@@ -93,10 +106,17 @@ gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
   --role "roles/compute.osAdminLogin"
 
-gcloud compute instances add-iam-policy-binding "$FLEET_VM_NAME" \
-  --project "$PROJECT_ID" --zone "$FLEET_VM_ZONE" \
+# roles/compute.viewer's permission set is mostly project-scoped
+# (compute.projects.get, compute.zones.list, ...), which Compute Engine
+# rejects when bound at a single-instance resource scope — unlike
+# iap.tunnelResourceAccessor/osAdminLogin above, which are genuinely
+# instance-scoped roles. Bind it at the project level instead; it's
+# read-only, so this is a small, deliberate widening, not a write grant.
+echo "==> Granting project-level read access to Compute Engine (needed for gcloud compute ssh/describe to resolve the instance and project OS Login metadata)"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${DEPLOY_SA_EMAIL}" \
-  --role "roles/compute.viewer"
+  --role "roles/compute.viewer" \
+  --condition=None
 
 FLEET_WAKE_ROLE_ID="kiwiDeployFleetWake"
 echo "==> Creating (if needed) a minimal custom role granting only compute.instances.start, for waking the fleet VM when it's autoscaled to zero"
