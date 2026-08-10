@@ -166,6 +166,12 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          # `gcloud run jobs` still lives in the beta component track.
+          # Without pre-installing it, the first `gcloud beta run jobs`
+          # call triggers gcloud's own auto-install prompt, which hangs
+          # forever on a non-interactive runner.
+          install_components: beta
 
       - name: Update and execute kiwi-migrate job
         env:
