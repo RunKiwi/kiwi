@@ -1,0 +1,350 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GCP_PROJECT: kiwi-prod-502913
+  GCP_REGION: us-central1
+  ARTIFACT_REPO: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo
+  FLEET_VM_NAME: kiwi-free-fleet
+  FLEET_VM_ZONE: us-central1-a
+
+jobs:
+  verify:
+    name: Verify (test + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go format check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "The following files are not formatted correctly. Please run 'go fmt ./...':"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Go test
+        run: CGO_ENABLED=0 go test ./pkg/...
+
+      - name: Go build (all packages)
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_KIWI_API_URL: https://api.runkiwi.dev
+
+  build-and-push:
+    name: Build and push images
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      sha: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Require POSTHOG_KEY secret
+        run: |
+          if [ -z "${{ secrets.POSTHOG_KEY }}" ]; then
+            echo "::error::secrets.POSTHOG_KEY is empty; the frontend build would silently ship without analytics. Set it in repo settings before deploying."
+            exit 1
+          fi
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push kiwid
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          target: kiwid
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.ARTIFACT_REPO }}/kiwid:${{ steps.sha.outputs.short }}
+
+      - name: Build and push kiwidaemon
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          target: kiwidaemon
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.ARTIFACT_REPO }}/kiwidaemon:${{ steps.sha.outputs.short }}
+            ${{ env.ARTIFACT_REPO }}/kiwidaemon:latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            NEXT_PUBLIC_KIWI_API_URL=https://api.runkiwi.dev
+            NEXT_PUBLIC_POSTHOG_KEY=${{ secrets.POSTHOG_KEY }}
+            NEXT_PUBLIC_POSTHOG_HOST=${{ vars.POSTHOG_HOST }}
+          tags: |
+            ${{ env.ARTIFACT_REPO }}/frontend:${{ steps.sha.outputs.short }}
+
+  migrate:
+    name: Run database migrations
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Update and execute kiwi-migrate job
+        env:
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gcloud beta run jobs update kiwi-migrate \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --image "$IMAGE" \
+            --quiet
+
+          if ! gcloud beta run jobs execute kiwi-migrate \
+              --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+              --wait \
+              --quiet; then
+            echo "::error::kiwi-migrate failed. Migrations are forward-only by design and are never auto-rolled-back — fix with a new forward migration, do not attempt to undo this one."
+            exit 1
+          fi
+
+  deploy-api:
+    name: Deploy kiwi-api
+    needs: [migrate, build-and-push]
+    # `with:` on a reusable-workflow call cannot reference this workflow's
+    # `env:` context (GitHub Actions limitation) — these literals must be
+    # kept in sync with the env: block above by hand.
+    #
+    # `permissions:` here is required too: a reusable workflow can only
+    # downgrade the permissions of the job that calls it, never elevate
+    # them, so `_deploy-cloud-run-canary.yml`'s own `id-token: write` has
+    # no effect unless the caller job grants it as well.
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
+    with:
+      service: kiwi-api
+      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/kiwid:${{ needs.build-and-push.outputs.sha }}
+      project: kiwi-prod-502913
+      region: us-central1
+      tag: canary-${{ needs.build-and-push.outputs.sha }}
+    secrets:
+      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+  deploy-orchestrator:
+    name: Deploy kiwi-orchestrator
+    needs: [deploy-api, build-and-push]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy kiwi-orchestrator directly (no public HTTP surface, singleton — cannot use the canary pattern)
+        env:
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "deploying kiwi-orchestrator directly: gcloud run deploy blocks until the new revision is Ready before routing any traffic to it, and leaves the prior revision serving if the new one never becomes ready — this service is a min=max=1 singleton where a held-open second instance (the canary pattern used for kiwi-api/kiwi-frontend) is unsafe, and it has no public HTTP invoker to health-check anyway"
+          gcloud run deploy kiwi-orchestrator \
+            --project "${{ env.GCP_PROJECT }}" --region "${{ env.GCP_REGION }}" \
+            --image "$IMAGE" \
+            --quiet
+          echo "kiwi-orchestrator deploy succeeded"
+
+  deploy-frontend:
+    name: Deploy kiwi-frontend
+    needs: [deploy-orchestrator, build-and-push]
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy-cloud-run-canary.yml
+    with:
+      service: kiwi-frontend
+      image: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo/frontend:${{ needs.build-and-push.outputs.sha }}
+      project: kiwi-prod-502913
+      region: us-central1
+      tag: canary-${{ needs.build-and-push.outputs.sha }}
+    secrets:
+      workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      deploy_sa_email: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+  refresh-fleet:
+    name: Refresh free-fleet daemon image
+    needs: [deploy-frontend, build-and-push]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Wake the fleet VM if it's stopped (autostop scales it to zero when idle)
+        run: |
+          set -euo pipefail
+          STATUS=$(gcloud compute instances describe "${{ env.FLEET_VM_NAME }}" \
+            --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" \
+            --format='value(status)')
+          echo "fleet VM status: ${STATUS}"
+          if [ "$STATUS" != "RUNNING" ]; then
+            echo "starting ${{ env.FLEET_VM_NAME }}..."
+            gcloud compute instances start "${{ env.FLEET_VM_NAME }}" \
+              --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" --quiet
+            SSH_READY=""
+            for attempt in $(seq 1 20); do
+              if gcloud compute ssh "${{ env.FLEET_VM_NAME }}" \
+                   --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" \
+                   --tunnel-through-iap --quiet --command 'true'; then
+                echo "fleet VM is SSH-reachable"
+                SSH_READY=1
+                break
+              fi
+              echo "waiting for fleet VM to become SSH-reachable, attempt ${attempt}/20..."
+              sleep 10
+            done
+            if [ -z "$SSH_READY" ]; then
+              echo "::error::${{ env.FLEET_VM_NAME }} did not become SSH-reachable after starting it; manual intervention required"
+              exit 1
+            fi
+          fi
+
+      - name: Restart fleet daemon-image + provisioner services, verify digest
+        env:
+          EXPECTED_IMAGE: ${{ env.ARTIFACT_REPO }}/kiwidaemon:${{ needs.build-and-push.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          EXPECTED_DIGEST=$(gcloud artifacts docker images describe "$EXPECTED_IMAGE" \
+            --format='value(image_summary.digest)')
+          if [ -z "$EXPECTED_DIGEST" ]; then
+            echo "::error::could not resolve digest for ${EXPECTED_IMAGE}; refusing to compare against an empty value"
+            exit 1
+          fi
+          echo "expecting fleet host to be running digest: ${EXPECTED_DIGEST}"
+
+          REMOTE_OUTPUT=$(gcloud compute ssh "${{ env.FLEET_VM_NAME }}" \
+            --project "${{ env.GCP_PROJECT }}" --zone "${{ env.FLEET_VM_ZONE }}" \
+            --tunnel-through-iap --quiet \
+            --command 'sudo systemctl start kiwi-daemon-image.service && \
+                       sudo systemctl restart kiwi-provisioner.service && \
+                       echo "DAEMON_IMAGE_STATUS=$(systemctl is-active kiwi-daemon-image.service)" && \
+                       echo "PROVISIONER_STATUS=$(systemctl is-active kiwi-provisioner.service)" && \
+                       echo "DIGEST=$(sudo docker image inspect kiwidaemon:latest --format "{{index .RepoDigests 0}}")"')
+
+          echo "$REMOTE_OUTPUT"
+
+          # DAEMON_IMAGE_STATUS is captured but intentionally not checked:
+          # kiwi-daemon-image.service is a Type=oneshot unit with no
+          # RemainAfterExit, so `systemctl is-active` correctly reports
+          # "inactive" once it exits successfully. Only the long-running
+          # provisioner service's active state is a meaningful signal.
+          PROVISIONER_STATUS=$(echo "$REMOTE_OUTPUT" | grep -o 'PROVISIONER_STATUS=.*' | cut -d= -f2)
+          ACTUAL_DIGEST=$(echo "$REMOTE_OUTPUT" | grep -o 'DIGEST=.*@sha256:[a-f0-9]*' | grep -o 'sha256:[a-f0-9]*')
+
+          if [ "$PROVISIONER_STATUS" != "active" ]; then
+            echo "::error::kiwi-provisioner.service is not active after refresh on ${{ env.FLEET_VM_NAME }}; manual intervention required"
+            exit 1
+          fi
+
+          if [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
+            echo "::error::fleet host kiwidaemon:latest digest (${ACTUAL_DIGEST}) does not match the digest just pushed (${EXPECTED_DIGEST}); manual intervention required on ${{ env.FLEET_VM_NAME }}"
+            exit 1
+          fi
+
+          echo "fleet host refreshed and verified at digest ${ACTUAL_DIGEST}"

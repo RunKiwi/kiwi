@@ -41,11 +41,11 @@ Before deploying the Cloud Run services, build and push the Docker images to the
 
 ```bash
 # Build API and Orchestrator image
-docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/kiwid:latest -f Dockerfile.kiwid .
+docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/kiwid:latest --target kiwid -f Dockerfile .
 docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/kiwid:latest
 
 # Build Frontend image
-docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/frontend:latest -f Dockerfile.frontend .
+docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/frontend:latest -f frontend/Dockerfile frontend
 docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/kiwi-repo/frontend:latest
 ```
 
@@ -70,7 +70,7 @@ terraform apply -var-file=terraform.tfvars
 Before routing traffic to a newly deployed API, run the migration job:
 
 ```bash
-gcloud run jobs execute kiwi-migrate --region us-central1
+gcloud beta run jobs execute kiwi-migrate --region us-central1
 ```
 
 Wait for the job to complete successfully.
@@ -80,3 +80,48 @@ Wait for the job to complete successfully.
 *   Check that the Load Balancer is provisioning the SSL certificate (this can take 15-30 minutes).
 *   Verify the `/healthz` and `/readyz` endpoints on the API domain.
 *   Access the frontend domain to ensure the UI loads.
+
+## Continuous Deployment
+
+Step 1 (build and push images) and step 4 (run migrations) of the runbook
+above, plus the Cloud Run service updates step 3's `terraform apply` would
+otherwise be used for, are automated by
+[`.github/workflows/deploy.yml`](../../../.github/workflows/deploy.yml) on
+every merge to `main`. It builds and pushes `kiwid`, `kiwidaemon`, and
+`frontend`, runs `kiwi-migrate`, then deploys `kiwi-api` and
+`kiwi-frontend` each as a canary revision: deployed with `--no-traffic`,
+health-checked on its own URL, promoted to 100% traffic, re-verified, and
+automatically rolled back to the previous revision if the post-cutover
+check fails (the pre-cutover canary check simply leaves prod traffic
+untouched, since it never moved). `kiwi-orchestrator` is deployed
+differently — see below. It finishes by refreshing the
+free-fleet VM's `kiwidaemon:latest`, starting `kiwi-daemon-image.service` and
+restarting `kiwi-provisioner.service` — waking the VM first via
+`gcloud compute instances start` if it was idle and autoscaled to zero.
+`kiwi-orchestrator` is deployed directly rather than through the canary
+pattern above — it has no public HTTP surface to health-check and is a
+singleton where two concurrent instances is unsafe, so `gcloud run deploy`'s
+own built-in readiness gate is used instead.
+
+This Terraform module still owns *provisioning* — creating the services,
+networking, and IAM the first time, or changing their shape (env vars,
+scaling, secrets). Routine version bumps go through `deploy.yml`, not
+`terraform apply`. Note that after `deploy.yml` runs, the live Cloud Run
+image tags will differ from whatever is in `terraform.tfvars` — an unrelated
+`terraform apply` (e.g. to add an env var) will read the stale tag from
+tfvars and can silently roll a service back to it, so keep
+`terraform.tfvars`'s image references current or expect to re-run
+`deploy.yml` afterward.
+
+One-time setup for the pipeline's GCP credentials (Workload Identity
+Federation, a scoped deploy service account) lives in
+[`deploy/gcp/bootstrap-cicd.sh`](../bootstrap-cicd.sh); run it once, then set
+the `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SA_EMAIL` GitHub Actions
+repo secrets it prints, plus `POSTHOG_KEY` (from `frontend/.env.local`) —
+the script reminds you to set this one but does not compute or print a
+value for it. `POSTHOG_HOST` (a repo *variable*, not a secret) must also be
+set — see the script's closing output for where.
+
+**Manual override:** the steps in the runbook above still work for an
+emergency out-of-band deploy — `deploy.yml` is a wrapper around the same
+`gcloud` commands, not a replacement for knowing them.

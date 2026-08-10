@@ -246,6 +246,9 @@ The Free tier is **live in production**, split across two execution substrates b
    `KIWI_DAEMON_IMAGE` is deliberately **left unset**. Setting it to a registry reference turns on `docker run --pull=always` for every launch, but Docker resolves registry credentials client-side, inside the provisioner container, which is cut off from the cloud metadata endpoint by `harden-egress.sh`, so every cold start would fail to pull. The launcher instead uses the local `kiwidaemon:latest` tag, refreshed on the *host* by a systemd timer, where the credentials live.
 3. The **`kiwidaemon` image** in Artifact Registry, built with `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets).
 
+Deploys to this environment are automated on merge to `main` — see
+[Continuous Deployment](deploy/gcp/control-plane/README.md#continuous-deployment).
+
 Schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, the `fleets.type` `self-managed`→`managed` rename, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. **Pro** (dedicated) stays on per-org VMs.
 
 ## Operational notes

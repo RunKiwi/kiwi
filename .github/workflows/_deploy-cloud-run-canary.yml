@@ -1,0 +1,147 @@
+name: Deploy Cloud Run service (canary)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Cloud Run service name"
+        required: true
+        type: string
+      image:
+        description: "Full image reference to deploy, e.g. us-central1-docker.pkg.dev/PROJECT/kiwi-repo/kiwid:SHA"
+        required: true
+        type: string
+      project:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      tag:
+        description: "Canary revision tag, must be unique per run"
+        required: true
+        type: string
+    secrets:
+      workload_identity_provider:
+        required: true
+      deploy_sa_email:
+        required: true
+
+jobs:
+  canary-deploy:
+    name: Canary deploy ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.workload_identity_provider }}
+          service_account: ${{ secrets.deploy_sa_email }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Canary deploy, health-check, promote or roll back
+        shell: bash
+        env:
+          SERVICE: ${{ inputs.service }}
+          IMAGE: ${{ inputs.image }}
+          PROJECT: ${{ inputs.project }}
+          REGION: ${{ inputs.region }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          check_health() {
+            local base_url="$1"
+            for attempt in $(seq 1 10); do
+              if curl -fsS --max-time 5 "${base_url}/healthz" >/dev/null \
+                 && curl -fsS --max-time 5 "${base_url}/readyz" >/dev/null; then
+                return 0
+              fi
+              echo "health check attempt ${attempt}/10 failed for ${base_url}, retrying in 6s..."
+              sleep 6
+            done
+            return 1
+          }
+
+          PREV_REVISION=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" --format=json \
+            | jq -r '[.status.traffic[]? | select(.percent==100)] | .[0].revisionName // empty')
+
+          echo "current revision serving 100% traffic: ${PREV_REVISION:-<none>}"
+
+          echo "deploying canary revision, tag=${TAG}, image=${IMAGE}"
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --image "$IMAGE" \
+            --no-traffic \
+            --tag "$TAG" \
+            --quiet
+
+          cleanup_tag() {
+            gcloud run services update-traffic "$SERVICE" \
+              --project "$PROJECT" --region "$REGION" \
+              --remove-tags "$TAG" --quiet \
+              || echo "::warning::failed to remove canary tag ${TAG} on ${SERVICE}, non-fatal"
+          }
+
+          CANARY_URL=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" --format=json \
+            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag==$tag) | .url')
+
+          if [ -z "$CANARY_URL" ]; then
+            echo "::error::could not resolve canary URL for tag ${TAG} on service ${SERVICE}"
+            exit 1
+          fi
+
+          echo "canary URL: ${CANARY_URL}"
+
+          if ! check_health "$CANARY_URL"; then
+            echo "::error::canary revision for ${SERVICE} failed health checks; leaving prod traffic untouched"
+            cleanup_tag
+            exit 1
+          fi
+
+          # This workflow only ever runs one at a time per service — the
+          # calling workflow (deploy.yml) sets `concurrency: {group:
+          # deploy-prod}`, which serializes whole pipeline runs — so
+          # `--to-latest` cannot race with a concurrent run's promotion the
+          # way it could without that guarantee. `--to-latest` is used
+          # (rather than pinning to this run's specific revision) so a
+          # manual `gcloud run deploy` during an incident keeps working
+          # exactly as documented in deploy/gcp/control-plane/README.md's
+          # "Manual override" section.
+          echo "canary healthy, shifting 100% traffic to the new revision"
+          gcloud run services update-traffic "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --to-latest --quiet
+
+          PUBLIC_URL=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" --format='value(status.url)')
+
+          if check_health "$PUBLIC_URL"; then
+            echo "deploy of ${SERVICE} succeeded"
+            echo "cleaning up canary tag ${TAG}"
+            cleanup_tag
+            exit 0
+          fi
+
+          echo "::error::${SERVICE} failed health checks after traffic cutover"
+
+          if [ -z "$PREV_REVISION" ]; then
+            echo "::error::no previous revision recorded, cannot auto-rollback ${SERVICE}; manual intervention required"
+            cleanup_tag
+            exit 1
+          fi
+
+          echo "rolling back ${SERVICE} to ${PREV_REVISION}"
+          gcloud run services update-traffic "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --to-revisions "${PREV_REVISION}=100" --quiet
+          cleanup_tag
+          exit 1
