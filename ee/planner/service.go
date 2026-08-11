@@ -95,6 +95,13 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		}
 	}
 
+	// Refuse work whose repository nothing can reach, before any model is called
+	// or any row is written. Checked after the idempotency replay above so a
+	// retry of an already-accepted submission still deduplicates.
+	if err := requireRepoAuth(ctx, s.store, req.OrgID, req.RepoURL); err != nil {
+		return nil, err
+	}
+
 	// Resolve prior-work learnings before planning. Everything is org-scoped in
 	// the store queries — a caller can never reference another tenant's jobs.
 	// taskVec is captured so an "auto" submit reuses its query embedding for the

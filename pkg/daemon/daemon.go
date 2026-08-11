@@ -487,13 +487,22 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		// back to spec.Ref.
 		jobBranch := jobBranchName(spec)
 		log.Printf("Provisioning worktree for %s (ref: %s, job branch: %s)...", spec.ID, spec.Ref, jobBranch)
-		// The same GIT_TOKEN that publishes the result also reads the repo. It
+		// The same credential that publishes the result also reads the repo. It
 		// was previously applied only on push, so a private repo failed here
 		// with git's "could not read Username" — a message that names no
 		// credential. Cloning happens in the daemon, never in the sandbox, so
 		// this does not put the token anywhere model-generated code can see it.
+		//
+		// Resolved per operation rather than once per task: an installation
+		// token expires within the hour, and the push at the end of a long run
+		// must not inherit one minted at the start.
+		cloneToken, err := d.resolveGitToken(ctx, spec.ID, leaseID, creds)
+		if err != nil {
+			log.Printf("Failed to resolve git credential for task %s: %v", spec.ID, err)
+			return taskResult{detail: truncateDetail(err.Error())}
+		}
 		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath,
-			gitcache.WithToken(creds["GIT_TOKEN"])); err != nil {
+			gitcache.WithToken(cloneToken)); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
 			return taskResult{detail: "failed to provision worktree"}
 		}
@@ -911,8 +920,10 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	prURL := ""
 	detail := ""
 	if result.Success {
-		gitToken := creds["GIT_TOKEN"]
-		if gitToken == "" {
+		gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, leaseID, creds)
+		if gitErr != nil {
+			detail = truncateDetail(gitErr.Error())
+		} else if gitToken == "" {
 			detail = "no GIT_TOKEN; skipped PR"
 		} else {
 			gh := &restGitHub{token: gitToken}

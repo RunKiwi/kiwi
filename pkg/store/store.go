@@ -164,4 +164,17 @@ type Store interface {
 	UpsertJobLearning(ctx context.Context, learning *JobLearning) error
 	GetJobLearnings(ctx context.Context, orgID string, jobIDs []string) ([]JobLearning, error)
 	SearchJobLearnings(ctx context.Context, orgID string, taskEmbedding []float32, limit int, excludeJobID string) ([]JobLearning, error)
+
+	// FindLeasedTask returns a task only to the holder of its current lease. It
+	// is an authorisation check: holding the lease is the basis on which a
+	// daemon is allowed to buy a git credential for that task's repository.
+	FindLeasedTask(ctx context.Context, taskID, leaseID string) (*QueuedTask, error)
+
+	// GitHub App installations. These replace the personal access token as the
+	// way Kiwi reaches a customer's repositories; GIT_TOKEN remains the
+	// fallback for non-GitHub remotes and for orgs that have not installed.
+	UpsertGitHubInstallation(ctx context.Context, inst *GitHubInstallation) error
+	FindGitHubInstallation(ctx context.Context, orgID, accountLogin string) (*GitHubInstallation, error)
+	ListGitHubInstallations(ctx context.Context, orgID string) ([]GitHubInstallation, error)
+	DeleteGitHubInstallation(ctx context.Context, installationID int64) error
 }

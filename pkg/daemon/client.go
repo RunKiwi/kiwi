@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -219,4 +220,55 @@ func (c *Client) LoadSession(ctx context.Context, taskID, sessionID, signPubKey 
 		return nil, fmt.Errorf("decode session state: %w", err)
 	}
 	return &res, nil
+}
+
+// ErrNoInstallation means the Control Plane has no GitHub App installation
+// covering this task's repository, so the caller should use its sealed
+// GIT_TOKEN instead. It is the ordinary answer for a non-GitHub remote, for an
+// org that has not installed the App, and for any deployment where no App is
+// configured at all, which is why it is a typed signal rather than an error to
+// report.
+var ErrNoInstallation = errors.New("no github app installation for this repository")
+
+// ErrInstallationRevoked means the customer removed the App or dropped this
+// repository from it. Unlike ErrNoInstallation there is no fallback worth
+// trying: an org that connected GitHub and then revoked it almost certainly has
+// no PAT, and a git error naming nothing is the worst way to learn that.
+var ErrInstallationRevoked = errors.New("github app access was revoked for this repository")
+
+// GitToken exchanges the lease this daemon holds for a short-lived credential
+// to the task's repository.
+//
+// Called immediately before each git operation rather than once per task. An
+// installation token lives about an hour and the push happens at the very end
+// of a run, so minting once up front trades a cheap call for the worst failure
+// shape there is: the work succeeds and the push 401s.
+func (c *Client) GitToken(ctx context.Context, req GitTokenReq) (GitTokenResp, error) {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/git-token", req)
+	if err != nil {
+		return GitTokenResp{}, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out GitTokenResp
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+			return GitTokenResp{}, fmt.Errorf("decode git token response: %w", err)
+		}
+		if out.Token == "" {
+			return GitTokenResp{}, errors.New("control plane returned an empty git token")
+		}
+		return out, nil
+	case http.StatusNotFound:
+		return GitTokenResp{}, ErrNoInstallation
+	case http.StatusGone:
+		return GitTokenResp{}, ErrInstallationRevoked
+	}
+
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if resp.StatusCode == http.StatusConflict {
+		return GitTokenResp{}, fmt.Errorf("%w: %s", ErrLeaseLost, strings.TrimSpace(string(msg)))
+	}
+	return GitTokenResp{}, fmt.Errorf("git token request failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }

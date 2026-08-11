@@ -26,6 +26,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/ee/billing"
 	"github.com/ibreakthecloud/kiwi/ee/dashboard"
 	"github.com/ibreakthecloud/kiwi/ee/fleethost"
+	"github.com/ibreakthecloud/kiwi/ee/githubapp"
 	"github.com/ibreakthecloud/kiwi/ee/planner"
 	"github.com/ibreakthecloud/kiwi/ee/tunnel"
 	"github.com/ibreakthecloud/kiwi/pkg/agentapi"
@@ -80,6 +81,11 @@ type Server struct {
 	// own key without a global reset — production must not be able to swap the
 	// signing identity at runtime.
 	signingKeyFn func() (*ver.SigningKey, error)
+	// githubApp mints short-lived installation tokens, replacing the stored
+	// personal access token for orgs that have installed the App. nil when no
+	// App is configured, which is the pre-rollout state: every org then
+	// authenticates with GIT_TOKEN exactly as before.
+	githubApp *githubapp.Client
 }
 
 // cpSigningKey resolves the record-signing identity for this server.
@@ -119,6 +125,7 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		// Kiwi does not hold.
 		refresher:     catalog.NewRefresher(storage),
 		credValidator: defaultCredValidator,
+		githubApp:     newGitHubAppClient(),
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
 	// controller, so the submit path needs no special-casing. The api role wakes
@@ -440,6 +447,8 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/spend", s.handleSpend)
 	mux.HandleFunc("/api/v1/billing/checkout", s.handleBillingCheckout)
 	mux.HandleFunc("/api/v1/github/repos", s.handleGithubRepos)
+	mux.HandleFunc("/api/v1/github/install", s.handleGithubInstall)
+	mux.HandleFunc("/api/v1/github/installations", s.handleGithubInstallations)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
@@ -472,6 +481,7 @@ func (s *Server) Start(addr string) error {
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.HandleFunc("/api/v1/webhooks/github", s.handleGithubWebhook)
+	root.HandleFunc("/api/v1/github/callback", s.handleGithubCallback)
 	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
 	// The daemon API authenticates by Ed25519 request signature, not an org API
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.
@@ -480,6 +490,7 @@ func (s *Server) Start(addr string) error {
 	root.HandleFunc("/api/v1/daemon/renew", s.handleDaemonRenew)
 	root.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
 	root.HandleFunc("/api/v1/daemon/progress", s.handleDaemonProgress)
+	root.HandleFunc("/api/v1/daemon/git-token", s.handleDaemonGitToken)
 	root.HandleFunc("/api/v1/daemon/session", s.handleDaemonSession)
 	root.HandleFunc("/api/v1/daemon/session/load", s.handleDaemonSessionLoad)
 

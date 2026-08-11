@@ -250,7 +250,10 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		return taskResult{detail: truncateDetail(detail), abuse: abuse, events: prog.all()}
 	}
 
-	gitToken := creds["GIT_TOKEN"]
+	gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, deps.leaseID, creds)
+	if gitErr != nil {
+		return taskResult{detail: truncateDetail(gitErr.Error()), events: prog.all()}
+	}
 	if gitToken == "" {
 		return taskResult{detail: "no GIT_TOKEN; skipped PR", events: prog.all()}
 	}
