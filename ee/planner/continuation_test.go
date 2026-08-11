@@ -8,6 +8,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/ee/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -137,5 +138,101 @@ func TestSubmitContinuationRejectsAParentWithNoSession(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected an error when no parent task is given")
+	}
+}
+
+// The bug this exists to prevent: a comment enqueued a continuation, the task
+// appeared in the dashboard, and it sat there reporting "no runner is connected
+// that can execute this task" while the fleet host was running.
+//
+// HandlePlan cold-starts a per-org daemon after every submit. SubmitContinuation
+// is a second submit path that skipped it, so the work was queued for a fleet
+// with nothing to lease it.
+func TestContinuationColdStartsTheOrgsDaemon(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	if err := st.DB().Create(&auth.Organization{ID: "org1", Name: "acme", Plan: "free"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename the handler", CommentID: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var provisions []auth.ProvisioningRequest
+	if err := st.DB().Where("org_id = ?", "org1").Find(&provisions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(provisions) != 1 {
+		t.Fatalf("got %d provisioning requests, want 1 — the task has no runner without one", len(provisions))
+	}
+}
+
+// A paid org runs on its own fleet and must not have a free daemon provisioned
+// for it.
+func TestContinuationDoesNotColdStartAPaidOrg(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	if err := st.DB().Create(&auth.Organization{ID: "org1", Name: "acme", Plan: "pro"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename it", CommentID: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int64
+	if err := st.DB().Model(&auth.ProvisioningRequest{}).Where("org_id = ?", "org1").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("got %d provisioning requests for a paid org, want 0", n)
+	}
+}
+
+// HandlePlan refuses a suspended org. A second submit path that does not is a
+// way around an abuse suspension: comment on an old pull request and keep
+// spending.
+func TestContinuationRefusesASuspendedOrg(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	if err := st.DB().Create(&auth.Organization{
+		ID: "org1", Name: "acme", Plan: "free", ActivationState: "suspended",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "keep going", CommentID: 3,
+	}); err == nil {
+		t.Fatal("a suspended org must not be able to buy work by commenting")
+	}
+
+	var n int64
+	if err := st.DB().Model(&store.QueuedTask{}).Where("origin = ?", store.OriginPRComment).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("got %d continuations for a suspended org, want 0", n)
 	}
 }

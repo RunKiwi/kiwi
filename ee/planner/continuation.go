@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ibreakthecloud/kiwi/ee/auth"
+
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
@@ -102,6 +104,18 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 		return nil, fmt.Errorf("a continuation needs an instruction")
 	}
 
+	// The org's own gate, before anything is enqueued. HandlePlan refuses a
+	// suspended org and this is the second door into the same queue: without
+	// the same check, an org auto-suspended for abuse could keep buying work by
+	// commenting on a pull request it already has.
+	var org auth.Organization
+	if err := s.store.DB().WithContext(ctx).First(&org, "id = ?", in.OrgID).Error; err != nil {
+		return nil, fmt.Errorf("organization %s: %w", in.OrgID, err)
+	}
+	if org.ActivationState == "suspended" {
+		return nil, fmt.Errorf("organization is suspended")
+	}
+
 	// Admission is the ordinary path. A continuation is a task like any other:
 	// it spends the same allowance, on the same model, under the same caps, and
 	// nothing about arriving via a comment earns it an exemption.
@@ -134,6 +148,18 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Cold-start, exactly as HandlePlan does after a submit. A free org has no
+	// standing daemon — the provisioner starts one per org when work arrives —
+	// so a continuation queued without this sits reporting "no runner is
+	// connected that can execute this task" while the fleet host is running and
+	// idle. It happens here rather than in the caller because this is the
+	// second submit path, and the first one's post-steps were missed precisely
+	// by being somewhere a caller had to remember to repeat.
+	if org.Plan == "free" {
+		s.ensureFreeDaemon(ctx, in.OrgID)
+		s.wakeFleetHost()
 	}
 	return task, nil
 }
