@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseToolArgs, parseNumberedFile, languageOf, editDiff } from "./toolContent.ts";
+import { parseToolArgs, parseNumberedFile, languageOf, editDiff, parseUnifiedDiff } from "./toolContent.ts";
 
 describe("parseToolArgs", () => {
   it("pulls out an edit's before and after", () => {
@@ -119,5 +119,57 @@ describe("editDiff", () => {
   it("returns nothing to draw when the strings match", () => {
     const lines = editDiff("same", "same");
     assert.ok(lines.every((l) => l.kind === "ctx"));
+  });
+});
+
+describe("parseUnifiedDiff", () => {
+  const patch = [
+    "--- a/main.go",
+    "+++ b/main.go",
+    "@@ -1,5 +1,5 @@",
+    " package main",
+    " ",
+    " func main() {",
+    "-\tprintln(1)",
+    "+\tprintln(2)",
+    " }",
+    "",
+  ].join("\n");
+
+  // The edit's arguments are capped at 600 bytes and arrive cut mid-JSON, so
+  // the diff has to come from the tool's own output instead.
+  it("reads the diff out of an edit's result", () => {
+    const parsed = parseUnifiedDiff("edited main.go\n" + patch);
+    assert.ok(parsed, "expected a diff");
+    assert.equal(parsed.path, "main.go");
+    const kinds = parsed.lines.map((l) => l.kind);
+    assert.ok(kinds.includes("del"));
+    assert.ok(kinds.includes("add"));
+    assert.ok(kinds.includes("ctx"));
+  });
+
+  it("numbers both sides from the hunk header", () => {
+    const parsed = parseUnifiedDiff(patch);
+    const del = parsed!.lines.find((l) => l.kind === "del");
+    const add = parsed!.lines.find((l) => l.kind === "add");
+    assert.equal(del?.oldNo, 4, "the removed line is the file's line 4");
+    assert.equal(add?.newNo, 4);
+    assert.equal(del?.newNo, undefined);
+    assert.equal(add?.oldNo, undefined);
+  });
+
+  // A bounded diff ends with a notice rather than a hunk. It must still render
+  // what did arrive.
+  it("still parses a diff that was truncated", () => {
+    const truncated = patch.split("\n").slice(0, 6).join("\n") + "\n... (diff truncated)\n";
+    const parsed = parseUnifiedDiff(truncated);
+    assert.ok(parsed, "a truncated diff should still render");
+    assert.ok(parsed.truncated, "and should say that it was truncated");
+  });
+
+  it("returns null for output that is not a diff", () => {
+    assert.equal(parseUnifiedDiff("edited main.go"), null);
+    assert.equal(parseUnifiedDiff("ok"), null);
+    assert.equal(parseUnifiedDiff(""), null);
   });
 });

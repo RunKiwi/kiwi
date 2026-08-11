@@ -1,4 +1,4 @@
-import { diffLines } from "diff";
+import { diffLines, parsePatch } from "diff";
 
 /**
  * Reading what a tool call actually did.
@@ -172,4 +172,113 @@ export function editDiff(oldStr: string, newStr: string): DiffLine[] {
     }
   }
   return rows;
+}
+
+
+const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
+
+/**
+ * repairHunkCounts rewrites each hunk header to match the lines that follow it.
+ *
+ * A diff bounded partway through a hunk still promises the original line counts
+ * in its @@ header, and a strict parser rejects the whole patch for it — so the
+ * change would vanish from the timeline exactly when it was big enough to be
+ * worth reading. Recounting is a normalisation of the header, not a second diff
+ * implementation: the hunks themselves are still parsed by jsdiff.
+ */
+function repairHunkCounts(body: string): string {
+  const lines = body.split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = HUNK.exec(lines[i]);
+    if (!m) {
+      out.push(lines[i]);
+      continue;
+    }
+
+    let oldCount = 0;
+    let newCount = 0;
+    let j = i + 1;
+    for (; j < lines.length && !HUNK.test(lines[j]); j++) {
+      const marker = lines[j][0];
+      if (marker === "-") oldCount++;
+      else if (marker === "+") newCount++;
+      else if (marker === " ") {
+        oldCount++;
+        newCount++;
+      }
+      // Anything else — a blank tail, the truncation notice — belongs to
+      // neither side and is not counted.
+    }
+
+    out.push("@@ -" + m[1] + "," + oldCount + " +" + m[2] + "," + newCount + " @@" + m[3]);
+    for (let k = i + 1; k < j; k++) out.push(lines[k]);
+    i = j - 1;
+  }
+
+  return out.join("\n");
+}
+
+export interface ParsedDiff {
+  path?: string;
+  lines: DiffLine[];
+  /** The daemon bounded the diff; what is shown is not the whole change. */
+  truncated: boolean;
+}
+
+/**
+ * parseUnifiedDiff reads the diff an edit_file call reported.
+ *
+ * It has to come from the tool's result rather than from the call's arguments:
+ * inputCap bounds a recorded argument at 600 bytes, so a real edit's
+ * old_string and new_string arrive cut mid-JSON, unparseable and both
+ * incomplete. The daemon therefore computes the diff, where it still has both
+ * whole, and sends it.
+ *
+ * Parsing is jsdiff's parsePatch — the same library that produces the diff for
+ * the small-edit path, and the standard implementation of a format with more
+ * edge cases than it appears to have.
+ */
+export function parseUnifiedDiff(detail: string): ParsedDiff | null {
+  if (!detail.includes("@@")) return null;
+
+  // The result begins with "edited <path>"; the patch starts at its header.
+  const start = detail.indexOf("--- ");
+  const body = start >= 0 ? detail.slice(start) : detail.slice(detail.indexOf("@@"));
+
+  let patches;
+  try {
+    patches = parsePatch(repairHunkCounts(body));
+  } catch {
+    return null;
+  }
+  if (!patches.length || !patches[0].hunks.length) return null;
+
+  const patch = patches[0];
+  const lines: DiffLine[] = [];
+
+  for (const hunk of patch.hunks) {
+    let oldNo = hunk.oldStart;
+    let newNo = hunk.newStart;
+    for (const raw of hunk.lines) {
+      const marker = raw[0];
+      const text = raw.slice(1);
+      if (marker === "+") {
+        lines.push({ kind: "add", text, newNo: newNo++ });
+      } else if (marker === "-") {
+        lines.push({ kind: "del", text, oldNo: oldNo++ });
+      } else if (marker === " ") {
+        lines.push({ kind: "ctx", text, oldNo: oldNo++, newNo: newNo++ });
+      }
+      // "\\ No newline at end of file" carries no line and is skipped.
+    }
+  }
+
+  if (lines.length === 0) return null;
+  return {
+    path: patch.newFileName?.replace(/^b\//, "") ?? patch.oldFileName?.replace(/^a\//, ""),
+    lines,
+    truncated: detail.includes("(diff truncated)"),
+  };
 }
