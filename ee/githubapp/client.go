@@ -189,3 +189,62 @@ func (c *Client) mint(ctx context.Context, installationID int64) (Token, error) 
 	}
 	return out, nil
 }
+
+// Installation is what GitHub knows about one installation.
+type Installation struct {
+	ID      int64 `json:"id"`
+	Account struct {
+		Login string `json:"login"`
+	} `json:"account"`
+	RepositorySelection string `json:"repository_selection"`
+}
+
+// GetInstallation looks up an installation by id.
+//
+// The install callback needs this because GitHub's redirect carries only the
+// installation id. The account the App was installed on, which is the key every
+// later lookup resolves against, has to be asked for. Taking it from the
+// redirect instead would let anyone who guessed an id claim somebody else's
+// account.
+func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Installation, error) {
+	jwt, err := appJWT(c.appID, c.key, c.now())
+	if err != nil {
+		return Installation{}, err
+	}
+
+	url := fmt.Sprintf("%s/app/installations/%d", c.baseURL, installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Installation{}, fmt.Errorf("githubapp: build installation request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Installation{}, fmt.Errorf("githubapp: get installation: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusGone:
+		return Installation{}, ErrInstallationGone
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return Installation{}, ErrAppAuth
+	default:
+		return Installation{}, fmt.Errorf("githubapp: get installation returned %s", resp.Status)
+	}
+
+	var out Installation
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Installation{}, fmt.Errorf("githubapp: decode installation: %w", err)
+	}
+	if out.Account.Login == "" {
+		return Installation{}, errors.New("githubapp: installation carried no account login")
+	}
+	return out, nil
+}

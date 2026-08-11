@@ -447,6 +447,8 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/spend", s.handleSpend)
 	mux.HandleFunc("/api/v1/billing/checkout", s.handleBillingCheckout)
 	mux.HandleFunc("/api/v1/github/repos", s.handleGithubRepos)
+	mux.HandleFunc("/api/v1/github/install", s.handleGithubInstall)
+	mux.HandleFunc("/api/v1/github/installations", s.handleGithubInstallations)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
@@ -479,6 +481,7 @@ func (s *Server) Start(addr string) error {
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.HandleFunc("/api/v1/webhooks/github", s.handleGithubWebhook)
+	root.HandleFunc("/api/v1/github/callback", s.handleGithubCallback)
 	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
 	// The daemon API authenticates by Ed25519 request signature, not an org API
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.

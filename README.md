@@ -63,7 +63,7 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 | Dashboard: jobs, fleets, models, integrations, topology, settings | ✅ |
 | Multi-file agent: file discovery + multi-file edits | ✅ |
 | Provider robustness: key validation on save, quota/error surfacing | ✅ |
-| GitHub App: per-repo installation tokens minted per git operation, PAT kept as fallback | 🚧 Auth path shipped and tested; install/callback flow, repo picker and submit-time validation still to land |
+| GitHub App: per-repo installation tokens minted per git operation, PAT kept as fallback | ✅ Auth path, install/callback flow and revocation webhook. Set `KIWI_GITHUB_APP_ID`, `KIWI_GITHUB_APP_PRIVATE_KEY` and `KIWI_GITHUB_APP_SLUG`; unset means every org keeps using `GIT_TOKEN`. Repo picker and submit-time validation still to land |
 | Fleet routing: tasks lease only their fleet's daemons | ✅ |
 | Queue diagnostics: a queued task reports *why* it hasn't started | ✅ |
 | Job control: stop / retry / delete, with a real abort on the daemon | ✅ |
