@@ -124,8 +124,20 @@ func getConfig(provider string) *oauth2.Config {
 			ClientID:     os.Getenv("KIWI_GITHUB_OAUTH_CLIENT_ID"),
 			ClientSecret: os.Getenv("KIWI_GITHUB_OAUTH_CLIENT_SECRET"),
 			Endpoint:     githubEndpoint,
-			RedirectURL:  base + "/auth/github/callback",
-			Scopes:       []string{"read:user", "user:email", "repo"},
+			RedirectURL: base + "/auth/github/callback",
+			// Identity only. Sign-in used to request "repo" as well, which is
+			// full read and write on every repository the person can reach in
+			// every organisation they belong to, with no expiry.
+			//
+			// Nothing ever used it. handleOAuthCallback exchanges the code, calls
+			// /user to learn who signed in, and drops the token; no code path
+			// stores it. GITHUB_TOKEN is only ever set by a human pasting one
+			// into Integrations, and repository access now comes from a GitHub
+			// App installation.
+			//
+			// So the scope bought nothing and cost the consent screen a security
+			// reviewer reads before deciding whether to sign up at all.
+			Scopes: []string{"read:user", "user:email"},
 		}
 	} else if provider == "google" {
 		return &oauth2.Config{
