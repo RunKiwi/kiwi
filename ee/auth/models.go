@@ -20,14 +20,18 @@ const SharedFreeFleet = store.SharedFreeFleet
 
 // Organization represents a tenant in the multi-tenant system.
 type Organization struct {
-	ID              string    `json:"id" gorm:"primaryKey"`
-	Name            string    `json:"name" gorm:"uniqueIndex;not null"`
-	Type            string    `json:"type" gorm:"not null;default:personal"`
-	PrimaryDomain   string    `json:"primary_domain" gorm:"not null;default:''"`
-	DomainJoin      bool      `json:"domain_join" gorm:"not null;default:false"`
-	Plan            string    `json:"plan" gorm:"not null;default:free"`
-	ActivationState string    `json:"activation_state" gorm:"not null;default:inactive"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string `json:"id" gorm:"primaryKey"`
+	Name            string `json:"name" gorm:"uniqueIndex;not null"`
+	Type            string `json:"type" gorm:"not null;default:personal"`
+	PrimaryDomain   string `json:"primary_domain" gorm:"not null;default:''"`
+	DomainJoin      bool   `json:"domain_join" gorm:"not null;default:false"`
+	Plan            string `json:"plan" gorm:"not null;default:free"`
+	ActivationState string `json:"activation_state" gorm:"not null;default:inactive"`
+	// PRCommentMode selects what a review comment on a Kiwi pull request does:
+	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
+	// mention, so Kiwi acts only when it is spoken to.
+	PRCommentMode string    `gorm:"not null;default:mention" json:"pr_comment_mode"`
+	CreatedAt     time.Time `json:"created_at"`
 	// AbuseStrikes counts recent abuse signals within AbuseStrikeWindow; the org
 	// is auto-suspended once it reaches the threshold. It decays (resets) when a
 	// strike arrives after the window, and is cleared on suspend. See

@@ -6,14 +6,18 @@ import (
 
 // Organization represents a tenant in the system.
 type Organization struct {
-	ID              string    `gorm:"primaryKey" json:"id"`
-	Name            string    `gorm:"not null" json:"name"`
-	Type            string    `gorm:"not null;default:personal" json:"type"`
-	PrimaryDomain   string    `gorm:"not null;default:''" json:"primary_domain"`
-	DomainJoin      bool      `gorm:"not null;default:false" json:"domain_join"`
-	Plan            string    `gorm:"not null;default:free" json:"plan"`
-	ActivationState string    `gorm:"not null;default:inactive" json:"activation_state"`
-	CreatedAt       time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+	ID              string `gorm:"primaryKey" json:"id"`
+	Name            string `gorm:"not null" json:"name"`
+	Type            string `gorm:"not null;default:personal" json:"type"`
+	PrimaryDomain   string `gorm:"not null;default:''" json:"primary_domain"`
+	DomainJoin      bool   `gorm:"not null;default:false" json:"domain_join"`
+	Plan            string `gorm:"not null;default:free" json:"plan"`
+	ActivationState string `gorm:"not null;default:inactive" json:"activation_state"`
+	// PRCommentMode selects what a review comment on a Kiwi pull request does:
+	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
+	// mention, so Kiwi acts only when it is spoken to.
+	PRCommentMode string    `gorm:"not null;default:mention" json:"pr_comment_mode"`
+	CreatedAt     time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 
 // CanRun returns true if the organization is active and allowed to run tasks.

@@ -43,7 +43,29 @@ type QueuedTask struct {
 	ID    string `gorm:"primaryKey" json:"id"`
 	OrgID string `gorm:"index;not null" json:"org_id"`
 	// JobID links the task back to the job/manifest that produced it.
+	//
+	// Since continuations, a job id no longer identifies exactly one task: a
+	// continuation deliberately reuses its parent's, because the job id is what
+	// names the branch (jobBranchName is "kiwi/"+JobID) and therefore what puts
+	// the next round on the same pull request. Anything reading by JobID alone
+	// now gets a thread.
 	JobID string `gorm:"index" json:"job_id"`
+	// ParentTaskID is the task this one continues or forks from. NULL on a task
+	// submitted directly, which is every task that existed before lineage.
+	ParentTaskID *string `gorm:"index" json:"parent_task_id"`
+	// RootTaskID is the thread this task belongs to, equal to its own id on a
+	// root. Denormalised on purpose: the parent chain alone would need a
+	// recursive query, and "give me this whole thread" is asked on every task
+	// view in the dashboard.
+	RootTaskID string `gorm:"index" json:"root_task_id"`
+	// Origin records how this task came to exist: submit | pr_comment | fork.
+	// The dashboard labels a node from it without having to infer, and a
+	// trigger stays auditable after the fact.
+	Origin string `gorm:"not null;default:submit" json:"origin"`
+	// TriggerCommentID is the GitHub comment that caused a pr_comment task.
+	// Unique, because GitHub redelivers webhooks and a redelivery must not buy
+	// the customer a second round.
+	TriggerCommentID *int64 `gorm:"uniqueIndex" json:"trigger_comment_id"`
 	// FleetID optionally scopes the task to a fleet (empty = any fleet).
 	FleetID string `gorm:"index" json:"fleet_id"`
 	// Status ∈ QUEUED|LEASED|SUCCEEDED|FAILED.

@@ -444,6 +444,14 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	// both — the Architect's spec is in the checkpoint — and re-planning would
 	// pay for a frontier-model call to reproduce an answer already written down.
 	if resumeFrom > 0 {
+		// A session resumed at its last round has already spent that many
+		// rounds, so a fixed ceiling would leave a continuation with nothing to
+		// spend: a task that concluded at round 4 of 4 would resume and halt
+		// immediately, reporting that it ran out of rounds without doing
+		// anything. The budget is therefore per run, counted from where this one
+		// starts, which is also what makes each continuation cost what an
+		// ordinary task costs.
+		cfg.MaxRounds += resumeFrom
 		return r.rounds(ctx, task, st, cfg, resumeFrom)
 	}
 
