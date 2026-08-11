@@ -4,6 +4,8 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { RecordWorker, RecordStep } from "@/lib/api";
 import { formatDuration, formatCost, formatTokens } from "@/lib/datetime";
+import { parseToolArgs, parseNumberedFile, languageOf, editDiff } from "@/lib/toolContent";
+import { CodeBlock, DiffView } from "@/components/CodeView";
 
 /**
  * RunTimeline renders what actually happened inside the Actor–Critic loop.
@@ -153,6 +155,17 @@ function StepRow({ row }: { row: RecordStep }) {
   const { label, tool } = labelPhase(row.phase);
   const args = summariseInput(row.input);
 
+  // What this row can be shown as, decided once from the call itself rather
+  // than by sniffing the output further down.
+  const toolArgs = parseToolArgs(row.input);
+  const lang = languageOf(toolArgs.path);
+  const parsedFile = row.detail ? parseNumberedFile(row.detail) : null;
+  const file = parsedFile ? { ...parsedFile, lang } : null;
+  const edit =
+    toolArgs.oldString !== undefined && toolArgs.newString !== undefined
+      ? { lines: editDiff(toolArgs.oldString, toolArgs.newString), lang }
+      : null;
+
   // Cost and tokens ride the live feed, not the signed record, so a running job
   // shows them and a finished one falls back to the worker totals. Rendered
   // only when non-zero — a "$0.0000 · 0 tok" row on a phase that made no model
@@ -191,11 +204,25 @@ function StepRow({ row }: { row: RecordStep }) {
             {args}
           </p>
         )}
+        {/* An edit shows what it replaced, as a diff, because that is the
+            question a reader has about an edit and the shape they will see it
+            in on the pull request. The before and after are in the call's own
+            arguments; nothing new has to be recorded to show them. */}
+        {edit && <DiffView lines={edit.lines} lang={edit.lang} />}
+
         {/* `reasons` is the Critic's verdict on the signed record; `detail` is
             what the live feed carries for the same row (a tool's output tail, a
             test result). Either way it is the run explaining itself in its own
-            words, so it is quoted rather than paraphrased. */}
-        {(row.reasons || row.detail) ? (
+            words, so it is quoted rather than paraphrased.
+
+            A read_file's output is source, and was being shown as grey prose:
+            the information was there and unreadable. Numbered source gets the
+            gutter and the colours an editor would give it; everything else —
+            a test's output, a Critic's paragraph — stays prose, because that
+            is what it is. */}
+        {file ? (
+          <CodeBlock code={file.code} lang={file.lang} startLine={file.startLine} note={file.note} />
+        ) : (row.reasons || row.detail) ? (
           <pre className="mt-1 text-[11px] leading-relaxed text-zinc-400 border-l-2 border-white/10 pl-2.5 whitespace-pre-wrap break-words font-sans">
             {row.reasons || row.detail}
           </pre>
