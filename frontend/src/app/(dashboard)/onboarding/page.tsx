@@ -297,7 +297,7 @@ export default function OnboardingPage() {
                 )}
               </div>
               <p className="text-zinc-400 text-sm mb-4">
-                Kiwi runs on your own model key. Add an Anthropic, Gemini or OpenAI key to power the planner and worker agents.
+                Kiwi provides access to hosted models with a daily quota, but you can also bring your own key. Add an Anthropic, Gemini or OpenAI key to bypass quotas and power the planner and worker agents.
               </p>
               {step === 2 && (
                 <div className="flex flex-col gap-3 max-w-md pt-2">
