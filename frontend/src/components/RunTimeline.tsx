@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { RecordWorker, RecordStep } from "@/lib/api";
 import { formatDuration, formatCost, formatTokens } from "@/lib/datetime";
-import { parseToolArgs, parseNumberedFile, languageOf, editDiff } from "@/lib/toolContent";
+import { parseToolArgs, parseNumberedFile, languageOf, editDiff, parseUnifiedDiff } from "@/lib/toolContent";
 import { CodeBlock, DiffView } from "@/components/CodeView";
 
 /**
@@ -161,9 +161,16 @@ function StepRow({ row }: { row: RecordStep }) {
   const lang = languageOf(toolArgs.path);
   const parsedFile = row.detail ? parseNumberedFile(row.detail) : null;
   const file = parsedFile ? { ...parsedFile, lang } : null;
-  const edit =
-    toolArgs.oldString !== undefined && toolArgs.newString !== undefined
-      ? { lines: editDiff(toolArgs.oldString, toolArgs.newString), lang }
+
+  // An edit's diff comes from the tool's own result. Reconstructing it from
+  // the call's arguments only works while they fit inside inputCap's 600
+  // bytes — a real edit exceeds that and arrives cut mid-JSON — so the
+  // argument path is the fallback for small edits, not the source of truth.
+  const reported = row.detail ? parseUnifiedDiff(row.detail) : null;
+  const edit = reported
+    ? { lines: reported.lines, lang: languageOf(reported.path ?? toolArgs.path), truncated: reported.truncated }
+    : toolArgs.oldString !== undefined && toolArgs.newString !== undefined
+      ? { lines: editDiff(toolArgs.oldString, toolArgs.newString), lang, truncated: false }
       : null;
 
   // Cost and tokens ride the live feed, not the signed record, so a running job
@@ -208,7 +215,16 @@ function StepRow({ row }: { row: RecordStep }) {
             question a reader has about an edit and the shape they will see it
             in on the pull request. The before and after are in the call's own
             arguments; nothing new has to be recorded to show them. */}
-        {edit && <DiffView lines={edit.lines} lang={edit.lang} />}
+        {edit && (
+          <>
+            <DiffView lines={edit.lines} lang={edit.lang} />
+            {edit.truncated && (
+              <p className="mt-0.5 text-[10px] text-zinc-500">
+                Diff truncated — the change is larger than what is recorded here.
+              </p>
+            )}
+          </>
+        )}
 
         {/* `reasons` is the Critic's verdict on the signed record; `detail` is
             what the live feed carries for the same row (a tool's output tail, a
@@ -222,7 +238,7 @@ function StepRow({ row }: { row: RecordStep }) {
             is what it is. */}
         {file ? (
           <CodeBlock code={file.code} lang={file.lang} startLine={file.startLine} note={file.note} />
-        ) : (row.reasons || row.detail) ? (
+        ) : reported ? null : (row.reasons || row.detail) ? (
           <pre className="mt-1 text-[11px] leading-relaxed text-zinc-400 border-l-2 border-white/10 pl-2.5 whitespace-pre-wrap break-words font-sans">
             {row.reasons || row.detail}
           </pre>

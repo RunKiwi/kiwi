@@ -467,10 +467,15 @@ func (t *FileTools) edit(rel, oldStr, newStr string, replaceAll bool) (string, e
 		return "", fmt.Errorf("could not write %s: %v", rel, err)
 	}
 
-	if replaceAll && n > 1 {
-		return fmt.Sprintf("edited %s (%d occurrences replaced)", rel, n), nil
+	// The diff is computed over the whole file rather than the two strings, so
+	// its line numbers are the file's own — and it travels in the result
+	// because the arguments this was reconstructed from are capped at 600 bytes
+	// and arrive at the dashboard cut mid-string.
+	occurrences := 1
+	if replaceAll {
+		occurrences = n
 	}
-	return fmt.Sprintf("edited %s", rel), nil
+	return editSummary(rel, occurrences, unifiedEdit(rel, content, updated)), nil
 }
 
 // renderFileWindow numbers a file's lines and returns the requested window.

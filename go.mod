@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.52.0
 	github.com/pgvector/pgvector-go v0.4.0
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	golang.org/x/crypto v0.53.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/term v0.45.0
