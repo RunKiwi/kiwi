@@ -33,6 +33,23 @@ func TestEnqueueDefaultsToItsOwnRoot(t *testing.T) {
 	}
 }
 
+// SubmitPlan builds its tasks with tx.Create inside the manifest transaction,
+// not through EnqueueTask. Defaulting in the store helper alone would have
+// left every real task with no thread at all.
+func TestARawCreateStillGetsAThread(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.db.Create(&QueuedTask{ID: "t1", OrgID: "org1", Spec: map[string]interface{}{}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ThreadTasks(context.Background(), "org1", "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].RootTaskID != "t1" || got[0].Origin != OriginSubmit {
+		t.Fatalf("got %+v, want a self-rooted submit task", got)
+	}
+}
+
 func TestThreadTasksReturnsTheWholeThreadInOrder(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

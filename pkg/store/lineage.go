@@ -26,6 +26,27 @@ const (
 	OriginFork      = "fork"
 )
 
+// BeforeCreate gives every task a thread, whichever path created it.
+//
+// This is a hook rather than a few lines in EnqueueTask because EnqueueTask is
+// not the path that matters: SubmitPlan builds its tasks with tx.Create inside
+// the transaction that writes the manifest, so defaulting in the store helper
+// alone would have left every real task with no root — and every lineage read
+// returning nothing for it, which reads as "this task never happened".
+//
+// A task with no parent is the root of its own thread. That is true of every
+// ordinary submission and of every task written before lineage existed, so it
+// is the right default rather than a special case.
+func (t *QueuedTask) BeforeCreate(*gorm.DB) error {
+	if t.Origin == "" {
+		t.Origin = OriginSubmit
+	}
+	if t.RootTaskID == "" {
+		t.RootTaskID = t.ID
+	}
+	return nil
+}
+
 // ThreadTasks returns every task in a thread, oldest first.
 //
 // One indexed read on root_task_id rather than a walk up parent pointers: this

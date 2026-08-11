@@ -54,15 +54,6 @@ func (s *PostgresStore) EnqueueTask(ctx context.Context, task *QueuedTask) error
 	if task.Status == "" {
 		task.Status = TaskQueued
 	}
-	if task.Origin == "" {
-		task.Origin = OriginSubmit
-	}
-	// A task with no parent is its own thread. Defaulting here rather than at
-	// each call site means no caller can create a task that belongs to no
-	// thread, which is what every lineage read then relies on.
-	if task.RootTaskID == "" {
-		task.RootTaskID = task.ID
-	}
 	return s.db.WithContext(ctx).Create(task).Error
 }
 
