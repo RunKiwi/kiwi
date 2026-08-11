@@ -104,6 +104,16 @@ export interface JobTask {
   /** Set only while the task is QUEUED; blocked_detail is the sentence to show. */
   blocked_reason?: BlockedReason;
   blocked_detail?: string;
+
+  // Lineage. A review comment on a Kiwi pull request continues the task that
+  // opened it, and a continuation reuses its parent's job id — so a job's task
+  // list is a thread, and these say which run follows which.
+  /** Empty on a task submitted directly. */
+  parent_task_id?: string;
+  /** The thread this run belongs to; equals its own id on the first run. */
+  root_task_id?: string;
+  /** submit | pr_comment | fork */
+  origin?: string;
 }
 
 export interface Job {
@@ -216,6 +226,14 @@ export interface JobSummary {
   job_id: string;
   created_at: string;
   task_count: number;
+  /**
+   * How many of this job's runs came from a review comment. task_count cannot
+   * stand in for it: a plan with three workers counts three the same way three
+   * runs do, and only one of those is a thread.
+   */
+  continuation_count?: number;
+  /** How the newest run came to exist, so a row says what moved it last. */
+  latest_origin?: string;
   status: string;
   pr_urls: string[];
   task?: string;

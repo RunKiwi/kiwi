@@ -559,6 +559,11 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		Repo      string
 		FleetID   string
 		DaemonID  string
+		// Continuations, and the origin of the newest task — what the row shows
+		// when a task has become a thread.
+		Continuations int
+		LatestOrigin  string
+		LatestAt      time.Time
 	}
 
 	jobMap := make(map[string]*jobAgg)
@@ -571,6 +576,16 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		agg.TaskCount++
 		if t.CreatedAt.After(agg.CreatedAt) {
 			agg.CreatedAt = t.CreatedAt
+		}
+		if t.Origin == OriginPRComment {
+			agg.Continuations++
+		}
+		// The newest task decides what the row says happened last. >= rather
+		// than >, so a thread whose tasks share a timestamp still reports the
+		// last one seen rather than defaulting to empty.
+		if agg.LatestOrigin == "" || !t.CreatedAt.Before(agg.LatestAt) {
+			agg.LatestOrigin = t.Origin
+			agg.LatestAt = t.CreatedAt
 		}
 		// The overall goal + repo live on the task spec. Prefer the job-level
 		// "job_task" the planner stamps; fall back to the worker task text.
@@ -635,15 +650,17 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		}
 
 		summaries = append(summaries, JobSummary{
-			JobID:     agg.JobID,
-			CreatedAt: agg.CreatedAt,
-			TaskCount: agg.TaskCount,
-			Status:    status,
-			PRURLs:    prUrls,
-			Task:      agg.Task,
-			Repo:      agg.Repo,
-			FleetID:   agg.FleetID,
-			DaemonID:  agg.DaemonID,
+			JobID:             agg.JobID,
+			ContinuationCount: agg.Continuations,
+			LatestOrigin:      agg.LatestOrigin,
+			CreatedAt:         agg.CreatedAt,
+			TaskCount:         agg.TaskCount,
+			Status:            status,
+			PRURLs:            prUrls,
+			Task:              agg.Task,
+			Repo:              agg.Repo,
+			FleetID:           agg.FleetID,
+			DaemonID:          agg.DaemonID,
 		})
 	}
 

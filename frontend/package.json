@@ -20,6 +20,7 @@
     "@tiptap/react": "^3.29.0",
     "@tiptap/suggestion": "^3.29.0",
     "@xyflow/react": "^12.11.2",
+    "diff": "^9.0.0",
     "lucide-react": "^1.24.0",
     "next": "16.2.10",
     "posthog-js": "^1.413.2",
@@ -27,11 +28,13 @@
     "react-dom": "19.2.4",
     "react-icons": "^5.7.0",
     "recharts": "^3.9.2",
+    "shiki": "^4.4.3",
     "thinking-orbs": "^0.2.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/diff": "^7.0.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

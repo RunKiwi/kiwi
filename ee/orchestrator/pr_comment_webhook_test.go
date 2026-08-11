@@ -328,3 +328,41 @@ func TestPullRequestMergeStillRecords(t *testing.T) {
 		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
+
+// The thread view is drawn from this endpoint and nothing else: a continuation
+// reuses its parent's job id, so GetJobTasks already returns the whole thread.
+// What it did not return was the lineage that says which node follows which.
+func TestJobStatusCarriesLineage(t *testing.T) {
+	withCommentSecret(t)
+	srv, s := setupWebhookTest(t)
+	parent := seedCommentTask(t, s, store.PRCommentModeMention)
+
+	if rec := postComment(t, srv, "issue_comment",
+		commentDelivery("@runkiwi rename the handler", "OWNER", "User", 801)); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	tasks, err := s.GetJobTasks(context.Background(), "org1", parent.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("got %d tasks for the job, want 2 — the thread is one job", len(tasks))
+	}
+
+	var cont *store.QueuedTask
+	for i := range tasks {
+		if tasks[i].Origin == store.OriginPRComment {
+			cont = &tasks[i]
+		}
+	}
+	if cont == nil {
+		t.Fatal("no continuation in the job's tasks")
+	}
+	if cont.ParentTaskID == nil || *cont.ParentTaskID != parent.ID {
+		t.Errorf("parent = %v, want %s", cont.ParentTaskID, parent.ID)
+	}
+	if cont.RootTaskID != parent.ID {
+		t.Errorf("root = %q, want %s", cont.RootTaskID, parent.ID)
+	}
+}

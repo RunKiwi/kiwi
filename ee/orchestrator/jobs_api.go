@@ -58,6 +58,17 @@ type JobTaskResponse struct {
 	// a spinner for 30 minutes while its org had no runner at all.
 	BlockedReason string `json:"blocked_reason,omitempty"`
 	BlockedDetail string `json:"blocked_detail,omitempty"`
+
+	// Lineage. A review comment on a Kiwi pull request continues the task that
+	// opened it, and a continuation reuses its parent's job id — so this
+	// endpoint already returns a whole thread, and these are what let a caller
+	// draw it as one.
+	//
+	// ParentTaskID is empty on a task submitted directly. RootTaskID identifies
+	// the thread. Origin is submit | pr_comment | fork.
+	ParentTaskID string `json:"parent_task_id,omitempty"`
+	RootTaskID   string `json:"root_task_id,omitempty"`
+	Origin       string `json:"origin,omitempty"`
 }
 
 type JobStatusResponse struct {
@@ -187,6 +198,11 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:    t.UpdatedAt,
 			Attempts:     t.Attempts,
 			LeasedBy:     leasedBy,
+			RootTaskID:   t.RootTaskID,
+			Origin:       t.Origin,
+		}
+		if t.ParentTaskID != nil {
+			resp.Tasks[i].ParentTaskID = *t.ParentTaskID
 		}
 		// The job-level goal and repo are stamped on every worker spec; take them
 		// from the first task that carries them.
