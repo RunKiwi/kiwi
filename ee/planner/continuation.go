@@ -127,7 +127,10 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 		if in.SessionID == "" {
 			return nil
 		}
-		return s.store.ReattachSession(ctx, in.OrgID, in.SessionID, task.ID)
+		// On the transaction, not through the store method: a separate
+		// connection would not be atomic with the enqueue above, and on SQLite
+		// it deadlocks against this transaction's own write lock.
+		return store.ReattachSessionIn(tx, in.OrgID, in.SessionID, task.ID)
 	})
 	if err != nil {
 		return nil, err

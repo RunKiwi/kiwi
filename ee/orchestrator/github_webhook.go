@@ -104,6 +104,15 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A review comment continues the task that opened the pull request. Handled
+	// before the merge path below because the events are disjoint, and because
+	// every rejection here must also be a 200.
+	if trigger, ok := parseCommentEvent(event, body); ok {
+		s.handleCommentTrigger(r, event, trigger)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if event != "pull_request" {
 		w.WriteHeader(http.StatusOK)
 		return
