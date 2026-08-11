@@ -10,6 +10,7 @@ import (
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
 
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
@@ -116,6 +117,17 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 		return nil, fmt.Errorf("organization is suspended")
 	}
 
+	// Refuse work whose repository nothing can reach, before any row is
+	// written. Without this the continuation is accepted, waits for a runner,
+	// and fails at clone time — the slow, confusing version of an answer that
+	// was available immediately. The org may have revoked the App since the
+	// parent ran, which is exactly the case a comment on an old pull request
+	// walks into.
+	repoURL, _ := in.ParentTask.Spec["repo_url"].(string)
+	if err := requireRepoAuth(ctx, s.store, in.OrgID, repoURL); err != nil {
+		return nil, err
+	}
+
 	// Admission is the ordinary path. A continuation is a task like any other:
 	// it spends the same allowance, on the same model, under the same caps, and
 	// nothing about arriving via a comment earns it an exemption.
@@ -127,9 +139,30 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 		if err := s.requireAllowance(ctx, in.OrgID, model); err != nil {
 			return nil, err
 		}
+		// The key check is skipped for Kiwi-funded work, where Kiwi supplies
+		// the key — demanding the org connect one of their own would refuse
+		// exactly the case the free tier exists to serve. Funding is inherited
+		// from the parent, so this asks the same question SubmitPlan asked.
+		if in.ParentTask.Funding != store.FundingKiwi {
+			prov, _ := in.ParentTask.Spec["provider"].(string)
+			if prov == "" {
+				prov = provider.ProviderOf(model)
+			}
+			if err := s.requireProviderKey(ctx, in.OrgID, prov); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	task := buildContinuationTask(in.ParentTask, in.Instruction, in.CommentID)
+	// A free org's work goes to the shared fleet whatever the parent says.
+	// Inheriting the parent's fleet queues the continuation wherever that task
+	// happened to run — a fleet since retired, or one from before a downgrade —
+	// where no daemon is provisioned, which is the same dead end as having no
+	// runner at all.
+	if org.Plan == "free" {
+		task.FleetID = auth.SharedFreeFleet
+	}
 
 	err := s.store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(task).Error; err != nil {

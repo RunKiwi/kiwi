@@ -6,6 +6,7 @@ package planner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
@@ -141,6 +142,29 @@ func TestSubmitContinuationRejectsAParentWithNoSession(t *testing.T) {
 	}
 }
 
+// seedRunnableOrg creates an org that passes every admission check, so a test
+// can remove exactly the one thing it is about and know that is why it failed.
+func seedRunnableOrg(t *testing.T, st *store.PostgresStore, plan string) {
+	t.Helper()
+	if err := st.DB().Create(&auth.Organization{ID: "org1", Name: "acme", Plan: plan}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// The provider key is a presence check — requireProviderKey lists names and
+	// never decrypts — so a placeholder value is enough here.
+	if err := st.DB().Create(&store.Credential{
+		ID: "c1", OrgID: "org1", Name: "ANTHROPIC_API_KEY", Kind: "llm", EncryptedValue: "x",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Repository access comes from an App installation rather than a GIT_TOKEN,
+	// because the token path decrypts and a placeholder would fail there.
+	if err := st.DB().Create(&store.GitHubInstallation{
+		InstallationID: 42, OrgID: "org1", AccountLogin: "acme",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The bug this exists to prevent: a comment enqueued a continuation, the task
 // appeared in the dashboard, and it sat there reporting "no runner is connected
 // that can execute this task" while the fleet host was running.
@@ -151,9 +175,7 @@ func TestSubmitContinuationRejectsAParentWithNoSession(t *testing.T) {
 func TestContinuationColdStartsTheOrgsDaemon(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	if err := st.DB().Create(&auth.Organization{ID: "org1", Name: "acme", Plan: "free"}).Error; err != nil {
-		t.Fatal(err)
-	}
+	seedRunnableOrg(t, st, "free")
 	svc := NewService(st, NewHeuristicPlanner(), nil)
 
 	parent := parentTask()
@@ -181,9 +203,7 @@ func TestContinuationColdStartsTheOrgsDaemon(t *testing.T) {
 func TestContinuationDoesNotColdStartAPaidOrg(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	if err := st.DB().Create(&auth.Organization{ID: "org1", Name: "acme", Plan: "pro"}).Error; err != nil {
-		t.Fatal(err)
-	}
+	seedRunnableOrg(t, st, "pro")
 	svc := NewService(st, NewHeuristicPlanner(), nil)
 
 	parent := parentTask()
@@ -211,9 +231,9 @@ func TestContinuationDoesNotColdStartAPaidOrg(t *testing.T) {
 func TestContinuationRefusesASuspendedOrg(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	if err := st.DB().Create(&auth.Organization{
-		ID: "org1", Name: "acme", Plan: "free", ActivationState: "suspended",
-	}).Error; err != nil {
+	seedRunnableOrg(t, st, "free")
+	if err := st.DB().Model(&auth.Organization{}).Where("id = ?", "org1").
+		Update("activation_state", "suspended").Error; err != nil {
 		t.Fatal(err)
 	}
 	svc := NewService(st, NewHeuristicPlanner(), nil)
@@ -234,5 +254,89 @@ func TestContinuationRefusesASuspendedOrg(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("got %d continuations for a suspended org, want 0", n)
+	}
+}
+
+// HandlePlan pins a free org's work to the shared fleet regardless of what the
+// request asked for. A continuation inherited the parent's fleet instead, so a
+// parent that ran on any other fleet — a Pro org since downgraded, a fleet id
+// that has moved — would queue the continuation somewhere no daemon is
+// provisioned, which is the same dead end as having no runner at all.
+func TestContinuationPinsAFreeOrgToTheSharedFleet(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedRunnableOrg(t, st, "free")
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	parent.FleetID = "some-other-fleet"
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename it", CommentID: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.FleetID != auth.SharedFreeFleet {
+		t.Errorf("fleet = %q, want %q", task.FleetID, auth.SharedFreeFleet)
+	}
+}
+
+// A paid org keeps the fleet its work already runs on.
+func TestContinuationKeepsAPaidOrgsFleet(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedRunnableOrg(t, st, "pro")
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	parent.FleetID = "dedicated-fleet"
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename it", CommentID: 11,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.FleetID != "dedicated-fleet" {
+		t.Errorf("fleet = %q, want the parent's dedicated-fleet", task.FleetID)
+	}
+}
+
+// SubmitPlan refuses work whose repository nothing can reach, before any row is
+// written. Without the same check a continuation is accepted, waits for a
+// runner, and fails at clone time — the slow, confusing version of an answer
+// that was available immediately.
+func TestContinuationRefusesARepoItCannotReach(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedRunnableOrg(t, st, "free")
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	// Everything else is in place; repository access deliberately is not, so
+	// the refusal can only be about that.
+	if err := st.DB().Where("org_id = ?", "org1").Delete(&store.GitHubInstallation{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	parent := parentTask() // github.com/acme/widgets, now with no way in
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename it", CommentID: 12,
+	})
+	if err == nil {
+		t.Fatal("expected a refusal for a repository the org cannot reach")
+	}
+	if !strings.Contains(err.Error(), "acme/widgets") {
+		t.Errorf("the refusal should name the repository, got: %v", err)
 	}
 }
