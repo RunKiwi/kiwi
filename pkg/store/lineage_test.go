@@ -201,3 +201,70 @@ func taskIDs(tasks []QueuedTask) []string {
 	}
 	return out
 }
+
+// RetryJob re-queues every failed task in a job. Once a job can hold a thread,
+// that means the original task and every failed continuation are re-queued at
+// once — several tasks sharing one branch, all force-pushing to it, which is
+// the exact hazard ActiveTaskInThread exists to prevent. Only the thread's
+// newest attempt should come back.
+func TestRetryJobRequeuesOnlyTheNewestTaskInAThread(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	root := &QueuedTask{ID: "t1", OrgID: "org1", JobID: "job1", Status: TaskFailed, Spec: map[string]interface{}{}}
+	if err := s.EnqueueTask(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	parent := "t1"
+	cont := &QueuedTask{
+		ID: "t2", OrgID: "org1", JobID: "job1", Status: TaskFailed, Spec: map[string]interface{}{},
+		ParentTaskID: &parent, RootTaskID: "t1", Origin: OriginPRComment,
+	}
+	if err := s.EnqueueTask(ctx, cont); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.RetryJob(ctx, "org1", "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("requeued %d tasks, want 1 — two tasks on one branch race to force-push", n)
+	}
+
+	tasks, err := s.ThreadTasks(ctx, "org1", "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		want := TaskFailed
+		if task.ID == "t2" {
+			want = TaskQueued
+		}
+		if task.Status != want {
+			t.Errorf("task %s status = %q, want %q", task.ID, task.Status, want)
+		}
+	}
+}
+
+// A job with no continuations behaves exactly as it always did.
+func TestRetryJobStillRequeuesEveryWorkerOfAPlainJob(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"w1", "w2"} {
+		if err := s.EnqueueTask(ctx, &QueuedTask{
+			ID: id, OrgID: "org1", JobID: "job1", Status: TaskFailed, Spec: map[string]interface{}{},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := s.RetryJob(ctx, "org1", "job1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("requeued %d tasks, want 2 — separate workers are separate threads", n)
+	}
+}
