@@ -499,6 +499,18 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
               {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
               {taskId}
             </p>
+            {/* A review comment on this job's pull request continues it, so a
+                job can be several runs. The drawer shows the job; the thread —
+                which run followed which, and what each was asked to do — needs
+                two panes and lives on its own page. */}
+            {(currentJob?.tasks.some(t => t.origin === "pr_comment") ?? false) && taskId && (
+              <Link
+                href={`/tasks/${taskId}`}
+                className="mt-1 inline-block text-[11px] text-blue-400 hover:underline"
+              >
+                View thread →
+              </Link>
+            )}
             <RunFacts job={currentJob} progress={progress} record={record} />
           </div>
         </div>

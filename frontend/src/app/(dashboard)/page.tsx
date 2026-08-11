@@ -1151,6 +1151,28 @@ function CommandCenterContent() {
                             {job.task?.trim() || `Job ${shortId(job.job_id)}`}
                           </h3>
 
+                          {/* A row is a thread now. The chip appears only when a
+                              review comment actually continued the work — a plan
+                              with three workers is not three runs — and the badge
+                              says what moved it last, so a thread continued an
+                              hour ago does not still read as "submitted". */}
+                          {(job.continuation_count ?? 0) > 0 && (
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <Link
+                                href={`/tasks/${job.job_id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/6 text-zinc-400 hover:text-zinc-200"
+                              >
+                                {(job.continuation_count ?? 0) + 1} runs
+                              </Link>
+                              {job.latest_origin === "pr_comment" && (
+                                <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                                  comment
+                                </span>
+                              )}
+                            </div>
+                          )}
+
                           {cardNotice?.jobId === job.job_id && (
                             <div
                               role="status"
