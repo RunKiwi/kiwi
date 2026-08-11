@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -169,29 +168,32 @@ func (c *openaiConversation) Send(ctx context.Context, text string, results []To
 
 	resp, err := c.provider.http.Do(req)
 	if err != nil {
-		return Turn{}, fmt.Errorf("openai tool turn failed: %w", err)
+		return Turn{}, fmt.Errorf("%s tool turn failed: %w", c.provider.name, err)
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, c.provider.name, resp)
+	if err != nil {
+		return Turn{}, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var or openaiToolResponse
 		_ = json.Unmarshal(body, &or)
 		if or.Error.Message != "" {
-			return Turn{}, fmt.Errorf("openai API returned %d: %s", resp.StatusCode, or.Error.Message)
+			return Turn{}, fmt.Errorf("%s API returned %d: %s", c.provider.name, resp.StatusCode, or.Error.Message)
 		}
-		return Turn{}, fmt.Errorf("openai API returned %d: %s", resp.StatusCode, string(body))
+		return Turn{}, fmt.Errorf("%s API returned %d: %s", c.provider.name, resp.StatusCode, string(body))
 	}
 
 	var or openaiToolResponse
-	if err := json.Unmarshal(body, &or); err != nil {
-		return Turn{}, fmt.Errorf("decode openai response: %w", err)
+	if err := decodeAPIBody(c.provider.name, resp.StatusCode, body, &or); err != nil {
+		return Turn{}, err
 	}
 	c.turns++
 	c.record(&or)
 
 	if len(or.Choices) == 0 {
-		return Turn{}, fmt.Errorf("openai returned no choices")
+		return Turn{}, fmt.Errorf("%s returned no choices", c.provider.name)
 	}
 	choice := or.Choices[0]
 	if choice.Message.Refusal != "" {

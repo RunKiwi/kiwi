@@ -147,7 +147,7 @@ func defaultProvider(creds map[string]string, model, providerID string) (provide
 	// the registry's base URL. Without the URL the client would call
 	// api.openai.com with a key that endpoint never issued.
 	if spec, ok := provider.SpecFor(prov); ok && spec.Kind == provider.KindOpenAICompatible {
-		cp := provider.NewOpenAICompatibleProvider(key, model, model, spec.BaseURL)
+		cp := provider.NewOpenAICompatibleProvider(key, model, model, spec.BaseURL, spec.ID)
 		return cp, cp
 	}
 

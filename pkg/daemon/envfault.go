@@ -26,10 +26,13 @@ import (
 // envFault describes a sandbox that could not run the command, and how to fix
 // it. A nil *envFault means the output is a genuine test result.
 type envFault struct {
-	// Kind is a stable label for logs: missing_runtime | version_mismatch.
+	// Kind is a stable label for logs:
+	// missing_runtime | version_mismatch | missing_c_toolchain.
 	Kind string
 	// Image is the corrected image to retry with, or "" when the fault is real
-	// but not repairable by swapping images (missing dependencies, say).
+	// but not repairable by swapping images (missing dependencies, say), or
+	// when the repair depends on the image currently in use — missing_c_toolchain
+	// is derived from that by correctedImage, not from the repository.
 	Image string
 	// Detail is a short human-readable reason, surfaced on the task when a
 	// repair is impossible.
@@ -42,6 +45,27 @@ var notFoundRe = regexp.MustCompile(`(?m)([\w.+-]+): (?:command )?not found`)
 
 // "go.mod requires go >= 1.25.0 (running go 1.21.13)"
 var goVersionRe = regexp.MustCompile(`go\.mod requires go >= (\d+)\.(\d+)`)
+
+// A build that needed a C compiler in an image that has none.
+//
+// The small tags exist by dropping the C toolchain, which is invisible until
+// something reaches for cgo — and plenty does. A repository pinning go < 1.20
+// hits it on a plain `go test`: before 1.20 the go command defaulted
+// CGO_ENABLED=1 whether or not a compiler existed, so importing os/user or net
+// is enough. `go test -race` requires cgo at any version, and so does a sqlite
+// driver or a Rust build that links with cc.
+//
+// None of it is legible as a test result. "cgo: exec gcc" describes the
+// sandbox, and an Actor asked to fix it will edit Go code until the budget is
+// gone — the same shape as npm-in-a-Go-image above.
+var cToolchainRe = regexp.MustCompile(`(?m)` + strings.Join([]string{
+	`cgo: exec (?:gcc|cc|clang)`,                // Go < 1.21
+	`cgo: C compiler "[^"]*" not found`,         // Go >= 1.21
+	`-race requires cgo`,                        // the race detector, at any version
+	"linker `cc` not found",                     // Rust
+	`(?:^|[\s:])(?:gcc|cc|g\+\+): not found`,    // the compiler invoked directly
+	`command '(?:gcc|cc)' failed: No such file`, // Python building an extension
+}, "|"))
 
 // classifyEnvOutput inspects a failing command's output and reports whether the
 // environment — rather than the code — is at fault.
@@ -76,6 +100,17 @@ func classifyEnvOutput(output string) *envFault {
 		}
 	}
 
+	// Last, because it is the weakest signal of the three: a missing compiler
+	// only matters once the named runtime is present and at the right version.
+	if cToolchainRe.MatchString(output) {
+		return &envFault{
+			Kind: "missing_c_toolchain",
+			// Resolved by correctedImage from the image in use — the repository
+			// cannot say which variant is running.
+			Detail: "this build needs a C compiler, which the sandbox image does not carry",
+		}
+	}
+
 	return nil
 }
 
@@ -86,11 +121,21 @@ func classifyEnvOutput(output string) *envFault {
 // missing `node` becomes the project's own Node major rather than the default.
 func correctedImage(current, output, dir string) (string, string) {
 	fault := classifyEnvOutput(output)
-	if fault == nil || fault.Image == "" {
+	if fault == nil {
 		return "", ""
 	}
 
 	next := fault.Image
+	// A missing compiler is a property of the image in use, not of the
+	// repository: the answer is the same toolchain at the same version with the
+	// C toolchain present. Re-resolving from the checkout would return the
+	// alpine tag that has just failed.
+	if fault.Kind == "missing_c_toolchain" {
+		next = withCToolchain(current)
+	}
+	if next == "" {
+		return "", ""
+	}
 	// missing_runtime resolves the image without repo context; re-resolve it
 	// against the checkout so a pinned version wins over the default.
 	if fault.Kind == "missing_runtime" && dir != "" {
