@@ -37,6 +37,14 @@ type JobSummary struct {
 	// to hang a job off its actual executor rather than the Control Plane.
 	FleetID  string `json:"fleet_id"`
 	DaemonID string `json:"daemon_id"`
+	// ContinuationCount is how many of this job's tasks came from a review
+	// comment, so a row can say "3 runs" only when there is really a thread —
+	// TaskCount cannot, because a plan with three workers also counts three.
+	ContinuationCount int `json:"continuation_count"`
+	// LatestOrigin is how the newest task in the job came to exist. Without it a
+	// thread continued an hour ago still reads as "submitted", and the row is a
+	// receipt for something that has since moved on.
+	LatestOrigin string `json:"latest_origin"`
 }
 
 // TaskCompletion wraps the arguments for ending a task's lease.

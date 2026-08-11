@@ -268,3 +268,69 @@ func TestRetryJobStillRequeuesEveryWorkerOfAPlainJob(t *testing.T) {
 		t.Errorf("requeued %d tasks, want 2 — separate workers are separate threads", n)
 	}
 }
+
+// The list row needs two things the summary did not carry: how many runs a
+// thread has had, and what moved it last. Without the second, a thread
+// continued an hour ago still reads as "submitted" — the row would be a
+// receipt for something that has since moved on.
+func TestListJobsReportsContinuations(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	root := &QueuedTask{
+		ID: "t1", OrgID: "org1", JobID: "job1", Status: TaskSucceeded,
+		Spec: map[string]interface{}{"task": "add a health endpoint"},
+	}
+	if err := s.EnqueueTask(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	parent := "t1"
+	cont := &QueuedTask{
+		ID: "t2", OrgID: "org1", JobID: "job1", Status: TaskQueued,
+		ParentTaskID: &parent, RootTaskID: "t1", Origin: OriginPRComment,
+		Spec: map[string]interface{}{"task": "rename the handler"},
+	}
+	if err := s.EnqueueTask(ctx, cont); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs, err := s.ListJobs(ctx, "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1 — a thread is one row", len(jobs))
+	}
+	if jobs[0].ContinuationCount != 1 {
+		t.Errorf("continuations = %d, want 1", jobs[0].ContinuationCount)
+	}
+	if jobs[0].LatestOrigin != OriginPRComment {
+		t.Errorf("latest origin = %q, want %q", jobs[0].LatestOrigin, OriginPRComment)
+	}
+}
+
+// A plain job is unchanged: no chip, and it still reads as submitted.
+func TestListJobsLeavesAPlainJobAlone(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"w1", "w2"} {
+		if err := s.EnqueueTask(ctx, &QueuedTask{
+			ID: id, OrgID: "org1", JobID: "job1", Status: TaskSucceeded,
+			Spec: map[string]interface{}{"task": "multi-worker job"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	jobs, err := s.ListJobs(ctx, "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobs[0].ContinuationCount != 0 {
+		t.Errorf("continuations = %d, want 0 — separate workers are not continuations", jobs[0].ContinuationCount)
+	}
+	if jobs[0].LatestOrigin != OriginSubmit {
+		t.Errorf("latest origin = %q, want %q", jobs[0].LatestOrigin, OriginSubmit)
+	}
+}
