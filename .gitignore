@@ -36,7 +36,13 @@ kms-migrate
 # Local operator/deploy scripts — hold prod ids, private paths, and DB creds. Never commit.
 deploy.sh
 deploy-all.sh
-.claude/
+.claude/*
+# ...except shared project skills, which are documentation meant to be
+# committed and used by any future session working in this repo. (A
+# directory-match pattern like `.claude/` prunes the whole tree before
+# git ever evaluates a negation inside it — `.claude/*` ignores direct
+# children individually instead, so the negation below actually applies.)
+!.claude/skills/
 
 # Python SDK build artifacts (setup.py sdist / pip install -e leaves these)
 sdk/python/build/
