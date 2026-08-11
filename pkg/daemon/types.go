@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
@@ -170,4 +171,27 @@ type SessionStateRes struct {
 	Attempts  int             `json:"attempts,omitempty"`
 	Status    string          `json:"status,omitempty"`
 	State     json.RawMessage `json:"state,omitempty"`
+}
+
+// GitTokenReq asks the Control Plane for a git credential for a running task.
+//
+// The repository is deliberately absent. It is read from the task's own spec on
+// the Control Plane, so a daemon cannot name a repository of its own choosing
+// and buy a token for it: the only repository it can reach is the one belonging
+// to a task it currently holds the lease on.
+type GitTokenReq struct {
+	TaskID     string `json:"task_id"`
+	LeaseID    string `json:"lease_id"`
+	SignPubKey string `json:"sign_pub_key"`
+}
+
+// GitTokenResp carries a short-lived GitHub App installation token.
+//
+// ExpiresAt is returned rather than assumed because the daemon decides when to
+// ask again from it. A token is fetched immediately before each git operation
+// rather than held for the length of a task, so no long-lived git credential
+// exists on the data plane at all for App-backed orgs.
+type GitTokenResp struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }

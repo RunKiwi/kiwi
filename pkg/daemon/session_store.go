@@ -30,6 +30,31 @@ type cpSessionStore struct {
 	architectModel string
 	workerModel    string
 	maxRounds      int
+
+	// resolvedID is the session the Control Plane says this task belongs to,
+	// learned from Load and used for every write afterwards.
+	//
+	// It exists because a continuation is a new task carrying a session that
+	// already exists: a review comment moves the thread's session onto the new
+	// task, so the id derived from that task's own id is not the session's id.
+	// The Control Plane resolves sessions by task and answers with the real
+	// one, and it is the authority — the daemon has no database and cannot know
+	// a thread's history.
+	//
+	// Ignoring that answer would insert a second row, which collides with the
+	// unique index on task_id, so the checkpoint is rejected and the round's
+	// history is lost.
+	resolvedID string
+}
+
+// sessionID prefers what the Control Plane resolved over what the caller
+// derived. Empty resolvedID means nothing was resumed, and the derived id is
+// correct — a task's first lease creates its own session.
+func (s *cpSessionStore) sessionID(derived string) string {
+	if s.resolvedID != "" {
+		return s.resolvedID
+	}
+	return derived
 }
 
 func (s *cpSessionStore) Load(ctx context.Context, sessionID string) (*session.Checkpoint, error) {
@@ -50,6 +75,13 @@ func (s *cpSessionStore) Load(ctx context.Context, sessionID string) (*session.C
 	if err := json.Unmarshal(res.State, &cp); err != nil {
 		return nil, fmt.Errorf("decode session checkpoint: %w", err)
 	}
+	// Adopt the session we are actually resuming. Only here, on the path that
+	// returns a checkpoint: a concluded session returns above without adopting,
+	// so an ordinary re-lease still writes under its own derived id and cannot
+	// reopen work that has already concluded.
+	if res.SessionID != "" {
+		s.resolvedID = res.SessionID
+	}
 	return &cp, nil
 }
 
@@ -63,7 +95,7 @@ func (s *cpSessionStore) Save(ctx context.Context, sessionID string, cp session.
 	total.Add(cp.Implementer)
 
 	req := SessionCheckpointReq{
-		SessionID:      sessionID,
+		SessionID:      s.sessionID(sessionID),
 		TaskID:         s.taskID,
 		LeaseID:        s.leaseID,
 		SignPubKey:     s.signPubKey,
@@ -101,7 +133,7 @@ func (s *cpSessionStore) Finish(ctx context.Context, sessionID string, success b
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	return s.client.CheckpointSession(ctx, SessionCheckpointReq{
-		SessionID:  sessionID,
+		SessionID:  s.sessionID(sessionID),
 		TaskID:     s.taskID,
 		LeaseID:    s.leaseID,
 		SignPubKey: s.signPubKey,

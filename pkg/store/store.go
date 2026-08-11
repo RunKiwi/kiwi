@@ -57,6 +57,17 @@ type Store interface {
 	SaveAgentSession(ctx context.Context, sess *AgentSession, events []AgentSessionEvent) error
 	ListAgentSessionEvents(ctx context.Context, orgID, sessionID string) ([]AgentSessionEvent, error)
 	FinishAgentSession(ctx context.Context, orgID, sessionID, status string) error
+	// ReattachSession moves a session onto the task about to continue it, and
+	// reopens it. A session belongs to one task at a time because the load path
+	// resolves it by task id, so continuing a thread means moving it.
+	ReattachSession(ctx context.Context, orgID, sessionID, newTaskID string) error
+
+	// Task lineage. A review comment on a pull request starts another task that
+	// continues the same session, so a task's history is a thread of them.
+	ThreadTasks(ctx context.Context, orgID, rootTaskID string) ([]QueuedTask, error)
+	ActiveTaskInThread(ctx context.Context, orgID, rootTaskID string) (*QueuedTask, error)
+	PRCommentMode(ctx context.Context, orgID string) (string, error)
+	SetPRCommentMode(ctx context.Context, orgID, mode string) error
 
 	// Tenancy & Limits
 	GetOrganization(ctx context.Context, id string) (*Organization, error)
@@ -164,4 +175,17 @@ type Store interface {
 	UpsertJobLearning(ctx context.Context, learning *JobLearning) error
 	GetJobLearnings(ctx context.Context, orgID string, jobIDs []string) ([]JobLearning, error)
 	SearchJobLearnings(ctx context.Context, orgID string, taskEmbedding []float32, limit int, excludeJobID string) ([]JobLearning, error)
+
+	// FindLeasedTask returns a task only to the holder of its current lease. It
+	// is an authorisation check: holding the lease is the basis on which a
+	// daemon is allowed to buy a git credential for that task's repository.
+	FindLeasedTask(ctx context.Context, taskID, leaseID string) (*QueuedTask, error)
+
+	// GitHub App installations. These replace the personal access token as the
+	// way Kiwi reaches a customer's repositories; GIT_TOKEN remains the
+	// fallback for non-GitHub remotes and for orgs that have not installed.
+	UpsertGitHubInstallation(ctx context.Context, inst *GitHubInstallation) error
+	FindGitHubInstallation(ctx context.Context, orgID, accountLogin string) (*GitHubInstallation, error)
+	ListGitHubInstallations(ctx context.Context, orgID string) ([]GitHubInstallation, error)
+	DeleteGitHubInstallation(ctx context.Context, installationID int64) error
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -68,8 +69,25 @@ func (s *PostgresStore) RetryJob(ctx context.Context, orgID, jobID string) (int,
 
 	var affected int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Only the newest attempt in each thread comes back.
+		//
+		// A job used to hold one task per planned worker, so retrying it meant
+		// retrying all of them. Since a review comment can continue a task, a
+		// job can also hold a thread — and re-queueing a thread's original task
+		// alongside its failed continuations would put several tasks on one
+		// branch, all force-pushing to it, with only one able to hold the
+		// session. That is the hazard ActiveTaskInThread exists to prevent, and
+		// a retry must not walk around it.
+		ids, err := retryableTaskIDs(tx, orgID, jobID)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+
 		res := tx.Model(&QueuedTask{}).
-			Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskFailed, TaskCancelled}).
+			Where("org_id = ? AND id IN ?", orgID, ids).
 			Updates(map[string]interface{}{
 				"status":           TaskQueued,
 				"leased_by":        nil,
@@ -189,4 +207,37 @@ func (s *PostgresStore) RecordTaskProgress(ctx context.Context, taskID, leaseID,
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// retryableTaskIDs picks the task to re-queue for each thread in a job: the
+// newest failed or cancelled one, which is the attempt a user retrying the job
+// means.
+//
+// Separate workers of a plain job are separate threads, so a job that never
+// had a continuation retries every one of them exactly as it always did.
+func retryableTaskIDs(tx *gorm.DB, orgID, jobID string) ([]string, error) {
+	var tasks []QueuedTask
+	if err := tx.Select("id", "root_task_id", "created_at").
+		Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskFailed, TaskCancelled}).
+		Order("created_at asc, id asc").
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+
+	newest := make(map[string]QueuedTask, len(tasks))
+	for _, task := range tasks {
+		root := task.RootTaskID
+		if root == "" {
+			root = task.ID
+		}
+		// Ordered oldest-first above, so the last write per thread wins.
+		newest[root] = task
+	}
+
+	ids := make([]string, 0, len(newest))
+	for _, task := range newest {
+		ids = append(ids, task.ID)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

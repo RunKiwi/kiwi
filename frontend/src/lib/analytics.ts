@@ -45,7 +45,7 @@ export type AuthMethod = "github" | "google" | "api_key";
  * from two places, and "onboarding saves fail but Integrations works" is a
  * conclusion you can only reach if the events say which one.
  */
-export type Surface = "onboarding" | "integrations";
+export type Surface = "onboarding" | "integrations" | "github_app";
 
 /**
  * The activation funnel, in order. Anything not listed here cannot be sent.

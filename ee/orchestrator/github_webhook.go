@@ -78,6 +78,41 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
+
+	// An App the customer removed must stop being offered as an auth path
+	// straight away. Without this the row survives until a task tries to use it,
+	// which routes that task away from the GIT_TOKEN fallback and into a failure
+	// that arrives minutes later and blames the runner.
+	if event == "installation" {
+		var p struct {
+			Action       string `json:"action"`
+			Installation struct {
+				ID int64 `json:"id"`
+			} `json:"installation"`
+		}
+		if err := json.Unmarshal(body, &p); err == nil && p.Installation.ID != 0 {
+			switch p.Action {
+			case "deleted", "suspend":
+				if err := s.storage.DeleteGitHubInstallation(r.Context(), p.Installation.ID); err != nil {
+					log.Printf("[githubapp] removing installation %d after %q: %v", p.Installation.ID, p.Action, err)
+				} else {
+					log.Printf("[githubapp] installation %d removed after %q", p.Installation.ID, p.Action)
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// A review comment continues the task that opened the pull request. Handled
+	// before the merge path below because the events are disjoint, and because
+	// every rejection here must also be a 200.
+	if trigger, ok := parseCommentEvent(event, body); ok {
+		s.handleCommentTrigger(r, event, trigger)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if event != "pull_request" {
 		w.WriteHeader(http.StatusOK)
 		return
