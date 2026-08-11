@@ -97,6 +97,21 @@ export default function OnboardingPage() {
     return () => clearInterval(interval);
   }, [step]);
 
+  // Fetches the signed install link rather than navigating straight at the
+  // endpoint: it sits behind bearer auth and a top-level navigation carries no
+  // Authorization header.
+  const handleInstallApp = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const { install_url } = await client.githubInstallUrl();
+      window.location.href = install_url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not start the GitHub App install");
+      setBusy(false);
+    }
+  };
+
   const handleConnectRepo = async () => {
     const val = ghToken.trim();
     if (!val) {
@@ -196,11 +211,28 @@ export default function OnboardingPage() {
                 )}
               </div>
               <p className="text-zinc-400 text-sm mb-4">
-                Link your codebase so Kiwi agents can analyze, plan, and submit pull requests. Provide a GitHub Personal Access Token (`repo` scope).
+                Link your codebase so Kiwi agents can analyze, plan, and submit pull requests. Install the GitHub App and pick the repositories Kiwi may touch.
               </p>
               {step === 1 && (
                 <div className="flex flex-col gap-3 max-w-md pt-2">
-                  <div className="flex gap-2">
+                  <button
+                    onClick={handleInstallApp}
+                    disabled={busy}
+                    className="flex items-center justify-center gap-2 btn-primary px-5 py-2.5 transition-colors disabled:opacity-50"
+                  >
+                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    Install the GitHub App
+                  </button>
+                  <p className="text-xs text-zinc-500">
+                    Access covers only the repositories you select, expires
+                    hourly, and you can revoke it from GitHub at any time.
+                  </p>
+
+                  <details className="pt-1">
+                    <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300">
+                      Use a personal access token instead
+                    </summary>
+                    <div className="flex gap-2 pt-3">
                     <input
                       type="password"
                       value={ghToken}
@@ -216,7 +248,8 @@ export default function OnboardingPage() {
                       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                       Connect
                     </button>
-                  </div>
+                    </div>
+                  </details>
                   {err && (
                     <div className="flex items-center gap-2 text-red-400 text-sm">
                       <AlertCircle className="w-4 h-4 shrink-0" /> {err}

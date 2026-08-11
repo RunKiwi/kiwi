@@ -6,6 +6,7 @@ import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, Bot, CheckCircle2 
 import { CredentialField } from "@/components/CredentialField";
 import { parseActionableError } from "@/lib/errors";
 import { capture } from "@/lib/analytics";
+import { GithubAppCard } from "@/components/GithubAppCard";
 
 // UI catalog: which integrations we surface and how to connect them. `credName`
 // is the credential the backend stores; `kind` classifies it.
@@ -13,7 +14,7 @@ const CATALOG: Record<string, {
   title: string; blurb: string; credName: string; kind: string;
   placeholder: string; icon: React.ComponentType<{ className?: string }>;
 }> = {
-  github: { title: "GitHub", blurb: "List repos in the task form and push branches / open PRs.", credName: "GITHUB_TOKEN", kind: "github", placeholder: "github_pat_… (repo scope)", icon: Boxes },
+  github: { title: "GitHub token (fallback)", blurb: "Only needed if you have not installed the GitHub App above.", credName: "GITHUB_TOKEN", kind: "github", placeholder: "github_pat_… (repo scope)", icon: Boxes },
   slack:  { title: "Slack",  blurb: "Notify a channel when jobs finish.", credName: "SLACK_TOKEN", kind: "slack", placeholder: "xoxb-… or a webhook URL", icon: MessageSquare },
   git:    { title: "Git push token", blurb: "Token the daemon uses to push branches.", credName: "GIT_TOKEN", kind: "git", placeholder: "github_pat_…", icon: GitBranch },
   anthropic: { title: "Anthropic", blurb: "API key for Claude models.", credName: "ANTHROPIC_API_KEY", kind: "llm", placeholder: "sk-ant-…", icon: Sparkles },
@@ -75,6 +76,8 @@ export default function IntegrationsPage() {
       </div>
 
       <div className="flex flex-col gap-4">
+        <GithubAppCard />
+
         {ORDER.map(key => {
           const meta = CATALOG[key];
           const Icon = meta.icon;
@@ -117,7 +120,7 @@ export default function IntegrationsPage() {
         })}
       </div>
 
-      <p className="text-xs text-zinc-600 mt-6">Full OAuth (one-click GitHub/Slack) is planned; for now connect with a token / webhook.</p>
+      <p className="text-xs text-zinc-600 mt-6">GitHub connects through the App above. Other integrations use a token or webhook for now.</p>
     </div>
   );
 }
