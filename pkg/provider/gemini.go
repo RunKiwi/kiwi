@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -117,7 +116,10 @@ func (p *GeminiProvider) generate(ctx context.Context, model, system, user strin
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, "gemini", resp)
+	if err != nil {
+		return "", "", err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// The error body may echo the model/prompt but not the key (which is a
 		// header). Include it to surface actionable errors (quota, bad model).
@@ -125,8 +127,8 @@ func (p *GeminiProvider) generate(ctx context.Context, model, system, user strin
 	}
 
 	var gr geminiResponse
-	if err := json.Unmarshal(body, &gr); err != nil {
-		return "", "", fmt.Errorf("decode gemini response: %w", err)
+	if err := decodeAPIBody("gemini", resp.StatusCode, body, &gr); err != nil {
+		return "", "", err
 	}
 	p.lastInput = gr.UsageMetadata.PromptTokenCount
 	p.lastOutput = gr.UsageMetadata.CandidatesTokenCount
@@ -245,14 +247,17 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, "gemini embed", resp)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("gemini embed API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var gr geminiEmbedResponse
-	if err := json.Unmarshal(body, &gr); err != nil {
-		return nil, fmt.Errorf("decode gemini embed response: %w", err)
+	if err := decodeAPIBody("gemini embed", resp.StatusCode, body, &gr); err != nil {
+		return nil, err
 	}
 
 	if len(gr.Embedding.Values) == 0 {

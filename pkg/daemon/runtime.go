@@ -47,6 +47,29 @@ const (
 	phpImage    = "php:8-cli-alpine"
 )
 
+// withCToolchain names the variant of an image that ships a C compiler, or ""
+// when there is none to name.
+//
+// Every default above is a small tag, and what "-alpine" and "-slim" drop is
+// the C toolchain. The Debian-based tag of the same image is the same language
+// at the same version with gcc present, so the repair is a tag swap and never a
+// version change — which is what makes it safe to apply automatically.
+//
+// Images we did not choose are left alone. Trimming "-alpine" off a
+// devcontainer's own image invents a tag that probably does not exist, and the
+// correction is carried into verification even when the retry cannot run.
+func withCToolchain(image string) string {
+	if _, ok := ecosystemOfImage(image); !ok {
+		return ""
+	}
+	for _, small := range []string{"-alpine", "-slim"} {
+		if strings.HasSuffix(image, small) {
+			return strings.TrimSuffix(image, small)
+		}
+	}
+	return ""
+}
+
 // ecosystem is an internal label for a language toolchain, resolved to a
 // concrete image (with a version read from the repo) by imageFor.
 type ecosystem string

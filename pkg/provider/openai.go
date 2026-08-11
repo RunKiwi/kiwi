@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -22,6 +21,14 @@ const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 // which keeps the daemon — the process that actually runs the loop — free of a
 // third provider SDK and its transitive tree.
 type OpenAIProvider struct {
+	// name is the provider this client is speaking for, and it appears in every
+	// error this file produces. It is a field rather than a constant because
+	// OpenAI is not the only provider served here: OpenRouter — the provider
+	// Kiwi funds for the free tier — is openai_compatible and runs on this same
+	// client. An Architect failure once reported "openai completion request
+	// failed" to a user who had never configured OpenAI, which points at an
+	// integration they cannot fix because it is not the one in use.
+	name        string
 	apiKey      string
 	actorModel  string
 	criticModel string
@@ -47,6 +54,7 @@ func NewOpenAIProviderWithModels(apiKey, actorModel, criticModel string) *OpenAI
 		base = v
 	}
 	return &OpenAIProvider{
+		name:        ProviderOpenAI,
 		apiKey:      apiKey,
 		actorModel:  actorModel,
 		criticModel: criticModel,
@@ -68,10 +76,16 @@ func NewOpenAIProviderWithModels(apiKey, actorModel, criticModel string) *OpenAI
 // An empty baseURL falls back to NewOpenAIProviderWithModels' behaviour, so a
 // misconfigured registry row degrades to plain OpenAI rather than to a request
 // against "".
-func NewOpenAICompatibleProvider(apiKey, actorModel, criticModel, baseURL string) *OpenAIProvider {
+//
+// name is the provider's canonical id, carried so that failures name the
+// provider the user actually selected rather than the client that serves it.
+func NewOpenAICompatibleProvider(apiKey, actorModel, criticModel, baseURL, name string) *OpenAIProvider {
 	p := NewOpenAIProviderWithModels(apiKey, actorModel, criticModel)
 	if v := strings.TrimRight(baseURL, "/"); v != "" {
 		p.baseURL = v
+	}
+	if name != "" {
+		p.name = name
 	}
 	return p
 }
@@ -172,21 +186,24 @@ func (p *OpenAIProvider) chat(ctx context.Context, model, system, user string, m
 
 	resp, err := p.http.Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("openai request failed: %w", err)
+		return "", "", fmt.Errorf("%s request failed: %w", p.name, err)
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, p.name, resp)
+	if err != nil {
+		return "", "", err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// The body may echo the model and prompt but never the key, which is a
 		// header. Include it so quota and bad-model errors stay actionable —
 		// Classify reads these strings to categorise the failure.
-		return "", "", fmt.Errorf("openai API returned %d: %s", resp.StatusCode, string(body))
+		return "", "", fmt.Errorf("%s API returned %d: %s", p.name, resp.StatusCode, string(body))
 	}
 
 	var or openaiResponse
-	if err := json.Unmarshal(body, &or); err != nil {
-		return "", "", fmt.Errorf("decode openai response: %w", err)
+	if err := decodeAPIBody(p.name, resp.StatusCode, body, &or); err != nil {
+		return "", "", err
 	}
 	p.lastInput = or.Usage.PromptTokens
 	p.lastOutput = or.Usage.CompletionTokens
@@ -195,10 +212,10 @@ func (p *OpenAIProvider) chat(ctx context.Context, model, system, user string, m
 	// A 200 carrying an error object is rare but real on compatible endpoints;
 	// treating it as an empty answer would strand the caller with "no choices".
 	if or.Error.Message != "" {
-		return "", "", fmt.Errorf("openai API error: %s", or.Error.Message)
+		return "", "", fmt.Errorf("%s API error: %s", p.name, or.Error.Message)
 	}
 	if len(or.Choices) == 0 {
-		return "", "", fmt.Errorf("openai returned no choices")
+		return "", "", fmt.Errorf("%s returned no choices", p.name)
 	}
 	choice := or.Choices[0]
 	if choice.Message.Refusal != "" {
@@ -219,7 +236,7 @@ func (p *OpenAIProvider) GetCodeEdit(ctx context.Context, task, fileName, codeCo
 
 	text, finish, err := p.chat(ctx, p.actorModel, system, user, 16000)
 	if err != nil {
-		return "", fmt.Errorf("openai actor request failed: %w", err)
+		return "", fmt.Errorf("%s actor request failed: %w", p.name, err)
 	}
 	if finish == "refusal" || finish == "content_filter" {
 		return "", fmt.Errorf("actor request refused by safety classifier (%s)", finish)
@@ -242,7 +259,7 @@ func (p *OpenAIProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	// which parseVerdict reads as a rejection, silently stalling the loop.
 	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("openai critic request failed: %w", err)
+		return Verdict{}, fmt.Errorf("%s critic request failed: %w", p.name, err)
 	}
 	if finish == "refusal" || finish == "content_filter" {
 		return Verdict{Approved: false, Reasons: "critic refused to review (safety classifier)"}, nil
@@ -258,7 +275,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, system, user string) (str
 	budget := CompletionBudget()
 	text, finish, err := p.chat(ctx, p.actorModel, system, user, budget)
 	if err != nil {
-		return "", fmt.Errorf("openai completion request failed: %w", err)
+		return "", fmt.Errorf("%s completion request failed: %w", p.name, err)
 	}
 	if finish == "refusal" || finish == "content_filter" {
 		return "", fmt.Errorf("completion refused by safety classifier (%s)", finish)
@@ -301,21 +318,24 @@ func (p *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 	resp, err := p.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openai embed request failed: %w", err)
+		return nil, fmt.Errorf("%s embed request failed: %w", p.name, err)
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, p.name+" embed", resp)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openai embed API returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("%s embed API returned %d: %s", p.name, resp.StatusCode, string(body))
 	}
 
 	var er openaiEmbedResponse
-	if err := json.Unmarshal(body, &er); err != nil {
-		return nil, fmt.Errorf("decode openai embed response: %w", err)
+	if err := decodeAPIBody(p.name+" embed", resp.StatusCode, body, &er); err != nil {
+		return nil, err
 	}
 	if len(er.Data) == 0 || len(er.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("openai returned empty embedding")
+		return nil, fmt.Errorf("%s returned empty embedding", p.name)
 	}
 	return er.Data[0].Embedding, nil
 }

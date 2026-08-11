@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -193,14 +192,17 @@ func (c *geminiConversation) Send(ctx context.Context, text string, results []To
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := readAPIBody(ctx, "gemini", resp)
+	if err != nil {
+		return Turn{}, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Turn{}, fmt.Errorf("gemini API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var gr geminiToolResponse
-	if err := json.Unmarshal(body, &gr); err != nil {
-		return Turn{}, fmt.Errorf("decode gemini response: %w", err)
+	if err := decodeAPIBody("gemini", resp.StatusCode, body, &gr); err != nil {
+		return Turn{}, err
 	}
 	c.turns++
 	c.record(&gr)
