@@ -49,6 +49,15 @@ export interface Integration {
   connected: boolean;
 }
 
+export interface GithubInstallation {
+  installation_id: number;
+  org_id: string;
+  account_login: string;
+  repo_selection: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GithubRepo {
   full_name: string;
   url: string;
@@ -670,6 +679,21 @@ export const client = {
 
   listIntegrations: () =>
     fetchApi<{ integrations: Integration[] }>("/api/v1/integrations"),
+
+  // GitHub App. listGithubInstallations reports which GitHub accounts this org
+  // has connected; githubInstallUrl asks the Control Plane for a signed install
+  // link.
+  //
+  // The link is fetched rather than navigated to. This endpoint is behind bearer
+  // auth and a top-level navigation carries no Authorization header, so the
+  // server hands back the URL as JSON and the caller navigates itself.
+  listGithubInstallations: () =>
+    fetchApi<{ installations: GithubInstallation[] }>("/api/v1/github/installations"),
+
+  githubInstallUrl: () =>
+    fetchApi<{ install_url: string }>("/api/v1/github/install", {
+      headers: { Accept: "application/json" },
+    }),
 
   listProviders: () => fetchApi<{ providers: ProviderInfo[] }>("/api/v1/providers"),
   listCatalogModels: () => fetchApi<{ models: CatalogModel[] }>("/api/v1/catalog/models"),

@@ -132,6 +132,18 @@ func (s *Server) handleGithubInstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := fmt.Sprintf("https://github.com/apps/%s/installations/new?state=%s", slug, state)
+
+	// Content-negotiated because the callers cannot both follow a redirect.
+	//
+	// The dashboard authenticates with a bearer token held in localStorage, and
+	// a top-level browser navigation carries no Authorization header, so it
+	// cannot simply point the window at this endpoint. It asks for JSON, gets
+	// the URL, and navigates itself. The CLI has the same problem for a
+	// different reason and the same answer.
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeJSON(w, http.StatusOK, map[string]string{"install_url": target})
+		return
+	}
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
