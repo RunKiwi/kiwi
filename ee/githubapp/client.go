@@ -248,3 +248,69 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 	}
 	return out, nil
 }
+
+// Repository is one repository an installation can reach.
+type Repository struct {
+	FullName      string `json:"full_name"`
+	HTMLURL       string `json:"html_url"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
+}
+
+// ListRepositories returns the repositories an installation covers.
+//
+// This is a better answer than the one a personal access token gives. A PAT
+// lists everything its owner can see, most of which Kiwi has no business
+// touching and cannot act on anyway; an installation lists exactly what the
+// customer ticked. The picker and the permission then agree, so a repository
+// that appears in the dropdown is one a task can actually run against.
+//
+// Paginated because an installation on a large organisation routinely exceeds
+// one page, and a silently truncated picker looks like a missing repository.
+func (c *Client) ListRepositories(ctx context.Context, installationID int64) ([]Repository, error) {
+	tok, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+
+	var all []Repository
+	for page := 1; page <= 10; page++ {
+		url := fmt.Sprintf("%s/installation/repositories?per_page=100&page=%d", c.baseURL, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("githubapp: build repositories request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tok.Value)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("githubapp: list repositories: %w", err)
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+		case http.StatusNotFound, http.StatusGone:
+			return nil, ErrInstallationGone
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, ErrAppAuth
+		default:
+			return nil, fmt.Errorf("githubapp: list repositories returned %s", resp.Status)
+		}
+
+		var out struct {
+			Repositories []Repository `json:"repositories"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("githubapp: decode repositories: %w", err)
+		}
+		all = append(all, out.Repositories...)
+		if len(out.Repositories) < 100 {
+			break
+		}
+	}
+	return all, nil
+}
