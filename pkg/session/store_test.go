@@ -324,3 +324,43 @@ func TestResumedSessionKeepsNumberingUpwards(t *testing.T) {
 		t.Errorf("the checkpoint must carry the advanced counter, got %d", store.cp.Seq)
 	}
 }
+
+// A continuation resumes a session that has already spent its rounds, so a
+// fixed ceiling would leave it nothing to spend: a task that concluded at
+// round 4 of 4 would resume and halt immediately, reporting that it ran out of
+// rounds without having done anything at all.
+//
+// The budget is therefore counted from where this run starts, which is also
+// what makes a continuation cost what an ordinary task costs.
+func TestResumeGetsAFullRoundBudgetFromWhereItStarts(t *testing.T) {
+	arch := &fakeArchitect{
+		reviews: []Spec{
+			{Verdict: VerdictRevise, Objective: "not yet"},
+			{Verdict: VerdictApprove, Summary: "ok"},
+		},
+	}
+	ws := &fakeWorkspace{tree: []string{"a.go"}, diff: "+x", head: "round4"}
+	// Exactly at the old ceiling: MaxRounds defaults to 4 and the session
+	// concluded at round 4.
+	store := &memStore{cp: &Checkpoint{
+		Round:   4,
+		Spec:    Spec{Verdict: VerdictRevise, Objective: "rename the handler"},
+		BaseSHA: "base",
+		HeadSHA: "round4",
+	}}
+
+	r := durableRunner(t, arch, ws, store)
+	res, err := r.Run(context.Background(), Task{Description: "rename the handler"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("a continuation must be able to run: %+v", res)
+	}
+	if len(arch.seen) < 2 {
+		t.Fatalf("got %d rounds, want at least 2 — the continuation had no budget", len(arch.seen))
+	}
+	if arch.seen[0].Round != 4 {
+		t.Errorf("first resumed round = %d, want 4", arch.seen[0].Round)
+	}
+}
