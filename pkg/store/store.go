@@ -57,6 +57,17 @@ type Store interface {
 	SaveAgentSession(ctx context.Context, sess *AgentSession, events []AgentSessionEvent) error
 	ListAgentSessionEvents(ctx context.Context, orgID, sessionID string) ([]AgentSessionEvent, error)
 	FinishAgentSession(ctx context.Context, orgID, sessionID, status string) error
+	// ReattachSession moves a session onto the task about to continue it, and
+	// reopens it. A session belongs to one task at a time because the load path
+	// resolves it by task id, so continuing a thread means moving it.
+	ReattachSession(ctx context.Context, orgID, sessionID, newTaskID string) error
+
+	// Task lineage. A review comment on a pull request starts another task that
+	// continues the same session, so a task's history is a thread of them.
+	ThreadTasks(ctx context.Context, orgID, rootTaskID string) ([]QueuedTask, error)
+	ActiveTaskInThread(ctx context.Context, orgID, rootTaskID string) (*QueuedTask, error)
+	PRCommentMode(ctx context.Context, orgID string) (string, error)
+	SetPRCommentMode(ctx context.Context, orgID, mode string) error
 
 	// Tenancy & Limits
 	GetOrganization(ctx context.Context, id string) (*Organization, error)
