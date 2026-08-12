@@ -515,7 +515,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// once the sandbox reports what is actually missing — see runTest below.
 	sandboxCfg := &sandbox.SandboxConfig{
 		UseDocker:   dockerEnabled(),
-		MemoryLimit: "512m",
+		MemoryLimit: sandboxMemoryLimit(),
 		CPULimit:    "1.0",
 		Runtime:     d.config.SandboxRuntime,
 		NetworkNone: true,
@@ -614,6 +614,9 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// verbatim instead of a generic failure — there is nothing the Actor could
 	// do about it, so saying so beats spending the budget proving it.
 	offlineBlocked := ""
+	// Set when the sandbox stopped existing. Reported instead of a test result,
+	// because it is not one: see sandbox_lost.go.
+	sandboxGone := ""
 
 	// verifyBox lets session mode run the test command inside the container it
 	// already has, instead of paying a fresh `docker run` for every round.
@@ -673,6 +676,30 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			return "", false, err
 		}
 		prog.setActivity("test: "+testCmd, res.Output)
+
+		// The sandbox is gone. One retry in a fresh per-call container, because
+		// the usual cause is a box that died earlier in the session and a new
+		// one may well work — the same fall-back the image repair below uses.
+		//
+		// If that fails too, stop. Every further round would be verified by an
+		// error message, and the model cannot act on one: on
+		// job_e3a491f48809d606 that cost two rounds and $3 before a no-progress
+		// rail halted the session and blamed the agent.
+		if why := sandboxLost(res.Output); why != "" {
+			log.Printf("Task %s: sandbox lost: %s", spec.ID, why)
+			if verifyBox != nil {
+				verifyBox = nil
+				if retry, rerr := sandbox.RunCommand(sandboxCtx, worktreePath, testCmd, testEnv); rerr == nil {
+					res = retry
+					prog.setActivity("test: "+testCmd, res.Output)
+				}
+			}
+			if why := sandboxLost(res.Output); why != "" {
+				sandboxGone = why
+				return "", false, errors.New("the sandbox is gone; verification cannot run")
+			}
+		}
+
 		if !res.Success && !envChecked {
 			envChecked = true
 			if next, why := correctedImage(sandboxCfg.DockerImage, res.Output, worktreePath); next != "" {
@@ -734,7 +761,13 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// A repository whose verification cannot run offline is a fact about the
 	// repository, not a failure of the run. Report it verbatim rather than
 	// letting the session's generic "verification failed" stand in for it.
-	if offlineBlocked != "" && !res.ok {
+	// A repository whose verification cannot run offline, or a sandbox that
+	// stopped existing, are both facts about the run rather than failures of the
+	// work. Report either verbatim instead of letting the session's generic
+	// "verification failed" stand in for it.
+	if sandboxGone != "" && !res.ok {
+		res.detail = sandboxGone
+	} else if offlineBlocked != "" && !res.ok {
 		res.detail = offlineBlocked
 	}
 	return res
