@@ -192,6 +192,13 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			SessionBudgetUSD: budget,
 			SessionDeadline:  sessionDeadlineFor(spec),
 			Log:              func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
+			// What is running right now. The sandbox paths set this themselves
+			// (install, test, the run tool); this covers the model calls, which
+			// nothing else can see and which are the longest silent stretches
+			// of a session. Output is empty because a model call produces none
+			// until it returns — and passing the previous command's tail would
+			// reproduce the staleness this exists to fix.
+			OnActivity: func(a string) { prog.setActivity(a, "") },
 			OnEvent: func(e session.Event) {
 				prog.add(ver.TaskEvent{
 					Step:         e.Round,
