@@ -24,6 +24,10 @@ func newPlannerWithKiwiModel(t *testing.T) (*Service, context.Context) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
+	// These tests submit against a repository, and a submit whose repo nothing
+	// can clone is refused before any entitlement check runs.
+	seedRepoAccess(t, s, "o1")
+
 	// Create org
 	if err := s.DB().Create(&auth.Organization{
 		ID: "o1", Name: "o1", Plan: "free", ActivationState: "active",
@@ -78,6 +82,10 @@ func newPlannerWithBYOCFleet(t *testing.T) (*Service, context.Context) {
 func newPlannerWithOrgKey(t *testing.T, keyName, keyValue string) (*Service, context.Context) {
 	s := newTestStore(t)
 	ctx := context.Background()
+
+	// These tests submit against a repository, and a submit whose repo nothing
+	// can clone is refused before any entitlement check runs.
+	seedRepoAccess(t, s, "o1")
 
 	// Create org
 	if err := s.DB().Create(&auth.Organization{

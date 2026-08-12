@@ -20,6 +20,7 @@ func TestSessionSubmitCallsNoModelAndDecryptsNothing(t *testing.T) {
 	s := NewService(st, nil, nil)
 	t.Setenv("KIWI_PLANNER", "llm")
 	seedCredential(t, st, "org1", "ANTHROPIC_API_KEY")
+	seedRepoAccess(t, st, "org1")
 
 	var completerBuilt bool
 	s.newCompleter = func(model string) Completer {
@@ -123,4 +124,36 @@ func seedCredential(t *testing.T, s *store.PostgresStore, org, name string) {
 	if err := s.SaveCredential(context.Background(), org, name, store.CredentialLLM, "sk-test"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// seedRepoAccess gives an org a way to reach the repository it is submitting.
+//
+// requireRepoAuth refuses a submit whose repository nothing can clone, which is
+// the right behaviour and not what any of these tests are about — without this
+// they fail on the repo URL before reaching the thing under test. A GIT_TOKEN is
+// the simpler of the two accepted paths; a GitHub App installation is the other,
+// and repo_auth_test.go covers both properly.
+//
+// It is typed CredentialGit rather than reusing seedCredential: the type is not
+// what requireRepoAuth looks up, but a git token stored as an LLM credential is
+// a lie that the next person to read these tests would have to un-learn.
+func seedRepoAccess(t *testing.T, s *store.PostgresStore, org string) {
+	t.Helper()
+	if err := s.SaveCredential(context.Background(), org, "GIT_TOKEN", store.CredentialGit, "ghp-test"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedAdmissibleOrg gives an org everything admission demands before it will
+// look at what a test is actually asserting: a way to clone the repository, and
+// a key for the provider serving the model it will run.
+//
+// The second became universal when the single-file loop was retired. Every
+// submit now resolves an Architect, and a BYOK org must hold a key for that
+// model's provider — where before, the heuristic path checked nothing at submit
+// and let the daemon discover the problem minutes later.
+func seedAdmissibleOrg(t *testing.T, s *store.PostgresStore, org string) {
+	t.Helper()
+	seedRepoAccess(t, s, org)
+	seedCredential(t, s, org, "ANTHROPIC_API_KEY")
 }

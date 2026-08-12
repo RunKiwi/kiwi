@@ -208,6 +208,7 @@ func TestLLMPlannerDefaultsScopeFromRequest(t *testing.T) {
 
 func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
@@ -245,6 +246,7 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 
 func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
@@ -283,6 +285,7 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 
 func TestHandlePlan(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 
