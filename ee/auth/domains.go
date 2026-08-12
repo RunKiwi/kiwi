@@ -62,7 +62,7 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			ID:              orgID,
 			Name:            email + "'s Workspace",
 			Type:            "personal",
-			ActivationState: "inactive",
+			ActivationState: "active",
 			Plan:            "free",
 			CreatedAt:       time.Now(),
 		}
@@ -90,7 +90,7 @@ func resolveOrgForUser(ctx context.Context, db *gorm.DB, email string) (*Organiz
 			Type:            "team",
 			PrimaryDomain:   domain,
 			DomainJoin:      false,
-			ActivationState: "inactive",
+			ActivationState: "active",
 			Plan:            "free",
 			CreatedAt:       time.Now(),
 		}

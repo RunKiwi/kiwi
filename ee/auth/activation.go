@@ -62,8 +62,16 @@ func SuspendOrg(db *gorm.DB, orgID string) error {
 			return err
 		}
 
-		if org.ActivationState == "suspended" || org.ActivationState == "inactive" {
-			return nil // Already suspended/inactive
+		// "inactive" is deliberately NOT treated as already-suspended. It used to
+		// be, on the assumption that an inactive org could not run — but nothing
+		// in the run path ever checked: the submit handler gates on "suspended"
+		// specifically, and the provisioner claims any pending request. So an
+		// abusive org that no operator had activated could not be auto-suspended,
+		// RecordAbuseStrike's call here quietly did nothing, and no daemon
+		// reclaim was enqueued. That is the exact population most likely to be
+		// abusive — a fresh signup nobody has touched.
+		if org.ActivationState == "suspended" {
+			return nil // Already suspended
 		}
 
 		org.ActivationState = "suspended"

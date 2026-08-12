@@ -76,7 +76,7 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 | Merge provenance: GitHub PR-merge webhook appends a signed `kiwi.ver/merge/v1` link capturing the approver | ✅ Set `GITHUB_WEBHOOK_SECRET` |
 | **Free tier: live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed: Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
 | Control plane on GCP: Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
-| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live |
+| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live. An org is **active on creation** — no operator step. The state that gates the run path is `suspended`, set by abuse auto-suspend; `inactive` described a gate nothing enforced and is gone. A GitHub sign-in records the account's username alongside its verified primary email |
 | Billing: Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
 | Managed-**dedicated** (Pro): per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
 | Egress isolation: sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
