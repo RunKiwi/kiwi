@@ -1,41 +1,31 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-// A typo'd -mode must fail loudly. The planner treats anything that is not
-// "session" as file_loop, so `-mode sesion` would silently run the default loop
-// and report success — the user gets a green tick for a run that ignored their
-// flag entirely, with nothing in the output to say so.
-func TestValidateMode(t *testing.T) {
-	valid := []string{"", "file_loop", "session"}
-	for _, m := range valid {
-		if err := validateMode(m); err != nil {
-			t.Errorf("validateMode(%q) = %v, want nil", m, err)
-		}
+// -mode used to choose between the single-file loop and the session loop. The
+// single-file loop is gone, so the flag decides nothing — but a script that
+// still passes it must keep working, and the user must be told the flag stopped
+// meaning anything. Silently ignoring it is how someone concludes the tool is
+// broken; erroring on it punishes them for our change.
+func TestDeprecatedModeNotice(t *testing.T) {
+	if got := deprecatedModeNotice(""); got != "" {
+		t.Errorf("deprecatedModeNotice(\"\") = %q, want no notice", got)
 	}
 
-	invalid := []string{"sesion", "Session", "SESSION", "agent", "file-loop", "loop"}
-	for _, m := range invalid {
-		err := validateMode(m)
-		if err == nil {
-			t.Errorf("validateMode(%q) = nil; an unrecognised mode must not be silently downgraded to file_loop", m)
+	for _, m := range []string{"session", "file_loop", "sesion"} {
+		got := deprecatedModeNotice(m)
+		if got == "" {
+			t.Errorf("deprecatedModeNotice(%q) = \"\"; a caller passing the flag must be told it is ignored", m)
 			continue
 		}
-		// The message has to name the alternatives, or the user is left guessing
-		// which spelling the flag wanted.
-		if !contains(err.Error(), "file_loop") || !contains(err.Error(), "session") {
-			t.Errorf("validateMode(%q) error %q should list the valid modes", m, err)
+		if !strings.Contains(got, m) {
+			t.Errorf("deprecatedModeNotice(%q) = %q; the notice should quote what was passed", m, got)
+		}
+		if !strings.Contains(got, "ignored") {
+			t.Errorf("deprecatedModeNotice(%q) = %q; the notice should say the flag is ignored", m, got)
 		}
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool {
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	})()
 }

@@ -1,9 +1,6 @@
 package daemon
 
-import (
-	"path"
-	"strings"
-)
+import ()
 
 // looksLikeTestFile reports whether p is a test file across the languages Kiwi
 // targets. It is the "at minimum" anti-gaming heuristic (issue #132): if the
@@ -33,38 +30,3 @@ var manifestFiles = map[string]bool{
 // re-install in executeTask's runTest. The refusal made ordinary work
 // impossible: "add a cookie consent banner, use a library if there is one" was
 // rejected before the model was called once.
-
-func looksLikeTestFile(p string) bool {
-	if p == "" {
-		return false
-	}
-	lower := strings.ToLower(strings.ReplaceAll(p, "\\", "/"))
-	base := path.Base(lower)
-
-	// A path segment that is a conventional test directory.
-	for _, seg := range strings.Split(lower, "/") {
-		switch seg {
-		case "test", "tests", "__tests__", "spec", "specs":
-			return true
-		}
-	}
-
-	suffixes := []string{
-		"_test.go",                                       // Go
-		".test.js", ".test.ts", ".test.jsx", ".test.tsx", // JS/TS
-		".spec.js", ".spec.ts", ".spec.jsx", ".spec.tsx",
-		"_test.py", "_spec.rb", "_test.rb", "_test.exs",
-		"test.java", "tests.java", // *Test.java / *Tests.java (lowercased)
-	}
-	for _, s := range suffixes {
-		if strings.HasSuffix(base, s) {
-			return true
-		}
-	}
-
-	// Python convention: test_*.py.
-	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") {
-		return true
-	}
-	return false
-}

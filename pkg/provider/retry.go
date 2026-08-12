@@ -12,16 +12,15 @@ import (
 
 // Transient provider failures are retried at the transport layer.
 //
-// The agentic session loop is what makes this necessary. file_loop makes a
-// handful of model calls per task; a session makes dozens per round, so the
-// chance of meeting at least one throttle or one 503 approaches certainty as
-// the loop gets longer. Before this, any single blip ended the whole session —
+// The agentic session loop is what makes this necessary. A session makes dozens
+// of model calls per round, so the chance of meeting at least one throttle or
+// one 503 approaches certainty as the loop gets longer. Before this, any single blip ended the whole session —
 // a task that had already spent minutes and dollars was thrown away because one
 // call in fifty came back 429 with the provider itself saying "Please retry in
 // 2.785470319s".
 //
-// Doing it here rather than in pkg/session means file_loop, the planner and the
-// embedder get it too, and the session loop keeps no retry logic of its own.
+// Doing it here rather than in pkg/session means the Architect, the planner and
+// the embedder get it too, and the session loop keeps no retry logic of its own.
 //
 // Retrying a POST is safe for these endpoints specifically: a 429 or a 5xx means
 // the request was throttled or failed before producing a completion, so there is

@@ -54,9 +54,8 @@ describe("analytics client installation", () => {
     setAnalyticsClient(client);
 
     capture("task_submitted", {
-      mode: "session",
+      architect_model: "claude-opus-4-8",
       worker_model: "claude-haiku-4-5-20251001",
-      planner_model: "claude-opus-4-8",
       max_workers: 3,
       has_test_cmd: true,
       from_starter: false,
@@ -64,7 +63,7 @@ describe("analytics client installation", () => {
 
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].event, "task_submitted");
-    assert.strictEqual(events[0].props?.mode, "session");
+    assert.strictEqual(events[0].props?.architect_model, "claude-opus-4-8");
     assert.strictEqual(events[0].props?.max_workers, 3);
   });
 

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -30,7 +29,7 @@ func TestSessionSubmitCallsNoModelAndDecryptsNothing(t *testing.T) {
 
 	res, err := s.SubmitPlan(context.Background(), PlanRequest{
 		OrgID: "org1", Task: "add retries", RepoURL: "https://github.com/a/b", Ref: "main",
-		Model: "claude-sonnet-5", ArchitectModel: "claude-opus-4-8", Mode: agent.ModeSession,
+		Model: "claude-sonnet-5", ArchitectModel: "claude-opus-4-8",
 	})
 	if err != nil {
 		t.Fatalf("SubmitPlan: %v", err)
@@ -43,47 +42,32 @@ func TestSessionSubmitCallsNoModelAndDecryptsNothing(t *testing.T) {
 	}
 }
 
-// The spec is what the daemon reads, so mode and the architect model have to be
-// on it — not only in the manifest.
-func TestSessionSpecCarriesModeAndArchitectModel(t *testing.T) {
+// The spec is what the daemon reads, so the architect model has to be on it —
+// not only in the manifest. There is no mode key: the single-file loop is gone,
+// so a spec that named a loop would be describing a choice that no longer
+// exists. The manifest still records one, for records made either side of the
+// change to stay comparable.
+func TestSessionSpecCarriesArchitectModel(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	res, err := s.SubmitPlan(context.Background(), PlanRequest{
 		OrgID: "org1", Task: "add retries", Model: "claude-sonnet-5",
-		ArchitectModel: "claude-opus-4-8", Mode: agent.ModeSession,
+		ArchitectModel: "claude-opus-4-8",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var task store.QueuedTask
-	if err := s.store.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
-		t.Fatal(err)
-	}
-	if task.Spec["mode"] != agent.ModeSession {
-		t.Errorf("spec mode = %v", task.Spec["mode"])
-	}
-	if task.Spec["architect_model"] != "claude-opus-4-8" {
-		t.Errorf("spec architect_model = %v", task.Spec["architect_model"])
-	}
-}
-
-// A file_loop submit must be untouched by any of this.
-func TestFileLoopSpecCarriesNoSessionFields(t *testing.T) {
-	s := NewService(newTestStore(t), nil, nil)
-	res, err := s.SubmitPlan(context.Background(), PlanRequest{
-		OrgID: "org1", Task: "fix it", Model: "claude-sonnet-5", File: "main.go",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var task store.QueuedTask
 	if err := s.store.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := task.Spec["mode"]; ok {
-		t.Errorf("a file_loop spec should carry no mode key, got %v", task.Spec["mode"])
+		t.Errorf("spec should carry no mode key, got %v", task.Spec["mode"])
+	}
+	if task.Spec["architect_model"] != "claude-opus-4-8" {
+		t.Errorf("spec architect_model = %v", task.Spec["architect_model"])
 	}
 }
 
@@ -95,7 +79,7 @@ func TestSessionSubmitStillFailsFastWithoutAProviderKey(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
 
 	_, err := s.SubmitPlan(context.Background(), PlanRequest{
-		OrgID: "org1", Task: "add retries", Model: "claude-sonnet-5", Mode: agent.ModeSession,
+		OrgID: "org1", Task: "add retries", Model: "claude-sonnet-5",
 	})
 	if err == nil {
 		t.Fatal("expected the submit to be refused")
@@ -127,7 +111,7 @@ func TestSessionModeCanBeDisabledByTheOperator(t *testing.T) {
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	_, err := s.SubmitPlan(context.Background(), PlanRequest{
-		OrgID: "org1", Task: "x", Model: "claude-sonnet-5", Mode: agent.ModeSession,
+		OrgID: "org1", Task: "x", Model: "claude-sonnet-5",
 	})
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("expected the kill-switch to refuse the submit, got %v", err)

@@ -43,16 +43,15 @@ type sessionDeps struct {
 // credentials in a session's sandbox.
 //
 // Off by default, and this is the one place session mode is deliberately less
-// capable than the single-file loop. There, the sandbox runs one fixed command
-// supplied by the user, so a credential in its environment can be read but not
-// sent anywhere: the network is off. Here the model chooses the commands and
-// their output comes back to the daemon, into the event log and on to the
+// capable than the retired single-file loop. There, the sandbox ran one fixed
+// command supplied by the user, so a credential in its environment could be read
+// but not sent anywhere: the network is off. Here the model chooses the commands
+// and their output comes back to the daemon, into the event log and on to the
 // Control Plane — so `echo $GIT_TOKEN` is an exfiltration path that needs no
 // network at all.
 //
-// Repositories whose tests genuinely need a secret can set this and accept
-// that, or keep using file_loop mode. What is not acceptable is making that
-// trade silently on a customer's behalf.
+// Repositories whose tests genuinely need a secret can set this and accept that.
+// What is not acceptable is making that trade silently on a customer's behalf.
 func sessionAllowsTestCredentials() bool {
 	v, _ := strconv.ParseBool(os.Getenv("KIWI_SESSION_ALLOW_TEST_CREDS"))
 	return v
@@ -60,11 +59,11 @@ func sessionAllowsTestCredentials() bool {
 
 // sessionLimits is the per-task round and spend cap for session mode.
 //
-// It exists as a seam because the spend cap used to read MaxBudgetUSD, the
-// file_loop field. That default is $0.50, a session costs $2-4, and the two
-// were close enough to look plausible and far enough apart to halt every
-// session on the budget rail in round one. Reading the wrong field is the
-// regression worth a test, so the read has a name.
+// It exists as a seam because the spend cap once read the retired single-file
+// loop's field instead of this one. That default was $0.50, a session costs
+// $2-4, and the two were close enough to look plausible and far enough apart to
+// halt every session on the budget rail in round one. Reading the wrong field is
+// the regression worth a test, so the read has a name.
 //
 // Zero is passed through rather than defaulted here; session.Config applies its
 // own defaults, and duplicating them would give two places to disagree.
@@ -95,11 +94,11 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	}
 	implementer, ok := provider.AsToolRunner(workerProv)
 	if !ok {
-		// Falling back to file_loop would be worse than saying so: the user
-		// asked for a mode this model cannot serve, and silently running a
-		// different loop would make the result impossible to interpret.
+		// There is no non-agentic loop to fall back to any more, and inventing
+		// one would be worse than saying so: the model cannot do the job asked
+		// of it, and the answer is a different model.
 		return taskResult{detail: fmt.Sprintf(
-			"model %q cannot use tools, which session mode requires — choose a model that can, or run this task in file_loop mode",
+			"model %q cannot use tools, which every Kiwi task requires — choose a tool-capable model",
 			spec.Model)}
 	}
 

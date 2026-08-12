@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -247,7 +246,7 @@ func TestSessionSpecPinsArchitectRouting(t *testing.T) {
 		OrgID: "o1", FleetID: store.SharedFreeFleet,
 		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
 		TestCmd: "go test ./...", Model: "kimi-k2",
-		ArchitectModel: "big-reviewer", Mode: agent.ModeSession,
+		ArchitectModel: "big-reviewer",
 	})
 	if err != nil {
 		t.Fatalf("SubmitPlan: %v", err)
@@ -291,7 +290,7 @@ func TestSessionRefusesMixedFundingAcrossItsTwoModels(t *testing.T) {
 		OrgID: "o1", FleetID: store.SharedFreeFleet,
 		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
 		TestCmd: "go test ./...", Model: "kimi-k2",
-		ArchitectModel: "claude-opus-4-8", Mode: agent.ModeSession,
+		ArchitectModel: "claude-opus-4-8",
 	})
 	if err == nil {
 		t.Fatal("a session mixing a Kiwi-funded model with a BYOK one was admitted")
@@ -312,7 +311,7 @@ func TestSessionAcceptsTwoKiwiProvidedModels(t *testing.T) {
 		OrgID: "o1", FleetID: store.SharedFreeFleet,
 		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
 		TestCmd: "go test ./...", Model: "kimi-k2",
-		ArchitectModel: "big-reviewer", Mode: agent.ModeSession,
+		ArchitectModel: "big-reviewer",
 	}); err != nil {
 		t.Fatalf("a fully Kiwi-provided session was refused: %v", err)
 	}

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,25 +13,29 @@ import (
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
+	"github.com/ibreakthecloud/kiwi/pkg/session"
 )
 
-// slowActor is a provider.Provider whose GetCodeEdit blocks briefly, standing in
-// for a slow model call so executeTask runs long enough to trigger lease
-// renewals. It always returns the same content, so the test never passes and the
-// loop runs its full step budget — long enough for several renew ticks.
-type slowActor struct{ delay time.Duration }
-
-func (s slowActor) GetCodeEdit(ctx context.Context, task, fileName, codeContent, buildOutput string) (string, error) {
-	select {
-	case <-time.After(s.delay):
-	case <-ctx.Done():
-		return "", ctx.Err()
+// newSlowSessionMock returns a model double whose every turn blocks briefly,
+// standing in for slow model calls so executeTask runs long enough to trigger
+// lease renewals. The Architect never approves and the Implementer never
+// finishes, so the session runs its full round budget — long enough for several
+// renew ticks.
+func newSlowSessionMock(delay time.Duration) *sessionMock {
+	m := &sessionMock{specs: []session.Spec{
+		{Verdict: session.VerdictProceed, Objective: "keep going"},
+	}}
+	m.Script = func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+		select {
+		case <-time.After(delay):
+		}
+		return provider.Turn{Calls: []provider.ToolCall{
+			provider.MockCall("c1", session.ToolWriteFile, map[string]string{
+				"path": "target.txt", "content": "x",
+			}),
+		}}, nil
 	}
-	return codeContent, nil
-}
-
-func (s slowActor) Complete(ctx context.Context, system, user string) (string, error) {
-	return "", nil
+	return m
 }
 
 func TestDaemon_LeaseRenewal(t *testing.T) {
@@ -42,21 +45,14 @@ func TestDaemon_LeaseRenewal(t *testing.T) {
 		ID:      "task-renew-test",
 		Model:   "sonnet",
 		Task:    "make the test pass",
-		File:    "target.txt",
 		TestCmd: "exit 1", // never passes, so the loop runs its full budget
 		RepoURL: "",       // fallback sandbox dir
 		Ref:     "",
 	}
 
-	// Pre-create the fallback worktree + target file the loop reads each step.
-	fallbackPath := filepath.Join(os.TempDir(), "kiwi-sandbox", mockSpec.ID)
-	if err := os.MkdirAll(fallbackPath, 0o755); err != nil {
-		t.Fatalf("mkdir fallback: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fallbackPath, "target.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("write target: %v", err)
-	}
-	defer os.RemoveAll(fallbackPath)
+	// Pre-create the fallback worktree the session works in. It is a real git
+	// repository because a session diffs against HEAD before its first round.
+	seedWorkspace(t, mockSpec.ID, "target.txt", "x")
 
 	// Run the test command locally (no Docker) so "exit 1" is cheap.
 	os.Setenv("USE_DOCKER", "false")
@@ -83,7 +79,7 @@ func TestDaemon_LeaseRenewal(t *testing.T) {
 		APIURL:        server.URL,
 		KeyPath:       "", // ephemeral key
 		CacheDir:      t.TempDir(),
-		MaxSteps:      3,
+		MaxRounds:     3,
 		RenewInterval: 300 * time.Millisecond, // short so several ticks fit the run
 	}
 
@@ -91,9 +87,10 @@ func TestDaemon_LeaseRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New daemon failed: %v", err)
 	}
-	// Inject a slow actor so the real loop drives executeTask for ~1.5s.
+	// Inject a slow model so the real session drives executeTask for ~1.5s.
+	slow := newSlowSessionMock(500 * time.Millisecond)
 	d.newProvider = func(map[string]string, string, string) (provider.Provider, provider.Critic) {
-		return slowActor{delay: 500 * time.Millisecond}, nil
+		return slow, nil
 	}
 	if err := d.Start(); err != nil {
 		t.Fatalf("Start daemon failed: %v", err)

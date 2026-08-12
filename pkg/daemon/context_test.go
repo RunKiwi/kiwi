@@ -34,17 +34,3 @@ func TestRepoContextTruncated(t *testing.T) {
 		t.Errorf("context should be capped at %d bytes", maxAgentMDBytes)
 	}
 }
-
-func TestWithRepoContext(t *testing.T) {
-	if got := withRepoContext("do X", ""); got != "do X" {
-		t.Errorf("empty context must return the description unchanged, got %q", got)
-	}
-	got := withRepoContext("do X", "conventions")
-	if !strings.Contains(got, "AGENT.md") || !strings.Contains(got, "conventions") || !strings.Contains(got, "do X") {
-		t.Errorf("combined prompt missing parts: %q", got)
-	}
-	// Task must come after the context so the Actor sees conventions first.
-	if strings.Index(got, "conventions") > strings.Index(got, "do X") {
-		t.Error("repo context should precede the task")
-	}
-}

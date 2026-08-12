@@ -65,6 +65,9 @@ func TestHeuristicPlannerRequiresTask(t *testing.T) {
 func TestIdempotentPlanSubmission(t *testing.T) {
 	st := newTestStore(t)
 	s := NewService(st, NewHeuristicPlanner(), nil)
+	// Every submit now resolves an Architect, and a BYOK org must have a key for
+	// its provider before one can be chosen.
+	seedCredential(t, st, "org1", "ANTHROPIC_API_KEY")
 
 	req := PlanRequest{
 		OrgID:          "org1",

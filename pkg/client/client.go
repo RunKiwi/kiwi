@@ -115,13 +115,12 @@ type PlanOptions struct {
 	Model      string
 	MaxWorkers int
 
-	// Mode selects the execution loop: "" or "file_loop" for the single-file
-	// Actor–Critic loop, "session" for the agentic Architect/Implementer loop.
-	// Empty is the default and keeps every existing submission on its current
-	// path (agent.ModeFileLoop).
+	// Mode is accepted and ignored by the Control Plane. The single-file loop it
+	// used to select is gone; the field survives so a caller written against the
+	// two-mode API still submits rather than failing on an unknown key.
 	Mode string
-	// ArchitectModel is the session-mode planner/reviewer, and is ignored in
-	// file_loop mode. Empty falls back to Model.
+	// ArchitectModel is the planner/reviewer. Empty lets the Control Plane
+	// choose one, which is usually what you want — see DefaultArchitectModel.
 	ArchitectModel string
 }
 
@@ -139,9 +138,8 @@ func (c *Client) PlanTask(ctx context.Context, opts PlanOptions) (*PlanResult, e
 		"model":       opts.Model,
 		"max_workers": opts.MaxWorkers,
 	}
-	// Omitted rather than sent empty: the planner treats an absent mode as
-	// file_loop, and sending "" would make every request look like it had
-	// opinions about a field the caller never set.
+	// Omitted rather than sent empty, so a request does not appear to hold an
+	// opinion about a field the caller never set.
 	if opts.Mode != "" {
 		payload["mode"] = opts.Mode
 	}

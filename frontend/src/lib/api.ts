@@ -7,26 +7,26 @@ export interface PlanRequest {
   file?: string;
   files?: string[];
   test_cmd?: string;
-  // model is the worker model; planner_model decomposes the task into the
-  // worker DAG. Both run on your own provider key.
+  // model is the worker model — the Implementer, which runs constantly. It runs
+  // on your own provider key.
   model?: string;
+  // planner_model is accepted and ignored. Decomposition into a worker DAG is
+  // gone: the Architect plans inside the daemon, so nothing is planned here.
   planner_model?: string;
   max_workers?: number;
   fleet_id?: string;
   reference_mode?: string;
   reference_job_ids?: string[];
-  // mode selects the execution loop. Omit (or "file_loop") for the single-file
-  // Actor–Critic loop; "session" runs an Architect that plans and reviews an
-  // agentic Implementer over several rounds. Omitted means file_loop, so every
-  // existing submission keeps its current behaviour.
-  mode?: ExecutionMode;
-  // architect_model plans and reviews in session mode and is ignored otherwise.
-  // Expected to be more capable than model: the reviewer is called a handful of
-  // times per task while the implementer runs constantly.
+  // mode is accepted and ignored. The Architect/Implementer session is the only
+  // execution loop; the field survives so a client written against the two-mode
+  // API still submits rather than failing on an unknown key.
+  mode?: string;
+  // architect_model plans and reviews. Expected to be more capable than model:
+  // the reviewer is called a handful of times per task while the implementer
+  // runs constantly. Omitted lets the Control Plane choose — see
+  // DefaultArchitectModel in ee/planner.
   architect_model?: string;
 }
-
-export type ExecutionMode = "file_loop" | "session";
 
 export interface Fleet {
   id: string;
@@ -764,8 +764,9 @@ export const RECOMMENDED_MODELS: RecommendedModel[] = [
   { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", note: "Fast & cheap" },
 ];
 
-// A sensible default split for the task form: a strong planner, a fast worker.
-export const DEFAULT_PLANNER_MODEL = "claude-opus-4-8";
+// The task form's worker default: a fast, cheap Implementer. The Architect it
+// is paired with is chosen by the Control Plane, so the form does not carry a
+// second default that could drift from it.
 export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
 
 // How each provider id is written for a human. "OpenAI" does not survive CSS

@@ -29,10 +29,11 @@ type PlanRequest struct {
 	Files []string `json:"files,omitempty"`
 	// Model is the worker model (runs on the customer's provider key).
 	Model string `json:"model"`
-	// Mode selects the execution loop: "" or "file_loop" for the single-file
-	// Actor–Critic loop, "session" for the agentic Architect/Implementer loop.
+	// Mode is accepted and ignored. Session is the only execution loop; the
+	// field survives so a client written against the two-mode API still parses
+	// and submits rather than failing on an unknown key.
 	Mode string `json:"mode,omitempty"`
-	// ArchitectModel is the session-mode planner/reviewer. It runs on the
+	// ArchitectModel is the planner/reviewer. It runs on the
 	// customer's key in their own daemon, like the worker — the split is by
 	// capability and price, not by whose credential pays.
 	ArchitectModel string `json:"architect_model,omitempty"`

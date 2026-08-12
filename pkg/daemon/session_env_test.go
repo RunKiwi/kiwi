@@ -16,7 +16,7 @@ func envHas(env []string, name string) bool {
 
 // The pre-existing guarantee: model keys never enter the sandbox, because the
 // sandbox runs model-generated code.
-func TestFileLoopSandboxGetsCredentialsButNeverModelKeys(t *testing.T) {
+func TestSandboxWithCredentialsOptInNeverGetsModelKeys(t *testing.T) {
 	creds := map[string]string{
 		"GIT_TOKEN":      "ghp_secret",
 		"DATABASE_URL":   "postgres://x",
@@ -28,7 +28,7 @@ func TestFileLoopSandboxGetsCredentialsButNeverModelKeys(t *testing.T) {
 	env := taskTestEnv("do the thing", creds, false)
 
 	if !envHas(env, "GIT_TOKEN") || !envHas(env, "DATABASE_URL") {
-		t.Errorf("file_loop mode should pass non-model credentials through: %v", env)
+		t.Errorf("the credentials opt-in should pass non-model credentials through: %v", env)
 	}
 	for _, k := range []string{anthropicKeyName, geminiKeyName, openaiKeyName} {
 		if envHas(env, k) {

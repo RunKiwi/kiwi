@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-// The session default must sit well clear of the file_loop cap ($0.50).
+// The session default must sit well clear of the retired single-file loop cap ($0.50).
 //
 // The two loops are configured separately precisely because their costs differ
-// by an order of magnitude; if this default ever drifts down to file_loop
+// by an order of magnitude; if this default ever drifts down to that older
 // territory, sessions start halting in round one again and the symptom looks
 // like a hard task rather than a bad constant.
-func TestDefaultSessionBudgetExceedsFileLoopCap(t *testing.T) {
+func TestDefaultSessionBudgetExceedsRetiredSingleFileCap(t *testing.T) {
 	const fileLoopCap = 0.50
 
 	got := Config{}.withDefaults().SessionBudgetUSD
 	if got <= fileLoopCap {
-		t.Fatalf("default session budget %.2f is at or below the file_loop cap %.2f", got, fileLoopCap)
+		t.Fatalf("default session budget %.2f is at or below the retired single-file cap %.2f", got, fileLoopCap)
 	}
 	if got != defaultSessionBudgetUSD {
 		t.Errorf("withDefaults gave %.2f, want the package default %.2f", got, defaultSessionBudgetUSD)

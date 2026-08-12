@@ -74,6 +74,8 @@ func TestQueuedTaskCarriesTheRequestedWorkerModel(t *testing.T) {
 	// resolution, provider routing, worker assembly — actually runs.
 	svc.newCompleter = func(string) Completer { return &modelNamingFake{model: "claude-3-5-sonnet"} }
 
+	seedCredential(t, s, "org-1", "GEMINI_API_KEY")
+
 	res, err := svc.SubmitPlan(context.Background(), PlanRequest{
 		OrgID:        "org-1",
 		Task:         "add a cookie consent popup",
