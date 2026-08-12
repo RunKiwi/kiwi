@@ -305,7 +305,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // exactly once rather than on every idle tick for the life of the drawer.
   const [finalProgress, setFinalProgress] = useState(false);
   const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
-  const [titleExpanded, setTitleExpanded] = useState(false);
+  // Which job's title is expanded, rather than a bare boolean. Opening a
+  // different job must not inherit the previous one's expanded state, and
+  // deriving that from the id is what avoids resetting it from an effect.
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
@@ -412,7 +415,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // The drawer's title. Once the Architect has written its opening objective
   // that becomes the title; until then the task's own first sentence stands in.
   // Neither costs a model call — see lib/taskTitle.ts.
-  useEffect(() => { setTitleExpanded(false); }, [taskId]);
+  const titleExpanded = expandedFor !== null && expandedFor === taskId;
 
   const heading = jobTitle(
     currentJob?.task ?? "",
@@ -519,7 +522,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
               {heading.truncated && (
                 <button
                   type="button"
-                  onClick={() => setTitleExpanded(v => !v)}
+                  onClick={() => setExpandedFor(titleExpanded ? null : taskId ?? null)}
                   aria-expanded={titleExpanded}
                   className="mt-1 inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
                 >
