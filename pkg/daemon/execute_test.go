@@ -2,76 +2,136 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
+	"github.com/ibreakthecloud/kiwi/pkg/session"
 )
 
-// fixOnceProvider is a mock Actor that replaces the file with fixedContent on
-// its first call — enough to drive one real loop iteration to success.
-type fixOnceProvider struct{ fixedContent string }
-
-func (p *fixOnceProvider) GetCodeEdit(ctx context.Context, task, fileName, code, buildOutput string) (string, error) {
-	return p.fixedContent, nil
+// sessionMock is the daemon-side test double for a model that can both plan and
+// implement: Complete serves the Architect (which needs no tools) and the
+// embedded MockToolRunner serves the Implementer (which needs nothing else).
+// One type covers both because executeSession resolves the two roles through
+// the same newProvider seam.
+type sessionMock struct {
+	provider.MockToolRunner
+	// specs are returned by Complete in order — one per Architect turn, so a
+	// test can plan a round and then approve or abandon what came back.
+	specs []session.Spec
+	calls int
 }
 
-func (p *fixOnceProvider) Complete(ctx context.Context, system, user string) (string, error) {
+func (m *sessionMock) GetCodeEdit(ctx context.Context, task, fileName, code, buildOutput string) (string, error) {
 	return "", nil
 }
 
-// newExecTestDaemon builds a Daemon wired with a mock provider and local (non-
-// Docker) sandbox execution, so executeTask can run the real Actor–Critic loop
-// end-to-end without a network or Docker.
-func newExecTestDaemon(t *testing.T, fixedContent string) *Daemon {
+func (m *sessionMock) Complete(ctx context.Context, system, user string) (string, error) {
+	spec := m.specs[len(m.specs)-1]
+	if m.calls < len(m.specs) {
+		spec = m.specs[m.calls]
+	}
+	m.calls++
+	b, err := json.Marshal(spec)
+	return string(b), err
+}
+
+// newSessionTestDaemon wires a Daemon whose only model is the given double and
+// whose test command runs locally rather than in Docker, so executeTask drives
+// the real Architect/Implementer loop end to end without a network.
+func newSessionTestDaemon(t *testing.T, m *sessionMock) *Daemon {
 	t.Helper()
-	t.Setenv("USE_DOCKER", "false") // run the test command locally, not in Docker
+	t.Setenv("USE_DOCKER", "false")
 	d, err := New(Config{CacheDir: t.TempDir(), KeyPath: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	d.newProvider = func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
-		return &fixOnceProvider{fixedContent: fixedContent}, nil // no critic
+		return m, nil
 	}
 	return d
 }
 
-func TestExecuteTask_RealLoopFixesFileUntilTestPasses(t *testing.T) {
-	// The task: make `go`-free verification pass. We use a trivial shell test
-	// that greps the target file for a marker the mock provider will write.
-	d := newExecTestDaemon(t, "package x // FIXED\n")
-
-	// The fallback (no-repo) branch puts the workspace under os.TempDir(); point
-	// the target file there and seed it in a broken state.
-	specID := "loop-task-1"
+// seedWorkspace creates the fallback (no-repo) workspace for a spec id and puts
+// one committed file in it.
+//
+// It is a real git repository because a session is: the Architect reviews the
+// accumulated diff, so the runner reads HEAD before the first round and fails
+// the task outright if there is nothing to diff against.
+func seedWorkspace(t *testing.T, specID, name, content string) string {
+	t.Helper()
 	workdir := filepath.Join(os.TempDir(), "kiwi-sandbox", specID)
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir workdir: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(workdir) })
-	target := filepath.Join(workdir, "main.go")
-	if err := os.WriteFile(target, []byte("package x // broken\n"), 0o644); err != nil {
-		t.Fatalf("seed target: %v", err)
+	path := filepath.Join(workdir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed %s: %v", name, err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@kiwi.local"},
+		{"config", "user.name", "kiwi test"},
+		{"add", "."},
+		{"commit", "-q", "-m", "seed"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workdir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return path
+}
+
+// The end-to-end property that matters: the Implementer's edit lands on disk,
+// the test command verifies it, and the task reports success.
+func TestExecuteTask_SessionEditsFileUntilTestPasses(t *testing.T) {
+	specID := "session-task-1"
+	target := seedWorkspace(t, specID, "main.go", "package x // broken\n")
+
+	m := &sessionMock{specs: []session.Spec{
+		{Verdict: session.VerdictProceed, Objective: "add the FIXED marker"},
+		{Verdict: session.VerdictApprove, Summary: "marker added"},
+	}}
+	m.Script = func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+		switch n {
+		case 1:
+			return provider.Turn{Calls: []provider.ToolCall{
+				provider.MockCall("c1", session.ToolWriteFile, map[string]string{
+					"path": "main.go", "content": "package x // FIXED\n",
+				}),
+			}}, nil
+		default:
+			return provider.Turn{Calls: []provider.ToolCall{
+				provider.MockCall("c2", session.ToolFinish, map[string]string{"note": "done"}),
+			}}, nil
+		}
 	}
 
+	d := newSessionTestDaemon(t, m)
 	spec := agent.WorkerSpec{
-		ID:      specID,
-		Model:   "sonnet",
-		Task:    "add the FIXED marker",
-		File:    "main.go",
+		ID: specID, Model: "sonnet", Task: "add the FIXED marker",
 		TestCmd: "grep -q FIXED main.go",
 	}
-	creds := map[string]string{"ANTHROPIC_API_KEY": "test-key"} // makes newProvider return the mock
+	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "test-key"}, &progressReporter{}, "")
 
-	res := d.executeTask(context.Background(), spec, creds, &progressReporter{}, "")
-	ok := res.ok
-	if !ok {
-		t.Fatal("executeTask returned false; expected the loop to fix the file and pass the test")
+	// res.ok is deliberately NOT the assertion. It now also covers delivery, and
+	// this daemon has no remote to open a pull request against — so the run stops
+	// at the git token with the whole session behind it already done. Reaching
+	// that specific stop is itself the proof: the Implementer's tool call was
+	// dispatched, the test command verified the result, and the Architect
+	// approved. Anything that failed earlier reports a different detail.
+	if !strings.Contains(res.detail, "GIT_TOKEN") && !strings.Contains(res.detail, "git-token") {
+		t.Fatalf("session did not reach delivery; detail = %q", res.detail)
 	}
-	// The Actor's edit must be on disk.
+
 	got, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("read target: %v", err)
@@ -104,53 +164,35 @@ func TestExecuteTask_FailsWithClearReasonWhenNoProviderKey(t *testing.T) {
 	}
 }
 
-func TestExecuteTask_FailsWithClearReasonWhenNoTargetFile(t *testing.T) {
-	// No target file and none can be discovered yet: fail with an honest reason
-	// instead of silently doing nothing.
-	d := newExecTestDaemon(t, "")
-	specID := "no-file-task"
-	t.Cleanup(func() { os.RemoveAll(filepath.Join(os.TempDir(), "kiwi-sandbox", specID)) })
+func TestExecuteTask_SessionFailsWhenTestNeverPasses(t *testing.T) {
+	// The Implementer writes content that never satisfies the check and the
+	// Architect keeps asking for another round. The task must report failure
+	// with a reason — a FAILED task that explains nothing is the false-green
+	// this test exists to prevent.
+	specID := "session-task-fail"
+	seedWorkspace(t, specID, "main.go", "broken\n")
 
-	spec := agent.WorkerSpec{ID: specID, Model: "sonnet", Task: "fix it", TestCmd: "true"}
-	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}, &progressReporter{}, "")
-	ok, detail := res.ok, res.detail
-
-	if ok {
-		t.Fatal("expected failure when there is no target file")
-	}
-	if !strings.Contains(detail, "could not identify a file to change") {
-		t.Errorf("detail should explain the missing target file, got %q", detail)
-	}
-}
-
-func TestExecuteTask_FailsWhenTestNeverPasses(t *testing.T) {
-	// The provider writes content that never satisfies the test; the loop must
-	// exhaust and executeTask must report failure (no false-green).
-	d := newExecTestDaemon(t, "package x // still broken\n")
-
-	specID := "loop-task-fail"
-	workdir := filepath.Join(os.TempDir(), "kiwi-sandbox", specID)
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(workdir) })
-	if err := os.WriteFile(filepath.Join(workdir, "main.go"), []byte("broken\n"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
+	m := &sessionMock{specs: []session.Spec{
+		{Verdict: session.VerdictProceed, Objective: "add the FIXED marker"},
+	}}
+	m.Script = func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+		return provider.Turn{Calls: []provider.ToolCall{
+			provider.MockCall("c1", session.ToolWriteFile, map[string]string{
+				"path": "main.go", "content": "still broken\n",
+			}),
+		}}, nil
 	}
 
+	d := newSessionTestDaemon(t, m)
 	spec := agent.WorkerSpec{
-		ID:      specID,
-		Task:    "impossible",
-		File:    "main.go",
+		ID: specID, Model: "sonnet", Task: "impossible",
 		TestCmd: "grep -q FIXED main.go",
 	}
 	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}, &progressReporter{}, "")
-	ok, detail := res.ok, res.detail
-	if ok {
+	if res.ok {
 		t.Fatal("expected failure when the test never passes")
 	}
-	// A FAILED task must explain itself (result_detail), not report an empty reason.
-	if detail == "" {
+	if res.detail == "" {
 		t.Error("expected a non-empty failure detail so the FAILED task explains itself")
 	}
 }
@@ -169,39 +211,6 @@ func TestTruncateDetail(t *testing.T) {
 	}
 }
 
-func TestExecuteTask_FileScope(t *testing.T) {
-	d := newExecTestDaemon(t, "")
-
-	tests := []struct {
-		name  string
-		file  string
-		valid bool
-	}{
-		{"benign_simple", "main.go", true},
-		{"benign_nested", "pkg/main.go", true},
-		{"malicious_abs", "/etc/passwd", false},
-		{"malicious_dotdot", "../main.go", false},
-		{"malicious_nested_dotdot", "pkg/../../main.go", false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			spec := agent.WorkerSpec{
-				ID:   "task-" + tc.name,
-				File: tc.file,
-			}
-			res := d.executeTask(context.Background(), spec, nil, &progressReporter{}, "")
-			ok, detail := res.ok, res.detail
-			if tc.valid && detail == "file path escapes worktree" {
-				t.Errorf("expected valid path %q to not be rejected", tc.file)
-			}
-			if !tc.valid && detail != "file path escapes worktree" {
-				t.Errorf("expected malicious path %q to be rejected, got %v (ok=%v)", tc.file, detail, ok)
-			}
-		})
-	}
-}
-
 type multiFileProvider struct{ jsonResponse string }
 
 func (p *multiFileProvider) GetCodeEdit(ctx context.Context, task, fileName, code, buildOutput string) (string, error) {
@@ -209,33 +218,4 @@ func (p *multiFileProvider) GetCodeEdit(ctx context.Context, task, fileName, cod
 }
 func (p *multiFileProvider) Complete(ctx context.Context, system, user string) (string, error) {
 	return p.jsonResponse, nil
-}
-
-func TestExecuteTask_MultiFile(t *testing.T) {
-	d := newExecTestDaemon(t, "")
-	d.newProvider = func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic) {
-		jsonEdit := `{"files":[{"path":"file1.txt","content":"file1 FIXED"},{"path":"file2.txt","content":"file2 FIXED"}]}`
-		return &multiFileProvider{jsonResponse: jsonEdit}, nil
-	}
-	specID := "multi-file-task"
-
-	worktreePath := filepath.Join(os.TempDir(), "kiwi-sandbox", specID)
-	os.MkdirAll(worktreePath, 0o755)
-	t.Cleanup(func() { os.RemoveAll(worktreePath) })
-	os.WriteFile(filepath.Join(worktreePath, "file1.txt"), []byte("file1"), 0o644)
-	os.WriteFile(filepath.Join(worktreePath, "file2.txt"), []byte("file2"), 0o644)
-
-	spec := agent.WorkerSpec{
-		ID:      specID,
-		Model:   "sonnet",
-		Task:    "fix it",
-		Files:   []string{"file1.txt", "file2.txt"},
-		TestCmd: "grep -q FIXED file1.txt && grep -q FIXED file2.txt",
-	}
-
-	res := d.executeTask(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "k"}, &progressReporter{}, "")
-	ok, detail := res.ok, res.detail
-	if !ok {
-		t.Fatalf("expected success, got false (detail: %q)", detail)
-	}
 }

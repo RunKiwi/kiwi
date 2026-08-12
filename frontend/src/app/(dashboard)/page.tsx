@@ -6,7 +6,7 @@ import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGi
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { Select } from "@/components/Select";
 import { useRouter, useSearchParams } from "next/navigation";
-import { client, DEFAULT_PLANNER_MODEL, DEFAULT_WORKER_MODEL, modelClassLabel, formatTokens, MODEL_CLASS_BLURB, type Fleet, type ModelEntry, type CatalogModel, type AllowanceBucket, type GithubRepo, type UsageResponse, type Integration, type PlanRequest, type ExecutionMode } from "@/lib/api";
+import { client, DEFAULT_WORKER_MODEL, modelClassLabel, formatTokens, MODEL_CLASS_BLURB, type Fleet, type ModelEntry, type CatalogModel, type AllowanceBucket, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
 import Link from "next/link";
 import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
 import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
@@ -108,13 +108,11 @@ function CommandCenterContent() {
     localStorage.removeItem("kiwi_starter_repo");
   }, []);
   const [fleetId, setFleetId] = useState("");
-  const [plannerModel, setPlannerModel] = useState(DEFAULT_PLANNER_MODEL);
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
   const [ref, setRef] = useState("main");
   const [file, setFile] = useState("");
   const [testCmd, setTestCmd] = useState("");
   const [maxWorkers, setMaxWorkers] = useState(1);
-  const [mode, setMode] = useState<ExecutionMode>("file_loop");
   const [architectModel, setArchitectModel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Shared context off by default: it's opt-in, so a task never silently spends
@@ -217,12 +215,18 @@ function CommandCenterContent() {
         // The defaults are Anthropic models, so when Anthropic is the one
         // provider NOT connected, fall to a provider the org can actually call.
         // Without this a BYOK user's first task fails on a key they never added.
+        //
+        // The Architect is set explicitly here rather than left on "platform
+        // default": that default is an Anthropic model, and the Control Plane
+        // declines to apply it when the org has no Anthropic key — correct, but
+        // it would silently hand this user the worker model as their Architect.
+        // Naming one they can actually reach keeps the two-model split.
         if (!connected("anthropic")) {
           if (connected("gemini")) {
-            setPlannerModel("gemini-2.0-flash");
+            setArchitectModel("gemini-2.5-pro");
             setWorkerModel("gemini-flash-latest");
           } else if (connected("openai")) {
-            setPlannerModel("gpt-5");
+            setArchitectModel("gpt-5");
             setWorkerModel("gpt-5-mini");
           }
         }
@@ -331,12 +335,6 @@ function CommandCenterContent() {
     }
   }
 
-  // Planning now runs on the org's own key too, so the planner is gated by the
-  // same connected-provider filter as the worker. Offering a model the org
-  // cannot reach would fail at submit, after the user had already committed to
-  // the task.
-  const plannerOptions = workerOptions;
-
   // A model id alone ("moonshotai/kimi-k2") says nothing about what it costs,
   // what it is for, or whether there is any budget left for it. The picker
   // carries the class as a trailing hint on every row, and a detail panel for
@@ -442,18 +440,15 @@ function CommandCenterContent() {
         file: (inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file,
         test_cmd: inlineData.test_cmd || testCmd,
         model: inlineData.model || workerModel,
-        // Omitted in session mode rather than sent and ignored. The Control
-        // Plane discards it there, so sending it put a value in the request
-        // that no part of the run would honour.
-        ...(mode === "session" ? {} : { planner_model: plannerModel }),
         max_workers: inlineData.max_workers || maxWorkers,
         fleet_id: fleetId,
         reference_mode: inlineData.reference_mode || referenceMode,
         reference_job_ids: inlineData.reference_mode === "manual" ? inlineData.reference_job_ids : (referenceMode === "manual" ? referenceJobIds : undefined),
-        // Sent only when session is chosen. Omitting the key entirely on the
-        // default path keeps every existing submission byte-identical to what
-        // it was before this control existed.
-        ...(mode === "session" ? { mode, architect_model: architectModel || undefined } : {}),
+        // Omitted when the submitter left this on "Platform default", so the
+        // Control Plane chooses — see DefaultArchitectModel in ee/planner. It
+        // declines to apply that default when the org has no key for its
+        // provider, or when it would not share a payer with the worker model.
+        architect_model: architectModel || undefined,
       });
       setSubmitSuccess(resp.job_id);
       // Task text, repository and branch are deliberately absent — see the
@@ -461,9 +456,8 @@ function CommandCenterContent() {
       // customer's, and which of them people actually pick is the reason this
       // event exists.
       capture("task_submitted", {
-        mode,
+        architect_model: architectModel || undefined,
         worker_model: inlineData.model || workerModel,
-        planner_model: mode === "session" ? undefined : plannerModel,
         max_workers: inlineData.max_workers || maxWorkers,
         has_test_cmd: Boolean(inlineData.test_cmd || testCmd),
         from_starter: cameFromStarter.current,
@@ -665,29 +659,6 @@ function CommandCenterContent() {
             </label>
           )}
 
-          {/* Planner & verifier.
-
-              Hidden in session mode, where it decides nothing. SubmitPlan takes
-              the session branch (pkg/planner/service.go) and never reads
-              planner_model: SessionPlanner makes no LLM call at all, because
-              the Architect does the planning inside the daemon. Worse, the
-              manifest then records planner_model as the ARCHITECT model
-              (service.go, "planner_model": actualModel), so leaving this chip
-              lit did not merely mislead — it advertised a choice that was
-              silently replaced by a different one.
-
-              The Architect model control in Advanced is the real successor, so
-              the setting is not lost, only moved to where it applies. */}
-          {mode !== "session" && (
-            <Select
-              variant="chip" searchable label="Plan" ariaLabel="Planner & verifier model"
-              icon={<span className="pdot" style={{ background: "#93C645" }} />}
-              value={plannerModel} onChange={setPlannerModel}
-              options={plannerOptions.map(modelOption)}
-              renderDetail={renderModelDetail}
-            />
-          )}
-
           {/* Worker */}
           <Select
             variant="chip" searchable label="Work" ariaLabel="Worker model"
@@ -787,25 +758,13 @@ function CommandCenterContent() {
               <input type="number" min="1" max="10" value={inlineData.max_workers || maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} disabled={!!inlineData.max_workers} className={`${fieldClass} ${inlineData.max_workers ? 'opacity-50 cursor-not-allowed' : ''}`} />
             </div>
             <div>
-              <label className={labelClass}>Execution loop</label>
+              <label className={labelClass}>Architect model <span className="text-zinc-600 normal-case font-normal">(plans &amp; reviews)</span></label>
               <Select
-                ariaLabel="Execution loop" value={mode} onChange={v => setMode(v as ExecutionMode)}
-                options={[
-                  { value: "file_loop", label: "Standard", hint: "edit + verify" },
-                  { value: "session", label: "Session", hint: "plan, work, review" },
-                ]}
+                ariaLabel="Architect model" searchable value={architectModel} onChange={setArchitectModel}
+                options={[{ value: "", label: "Platform default" }, ...workerOptions.map(modelOption)]}
+                renderDetail={renderModelDetail}
               />
             </div>
-            {mode === "session" && (
-              <div>
-                <label className={labelClass}>Architect model <span className="text-zinc-600 normal-case font-normal">(plans &amp; reviews)</span></label>
-                <Select
-                  ariaLabel="Architect model" searchable value={architectModel} onChange={setArchitectModel}
-                  options={[{ value: "", label: `Same as worker (${workerModel})` }, ...workerOptions.map(modelOption)]}
-                  renderDetail={renderModelDetail}
-                />
-              </div>
-            )}
             <div>
               <label className={labelClass}>Shared context {inlineData.reference_mode && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
               <button

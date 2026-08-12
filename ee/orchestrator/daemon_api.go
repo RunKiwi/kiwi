@@ -519,7 +519,7 @@ func (s *Server) executionMode() string {
 // work was performed on a Kiwi-owned platform key.
 // architectIn/architectOut are the subset of the totals spent by session mode's
 // Architect, which may sit in a different price tier from the Implementer. They
-// are zero for file_loop tasks, where there is only one model.
+// are zero when a task ran both roles on one model.
 func (s *Server) meterKiwiUsage(ctx context.Context, task *store.QueuedTask, tokensIn, tokensOut, architectIn, architectOut int64) {
 	if task == nil || task.Funding != store.FundingKiwi || (tokensIn == 0 && tokensOut == 0) {
 		return

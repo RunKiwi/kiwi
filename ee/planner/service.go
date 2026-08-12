@@ -17,7 +17,6 @@ import (
 
 	"github.com/ibreakthecloud/kiwi/ee/entitlement"
 	"github.com/ibreakthecloud/kiwi/ee/fleethost"
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/pgvector/pgvector-go"
@@ -135,109 +134,62 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	plannedOnOperatorKey := false
 	funding := store.FundingBYOK
 
-	sessionMode := req.Mode == agent.ModeSession
-
-	// An operator kill-switch. Session mode is opt-in per task, but a mode that
-	// runs long agentic conversations on customer keys needs a way to be turned
-	// off across a fleet without a deploy rollback.
-	if sessionMode && os.Getenv("KIWI_SESSION_MODE") == "off" {
-		return nil, fmt.Errorf("session mode is disabled on this deployment")
+	// An operator kill-switch. A loop that runs long agentic conversations on
+	// customer keys needs a way to be turned off across a fleet without a deploy
+	// rollback. req.Mode is accepted and ignored: session is the only loop.
+	if os.Getenv("KIWI_SESSION_MODE") == "off" {
+		return nil, fmt.Errorf("task execution is disabled on this deployment")
 	}
 
-	switch {
-	case sessionMode:
-		// Nothing is decomposed and no model is called here: the Architect plans
-		// inside the daemon, on the customer's key, in their own cloud. The
-		// Control Plane still CHOOSES the models, so they are recorded accurately
-		// even though it no longer calls them.
-		actualModel = req.ArchitectModel
-		if actualModel == "" {
-			actualModel = req.Model
-		}
-		// Resolve through the catalog rather than by inference, so an aggregator
-		// model id lands on the provider that actually serves it.
-		archFunding := store.FundingBYOK
-		if res, rerr := s.store.ResolveModel(ctx, req.OrgID, actualModel); rerr == nil && res.Provider != "" {
-			prov = res.Provider
-			if f, ferr := s.fundingFor(ctx, req.OrgID, actualModel); ferr == nil {
-				archFunding = f
-			}
-		} else {
-			prov = provider.ProviderOf(actualModel)
-		}
-		p = NewSessionPlanner()
+	// Choose the Architect before anything reads it. An unset field used to mean
+	// "run the Implementer's model", which silently collapsed the two-model
+	// split — see architectModelFor.
+	req.ArchitectModel = s.architectModelFor(ctx, req)
 
-		// Submitting used to fail here for an org with no provider key, because
-		// the Control Plane had to read that key in order to plan. It no longer
-		// reads one — which would turn a clear, immediate error into a task that
-		// sits in the queue and fails minutes later inside the daemon. A presence
-		// check keeps the old answer without the old access: it asks whether the
-		// row exists, and never decrypts it.
-		//
-		// Skipped entirely for a Kiwi-provided model: Kiwi supplies that key, so
-		// demanding the org connect one of their own refuses exactly the case
-		// this feature exists to serve.
-		if archFunding != store.FundingKiwi {
-			if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
-				return nil, err
-			}
+	// Nothing is decomposed and no model is called here: the Architect plans
+	// inside the daemon, on the customer's key, in their own cloud. The
+	// Control Plane still CHOOSES the models, so they are recorded accurately
+	// even though it no longer calls them.
+	actualModel = req.ArchitectModel
+	if actualModel == "" {
+		actualModel = req.Model
+	}
+	// Resolve through the catalog rather than by inference, so an aggregator
+	// model id lands on the provider that actually serves it.
+	archFunding := store.FundingBYOK
+	if res, rerr := s.store.ResolveModel(ctx, req.OrgID, actualModel); rerr == nil && res.Provider != "" {
+		prov = res.Provider
+		if f, ferr := s.fundingFor(ctx, req.OrgID, actualModel); ferr == nil {
+			archFunding = f
 		}
-		if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
+	} else {
+		prov = provider.ProviderOf(actualModel)
+	}
+	p = NewSessionPlanner()
+
+	// Submitting used to fail here for an org with no provider key, because
+	// the Control Plane had to read that key in order to plan. It no longer
+	// reads one — which would turn a clear, immediate error into a task that
+	// sits in the queue and fails minutes later inside the daemon. A presence
+	// check keeps the old answer without the old access: it asks whether the
+	// row exists, and never decrypts it.
+	//
+	// Skipped entirely for a Kiwi-provided model: Kiwi supplies that key, so
+	// demanding the org connect one of their own refuses exactly the case
+	// this feature exists to serve.
+	if archFunding != store.FundingKiwi {
+		if err := s.requireProviderKey(ctx, req.OrgID, prov); err != nil {
 			return nil, err
 		}
-	case s.planner != nil:
+	}
+	if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
+		return nil, err
+	}
+
+	// A test may substitute the planner implementation; the admission checks
+	// above are not part of that seam and always run.
+	if s.planner != nil {
 		p = s.planner
-	case os.Getenv("KIWI_PLANNER") != "llm":
-		p = NewHeuristicPlanner()
-	default:
-		actualModel = req.PlannerModel
-		if actualModel == "" {
-			actualModel = os.Getenv("KIWI_PLANNER_MODEL")
-			if actualModel == "" {
-				actualModel = "claude-opus-4-8"
-			}
-		}
-
-		prov = provider.ProviderOf(actualModel)
-
-		var key string
-		if override := os.Getenv("KIWI_PLANNER_API_KEY"); override != "" {
-			key = override
-			funding = store.FundingKiwi // Operator keys are Kiwi-funded
-			plannedOnOperatorKey = true
-		} else {
-			if err := s.requireAllowance(ctx, req.OrgID, actualModel); err != nil {
-				return nil, err
-			}
-			var err error
-			key, funding, err = s.resolveKey(ctx, req.OrgID, actualModel)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// Planning runs on the Control Plane with the org's decrypted key. In BYOC
-		// that means Kiwi's network makes provider calls with a customer credential
-		// — acceptable for managed, a containment gap for BYOC. Moving planning into
-		// the daemon (as the Actor/Critic already are) closes it and is the intended
-		// direction; it needs a two-phase handoff (queue a plan task, daemon plans,
-		// reports the DAG, CP expands it into workers) and is deliberately not done
-		// here.
-		p = NewLLMPlannerFunc(func(m string) Completer {
-			var comp Completer
-			switch {
-			case s.newCompleter != nil:
-				comp = s.newCompleter(m)
-			case prov == provider.ProviderGemini:
-				comp = provider.NewGeminiProviderWithModels(key, m, m)
-			case prov == provider.ProviderOpenAI:
-				comp = provider.NewOpenAIProviderWithModels(key, m, m)
-			default:
-				comp = provider.NewAnthropicProviderWithModels(key, m, m)
-			}
-			completers = append(completers, comp)
-			return comp
-		}, actualModel)
 	}
 
 	plan, err := p.Plan(ctx, req)
@@ -336,7 +288,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			"model":           w.Model,
 			"test_cmd":        workerTestCmd(w, req),
 			"depends_on":      w.DependsOn,
-			"mode":            w.Mode,
+			"mode":            executionModeSession,
 			"architect_model": w.ArchitectModel,
 		})
 	}
@@ -456,9 +408,6 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 					}
 				}
 			}
-			if w.Mode != "" {
-				spec["mode"] = w.Mode
-			}
 			if w.ArchitectModel != "" {
 				spec["architect_model"] = w.ArchitectModel
 				// The Architect is a second model with its own provider, tier
@@ -477,10 +426,10 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				}
 			}
 			// Learnings are resolved here, on the Control Plane, because it owns
-			// the vector index — and consumed in the daemon, because in session
-			// mode that is where planning happens. Without this they would be
-			// searched for, paid for, and thrown away.
-			if sessionMode && len(resolved) > 0 {
+			// the vector index — and consumed in the daemon, because that is
+			// where the Architect plans. Without this they would be searched
+			// for, paid for, and thrown away.
+			if len(resolved) > 0 {
 				spec["learnings"] = learningSummaries(resolved)
 			}
 			if err := tx.Create(&store.QueuedTask{
@@ -608,14 +557,14 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// planMode reports the execution mode a request will run in, normalised so the
-// manifest never records an empty string for what is really the default.
-func planMode(req PlanRequest) string {
-	if req.Mode == agent.ModeSession {
-		return agent.ModeSession
-	}
-	return agent.ModeFileLoop
-}
+// executionModeSession is what every job records for its execution loop. It is
+// still written to the manifest and the execution record rather than dropped,
+// so a record made before the single-file loop was retired and one made after
+// stay comparable on the same field.
+const executionModeSession = "session"
+
+// planMode reports the execution loop a request will run in.
+func planMode(PlanRequest) string { return executionModeSession }
 
 // learningSummaries reduces resolved prior jobs to the lines the Architect can
 // actually use. It carries the task and its summary and nothing else: a

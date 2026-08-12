@@ -47,37 +47,35 @@ func TestProviderNamingIsCanonical(t *testing.T) {
 	}
 }
 
-// The planner resolves the org's key by the planning model's provider. If it
-// looked up the wrong credential name an org that connected only OpenAI would be
-// told it has no key at all, while its key sat in the store unread.
-func TestPlanningResolvesTheKeyForTheChosenModelsProvider(t *testing.T) {
+// Admission resolves the org's key by the ARCHITECT's provider. If it looked up
+// the wrong credential name, an org that connected only OpenAI would be told it
+// has no key at all while its key sat in the store unread.
+//
+// This used to be a property of Control-Plane planning. Planning moved into the
+// daemon, but the check did not go away — it moved to the model the Control
+// Plane still chooses.
+func TestAdmissionResolvesTheKeyForTheArchitectsProvider(t *testing.T) {
 	s := newTestStore(t)
 	svc := NewService(s, nil, nil)
 
-	t.Setenv("KIWI_PLANNER", "llm")
-	t.Setenv("KIWI_PLANNER_API_KEY", "")
 	if err := s.SaveCredential(context.Background(), "org-1", "OPENAI_API_KEY", store.CredentialLLM, "sk-openai-x"); err != nil {
 		t.Fatal(err)
 	}
 
-	svc.newCompleter = func(string) Completer { return &usageFake{} }
-
-	// Planning on a gpt model must find the OPENAI_API_KEY and succeed.
+	// An OpenAI Architect over an OpenAI Implementer must find OPENAI_API_KEY.
 	if _, err := svc.SubmitPlan(context.Background(), PlanRequest{
-		OrgID:        "org-1",
-		Task:         "do a thing",
-		PlannerModel: "gpt-5-mini",
+		OrgID: "org-1", Task: "do a thing",
+		Model: "gpt-5-mini", ArchitectModel: "gpt-5",
 	}); err != nil {
-		t.Fatalf("planning on an OpenAI model with an OpenAI key connected: %v", err)
+		t.Fatalf("an OpenAI task with an OpenAI key connected: %v", err)
 	}
 
-	// The complement: an Anthropic model with only an OpenAI key connected must
-	// fail naming Anthropic, not OpenAI — otherwise the user adds the key they
-	// already have.
+	// The complement: an Anthropic Architect with only an OpenAI key connected
+	// must fail naming Anthropic, not OpenAI — otherwise the user adds the key
+	// they already have.
 	_, err := svc.SubmitPlan(context.Background(), PlanRequest{
-		OrgID:        "org-1",
-		Task:         "do a thing",
-		PlannerModel: "claude-opus-4-8",
+		OrgID: "org-1", Task: "do a thing",
+		Model: "gpt-5-mini", ArchitectModel: "claude-opus-4-8",
 	})
 	if err == nil {
 		t.Fatal("expected an error: no Anthropic key is connected")
@@ -111,69 +109,5 @@ func TestPlanningWithoutAKeyIsAnActionableError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "anthropic") {
 		t.Errorf("error should name the provider it needed, got %q", err)
-	}
-}
-
-// Planning on the operator override is Kiwi's spend, not the customer's, and
-// must not land on their job.
-func TestOperatorKeyPlanningIsNotBilledToTheOrg(t *testing.T) {
-	s := newTestStore(t)
-	fake := &usageFake{in: 1000, out: 500, cost: 0.42}
-	svc := NewService(s, nil, nil)
-
-	t.Setenv("KIWI_PLANNER", "llm")
-	t.Setenv("KIWI_PLANNER_API_KEY", "operator-key")
-
-	// Override only how the Completer is built, so the live path — key
-	// resolution, routing, cost aggregation — actually runs.
-	svc.newCompleter = func(string) Completer { return fake }
-
-	res, err := svc.SubmitPlan(context.Background(), PlanRequest{
-		OrgID: "org-1",
-		Task:  "do a thing",
-	})
-	if err != nil {
-		t.Fatalf("SubmitPlan: %v", err)
-	}
-
-	var job store.Job
-	if err := s.DB().First(&job, "id = ?", res.JobID).Error; err != nil {
-		t.Fatalf("job row: %v", err)
-	}
-	if job.PlannerCostUSD != 0 || job.PlannerTokensIn != 0 || job.PlannerTokensOut != 0 {
-		t.Errorf("operator-key planning must not bill the org: got cost=%v in=%d out=%d",
-			job.PlannerCostUSD, job.PlannerTokensIn, job.PlannerTokensOut)
-	}
-}
-
-// The complement: planning on the org's own key records what it cost, so the
-// spend page has something truthful to report.
-func TestOrgKeyPlanningRecordsCost(t *testing.T) {
-	s := newTestStore(t)
-	fake := &usageFake{in: 1000, out: 500, cost: 0.42}
-	svc := NewService(s, nil, nil)
-
-	t.Setenv("KIWI_PLANNER", "llm")
-	t.Setenv("KIWI_PLANNER_API_KEY", "")
-	if err := s.SaveCredential(context.Background(), "org-1", "ANTHROPIC_API_KEY", store.CredentialLLM, "sk-ant-x"); err != nil {
-		t.Fatal(err)
-	}
-
-	svc.newCompleter = func(string) Completer { return fake }
-
-	res, err := svc.SubmitPlan(context.Background(), PlanRequest{OrgID: "org-1", Task: "do a thing"})
-	if err != nil {
-		t.Fatalf("SubmitPlan: %v", err)
-	}
-
-	var job store.Job
-	if err := s.DB().First(&job, "id = ?", res.JobID).Error; err != nil {
-		t.Fatalf("job row: %v", err)
-	}
-	if job.PlannerCostUSD != 0.42 {
-		t.Errorf("planner_cost_usd: got %v, want 0.42", job.PlannerCostUSD)
-	}
-	if job.PlannerTokensIn != 1000 || job.PlannerTokensOut != 500 {
-		t.Errorf("tokens: got in=%d out=%d, want 1000/500", job.PlannerTokensIn, job.PlannerTokensOut)
 	}
 }

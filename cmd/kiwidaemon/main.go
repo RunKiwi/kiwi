@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -42,6 +43,7 @@ func main() {
 	var joinToken string
 	var maxCachedRepos int
 	var maxSteps int
+	var maxRounds int
 	var maxBudgetUSD float64
 	var sessionBudgetUSD float64
 	var sandboxRuntime string
@@ -58,11 +60,24 @@ func main() {
 	flag.StringVar(&cacheDir, "cache-dir", "/tmp/kiwi-cache", "Path to store bare git repositories and worktrees.")
 	flag.StringVar(&joinToken, "join-token", os.Getenv("KIWI_JOIN_TOKEN"), "Single-use join token to register this daemon (required on first boot; falls back to KIWI_JOIN_TOKEN).")
 	flag.IntVar(&maxCachedRepos, "max-cached-repos", 20, "Max bare repositories to keep in the git cache before evicting the least-frequently-used (0 = unbounded).")
-	flag.IntVar(&maxSteps, "max-steps", 6, "Max Actor iterations per task before giving up.")
-	flag.Float64Var(&maxBudgetUSD, "max-budget", 0.50, "Max provider spend (USD) per file_loop task before the loop halts.")
-	flag.Float64Var(&sessionBudgetUSD, "session-budget", envFloat("KIWI_SESSION_BUDGET_USD", 5.00), "Max provider spend (USD) per session-mode task (falls back to KIWI_SESSION_BUDGET_USD).")
+	flag.IntVar(&maxRounds, "max-rounds", 0, "Max Architect/Implementer rounds per task before giving up (0 = the session default).")
+	// Deprecated aliases. The single-file loop these named is gone, but a
+	// launcher that still passes them must keep starting: failing on an unknown
+	// flag would take a fleet down for a flag that no longer decides anything.
+	// -max-steps capped agent iterations, so it lands on the cap that replaced
+	// it; -max-budget has a live successor under its own name and is ignored.
+	flag.IntVar(&maxSteps, "max-steps", 0, "Deprecated alias for -max-rounds.")
+	flag.Float64Var(&maxBudgetUSD, "max-budget", 0, "Deprecated and ignored; use -session-budget.")
+	flag.Float64Var(&sessionBudgetUSD, "session-budget", envFloat("KIWI_SESSION_BUDGET_USD", 5.00), "Max provider spend (USD) per task (falls back to KIWI_SESSION_BUDGET_USD).")
 	flag.StringVar(&sandboxRuntime, "sandbox-runtime", os.Getenv("KIWI_SANDBOX_RUNTIME"), "The OCI runtime to use for the docker sandbox (e.g. 'runsc').")
 	flag.Parse()
+
+	if maxRounds == 0 && maxSteps > 0 {
+		maxRounds = maxSteps
+	}
+	if maxBudgetUSD > 0 {
+		fmt.Fprintln(os.Stderr, "[kiwidaemon] -max-budget is ignored; per-task spend is capped by -session-budget.")
+	}
 
 	cfg := daemon.Config{
 		APIURL:           apiURL,
@@ -71,8 +86,7 @@ func main() {
 		CacheDir:         cacheDir,
 		JoinToken:        joinToken,
 		MaxCachedRepos:   maxCachedRepos,
-		MaxSteps:         maxSteps,
-		MaxBudgetUSD:     maxBudgetUSD,
+		MaxRounds:        maxRounds,
 		SessionBudgetUSD: sessionBudgetUSD,
 		SandboxRuntime:   sandboxRuntime,
 	}

@@ -8,7 +8,7 @@ import "testing"
 //	adaptive thinking is not supported on this model
 //
 // claude-haiku-4-5-20251001 is the case that matters most — it is the
-// dashboard's DEFAULT_WORKER_MODEL, so getting it wrong broke file_loop on the
+// dashboard's DEFAULT_WORKER_MODEL, so getting it wrong broke tasks on the
 // default path for every Anthropic user.
 func TestSupportsAdaptiveThinking(t *testing.T) {
 	supported := []string{

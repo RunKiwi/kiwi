@@ -53,6 +53,7 @@ func seedLearning(t *testing.T, s store.Store, jobID, orgID string) {
 // configured — and a failing embedder never fails the submission.
 func TestSubmitPlanIndexesLearning(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org1")
 	svc := NewService(s, &capturePlanner{}, failingEmbedder{})
 	svc.indexSync = true
 
@@ -86,6 +87,7 @@ func TestSubmitPlanIndexesLearning(t *testing.T) {
 // CompleteTask records the job's terminal outcome and PR on its learning row.
 func TestSubmitPlanCompletionRecordsOutcome(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org1")
 	svc := NewService(s, &capturePlanner{}, nil)
 	svc.indexSync = true
 	ctx := context.Background()
@@ -122,6 +124,7 @@ func TestSubmitPlanManualResolutionIsOrgScoped(t *testing.T) {
 	seedLearning(t, s, "jobC", "org2") // a different tenant's job
 
 	cp := &capturePlanner{}
+	seedAdmissibleOrg(t, s, "org1")
 	svc := NewService(s, cp, nil)
 	svc.indexSync = true
 
@@ -153,6 +156,7 @@ func TestSubmitPlanManualCapsAtThree(t *testing.T) {
 		seedLearning(t, s, id, "org1")
 	}
 	cp := &capturePlanner{}
+	seedAdmissibleOrg(t, s, "org1")
 	svc := NewService(s, cp, nil)
 	svc.indexSync = true
 
@@ -172,6 +176,7 @@ func TestSubmitPlanOffResolvesNothing(t *testing.T) {
 	s := newTestStore(t)
 	seedLearning(t, s, "jobA", "org1")
 	cp := &capturePlanner{}
+	seedAdmissibleOrg(t, s, "org1")
 	svc := NewService(s, cp, nil)
 	svc.indexSync = true
 
@@ -190,6 +195,7 @@ func TestSubmitPlanOffResolvesNothing(t *testing.T) {
 // indexing write rather than being recomputed.
 func TestSubmitPlanAutoEmbedsOnce(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org1")
 	emb := &countingEmbedder{}
 	svc := NewService(s, &capturePlanner{}, emb)
 	svc.indexSync = true

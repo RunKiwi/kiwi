@@ -7,8 +7,6 @@ package planner
 import (
 	"context"
 	"fmt"
-
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 )
 
 // SessionPlanner produces the plan for a session-mode job: exactly one worker,
@@ -52,7 +50,6 @@ func (p *SessionPlanner) Plan(_ context.Context, req PlanRequest) (*Plan, error)
 		Task:           req.Task,
 		Model:          req.Model,
 		ArchitectModel: req.ArchitectModel,
-		Mode:           agent.ModeSession,
 	}
 	// File and Files are deliberately left empty even when the submitter
 	// supplied them. A hint that the Control Plane cannot check against the

@@ -65,6 +65,9 @@ func TestHeuristicPlannerRequiresTask(t *testing.T) {
 func TestIdempotentPlanSubmission(t *testing.T) {
 	st := newTestStore(t)
 	s := NewService(st, NewHeuristicPlanner(), nil)
+	// Every submit now resolves an Architect, and a BYOK org must have a key for
+	// its provider before one can be chosen.
+	seedCredential(t, st, "org1", "ANTHROPIC_API_KEY")
 
 	req := PlanRequest{
 		OrgID:          "org1",
@@ -205,6 +208,7 @@ func TestLLMPlannerDefaultsScopeFromRequest(t *testing.T) {
 
 func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
@@ -242,6 +246,7 @@ func TestServiceSubmitPlanPersistsAndEnqueues(t *testing.T) {
 
 func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 	ctx := context.Background()
 
@@ -280,6 +285,7 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 
 func TestHandlePlan(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
 	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 

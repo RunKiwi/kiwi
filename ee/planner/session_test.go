@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
-
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 )
 
 // One task, one worker, one branch, one PR. The DAG existed to divide work into
@@ -21,7 +19,6 @@ func TestSessionPlanEmitsExactlyOneWorker(t *testing.T) {
 		Task:           "add retries to the fetch path",
 		Model:          "claude-sonnet-5",
 		ArchitectModel: "claude-opus-4-8",
-		Mode:           agent.ModeSession,
 	})
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -30,9 +27,6 @@ func TestSessionPlanEmitsExactlyOneWorker(t *testing.T) {
 		t.Fatalf("expected one worker, got %d", len(plan.Workers))
 	}
 	w := plan.Workers[0]
-	if w.Mode != agent.ModeSession {
-		t.Errorf("mode = %q", w.Mode)
-	}
 	if w.Model != "claude-sonnet-5" || w.ArchitectModel != "claude-opus-4-8" {
 		t.Errorf("models not carried: %+v", w)
 	}

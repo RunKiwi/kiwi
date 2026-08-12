@@ -123,7 +123,7 @@ func TestMeterKiwiUsageSplitsSessionRolesAcrossTiers(t *testing.T) {
 	}
 }
 
-// A file_loop task has one model and reports no architect tokens; its whole
+// A task that ran both roles on one model reports no architect tokens; its whole
 // usage belongs to the one tier.
 func TestMeterKiwiUsageChargesOneTierWithoutAnArchitect(t *testing.T) {
 	s := newTestServer(t)

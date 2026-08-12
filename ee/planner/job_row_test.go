@@ -20,6 +20,7 @@ import (
 // when the row is missing. Metering looked implemented and recorded nothing.
 func TestSubmitPlanPersistsJobRow(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org-1")
 	svc := NewService(s, &capturePlanner{}, nil)
 
 	res, err := svc.SubmitPlan(context.Background(), PlanRequest{
@@ -59,6 +60,7 @@ func TestSubmitPlanPersistsJobRow(t *testing.T) {
 // already accruing cost and minutes.
 func TestSubmitPlanJobRowIsIdempotent(t *testing.T) {
 	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org-1")
 	svc := NewService(s, &capturePlanner{}, nil)
 
 	req := PlanRequest{

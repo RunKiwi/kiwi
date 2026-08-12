@@ -62,9 +62,9 @@ export type EventProps = {
   model_key_added: { provider: string; surface: Surface };
   onboarding_step_skipped: { step: 1 | 2 | 3 };
   task_submitted: {
-    mode: "file_loop" | "session";
+    /** Empty when the submitter left the Architect on the platform default. */
+    architect_model?: string;
     worker_model: string;
-    planner_model?: string;
     max_workers: number;
     has_test_cmd: boolean;
     from_starter: boolean;

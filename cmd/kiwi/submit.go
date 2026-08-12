@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/client"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/tunnel"
@@ -25,8 +24,8 @@ func runSubmit(args []string) error {
 	repo := fs.String("repo", "", "git repo URL — BYOC path: the daemon clones it in your cloud and runs via the lease queue")
 	ref := fs.String("ref", "main", "git ref to check out (with -repo)")
 	model := fs.String("model", "", "LLM model for the worker (with -repo; planner default if empty)")
-	mode := fs.String("mode", "", "execution loop: file_loop (default) or session — session runs an Architect that plans and reviews an agentic Implementer over several rounds")
-	architectModel := fs.String("architect-model", "", "model that plans and reviews in -mode session (defaults to -model); expected to be more capable than the worker")
+	mode := fs.String("mode", "", "deprecated and ignored: every task runs the Architect/Implementer session loop")
+	architectModel := fs.String("architect-model", "", "model that plans and reviews (defaults to the platform architect model); expected to be more capable than the worker")
 	maxWorkers := fs.Int("max-workers", 1, "workers the planner may fan out (with -repo; 1 = single-worker MVP path)")
 	secretsPath := fs.String("secrets", "secrets.json", "path to secrets.json")
 	resume := fs.Bool("resume", false, "resume an existing task instead of submitting")
@@ -57,17 +56,16 @@ func runSubmit(args []string) error {
 	return submitTask(*server, t, *idempotencyKey, *task, *file, *testCmd, *dir, *secretsPath, *resume, *taskID, *interval)
 }
 
-// validateMode rejects an unknown -mode at the CLI rather than letting it reach
-// the planner, which treats anything that is not "session" as file_loop. A typo
-// like -mode sesion would otherwise run the default loop and report success,
-// and the user would have no way to tell their flag was ignored.
-func validateMode(mode string) error {
-	switch mode {
-	case "", agent.ModeFileLoop, agent.ModeSession:
-		return nil
-	default:
-		return fmt.Errorf("unknown -mode %q: use %q or %q", mode, agent.ModeFileLoop, agent.ModeSession)
+// warnDeprecatedMode tells a caller still passing -mode that the flag no longer
+// decides anything. It is a notice rather than an error: the single-file loop is
+// gone, and failing a script that pins the flag it was told to pin would punish
+// the user for our change. Saying nothing would be worse — a flag silently
+// ignored is how someone concludes the tool is broken.
+func deprecatedModeNotice(mode string) string {
+	if mode == "" {
+		return ""
 	}
+	return fmt.Sprintf("[kiwi] -mode %q is ignored: every task now runs the Architect/Implementer session loop.", mode)
 }
 
 func orDefault(s, fallback string) string {
@@ -101,8 +99,8 @@ func submitPlan(server, token, idempotencyKey string, interval time.Duration, op
 	if opts.Task == "" || opts.File == "" || opts.TestCmd == "" {
 		return fmt.Errorf("-task, -file, and -test-cmd are required")
 	}
-	if err := validateMode(opts.Mode); err != nil {
-		return err
+	if notice := deprecatedModeNotice(opts.Mode); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 
 	c := client.New(server, token)
@@ -119,16 +117,10 @@ func submitPlan(server, token, idempotencyKey string, interval time.Duration, op
 	fmt.Printf("[kiwi] Job:      %s\n", res.JobID)
 	fmt.Printf("[kiwi] Manifest: %s\n", res.ManifestID)
 	fmt.Printf("[kiwi] Enqueued %d worker task(s): %v\n", len(res.TaskIDs), res.TaskIDs)
-	if opts.Mode == agent.ModeSession {
-		architect := opts.ArchitectModel
-		if architect == "" {
-			architect = opts.Model
-		}
-		// Worth saying out loud: session mode is the more expensive path, and the
-		// two-model split is the thing people get wrong when they first reach for it.
-		fmt.Printf("[kiwi] Mode:     session — architect %s plans and reviews, implementer %s works in rounds\n",
-			orDefault(architect, "planner default"), orDefault(opts.Model, "planner default"))
-	}
+	// Worth saying out loud: the two-model split is the thing people get wrong
+	// first, and the Architect is where a task's judgment is bought.
+	fmt.Printf("[kiwi] Models:   architect %s plans and reviews, implementer %s works in rounds\n",
+		orDefault(opts.ArchitectModel, "platform default"), orDefault(opts.Model, "planner default"))
 	fmt.Printf("[kiwi] A registered daemon in your cloud will lease and execute these. "+
 		"It clones %s@%s, runs the loop until %q passes, and opens a PR.\n", opts.RepoURL, opts.Ref, opts.TestCmd)
 

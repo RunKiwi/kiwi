@@ -6,7 +6,7 @@
 
 **Kiwi runs coding agents inside infrastructure you control, and shows its work.**
 
-A SaaS **Control Plane** decomposes a task into a DAG of workers. A **Data Plane** runs each worker in an isolated sandbox through an **Actor–Critic loop**, editing files and re-running your test command until it passes, then opens a PR. Run it **managed**, where Kiwi operates the execution, or **BYOC**, where the Data Plane runs in your own cloud and neither code nor credentials leave your VPC.
+A SaaS **Control Plane** admits a task and hands it to a **Data Plane**, which runs a task-long **Architect** that plans and reviews, driving an agentic **Implementer** with real tool calls — reading, grepping and editing the repository, and re-running your test command in an isolated sandbox each round until the work is done and verified. Then it opens a PR. Run it **managed**, where Kiwi operates the execution, or **BYOC**, where the Data Plane runs in your own cloud and neither code nor credentials leave your VPC.
 
 Two properties hold on every task, in both modes.
 
@@ -59,7 +59,7 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 
 | Area | State |
 | :--- | :--- |
-| End-to-end seam: plan → lease → sandbox Actor–Critic loop → PR | ✅ Works ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| End-to-end seam: admit → lease → sandboxed Architect/Implementer session → PR | ✅ Works ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
 | One-command local / single-box prod (`make local` / `make prod`) | ✅ |
 | Dashboard: jobs, fleets, models, integrations, topology, settings | ✅ |
 | Multi-file agent: file discovery + multi-file edits | ✅ |
@@ -80,14 +80,14 @@ Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. Wh
 | Billing: Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
 | Managed-**dedicated** (Pro): per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
 | Egress isolation: sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
-| Session loop: a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | 🚧 Building, phase by phase; `pkg/loop` stays the default path |
+| Session loop: a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | ✅ The only execution loop. The single-file `pkg/loop` it replaced has been removed |
 | ├ Tool-calling seam (`provider.ToolRunner`) + persistent sandbox (`sandbox.Session`) + cache-aware pricing | ✅ Phase 0 |
 | ├ `pkg/session`: Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1: the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
 | ├ Crash recovery: round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
 | ├ Cost: prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ Phase 3 |
 | ├ Planner collapse: one worker per session job, **no LLM call and no credential decryption on the Control Plane** (`KIWI_SESSION_MODE=off` disables) | ✅ Phase 4 |
 | └ Provider parity: tool-calling on Anthropic, Gemini and OpenAI, so session mode is not one vendor's feature | ✅ Phase 5: Gemini additionally echoes the `thoughtSignature` it requires back on replay; without it the second tool turn of every conversation is rejected |
-| └ Reachable from the clients: `-mode session` on the CLI, `mode` in the SDK/API, an **Execution loop** control in the dashboard | ✅ Proven end to end in production: Architect plans, Implementer works with tools, reviewer approves, PR opened. `file_loop` stays the default everywhere and the key is omitted entirely unless session is chosen. The dashboard hides the **Plan** model chip in session mode, where it decides nothing: the Architect does the planning, inside the daemon |
+| └ Reachable from the clients | ✅ Proven end to end in production: Architect plans, Implementer works with tools, reviewer approves, PR opened. There is no mode to choose any more — `mode` is still accepted on the CLI, SDK and API and ignored, so nothing written against the two-mode API breaks. The **Plan** model chip is gone with it: planning happens in the daemon, so the Control Plane has no planner model to pick. **Architect model** under Advanced is the control that replaced it |
 | └ Partial edits: `edit_file` replaces an exact string instead of rewriting the file whole | ✅ The Implementer previously had one way to change a file: supply its complete new contents. Output tokens (and the latency that comes with them) therefore scaled with file size rather than change size, and every edit produced a diff full of reformatting for the reviewer to read. `edit_file` refuses rather than guesses: an `old_string` that is missing, ambiguous, or belongs to a file this round has not read is an error with a hint, because each quiet alternative writes a plausible-looking edit somewhere the test command may never look. `read_file` gained `offset`/`limit` and line numbers, and now truncates from the **end**: it kept the last 64KB, which is right for a failing build and wrong for source, where a model that saw only the bottom of a file then reconstructed its imports from memory |
 
 ## Building
@@ -140,7 +140,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 ./kiwi submit -task "Add a Modulo function mirroring Divide, with table-driven tests" \
     -repo https://github.com/you/yourrepo -ref main \
     -file math_utils.go -test-cmd "go test ./..." \
-    -mode session -model claude-haiku-4-5-20251001 -architect-model claude-sonnet-5
+    -model claude-haiku-4-5-20251001 -architect-model claude-sonnet-5
 
 # Resume an existing task
 ./kiwi submit -resume -task-id <task-id>
@@ -163,7 +163,7 @@ Anthropic's **adaptive thinking** is requested only for models that support it (
 
 The same rule decides which key the planner uses, how a call is priced, and which provider the signed execution record names. It is one function (`provider.ProviderOf`) rather than a rule repeated per component. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
 
-**Model discovery.** Rather than a hand-kept list, each provider's model list is read from its own API — at boot, once a day, and immediately when you save a key. Discovered models land in `model_catalog` with their pricing, context window and tool support, and only models that can actually drive the Actor–Critic loop (tool-capable, 32k+ context, text-to-text) are offered in the task form. A provider that is unreachable during a refresh leaves its existing rows untouched: a stale catalog is a much better failure than an empty one. Models that disappear from a provider's list are marked rather than deleted, so past jobs still name the model they ran.
+**Model discovery.** Rather than a hand-kept list, each provider's model list is read from its own API — at boot, once a day, and immediately when you save a key. Discovered models land in `model_catalog` with their pricing, context window and tool support, and only models that can actually drive the session loop (tool-capable, 32k+ context, text-to-text) are offered in the task form. A provider that is unreachable during a refresh leaves its existing rows untouched: a stale catalog is a much better failure than an empty one. Models that disappear from a provider's list are marked rather than deleted, so past jobs still name the model they ran.
 
 **Kiwi-provided models.** An operator can supply Kiwi's own API keys so users can run tasks without bringing their own:
 
@@ -193,11 +193,11 @@ The **worker model is yours to choose, not the planner's**: `-model` (and the da
 ```bash
 ./kiwidaemon -api-url https://api.runkiwi.dev \
     -key-path ~/.kiwi/daemon.key -cache-dir /tmp/kiwi-cache \
-    -poll-interval 5s -max-cached-repos 20 -max-steps 6 -max-budget 0.50 \
+    -poll-interval 5s -max-cached-repos 20 -session-budget 5.00 \
     -session-budget 5.00 -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Actor–Critic loop (`-max-steps` iterations / `-max-budget` USD per task cap the loop). Session-mode tasks are capped separately by `-session-budget` (or `KIWI_SESSION_BUDGET_USD`), default `5.00`, because the two loops have different economics, and a session costs several times what a file_loop task does, so `-max-budget` deliberately does not apply to it. The env fallback is what makes the setting reachable on the shared Free tier, where the provisioner launches per-org daemons with a fixed argv. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound. For the shared Free tier, pass `-sandbox-runtime runsc` (or `KIWI_SANDBOX_RUNTIME=runsc`) so the test command runs under gVisor; the wall-clock cap per task comes from the org's `TaskTimeoutSeconds` limit: **20 minutes on Free**, 30 on every other plan. Free is deliberately shorter because wall clock is what the tier meters: 20 minutes is 20 of the org's 500 agent-minutes, so the cap and the monthly allowance are one lever, not two. Within a session that budget is spread across rounds rather than spent on one. The per-round deadline derives from the session's own clock (a third of it, up to a 15-minute ceiling), because the value of several rounds is the Architect review *between* them, and a single round that consumes the whole cap produces no review anyone can act on.
+On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Architect/Implementer session. Per-task spend is capped by `-session-budget` (or `KIWI_SESSION_BUDGET_USD`), default `5.00`; rounds are capped by `-max-rounds` (0 uses the session default). `-max-steps` is a deprecated alias for `-max-rounds` and `-max-budget` is ignored — both named the retired single-file loop, and they are still accepted so a launcher that passes them keeps starting rather than failing on an unknown flag. The env fallback is what makes the budget reachable on the shared Free tier, where the provisioner launches per-org daemons with a fixed argv. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound. For the shared Free tier, pass `-sandbox-runtime runsc` (or `KIWI_SANDBOX_RUNTIME=runsc`) so the test command runs under gVisor; the wall-clock cap per task comes from the org's `TaskTimeoutSeconds` limit: **20 minutes on Free**, 30 on every other plan. Free is deliberately shorter because wall clock is what the tier meters: 20 minutes is 20 of the org's 500 agent-minutes, so the cap and the monthly allowance are one lever, not two. Within a session that budget is spread across rounds rather than spent on one. The per-round deadline derives from the session's own clock (a third of it, up to a 15-minute ceiling), because the value of several rounds is the Architect review *between* them, and a single round that consumes the whole cap produces no review anyone can act on.
 
 ### 4. Dashboard
 
@@ -279,7 +279,7 @@ Kiwi is open core. Two licences, split along one line: **the Data Plane and the 
 
 | | Licence | What it covers |
 | --- | --- | --- |
-| Everything outside `ee/` | [Apache 2.0](LICENSE) | `kiwidaemon`, `kiwi`, `kiwi-agent`, the Actor–Critic loop, the sandbox, the provider clients, the execution record, model discovery, the store |
+| Everything outside `ee/` | [Apache 2.0](LICENSE) | `kiwidaemon`, `kiwi`, `kiwi-agent`, the Architect/Implementer session loop, the sandbox, the provider clients, the execution record, model discovery, the store |
 | `ee/` | [BSL 1.1](ee/LICENSE) | The Control Plane: `kiwid`, orchestration, planning, orgs and auth, billing, entitlements, provisioning, fleet control |
 
 **If you run Kiwi in your own cloud, the part you run is Apache-2.0.** `cmd/kiwidaemon` — the daemon that clones your repo, runs the loop, and executes your tests — depends on nothing under `ee/`. That is enforced by a test (`pkg/licensing_boundary_test.go`), not by convention, so it cannot quietly stop being true.

@@ -24,12 +24,3 @@ func repoContext(worktreePath string) string {
 	}
 	return strings.TrimSpace(string(data))
 }
-
-// withRepoContext prepends repo context to a task description under a clear
-// header so the Actor can distinguish project conventions from the task itself.
-func withRepoContext(description, context string) string {
-	if context == "" {
-		return description
-	}
-	return "# Repository context (AGENT.md)\n" + context + "\n\n# Task\n" + description
-}

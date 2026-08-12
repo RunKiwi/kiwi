@@ -20,7 +20,6 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/gitcache"
-	"github.com/ibreakthecloud/kiwi/pkg/loop"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
@@ -50,24 +49,17 @@ type Config struct {
 	// before evicting the least-frequently-used one. 0 leaves the cache
 	// unbounded; the kiwidaemon CLI supplies a sensible default.
 	MaxCachedRepos int
-	// MaxSteps caps Actor iterations per task; 0 uses the loop default.
-	MaxSteps int
-	// MaxRounds caps Architect/Implementer rounds per task in session mode; 0
-	// uses the session default. It is separate from MaxSteps because the two
-	// count different things: a step is one model call, a round is a whole
-	// agentic pass over the repository, so the same number would mean wildly
-	// different budgets in the two modes.
+	// MaxRounds caps Architect/Implementer rounds per task; 0 uses the session
+	// default. A round is a whole agentic pass over the repository, not a single
+	// model call — the number is small for that reason.
 	MaxRounds int
-	// MaxBudgetUSD caps provider spend per task on the customer's key; 0 uses
-	// the loop default. A runaway loop on a live key is a real cost risk.
-	MaxBudgetUSD float64
-	// SessionBudgetUSD caps provider spend per task in session mode; 0 uses the
-	// session default. It is deliberately NOT MaxBudgetUSD: the two loops have
-	// different economics. file_loop is a handful of single-file model calls and
-	// lives comfortably under a dollar, while a session is a task-long Architect
-	// plus an agentic Implementer over several rounds — the design puts it at
-	// $2-4. Sharing one number meant the file_loop default of $0.50 halted every
-	// session on the budget rail around the end of round one.
+	// SessionBudgetUSD caps provider spend per task; 0 uses the session default.
+	//
+	// It is a separate field from the retired single-file loop's cap, and the
+	// history is worth keeping: that cap defaulted to $0.50 while a session runs
+	// a task-long Architect plus an agentic Implementer over several rounds, at
+	// $2-4. When one number served both, every session halted on the budget rail
+	// around the end of round one.
 	SessionBudgetUSD float64
 	// RenewInterval configures how often the daemon extends the lease of a
 	// running task. Zero uses defaultRenewInterval.
@@ -465,19 +457,6 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	// Anti-gaming (Execution Model RFC §8, issue #132) is no longer decided here.
-	// It used to be an outright refusal of any task targeting a test file, on the
-	// grounds that the Actor could satisfy "green test = done" by weakening the
-	// assertion instead of fixing the code.
-	//
-	// That reasoning only holds while the tests are FAILING, because only then is
-	// a test defining the job. When they pass, the test file defines nothing and
-	// "add tests for the parser" is an ordinary request that the blanket refusal
-	// rejected outright. The loop knows which case it is in — it runs the tests
-	// — so it makes the call; the daemon only reports what it observed, since it
-	// is the side that knows each language's naming conventions.
-	targetsTest := looksLikeTestFile(spec.File)
-
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
 	if spec.RepoURL != "" && spec.Ref != "" {
@@ -543,8 +522,6 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 	sandboxCtx := context.WithValue(taskCtx, sandbox.SandboxConfigKey, sandboxCfg)
 
-	sessionMode := spec.Mode == agent.ModeSession
-
 	// Test-command environment: every credential except the LLM keys.
 	//
 	// Session mode withholds them all by default. The exclusion of LLM keys
@@ -553,14 +530,14 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// their output travels back into the event log. A credential that can be
 	// read and echoed does not need a network to escape. See
 	// sessionAllowsTestCredentials for the opt-in and what it costs.
-	testEnv := taskTestEnv(spec.Task, creds, sessionMode)
-	if sessionMode && !sessionAllowsTestCredentials() {
+	testEnv := taskTestEnv(spec.Task, creds, true)
+	if !sessionAllowsTestCredentials() {
 		log.Printf("Task %s: session mode — withholding all credentials from the sandbox", spec.ID)
 	}
 
-	// Build the Actor/Critic (daemon-side, not in the sandbox). The provider is
+	// Build the Implementer's provider (daemon-side, not in the sandbox). It is
 	// selected from the worker's model; its key is picked from the bundle.
-	actor, critic := d.newProvider(creds, spec.Model, spec.Provider)
+	actor, _ := d.newProvider(creds, spec.Model, spec.Provider)
 
 	// actor == nil means the model's provider has no key in this org's sealed
 	// bundle (e.g. a gemini-* model but no GEMINI_API_KEY). That is a
@@ -584,149 +561,8 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	var targetFiles []string
-	var isMulti bool
-	if len(spec.Files) > 0 {
-		targetFiles = spec.Files
-		isMulti = true
-	} else if spec.File != "" {
-		targetFiles = []string{spec.File}
-		isMulti = false
-	}
-
-	// Everything from here to the end of the extension repair exists to decide
-	// which file the Actor is allowed to edit — resolving the planner's hints
-	// against the real tree, asking a model to choose when they resolve to
-	// nothing, and correcting an extension the planner guessed for the wrong
-	// language. A session Implementer greps for itself and writes wherever the
-	// work leads, so none of it applies, and running it would cost a model call
-	// to answer a question nobody asked.
-	if !sessionMode {
-
-		// The repo exists only here, on the daemon, so this is the only place a file
-		// path can be checked against reality. A path on the spec is a hint from the
-		// planner — which is given the repo URL, not its contents — and previously a
-		// hint suppressed discovery entirely: the component that cannot see the repo
-		// overrode the one that can, and a near-miss like "components/Footer.tsx"
-		// against "src/components/Footer.tsx" became a new duplicate file rather than
-		// an edit to the real one.
-		tree, _ := repoTree(worktreePath)
-		if len(targetFiles) > 0 && len(tree) > 0 {
-			resolved := make([]string, 0, len(targetFiles))
-			anyReal := false
-			for _, hint := range targetFiles {
-				got := resolveHint(hint, tree)
-				if got == "" {
-					// Keep the hint: it may name a file that genuinely has to be
-					// created. Whether it does is decided below, once discovery has
-					// had a chance to find an existing home instead.
-					resolved = append(resolved, hint)
-					continue
-				}
-				if got != hint {
-					log.Printf("Task %s: target %q does not exist; resolved to %q", spec.ID, hint, got)
-				}
-				resolved = append(resolved, got)
-				anyReal = true
-			}
-			targetFiles = resolved
-
-			if !anyReal {
-				log.Printf("Task %s: no planned target exists in the repo; asking the model to choose from %d file(s)", spec.ID, len(tree))
-				if discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree); len(discovered) > 0 {
-					targetFiles = discovered
-					isMulti = len(discovered) > 1
-				}
-				// Falling through with the original hint is deliberate: discovery only
-				// ever returns files that already exist, so when it finds nothing the
-				// task really may need a new file, and the loop creates it.
-			}
-		}
-
-		if len(targetFiles) == 0 {
-			discovered, _ := discoverTargetFiles(taskCtx, actor, spec.Task, tree)
-			if len(discovered) > 0 {
-				targetFiles = discovered
-				isMulti = true
-			} else {
-				return taskResult{detail: "could not identify a file to change from the task description — set one under Advanced options"}
-			}
-		}
-
-		// Repair a new file whose extension names the wrong language. The Actor can
-		// only change a file's contents, never its name, so a planner that guesses
-		// "examples/advanced.rs" for a Go repository creates a position the loop
-		// cannot win: the Critic rejects Go code in a .rs file, correctly, every
-		// time, until the budget runs out.
-		eco := inferEcosystem(worktreePath, testCmd)
-		for i, f := range targetFiles {
-			if _, err := os.Stat(filepath.Join(worktreePath, f)); err == nil {
-				continue // exists; its extension is the repository's business
-			}
-			if fixed := correctNewFileExtension(f, eco, worktreePath); fixed != f {
-				log.Printf("Task %s: new file %q has the wrong extension for a %s project; creating %q instead", spec.ID, f, eco, fixed)
-				targetFiles[i] = fixed
-			}
-		}
-	}
-
 	if testCmd == "" {
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
-	}
-
-	// Inject the repo's AGENT.md (if any) as per-repo context for the Actor —
-	// conventions, how to run tests, what not to touch (Execution Model RFC §5).
-	description := spec.Task
-	if rc := repoContext(worktreePath); rc != "" && !sessionMode {
-		log.Printf("Task %s: injecting repo AGENT.md context (%d bytes)", spec.ID, len(rc))
-		description = withRepoContext(description, rc)
-	}
-
-	// The single-file loop and its task are built only for the mode that uses
-	// them: a session has no pre-assigned file, so loop.Task's FilePath would
-	// index an empty slice.
-	var runner *loop.Runner
-	var task loop.Task
-	if !sessionMode {
-		log.Printf("Running Actor–Critic loop for task %s (files %d, test %q)...", spec.ID, len(targetFiles), testCmd)
-		// Runner.Run calls OnEvent inline on this goroutine, so ordering matches
-		// execution order. The reporter is what carries them out of the process
-		// while the task is still running; the full list is still sent with the
-		// result, which remains authoritative.
-		runner = &loop.Runner{
-			Provider: actor,
-			Critic:   critic,
-			Config: loop.Config{
-				MaxSteps:     d.config.MaxSteps,
-				MaxBudgetUSD: d.config.MaxBudgetUSD,
-				Log:          func(format string, a ...any) { log.Printf("task "+spec.ID+": "+format, a...) },
-				OnEvent: func(e loop.Event) {
-					prog.add(ver.TaskEvent{
-						Step:         e.Step,
-						Phase:        e.Phase,
-						Outcome:      e.Outcome,
-						Detail:       e.Detail,
-						DurationMs:   e.DurationMs,
-						InputTokens:  e.InputTokens,
-						OutputTokens: e.OutputTokens,
-						CostUSD:      e.CostUSD,
-					})
-				},
-			},
-		}
-		task = loop.Task{
-			Description:  description,
-			FilePath:     filepath.Join(worktreePath, targetFiles[0]),
-			WorktreeRoot: worktreePath,
-			TargetsTest:  targetsTest || looksLikeTestFile(targetFiles[0]),
-		}
-		if isMulti {
-			absFiles := make([]string, len(targetFiles))
-			for i, f := range targetFiles {
-				absFiles[i] = filepath.Join(worktreePath, f)
-			}
-			task.Files = absFiles
-		}
 	}
 
 	// Pick the image from what the repository declares, using the test command
@@ -868,116 +704,40 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return res.Output, res.Success, nil
 	}
 
-	if sessionMode {
-		var installFn session.InstallFunc
-		if inferInstallStep(worktreePath) != nil {
-			installFn = func(ctx context.Context) (string, bool, error) {
-				step := installStepFor(worktreePath, false)
-				if step == nil {
-					return "this repository declares no dependency install step", false, nil
-				}
-				if detail, ok := d.installDependencies(ctx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
-					return detail, false, nil
-				}
-				return "dependencies installed", true, nil
+	var installFn session.InstallFunc
+	if inferInstallStep(worktreePath) != nil {
+		installFn = func(ctx context.Context) (string, bool, error) {
+			step := installStepFor(worktreePath, false)
+			if step == nil {
+				return "this repository declares no dependency install step", false, nil
 			}
-		}
-		return d.executeSession(taskCtx, spec, creds, prog, sessionDeps{
-			leaseID:      leaseID,
-			worktreePath: worktreePath,
-			sandboxCfg:   sandboxCfg,
-			// The Implementer's shell gets the toolchain cache variables and
-			// nothing else. cacheEnv is credential-free by construction — it is
-			// the same set the networked install phase is given, for the same
-			// reason.
-			execEnv: cacheEnv,
-			testCmd: testCmd,
-			verify:  runTest,
-			install: installFn,
-			useBox:  func(b *sandbox.Session) { verifyBox = b },
-		})
-	}
-
-	result, err := runner.Run(taskCtx, task, runTest)
-	if offlineBlocked != "" {
-		return taskResult{detail: offlineBlocked, events: prog.all()}
-	}
-	if err != nil {
-		log.Printf("Task %s loop ended without success: %v (steps=%d, cost=$%.2f)",
-			spec.ID, err, result.Steps, result.CostUSD)
-	} else {
-		log.Printf("Task %s loop complete: success=%v (steps=%d, cost=$%.2f)",
-			spec.ID, result.Success, result.Steps, result.CostUSD)
-	}
-
-	abuse := false
-	if taskCtx.Err() == context.DeadlineExceeded && result.Steps < 2 {
-		log.Printf("Task %s timed out with %d steps — flagging for cryptomining abuse", spec.ID, result.Steps)
-		abuse = true
-	}
-
-	ok := result.Success
-	prURL := ""
-	detail := ""
-	if result.Success {
-		gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, leaseID, creds)
-		if gitErr != nil {
-			detail = truncateDetail(gitErr.Error())
-		} else if gitToken == "" {
-			detail = "no GIT_TOKEN; skipped PR"
-		} else {
-			gh := &restGitHub{token: gitToken}
-			pr, d, err := publishResult(ctx, worktreePath, spec, gitToken, gh, "")
-			switch {
-			case errors.Is(err, errNoChanges):
-				// The loop was satisfied without editing anything, so there is
-				// nothing to deliver. Reporting SUCCEEDED here was the exact
-				// "false green" the case below exists to prevent — the user
-				// asked for work, received a green tick, and got no pull
-				// request and no explanation beyond the words "no changes".
-				//
-				// It is the normal outcome for additive work. "Add an example"
-				// does not make `go build` start failing, so the test command
-				// passes on unmodified code and the loop correctly concludes
-				// there is nothing to do. The fault is the definition of done,
-				// not the agent, and the message has to say so.
-				log.Printf("Task %s: loop passed without changing anything (steps=%d)", spec.ID, result.Steps)
-				ok = false
-				if result.Steps == 0 {
-					detail = fmt.Sprintf("the test command (%s) already passed before any change was made, so nothing was done and there is nothing to open a PR with. "+
-						"This task needs a check that fails until the work exists — for new functionality, a test that exercises it.", testCmd)
-				} else {
-					detail = "the agent finished but left the repository unchanged, so there is nothing to open a PR with"
-				}
-			case err != nil:
-				// The loop passed but delivery failed. Report FAILED rather than a
-				// false green — a SUCCEEDED task with no PR is misleading.
-				log.Printf("Failed to publish result for task %s: %v", spec.ID, err)
-				detail = fmt.Sprintf("publish failed: %v", err)
-				ok = false
-			default:
-				prURL = pr
-				detail = d
+			if detail, ok := d.installDependencies(ctx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
+				return detail, false, nil
 			}
-		}
-	} else {
-		// Surface WHY the loop failed so the FAILED task explains itself in the
-		// Control Plane (result_detail), not only in the daemon's local logs.
-		if err != nil {
-			// A provider-side failure (out of credits, rate limit, bad key/model)
-			// gets a clean, actionable reason instead of a raw API dump — this is
-			// what the dashboard shows the operator.
-			if kind, reason := provider.Classify(err); kind != provider.ErrOther {
-				detail = fmt.Sprintf("%s: %s", providerNameForModel(spec.Model), reason)
-			} else {
-				detail = truncateDetail(fmt.Sprintf("loop failed after %d step(s): %v", result.Steps, err))
-			}
-		} else {
-			detail = fmt.Sprintf("test did not pass within %d step(s)", result.Steps)
+			return "dependencies installed", true, nil
 		}
 	}
-
-	return taskResult{ok: ok, prURL: prURL, detail: detail, abuse: abuse, events: prog.all()}
+	res := d.executeSession(taskCtx, spec, creds, prog, sessionDeps{
+		leaseID:      leaseID,
+		worktreePath: worktreePath,
+		sandboxCfg:   sandboxCfg,
+		// The Implementer's shell gets the toolchain cache variables and
+		// nothing else. cacheEnv is credential-free by construction — it is
+		// the same set the networked install phase is given, for the same
+		// reason.
+		execEnv: cacheEnv,
+		testCmd: testCmd,
+		verify:  runTest,
+		install: installFn,
+		useBox:  func(b *sandbox.Session) { verifyBox = b },
+	})
+	// A repository whose verification cannot run offline is a fact about the
+	// repository, not a failure of the run. Report it verbatim rather than
+	// letting the session's generic "verification failed" stand in for it.
+	if offlineBlocked != "" && !res.ok {
+		res.detail = offlineBlocked
+	}
+	return res
 }
 
 // installDependencies runs phase A of the sandbox: the repository's own install

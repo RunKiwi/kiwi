@@ -15,7 +15,7 @@ import (
 // 4.5, Opus 4.5, and anything 4.1 or earlier — take the previous
 // {type: "enabled", budget_tokens: N} form instead, and reject adaptive.
 //
-// Every Anthropic call sent adaptive unconditionally, so file_loop was broken
+// Every Anthropic call sent adaptive unconditionally, so non-agentic calls were broken
 // end to end on claude-haiku-4-5-20251001 — which is the dashboard's
 // DEFAULT_WORKER_MODEL. The planner default (claude-opus-4-8) does support it,
 // so the failure looked strange from the outside: the plan succeeded and then
