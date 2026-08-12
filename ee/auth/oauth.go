@@ -186,6 +186,9 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 
 	client := cfg.Client(r.Context(), token)
 	var email, name, subject string
+	// nil unless this sign-in was GitHub and carried a login. See User.GitHubLogin
+	// for why absence is nil rather than "".
+	var githubLogin *string
 
 	if provider == "github" {
 		req, _ := http.NewRequest("GET", githubAPIURL+"/user", nil)
@@ -204,6 +207,9 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 		name = userResp.Name
 		if name == "" {
 			name = userResp.Login
+		}
+		if userResp.Login != "" {
+			githubLogin = &userResp.Login
 		}
 		subject = fmt.Sprintf("%d", userResp.ID)
 
@@ -286,7 +292,7 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 							ID:              personalOrgID,
 							Name:            email + "'s Workspace",
 							Type:            "personal",
-							ActivationState: "inactive",
+							ActivationState: "active",
 							Plan:            "free",
 							CreatedAt:       time.Now(),
 						}
@@ -326,13 +332,23 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 				Role:          role,
 				OAuthProvider: &provider,
 				OAuthSubject:  &subject,
+				GitHubLogin:   githubLogin,
 				CreatedAt:     time.Now(),
 			}
 			db.Create(&user)
 		} else {
-			// Update existing user with oauth connection
+			// Update existing user with oauth connection.
+			//
+			// The login is refreshed on every sign-in rather than written once:
+			// GitHub accounts get renamed, and a stale username is worse than an
+			// absent one because it looks current. Only overwritten when this
+			// sign-in actually carried one, so a later Google sign-in does not
+			// erase the GitHub username captured earlier.
 			user.OAuthProvider = &provider
 			user.OAuthSubject = &subject
+			if githubLogin != nil {
+				user.GitHubLogin = githubLogin
+			}
 			db.Save(&user)
 		}
 	}

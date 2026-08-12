@@ -26,7 +26,7 @@ type Organization struct {
 	PrimaryDomain   string `json:"primary_domain" gorm:"not null;default:''"`
 	DomainJoin      bool   `json:"domain_join" gorm:"not null;default:false"`
 	Plan            string `json:"plan" gorm:"not null;default:free"`
-	ActivationState string `json:"activation_state" gorm:"not null;default:inactive"`
+	ActivationState string `json:"activation_state" gorm:"not null;default:active"`
 	// PRCommentMode selects what a review comment on a Kiwi pull request does:
 	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
 	// mention, so Kiwi acts only when it is spoken to.
@@ -58,9 +58,22 @@ type User struct {
 	// Explicit column names: without them GORM maps OAuthProvider ->
 	// "o_auth_provider", but migration 0008 (and the raw WHERE in oauth.go)
 	// use "oauth_provider". Pin the names so struct ops and SQL agree.
-	OAuthProvider *string   `json:"oauth_provider,omitempty" gorm:"column:oauth_provider;uniqueIndex:idx_users_oauth,priority:1"`
-	OAuthSubject  *string   `json:"oauth_subject,omitempty" gorm:"column:oauth_subject;uniqueIndex:idx_users_oauth,priority:2"`
-	CreatedAt     time.Time `json:"created_at"`
+	OAuthProvider *string `json:"oauth_provider,omitempty" gorm:"column:oauth_provider;uniqueIndex:idx_users_oauth,priority:1"`
+	OAuthSubject  *string `json:"oauth_subject,omitempty" gorm:"column:oauth_subject;uniqueIndex:idx_users_oauth,priority:2"`
+	// GitHubLogin is the user's GitHub username, captured at sign-in.
+	//
+	// Nullable rather than empty-string: a Google user has no GitHub account,
+	// and so does every user who signed up before this column existed — the
+	// login was fetched and discarded, so there is nothing to backfill from.
+	// Recording "" would make "no account" and "we never captured it" the same
+	// value.
+	//
+	// Deliberately NOT unique and NOT an identity key. GitHub allows an account
+	// to be renamed and the freed name to be re-registered by someone else, so a
+	// login is a label that can move between people. OAuthSubject (the numeric
+	// id) remains the thing that identifies the account.
+	GitHubLogin *string   `json:"github_login,omitempty" gorm:"column:github_login;index"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // TableName overrides the default GORM table name.

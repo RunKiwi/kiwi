@@ -47,8 +47,11 @@ func TestOrganization_Defaults(t *testing.T) {
 	if fetched.Plan != "free" {
 		t.Errorf("expected plan 'free', got %q", fetched.Plan)
 	}
-	if fetched.ActivationState != "inactive" {
-		t.Errorf("expected state 'inactive', got %q", fetched.ActivationState)
+	// Active on creation. "inactive" described a gate no code enforced, and it
+	// disarmed SuspendOrg for the orgs that had never been touched — see
+	// signup_activation_test.go.
+	if fetched.ActivationState != "active" {
+		t.Errorf("expected state 'active', got %q", fetched.ActivationState)
 	}
 	if fetched.PrimaryDomain != "" {
 		t.Errorf("expected primary_domain '', got %q", fetched.PrimaryDomain)
