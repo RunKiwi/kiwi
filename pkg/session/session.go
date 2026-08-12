@@ -107,6 +107,21 @@ type Config struct {
 
 	Log     func(format string, a ...any)
 	OnEvent func(Event)
+	// OnActivity reports what is running RIGHT NOW, before it starts, for the
+	// gap between two events.
+	//
+	// OnEvent fires when a phase finishes, which is the wrong moment for the
+	// only question someone watching a run is asking. The caller's indicator
+	// holds its last value, so a session that had just run the test command and
+	// then spent four minutes planning went on displaying that test command —
+	// not silence, which would at least be honest, but a confident statement
+	// about a command that had already finished.
+	//
+	// Sandbox work already reports itself, because the caller owns Verify and
+	// the run tool. What only the Runner can see is the model calls: planning,
+	// reviewing, and the Implementer's turns between tool calls. Those are the
+	// longest silent stretches in a session, so they are what this exists for.
+	OnActivity func(activity string)
 }
 
 // Defaults. Every number here is a starting point chosen from the arithmetic in
@@ -264,6 +279,15 @@ type Runner struct {
 	Store Store
 	// SessionID identifies this session in the Store. Required when Store is set.
 	SessionID string
+}
+
+// activity reports what is about to run. Always called BEFORE the work starts —
+// an activity set afterwards describes the past.
+func (r *Runner) activity(format string, a ...any) {
+	if r.Config.OnActivity == nil {
+		return
+	}
+	r.Config.OnActivity(fmt.Sprintf(format, a...))
 }
 
 func (r *Runner) logf(format string, a ...any) {
@@ -474,6 +498,7 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 
 	// Round 0: the Architect writes the opening spec. This is the planning the
 	// control plane used to do without ever seeing the repository.
+	r.activity("architect: planning the work")
 	start = time.Now()
 	spec, err := r.Architect.Plan(ctx, PlanInput{
 		Task:            task.Description,
@@ -582,6 +607,7 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 		st.progress[fingerprint(diff, out)]++
 		stalled := st.progress[fingerprint(diff, out)] >= noProgressHalt
 
+		r.activity("architect: reviewing round %d", st.round)
 		start = time.Now()
 		review, err := r.Architect.Review(ctx, ReviewInput{
 			Task:            task.Description,
@@ -752,6 +778,10 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 		// backoff inside it — was attributed to nothing at all. That gap is
 		// usually the largest single component of a run, which made "where did
 		// the time go" unanswerable from the record.
+		// The Implementer between tool calls. This is the stretch the comment
+		// above is about: no sandbox command is running, so without this the
+		// caller's indicator still names whichever tool finished last.
+		r.activity("implementer: working on round %d", st.round)
 		turnStart := time.Now()
 		turn, err := conv.Send(roundCtx, text, results)
 		used := r.trackImplementer(st, conv)
@@ -869,6 +899,7 @@ func (r *Runner) noteOrDefault(fallback string) string {
 // when the model has just asked for tools, so sending the prompt alone would
 // fail the request every single time it mattered.
 func (r *Runner) compact(ctx context.Context, conv provider.ToolConversation, st *state, pending []provider.ToolResult) (string, error) {
+	r.activity("implementer: compacting the transcript")
 	start := time.Now()
 	turn, err := conv.Send(ctx, compactPrompt, pending)
 	if err != nil {
