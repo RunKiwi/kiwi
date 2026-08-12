@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { jobOrbState } from "@/lib/orbState";
 import { usePolling } from "@/hooks/usePolling";
 import { parseActionableError } from "@/lib/errors";
+import { jobTitle } from "@/lib/taskTitle";
 import {
   X,
   Activity,
@@ -304,6 +305,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // exactly once rather than on every idle tick for the life of the drawer.
   const [finalProgress, setFinalProgress] = useState(false);
   const [record, setRecord] = useState<ExecutionRecordResponse | null>(null);
+  // Which job's title is expanded, rather than a bare boolean. Opening a
+  // different job must not inherit the previous one's expanded state, and
+  // deriving that from the id is what avoids resetting it from an effect.
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
@@ -407,6 +412,16 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // are passed: a job still cold-starting its runner has no progress at all.
   const headerOrb = jobOrbState(progress, currentJob?.tasks ?? []);
 
+  // The drawer's title. Once the Architect has written its opening objective
+  // that becomes the title; until then the task's own first sentence stands in.
+  // Neither costs a model call — see lib/taskTitle.ts.
+  const titleExpanded = expandedFor !== null && expandedFor === taskId;
+
+  const heading = jobTitle(
+    currentJob?.task ?? "",
+    progress.flatMap(p => p.steps ?? []),
+  );
+
   const getPhaseIcon = (task: JobTask) => {
     switch (task.status) {
       case 'RUNNING':
@@ -484,17 +499,48 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                 aria-label="Job running"
               />
             )}
-            <div>
-              <h2 id="drawer-heading" className="text-xl font-medium text-white flex items-center gap-3">
-                {/* The goal, not the id — an opaque job id says nothing about what
-                    is running, which is the first thing anyone opening this wants. */}
-                {currentJob?.task || "Job Details"}
+            <div className="min-w-0">
+              {/* The goal, not the id — an opaque job id says nothing about what
+                  is running, which is the first thing anyone opening this wants.
+
+                  Shortened rather than rendered whole. People paste issue
+                  reports as the task, and several hundred words in an <h2> put
+                  the run itself below the fold. The full text is one click
+                  away; see lib/taskTitle.ts for where the short form comes
+                  from and why nothing calls a model to get it. */}
+              <h2 id="drawer-heading" className="text-lg font-medium text-white flex items-start gap-3">
+                {/* Stays clamped when expanded: the full text renders below,
+                    and unclamping the title too would show the same words
+                    twice. */}
+                <span className="line-clamp-2">{heading.title}</span>
                 {currentJob && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
+                  <span className="px-2 py-0.5 mt-1 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
                     {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                 )}
               </h2>
+              {heading.truncated && (
+                <button
+                  type="button"
+                  onClick={() => setExpandedFor(titleExpanded ? null : taskId ?? null)}
+                  aria-expanded={titleExpanded}
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
+                >
+                  {titleExpanded ? "Show less" : "Show full task"}
+                  {/* Says where the title came from. A model-written summary
+                      standing in for what the user typed has to be labelled as
+                      one — silently showing a paraphrase of their own words
+                      back to them is how they stop trusting the page. */}
+                  {heading.fromArchitect && !titleExpanded && (
+                    <span className="text-zinc-600">· summarised by the Architect</span>
+                  )}
+                </button>
+              )}
+              {titleExpanded && (
+                <p className="mt-2 text-sm text-zinc-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                  {currentJob?.task}
+                </p>
+              )}
             <p className="text-sm text-zinc-400 font-mono mt-1">
               {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
               {taskId}
@@ -758,7 +804,15 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
               <div key={task.id} id={`task-${task.id}`} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl scroll-mt-24 target:ring-2 target:ring-white/20 target:bg-white/5 transition-all">
                 <div className="flex justify-between gap-4">
                   <div className="min-w-0">
-                    {task.task && <div className="text-sm text-white">{task.task}</div>}
+                    {/* Clamped for the same reason as the header: a task card
+                        that reprints a whole issue report buries the status,
+                        the id and the timing that the card exists to show. The
+                        header above already offers the full text. */}
+                    {task.task && (
+                      <div className="text-sm text-white line-clamp-2" title={task.task}>
+                        {task.task}
+                      </div>
+                    )}
                     <span className="font-mono text-xs text-zinc-500 break-all">{task.id}</span>
                   </div>
                   <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2 h-fit shrink-0">
