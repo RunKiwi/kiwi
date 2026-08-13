@@ -443,17 +443,17 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
 	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
 		log.Printf("Invalid task ID format: %s", spec.ID)
-		return taskResult{detail: "invalid task ID format"}
+		return taskResult{detail: "invalid task ID format", events: prog.all()}
 	}
 
 	if spec.File != "" && !filepath.IsLocal(spec.File) {
 		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
-		return taskResult{detail: "file path escapes worktree"}
+		return taskResult{detail: "file path escapes worktree", events: prog.all()}
 	}
 	for _, f := range spec.Files {
 		if !filepath.IsLocal(f) {
 			log.Printf("Task %s: file path %q escapes worktree", spec.ID, f)
-			return taskResult{detail: "file path escapes worktree"}
+			return taskResult{detail: "file path escapes worktree", events: prog.all()}
 		}
 	}
 
@@ -478,14 +478,14 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		cloneToken, err := d.resolveGitToken(ctx, spec.ID, leaseID, creds)
 		if err != nil {
 			log.Printf("Failed to resolve git credential for task %s: %v", spec.ID, err)
-			return taskResult{detail: truncateDetail(err.Error())}
+			return taskResult{detail: truncateDetail(err.Error()), events: prog.all()}
 		}
 		if err := reportSetupPhase(prog, "clone", "clone: "+spec.RepoURL, spec.RepoURL, func() error {
 			return d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath,
 				gitcache.WithToken(cloneToken))
 		}); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-			return taskResult{detail: "failed to provision worktree"}
+			return taskResult{detail: "failed to provision worktree", events: prog.all()}
 		}
 		defer func(url, path string) {
 			log.Printf("Cleaning up worktree: %s", path)
@@ -497,7 +497,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
 		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 			log.Printf("Failed to create fallback sandbox dir: %v", err)
-			return taskResult{detail: "failed to create fallback sandbox dir"}
+			return taskResult{detail: "failed to create fallback sandbox dir", events: prog.all()}
 		}
 	}
 
@@ -549,7 +549,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		reason := fmt.Sprintf("no API key configured for the %s provider that model %q needs — add it under Integrations",
 			providerNameForModel(spec.Model), spec.Model)
 		log.Printf("Task %s: %s", spec.ID, reason)
-		return taskResult{detail: reason}
+		return taskResult{detail: reason, events: prog.all()}
 	}
 
 	// test_cmd is optional. When the submitter did not supply one, infer it from
@@ -564,7 +564,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 
 	if testCmd == "" {
-		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
+		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", events: prog.all()}
 	}
 
 	// Pick the image from what the repository declares, using the test command
@@ -605,7 +605,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 			return nil
 		})
 		if err != nil {
-			return taskResult{detail: installDetail}
+			return taskResult{detail: installDetail, events: prog.all()}
 		}
 	}
 	// What the installed tree currently satisfies. Compared before each

@@ -113,7 +113,7 @@ type ProgressReq struct {
 	// PhaseSince is when the current Phase started, so the dashboard can show
 	// how long this step has actually been running — not just that the feed
 	// is still alive (which ProgressAt on the receiving end already answers).
-	PhaseSince time.Time `json:"phase_since,omitempty"`
+	PhaseSince time.Time `json:"phase_since,omitzero"`
 }
 
 // SessionCheckpointReq carries a session's durable position and the events that

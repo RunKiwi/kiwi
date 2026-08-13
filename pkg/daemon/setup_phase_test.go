@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
 // A successful step reports itself as the live activity before it runs and
@@ -74,5 +78,32 @@ func TestReportSetupPhase_NilReporterIsSafe(t *testing.T) {
 	err := reportSetupPhase(p, "install", "install: npm ci", "npm ci", func() error { return nil })
 	if err != nil {
 		t.Fatalf("reportSetupPhase with nil reporter: %v", err)
+	}
+}
+
+// executeTask's early returns must carry whatever the progressReporter has
+// already recorded — otherwise a setup-phase failure event (recorded by
+// reportSetupPhase, proved above) never reaches the Control Plane, because
+// reportResult only ever sees taskResult.events. This exercises the cheapest
+// early return, the ID-sanitization check, so it needs no git/docker/creds:
+// a pre-populated event on prog is a stand-in for what a real clone/install
+// failure would have added before executeTask got this far.
+func TestExecuteTask_EarlyReturnCarriesProgressEvents(t *testing.T) {
+	p := &progressReporter{}
+	p.add(ver.TaskEvent{Phase: "clone", Outcome: "error", Detail: "could not read Username"})
+
+	d := &Daemon{}
+	spec := agent.WorkerSpec{ID: "bad id with spaces"}
+
+	res := d.executeTask(context.Background(), spec, nil, p, "lease-1")
+
+	if res.detail != "invalid task ID format" {
+		t.Fatalf("detail = %q, want %q", res.detail, "invalid task ID format")
+	}
+	if len(res.events) != 1 {
+		t.Fatalf("events = %+v, want the 1 pre-populated event to survive", res.events)
+	}
+	if res.events[0].Phase != "clone" || res.events[0].Outcome != "error" {
+		t.Errorf("unexpected event: %+v", res.events[0])
 	}
 }
