@@ -271,6 +271,10 @@ type jobProgressTask struct {
 	// ProgressAt is when the daemon last reported. A timestamp that stops
 	// advancing is how a hung run distinguishes itself from a slow one.
 	ProgressAt *time.Time `json:"progress_at,omitempty"`
+	// PhaseSince is when the current Phase started — how long this step has
+	// actually been running, distinct from ProgressAt (whether the feed is
+	// still alive at all).
+	PhaseSince *time.Time `json:"phase_since,omitempty"`
 }
 
 // handleJobProgress serves GET /api/v1/jobs/{id}/progress — what is happening
@@ -307,6 +311,7 @@ func (s *Server) handleJobProgress(w http.ResponseWriter, r *http.Request, orgID
 			p.Output = *t.ProgressOutput
 		}
 		p.ProgressAt = t.ProgressAt
+		p.PhaseSince = t.ProgressPhaseSince
 		out = append(out, p)
 	}
 

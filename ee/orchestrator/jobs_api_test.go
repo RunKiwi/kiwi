@@ -262,3 +262,51 @@ func TestSpecStrings(t *testing.T) {
 		t.Errorf("expected nil for string value, got %v", got)
 	}
 }
+
+// handleJobProgress must carry phase_since through to the dashboard, so a
+// running task's live indicator can show how long its current phase has been
+// going — the same information the daemon reported, not re-derived.
+func TestHandleJobProgress_IncludesPhaseSince(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(
+		&store.Organization{}, &store.OrgLimits{}, &store.QueuedTask{},
+		&store.Credential{}, &store.Daemon{}, &store.DaemonJoinToken{}, &store.Job{},
+	); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st := store.NewPostgresStore(db)
+	srv := &Server{db: db, storage: st}
+
+	since := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	phase := "install: npm ci"
+	task := store.QueuedTask{
+		ID: "j1-t1", OrgID: "org-1", JobID: "j1", Status: store.TaskLeased,
+		ProgressPhase: &phase, ProgressPhaseSince: &since,
+	}
+	if err := st.DB().Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/j1/progress", nil)
+	rr := httptest.NewRecorder()
+	srv.handleJobProgress(rr, req, "org-1", "j1")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d. body: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Tasks []jobProgressTask `json:"tasks"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Tasks) != 1 {
+		t.Fatalf("tasks len: got %d, want 1", len(resp.Tasks))
+	}
+	if resp.Tasks[0].PhaseSince == nil || !resp.Tasks[0].PhaseSince.Equal(since) {
+		t.Errorf("PhaseSince = %v, want %v", resp.Tasks[0].PhaseSince, since)
+	}
+}
