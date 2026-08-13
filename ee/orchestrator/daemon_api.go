@@ -808,7 +808,7 @@ func (s *Server) handleDaemonProgress(w http.ResponseWriter, r *http.Request) {
 	// reassigned lease means these events describe a run that has been
 	// abandoned, so storing them would interleave two runs' phases in one
 	// timeline. Nothing is written when it does not apply.
-	applied, err := s.storage.RecordTaskProgress(r.Context(), req.TaskID, req.LeaseID, req.Phase, summarize(req.OutputTail, 4000))
+	applied, err := s.storage.RecordTaskProgress(r.Context(), req.TaskID, req.LeaseID, req.Phase, summarize(req.OutputTail, 4000), req.PhaseSince)
 	if err != nil {
 		log.Printf("[daemon] record progress for task %s: %v", req.TaskID, err)
 		w.WriteHeader(http.StatusNoContent)

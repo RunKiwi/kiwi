@@ -443,17 +443,17 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// Sanitize spec.ID to prevent path traversal into the cache dir.
 	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, spec.ID); !matched {
 		log.Printf("Invalid task ID format: %s", spec.ID)
-		return taskResult{detail: "invalid task ID format"}
+		return taskResult{detail: "invalid task ID format", events: prog.all()}
 	}
 
 	if spec.File != "" && !filepath.IsLocal(spec.File) {
 		log.Printf("Task %s: file path %q escapes worktree", spec.ID, spec.File)
-		return taskResult{detail: "file path escapes worktree"}
+		return taskResult{detail: "file path escapes worktree", events: prog.all()}
 	}
 	for _, f := range spec.Files {
 		if !filepath.IsLocal(f) {
 			log.Printf("Task %s: file path %q escapes worktree", spec.ID, f)
-			return taskResult{detail: "file path escapes worktree"}
+			return taskResult{detail: "file path escapes worktree", events: prog.all()}
 		}
 	}
 
@@ -478,12 +478,14 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		cloneToken, err := d.resolveGitToken(ctx, spec.ID, leaseID, creds)
 		if err != nil {
 			log.Printf("Failed to resolve git credential for task %s: %v", spec.ID, err)
-			return taskResult{detail: truncateDetail(err.Error())}
+			return taskResult{detail: truncateDetail(err.Error()), events: prog.all()}
 		}
-		if err := d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath,
-			gitcache.WithToken(cloneToken)); err != nil {
+		if err := reportSetupPhase(prog, "clone", "clone: "+spec.RepoURL, spec.RepoURL, func() error {
+			return d.gitCache.GetJobWorktree(ctx, spec.RepoURL, spec.Ref, jobBranch, worktreePath,
+				gitcache.WithToken(cloneToken))
+		}); err != nil {
 			log.Printf("Failed to provision worktree for task %s: %v", spec.ID, err)
-			return taskResult{detail: "failed to provision worktree"}
+			return taskResult{detail: "failed to provision worktree", events: prog.all()}
 		}
 		defer func(url, path string) {
 			log.Printf("Cleaning up worktree: %s", path)
@@ -495,7 +497,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		worktreePath = filepath.Join(os.TempDir(), "kiwi-sandbox", spec.ID)
 		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 			log.Printf("Failed to create fallback sandbox dir: %v", err)
-			return taskResult{detail: "failed to create fallback sandbox dir"}
+			return taskResult{detail: "failed to create fallback sandbox dir", events: prog.all()}
 		}
 	}
 
@@ -547,7 +549,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		reason := fmt.Sprintf("no API key configured for the %s provider that model %q needs — add it under Integrations",
 			providerNameForModel(spec.Model), spec.Model)
 		log.Printf("Task %s: %s", spec.ID, reason)
-		return taskResult{detail: reason}
+		return taskResult{detail: reason, events: prog.all()}
 	}
 
 	// test_cmd is optional. When the submitter did not supply one, infer it from
@@ -562,7 +564,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	}
 
 	if testCmd == "" {
-		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified"}
+		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", events: prog.all()}
 	}
 
 	// Pick the image from what the repository declares, using the test command
@@ -593,8 +595,17 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 	// this is separated from verification rather than solved by relaxing
 	// --network none.
 	if step := inferInstallStep(worktreePath); step != nil {
-		if detail, ok := d.installDependencies(taskCtx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv); !ok {
-			return taskResult{detail: detail}
+		var installDetail string
+		err := reportSetupPhase(prog, "install", "install: "+step.Command, step.Command, func() error {
+			var ok bool
+			installDetail, ok = d.installDependencies(taskCtx, worktreePath, sandboxCfg, step, spec.ID, cacheEnv)
+			if !ok {
+				return errors.New(installDetail)
+			}
+			return nil
+		})
+		if err != nil {
+			return taskResult{detail: installDetail, events: prog.all()}
 		}
 	}
 	// What the installed tree currently satisfies. Compared before each
@@ -771,6 +782,35 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		res.detail = offlineBlocked
 	}
 	return res
+}
+
+// reportSetupPhase runs fn, reporting it as the live activity before it starts
+// and recording one durable Step-0 event with its outcome and duration once it
+// finishes.
+//
+// Setup (clone, initial dependency install) happens before session.Runner
+// exists, so it is the one part of a run with no OnEvent/OnActivity of its
+// own to hook — this gives it the same live-plus-historical signal every
+// later phase already has via those. fallbackDetail is what a SUCCESSFUL run
+// records, since a clean install has nothing more informative to say than the
+// command itself; a failing fn's own error message is used instead, since
+// that names what actually went wrong.
+func reportSetupPhase(prog *progressReporter, phase, activity, fallbackDetail string, fn func() error) error {
+	prog.setActivity(activity, "")
+	start := time.Now()
+	err := fn()
+	outcome, detail := "ok", fallbackDetail
+	if err != nil {
+		outcome, detail = "error", err.Error()
+	}
+	prog.add(ver.TaskEvent{
+		Step:       0,
+		Phase:      phase,
+		Outcome:    outcome,
+		Detail:     detail,
+		DurationMs: time.Since(start).Milliseconds(),
+	})
+	return err
 }
 
 // installDependencies runs phase A of the sandbox: the repository's own install

@@ -44,6 +44,7 @@ func newSeamTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/daemon/register", s.handleDaemonRegister)
 	mux.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
+	mux.HandleFunc("/api/v1/daemon/progress", s.handleDaemonProgress)
 	mux.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
 
 	ts := httptest.NewServer(mux)
@@ -175,6 +176,61 @@ func TestDaemonSeam_EndToEnd(t *testing.T) {
 	}
 	if res2 != nil {
 		t.Errorf("expected no work (nil), got %+v", res2)
+	}
+}
+
+// A progress report's PhaseSince must reach the queued_tasks row untouched —
+// this is the field the dashboard uses to show how long the CURRENT phase has
+// been running, distinct from when the daemon last reported at all.
+func TestDaemonSeam_ProgressPersistsPhaseSince(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := st.EnqueueTask(ctx, &store.QueuedTask{
+		ID: "job1-w0", OrgID: "o1", JobID: "job1", Status: store.TaskQueued,
+		Spec: map[string]interface{}{"id": "job1-w0", "task": "fix the thing", "model": "sonnet"},
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	res, err := d.client.Heartbeat(ctx, daemon.HeartbeatReq{
+		PubKey: d.encPubB64(), SignPubKey: d.signPubB64(), Timestamp: time.Now().Unix(),
+	})
+	if err != nil || res == nil || len(res.Specs) != 1 {
+		t.Fatalf("heartbeat: %v %+v", err, res)
+	}
+
+	since := time.Now().Add(-45 * time.Second).UTC().Truncate(time.Second)
+	if err := d.client.ReportProgress(ctx, daemon.ProgressReq{
+		TaskID: res.Specs[0].ID, LeaseID: res.LeaseID, SignPubKey: d.signPubB64(),
+		Phase: "install: npm ci", PhaseSince: since,
+	}); err != nil {
+		t.Fatalf("report progress: %v", err)
+	}
+
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", "job1-w0").Error; err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.ProgressPhaseSince == nil || !task.ProgressPhaseSince.Equal(since) {
+		t.Errorf("ProgressPhaseSince = %v, want %v", task.ProgressPhaseSince, since)
+	}
+	if task.ProgressPhase == nil || *task.ProgressPhase != "install: npm ci" {
+		t.Errorf("ProgressPhase = %v, want %q", task.ProgressPhase, "install: npm ci")
 	}
 }
 

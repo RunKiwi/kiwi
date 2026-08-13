@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Terminal } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import { RunTimeline } from "@/components/RunTimeline";
 import { orbStateForPhase } from "@/lib/orbState";
+import { elapsedSince } from "@/lib/progressTime";
 import type { JobProgressTask } from "@/lib/api";
 
 /**
@@ -33,6 +34,14 @@ function staleness(progressAt?: string): number | null {
   const t = Date.parse(progressAt);
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.round((Date.now() - t) / 1000));
+}
+
+/** Seconds as "12s" or "4m32s" — short enough for an inline badge. */
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m${s.toString().padStart(2, "0")}s`;
 }
 
 function OutputTail({ text }: { text: string }) {
@@ -85,6 +94,7 @@ export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
       {running.map(t => {
         const { kind, command } = splitPhase(t.phase ?? "");
         const since = staleness(t.progress_at);
+        const elapsed = elapsedSince(t.phase_since);
         return (
           <div key={t.task_id} className="rounded-lg bg-black/30 border border-white/5 p-2.5 flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs">
@@ -101,6 +111,14 @@ export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
               />
               <span className="text-zinc-300">{kind || "working"}</span>
               {command && <code className="text-[11px] text-zinc-500 font-mono truncate">{command}</code>}
+              {/* How long the CURRENT phase has taken — distinct from the
+                  staleness warning below, which is about whether the feed
+                  itself is still arriving. */}
+              {elapsed !== null && (
+                <span className="text-[11px] text-zinc-500 font-mono tabular-nums shrink-0">
+                  {formatElapsed(elapsed)}
+                </span>
+              )}
               {/* A timestamp that stops advancing is how a hung run tells itself
                   apart from a slow one, so it is stated rather than hidden. */}
               {since !== null && since > 30 && (

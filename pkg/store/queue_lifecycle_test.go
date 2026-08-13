@@ -276,3 +276,72 @@ func TestHasActiveTasks(t *testing.T) {
 		t.Error("a cancelled task is terminal and must not count as active")
 	}
 }
+
+// RecordTaskProgress must persist when the current phase started, not just
+// what it is — the dashboard uses this to show how long a step has been
+// running, distinct from ProgressAt (when the daemon last reported at all).
+func TestRecordTaskProgress_PersistsPhaseSince(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.EnqueueTask(ctx, &QueuedTask{
+		ID: "j1-a", OrgID: "org1", JobID: "j1",
+		Spec: map[string]interface{}{"task": "fix it"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registerDaemon(t, s, "d1", "org1", "", nil)
+	leased, err := s.LeaseNextTask(ctx, "org1", "d1", "", time.Minute)
+	if err != nil || leased == nil {
+		t.Fatalf("lease: %v %v", leased, err)
+	}
+	leaseID := *leased.LeaseID
+
+	since := time.Now().Add(-90 * time.Second).UTC().Truncate(time.Second)
+	ok, err := s.RecordTaskProgress(ctx, "j1-a", leaseID, "install: npm ci", "", since)
+	if err != nil {
+		t.Fatalf("RecordTaskProgress: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected the write to apply")
+	}
+
+	got := statusOfTask(t, s, "j1-a")
+	if got.ProgressPhaseSince == nil {
+		t.Fatal("ProgressPhaseSince was not persisted")
+	}
+	if !got.ProgressPhaseSince.Equal(since) {
+		t.Errorf("ProgressPhaseSince = %v, want %v", got.ProgressPhaseSince, since)
+	}
+}
+
+// A phase update with a zero PhaseSince (the caller has nothing new to say
+// about timing) must not overwrite a previously recorded value with NULL.
+func TestRecordTaskProgress_ZeroPhaseSinceLeavesExistingValueAlone(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.EnqueueTask(ctx, &QueuedTask{
+		ID: "j1-b", OrgID: "org1", JobID: "j1",
+		Spec: map[string]interface{}{"task": "fix it"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registerDaemon(t, s, "d2", "org1", "", nil)
+	leased, err := s.LeaseNextTask(ctx, "org1", "d2", "", time.Minute)
+	if err != nil || leased == nil {
+		t.Fatalf("lease: %v %v", leased, err)
+	}
+	leaseID := *leased.LeaseID
+
+	since := time.Now().UTC().Truncate(time.Second)
+	if _, err := s.RecordTaskProgress(ctx, "j1-b", leaseID, "install: npm ci", "", since); err != nil {
+		t.Fatalf("first RecordTaskProgress: %v", err)
+	}
+	if _, err := s.RecordTaskProgress(ctx, "j1-b", leaseID, "install: npm ci", "more output", time.Time{}); err != nil {
+		t.Fatalf("second RecordTaskProgress: %v", err)
+	}
+
+	got := statusOfTask(t, s, "j1-b")
+	if got.ProgressPhaseSince == nil || !got.ProgressPhaseSince.Equal(since) {
+		t.Errorf("ProgressPhaseSince = %v, want unchanged %v", got.ProgressPhaseSince, since)
+	}
+}

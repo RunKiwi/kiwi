@@ -744,6 +744,10 @@ export interface JobProgressTask {
   phase?: string;
   output_tail?: string;
   progress_at?: string;
+  // When the current `phase` started — how long this step has actually been
+  // running. Distinct from progress_at, which is when the daemon last said
+  // anything at all.
+  phase_since?: string;
 }
 
 export interface RecommendedModel {
