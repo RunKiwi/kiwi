@@ -92,15 +92,20 @@ type QueuedTask struct {
 	ProgressPhase  *string    `json:"progress_phase"`
 	ProgressOutput *string    `json:"progress_output"`
 	ProgressAt     *time.Time `json:"progress_at"`
-	ResultURL      *string    `json:"result_url"`
-	ResultDetail   *string    `json:"result_detail"`
-	CostUSD        float64    `gorm:"not null;default:0" json:"cost_usd"`
-	Funding        string     `gorm:"not null;default:'byok'" json:"funding"`
-	TokensIn       int64      `gorm:"not null;default:0" json:"tokens_in"`
-	TokensOut      int64      `gorm:"not null;default:0" json:"tokens_out"`
-	MeteredAt      *time.Time `json:"metered_at"`
-	CreatedAt      time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
-	UpdatedAt      time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`
+	// ProgressPhaseSince is when ProgressPhase started, distinct from
+	// ProgressAt (when the daemon last reported anything at all). Set once per
+	// phase change and left alone on every subsequent report of the same
+	// phase — see progressReporter.setActivity in pkg/daemon.
+	ProgressPhaseSince *time.Time `json:"progress_phase_since"`
+	ResultURL          *string    `json:"result_url"`
+	ResultDetail       *string    `json:"result_detail"`
+	CostUSD            float64    `gorm:"not null;default:0" json:"cost_usd"`
+	Funding            string     `gorm:"not null;default:'byok'" json:"funding"`
+	TokensIn           int64      `gorm:"not null;default:0" json:"tokens_in"`
+	TokensOut          int64      `gorm:"not null;default:0" json:"tokens_out"`
+	MeteredAt          *time.Time `json:"metered_at"`
+	CreatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`
 }
 
 func (QueuedTask) TableName() string { return "queued_tasks" }

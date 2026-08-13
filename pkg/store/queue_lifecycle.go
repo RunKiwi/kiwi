@@ -187,7 +187,7 @@ func (s *PostgresStore) HasActiveTasks(ctx context.Context, orgID string) (bool,
 //
 // Returns false when the write did not apply, which the caller treats as
 // informational — progress is best-effort and must never fail a run.
-func (s *PostgresStore) RecordTaskProgress(ctx context.Context, taskID, leaseID, phase, output string) (bool, error) {
+func (s *PostgresStore) RecordTaskProgress(ctx context.Context, taskID, leaseID, phase, output string, phaseSince time.Time) (bool, error) {
 	now := time.Now()
 	updates := map[string]interface{}{
 		"progress_at": &now,
@@ -197,6 +197,13 @@ func (s *PostgresStore) RecordTaskProgress(ctx context.Context, taskID, leaseID,
 	}
 	if output != "" {
 		updates["progress_output"] = &output
+	}
+	// A zero PhaseSince means the caller has nothing new to say about timing
+	// (e.g. an output-only update on an unchanged phase) — leaving the column
+	// untouched keeps the previously recorded start time, rather than the
+	// write racing it back to NULL.
+	if !phaseSince.IsZero() {
+		updates["progress_phase_since"] = &phaseSince
 	}
 
 	res := s.db.WithContext(ctx).
