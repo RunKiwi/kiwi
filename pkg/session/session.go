@@ -566,7 +566,7 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 		r.logf("[session] round %d: %s\n", st.round, st.spec.Objective)
 		r.save(ctx, st, st.round, st.attempts)
 
-		note, err := r.runRound(ctx, task, st)
+		report, err := r.runRound(ctx, task, st)
 		if err != nil {
 			return r.result(st, false, fmt.Sprintf("round %d failed: %v", st.round, err)), err
 		}
@@ -615,7 +615,10 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 			Round:           st.round,
 			Diff:            diff,
 			FilesChanged:    files,
-			HandoffNote:     note,
+			HandoffNote:     report.Note,
+			Answers:         report.Answers,
+			NewQuestions:    report.NewQuestions,
+			Decisions:       report.Decisions,
 			VerifyOutput:    out,
 			VerifyPassed:    passed,
 			History:         st.history,
@@ -630,8 +633,12 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 		r.emit(st, Event{Round: st.round, Phase: "review", Outcome: review.Verdict, Detail: review.Rationale, DurationMs: ms(start),
 			InputTokens: reviewUsage.InputTokens, OutputTokens: reviewUsage.OutputTokens, CostUSD: reviewUsage.CostUSD})
 
-		st.history = append(st.history, fmt.Sprintf("- round %d: asked for %q; verification %s; reviewer said %s — %s",
-			st.round, firstLine(st.spec.Objective), passFail(passed), review.Verdict, firstLine(review.Rationale)))
+		exchange := ""
+		if n := len(report.Answers) + len(report.NewQuestions); n > 0 {
+			exchange = fmt.Sprintf(" (%d answer(s), %d new question(s))", len(report.Answers), len(report.NewQuestions))
+		}
+		st.history = append(st.history, fmt.Sprintf("- round %d: asked for %q; verification %s; reviewer said %s — %s%s",
+			st.round, firstLine(st.spec.Objective), passFail(passed), review.Verdict, firstLine(review.Rationale), exchange))
 
 		switch review.Verdict {
 		case VerdictApprove:
@@ -705,8 +712,8 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 }
 
 // runRound drives one Implementer conversation to its end and returns the
-// handoff note it left.
-func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, error) {
+// report it left.
+func (r *Runner) runRound(ctx context.Context, task Task, st *state) (Report, error) {
 	cfg := r.Config
 	roundCtx, cancel := context.WithTimeout(ctx, cfg.RoundDeadline)
 	defer cancel()
@@ -792,7 +799,7 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			if roundCtx.Err() != nil {
 				return r.noteOrDefault("the round ran out of time before the implementer finished"), nil
 			}
-			return "", fmt.Errorf("implementer turn failed: %w", err)
+			return Report{}, fmt.Errorf("implementer turn failed: %w", err)
 		}
 		// Detail is the model's own prose, which is what it said it was doing
 		// between tool calls; the tool calls themselves are emitted below.
@@ -827,7 +834,7 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 			if err != nil {
 				r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: "error", Tool: call.Name,
 					Input: string(call.Input), Detail: err.Error(), DurationMs: ms(start)})
-				return "", err
+				return Report{}, err
 			}
 			r.emit(st, Event{Round: st.round, Phase: "tool", Outcome: okErr(!out.IsError), Tool: call.Name,
 				Input: string(call.Input), Detail: out.Content, DurationMs: ms(start)})
@@ -871,20 +878,20 @@ func (r *Runner) runRound(ctx context.Context, task Task, st *state) (string, er
 	return r.noteOrDefault(fmt.Sprintf("the round reached its limit of %d tool calls", cfg.MaxToolCallsPerRound)), nil
 }
 
-// finished reports the handoff note if the Implementer called finish.
-func (r *Runner) finished() (bool, string) {
-	f, ok := r.Tools.(interface{ Finished() (bool, string) })
+// finished reports the report if the Implementer called finish.
+func (r *Runner) finished() (bool, Report) {
+	f, ok := r.Tools.(interface{ Finished() (bool, Report) })
 	if !ok {
-		return false, ""
+		return false, Report{}
 	}
 	return f.Finished()
 }
 
-func (r *Runner) noteOrDefault(fallback string) string {
-	if done, note := r.finished(); done && strings.TrimSpace(note) != "" {
-		return note
+func (r *Runner) noteOrDefault(fallback string) Report {
+	if done, rep := r.finished(); done && strings.TrimSpace(rep.Note) != "" {
+		return rep
 	}
-	return fallback
+	return Report{Note: fallback}
 }
 
 // compact asks the model to summarise its own round so far, then reports the
@@ -971,6 +978,10 @@ How this works:
   install tool, which is the one brokered exception.
 - You cannot run git. Committing, branching and pushing are handled for you; just leave the working
   tree in the state you want reviewed.
+- If your brief lists open questions, answer them via finish's "answers" field, in the same order. If
+  you cannot resolve one from the code, put it in "new_questions" instead of guessing — the reviewer
+  will see it and decide, rather than you silently picking one interpretation. Note any implementation
+  choices worth knowing in "decisions", even ones nobody asked about.
 `)
 	if testCmd != "" {
 		fmt.Fprintf(&b, "\nThe verification command for this repository is: %s\n", testCmd)

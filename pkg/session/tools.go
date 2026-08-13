@@ -75,9 +75,9 @@ type FileTools struct {
 	// MaxWriteBytes caps a single write_file. Zero uses a default.
 	MaxWriteBytes int
 
-	// finished records the note passed to ToolFinish, if any.
+	// finished records the report passed to ToolFinish, if any.
 	finished bool
-	note     string
+	report   Report
 	// read records the paths read this round, so an edit can require that the
 	// model has actually seen the file it is changing. Editing from memory is
 	// how a confident wrong `old_string` turns into a silent no-op or, worse, a
@@ -100,8 +100,8 @@ const (
 	maxGrepContext = 20
 )
 
-// Finished reports whether the Implementer called finish, and its handoff note.
-func (t *FileTools) Finished() (bool, string) { return t.finished, t.note }
+// Finished reports whether the Implementer called finish, and its report.
+func (t *FileTools) Finished() (bool, Report) { return t.finished, t.report }
 
 // Reset clears the per-round finish state so one FileTools can serve several
 // rounds — the worktree is the same, only the conversation is new.
@@ -112,7 +112,7 @@ func (t *FileTools) Finished() (bool, string) { return t.finished, t.note }
 // happens to have opened at some point.
 func (t *FileTools) Reset() {
 	t.finished = false
-	t.note = ""
+	t.report = Report{}
 	t.read = nil
 }
 
@@ -178,9 +178,18 @@ func (t *FileTools) Defs() []provider.ToolDef {
 		{
 			Name: ToolFinish,
 			Description: "Call this when the round's work is done. Pass a handoff note: what you changed, what you found, " +
-				"and anything the next round should know. Your conversation ends here, so put in the note anything worth remembering.",
+				"and anything the next round should know. If your brief listed open questions, answer them in `answers`, " +
+				"in the same order — if you could not resolve one, put it in `new_questions` instead of guessing. Record " +
+				"any implementation choices worth the reviewer knowing in `decisions`. Your conversation ends here, so put " +
+				"in the note anything else worth remembering.",
 			Properties: map[string]any{
 				"note": map[string]any{"type": "string", "description": "Handoff note for the reviewer and the next round."},
+				"answers": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Answers to the brief's open questions, in the same order they were asked."},
+				"new_questions": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Things you could not resolve this round — hand them back instead of guessing."},
+				"decisions": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Implementation choices worth the reviewer knowing, even if nothing asked about them."},
 			},
 			Required: []string{"note"},
 		},
@@ -344,13 +353,16 @@ func (t *FileTools) Call(ctx context.Context, call provider.ToolCall) (provider.
 
 	case ToolFinish:
 		var args struct {
-			Note string `json:"note"`
+			Note         string   `json:"note"`
+			Answers      []string `json:"answers"`
+			NewQuestions []string `json:"new_questions"`
+			Decisions    []string `json:"decisions"`
 		}
 		if err := json.Unmarshal(call.Input, &args); err != nil {
 			return res(fmt.Sprintf("could not parse arguments: %v", err), true), nil
 		}
 		t.finished = true
-		t.note = args.Note
+		t.report = Report{Note: args.Note, Answers: args.Answers, NewQuestions: args.NewQuestions, Decisions: args.Decisions}
 		return res("acknowledged", false), nil
 	}
 
