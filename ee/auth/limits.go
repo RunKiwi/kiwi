@@ -49,7 +49,22 @@ func FreeLimits(orgID string) *OrgLimits {
 		OrgID:             orgID,
 		MaxConcurrentJobs: 1,
 		MaxWorkersPerJob:  2,
-		MaxBudgetPerJob:   0.50,
+		// Raised from 0.50 to 2.00, 2026-08-13. The free-fleet daemon's own
+		// -session-budget flag defaulted to $5.00 and, until a bug in
+		// ee/provisioner's launchArgs was fixed the same day, that $5.00 was
+		// what every Free session actually ran under — never the org's real
+		// 0.50 cap, which was only enforced (inconsistently — see
+		// pkg/store.effectiveOrgLimits) at lease time against accumulated
+		// spend. Session mode's own round/timeout math was calibrated against
+		// that de facto $5 ceiling ("$5 buys three or four rounds" — see the
+		// TaskTimeoutSeconds comment below), not 0.50. Once the daemon-side bug
+		// was fixed, 0.50 became the real, binding cap for the first time — and
+		// separately, the Architect gained read_file/grep tool calls the same
+		// day, adding real exploration cost on top of an already-tight number.
+		// 2.00 is a deliberate step down from the de facto $5 Free had been
+		// running at, not a guess: real headroom for both, still 60% cheaper
+		// than what was actually happening in production for weeks.
+		MaxBudgetPerJob: 2.00,
 		// A real dollar value, not the 0 sentinel that GetOrgLimits rewrites at
 		// read time — this profile is also returned directly as a fallback, where
 		// 0 would read as a hard $0/month cap and block every submit. The Free
@@ -64,6 +79,8 @@ func FreeLimits(orgID string) *OrgLimits {
 		// mode has different economics — $5 buys three or four rounds, each with
 		// an Architect plan, an agentic Implementer and a review — and there the
 		// clock was binding, cutting off runs that still had budget to spend.
+		// (That "$5" is not a stale reference: see the MaxBudgetPerJob comment
+		// above — it is the number this was actually calibrated against.)
 		//
 		// Still short of the 1800 every other plan gets (DefaultLimits), because
 		// wall clock is what Free meters: this is 20 of the org's 500

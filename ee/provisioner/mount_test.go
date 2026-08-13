@@ -100,14 +100,14 @@ func TestLaunchArgs_HostRootIsOverridable(t *testing.T) {
 
 // The rest of the launch contract must survive the refactor.
 func TestLaunchArgs_KeepsExistingBehaviour(t *testing.T) {
-	args := launchArgs("kiwi-free-org-o1", "reg/kiwidaemon:latest", "o1", auth.SharedFreeFleet, "tok", "https://api", 0.50, true)
+	args := launchArgs("kiwi-free-org-o1", "reg/kiwidaemon:latest", "o1", auth.SharedFreeFleet, "tok", "https://api", 2.00, true)
 	joined := strings.Join(args, " ")
 
 	for _, want := range []string{
 		"--pull=always",                   // a moving tag must be re-fetched
 		"KIWI_SANDBOX_RUNTIME=runsc",      // free work runs under gVisor
 		"KIWI_JOIN_TOKEN=tok",             // single-use registration secret
-		"KIWI_SESSION_BUDGET_USD=0.50",    // the org's own cap, not the binary's $5 default
+		"KIWI_SESSION_BUDGET_USD=2.00",    // the org's own cap, not the binary's $5 default
 		dockerSocket + ":" + dockerSocket, // sandboxes are sibling containers
 		"-api-url https://api",            // daemons must reach the public CP
 		"reg/kiwidaemon:latest",           // the image itself

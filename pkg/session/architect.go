@@ -131,7 +131,13 @@ func (a *LLMArchitect) complete(ctx context.Context, prompt string) (string, err
 // text turn — the same JSON response Plan/Review expect from Complete, just
 // arrived at after looking rather than guessing.
 func (a *LLMArchitect) exploreAndAnswer(ctx context.Context, runner provider.ToolRunner, prompt string) (string, error) {
-	conv := runner.StartConversation(architectSystem+architectToolsAddendum, a.Tools.Defs(), provider.ConversationOpts{})
+	// Cache: true matters more here than for the Implementer. A tool-using
+	// conversation re-sends its whole transcript on every turn (see Pricing's
+	// own doc comment), and without caching every one of those resends is
+	// billed as fresh input at the full rate — for an Opus-priced Architect
+	// exploring across several turns, that is most of the bill, not a rounding
+	// error.
+	conv := runner.StartConversation(architectSystem+architectToolsAddendum, a.Tools.Defs(), provider.ConversationOpts{Cache: true})
 	maxCalls := a.MaxToolCalls
 	if maxCalls <= 0 {
 		maxCalls = defaultArchitectMaxToolCalls

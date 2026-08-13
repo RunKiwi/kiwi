@@ -58,11 +58,37 @@ type TaskDiagnosis struct {
 // effectiveOrgLimits loads an org's limits, falling back to the platform
 // defaults when the org has no row. LeaseNextTask and DiagnoseQueuedTasks both
 // use it so the explanation cannot drift from the enforcement it describes.
+//
+// The no-row fallback is plan-aware for the same reason ee/auth.GetOrgLimits
+// is: a Free org that hasn't had an explicit row written yet must not be
+// treated as if it had the standard profile. This was missing entirely
+// before — every Free org with no row got MaxBudgetPerJob 5.00 here,
+// completely independent of whatever ee/auth.FreeLimits said, because
+// LeaseNextTask's per-job spend check (below, "job.CostUSD >= limits.
+// MaxBudgetPerJob") reads through this function, not through auth.GetOrgLimits.
+//
+// pkg/store cannot import ee/auth — the licensing boundary is that
+// Apache-2.0 code must never import ee/'s BSL code — so the Free and default
+// profiles are duplicated here rather than shared. Keep both in sync with
+// ee/auth.FreeLimits/DefaultLimits by hand; the non-Free branch already was.
 func effectiveOrgLimits(tx *gorm.DB, orgID string) (OrgLimits, error) {
 	var limits OrgLimits
 	if err := tx.First(&limits, "org_id = ?", orgID).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return limits, err
+		}
+		var org Organization
+		if e := tx.Select("plan").First(&org, "id = ?", orgID).Error; e == nil && org.Plan == "free" {
+			return OrgLimits{
+				OrgID:                   orgID,
+				MaxConcurrentJobs:       1,
+				MaxWorkersPerJob:        2,
+				MaxBudgetPerJob:         2.00,
+				MaxBudgetPerMonth:       500.00,
+				MaxAgentMinutesPerMonth: 500,
+				TaskTimeoutSeconds:      1200,
+				MaxSandboxDiskMB:        512,
+			}, nil
 		}
 		limits = OrgLimits{
 			OrgID:              orgID,

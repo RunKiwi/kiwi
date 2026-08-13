@@ -34,7 +34,7 @@ func newSeamTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	}
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.QueuedTask{},
-		&store.Credential{}, &store.Daemon{}, &store.DaemonJoinToken{},
+		&store.Credential{}, &store.Daemon{}, &store.DaemonJoinToken{}, &store.Job{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

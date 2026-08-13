@@ -99,8 +99,8 @@ func TestPoller_Provision(t *testing.T) {
 	// The org has no explicit org_limits row and Plan == "free", so this must
 	// come from auth.FreeLimits — not the launcher's own $5.00 default, which
 	// is exactly the bug this pins.
-	if call.SessionBudgetUSD != 0.50 {
-		t.Errorf("session budget = %.2f, want the org's Free cap of 0.50", call.SessionBudgetUSD)
+	if call.SessionBudgetUSD != 2.00 {
+		t.Errorf("session budget = %.2f, want the org's Free cap of 2.00", call.SessionBudgetUSD)
 	}
 	if s := statusOf(t, db, "prov_1"); s != "completed" {
 		t.Errorf("expected status completed, got %s", s)
