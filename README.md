@@ -2,95 +2,128 @@
   <img src="docs/assets/kiwi-logo.svg" width="88" alt="Kiwi logo" />
 </p>
 
-# Kiwi
+<h1 align="center">Kiwi</h1>
 
-**Kiwi runs coding agents inside infrastructure you control, and shows its work.**
+<p align="center"><b>Kiwi runs coding agents inside infrastructure you control, and shows its work.</b></p>
 
-A SaaS **Control Plane** admits a task and hands it to a **Data Plane**, which runs a task-long **Architect** that plans and reviews, driving an agentic **Implementer** with real tool calls — reading, grepping and editing the repository, and re-running your test command in an isolated sandbox each round until the work is done and verified. Then it opens a PR. Run it **managed**, where Kiwi operates the execution, or **BYOC**, where the Data Plane runs in your own cloud and neither code nor credentials leave your VPC.
+<p align="center">
+  <a href="https://github.com/RunKiwi/kiwi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/RunKiwi/kiwi/ci.yml?branch=main&label=CI" alt="CI status" /></a>
+  <a href="https://github.com/RunKiwi/kiwi/actions/workflows/frontend-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/RunKiwi/kiwi/frontend-ci.yml?branch=main&label=frontend" alt="Frontend CI status" /></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/RunKiwi/kiwi" alt="Go version" /></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0%20%2B%20BSL%201.1-blue.svg" alt="License" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
+</p>
 
-Two properties hold on every task, in both modes.
+<p align="center">
+  <a href="https://app.runkiwi.dev"><b>Sign up free →</b></a> ·
+  <a href="https://docs.runkiwi.dev">Docs</a> ·
+  <a href="#quickstart">Self-host it</a> ·
+  <a href="#contributing--context-for-ai">Contributing</a>
+</p>
 
-- **The execution is contained.** Model-generated code runs only as your test command, inside a sandbox with default-deny networking, and never sees an API key. The Actor and Critic run in the daemon process, not the sandbox.
-- **The execution is on the record.** Every proposed edit, every Critic verdict and its reasons, and every test run is persisted per phase with its model, token counts, cost and duration, so you can trace a merged diff back to what produced it and what proved it.
+A **Control Plane** admits a task and hands it to a **Data Plane**, which runs a task-long **Architect** that plans and reviews, driving an agentic **Implementer** with real tool calls — reading, grepping and editing the repository, re-running your test command in an isolated sandbox each round until the work is done and verified. Then it opens a PR.
+
+Run it **managed**, where Kiwi operates the execution, or **BYOC**, where the Data Plane runs in your own cloud and neither code nor credentials leave your VPC.
+
+- **Contained.** Model-generated code only ever runs as your test command, in a sandbox with default-deny networking, and never sees an API key. The Architect and Implementer run in the daemon process, not the sandbox.
+- **On the record.** Every proposed edit, every review verdict, and every test run is persisted per phase — model, tokens, cost, duration — so a merged diff traces back to what produced it and what proved it.
+
+> [!NOTE]
+> **Live, still maturing.** A task flows end to end today: submit one and you get a real PR back. The self-serve **Free tier runs in production** — a signup runs tasks on a Kiwi-operated shared fleet with no setup. Two things are still in build: **Pro** has no self-serve checkout yet (it runs BYOC today, set up by email), and the Firecracker managed-*dedicated* path is written but not deployed. See [Status](#status).
+
+## Contents
+
+[Try it](#try-it) · [Quickstart](#quickstart) · [Architecture](#architecture) · [Features](#features) · [Status](#status) · [Self-hosting](#self-hosting) · [SDKs](#sdks) · [Webhooks](#webhooks) · [Contributing](#contributing--context-for-ai) · [License](#license)
 
 ## Try it
 
-**[Sign up or log in at app.runkiwi.dev →](https://app.runkiwi.dev)** is the fastest way to run Kiwi, with no setup. Sign in with GitHub or Google. Every account starts on the **Free tier**, a Kiwi-operated shared fleet. Connect a repo, add your own model key, submit a task, and the swarm plans it, runs it, and opens a PR.
+**[Sign up or log in at app.runkiwi.dev →](https://app.runkiwi.dev)** is the fastest way to run Kiwi — no setup. Sign in with GitHub or Google, connect a repo, add your own model key, submit a task. Every account starts on the **Free tier**, a Kiwi-operated shared fleet.
 
-Prefer to run it yourself? See the self-host [Quickstart](#quickstart) below.
-
-> [!NOTE]
-> **Live, still maturing.** A task flows end to end: submit one and you get a real PR back (`make local`, below). The self-serve **Free tier runs in production**, so a signup runs tasks on a Kiwi-operated **shared fleet** without contacting us, with per-org daemon processes, a gVisor sandbox and agent-minute metering, served from a Cloud Run control plane plus a Docker + gVisor free-fleet host (see [Deployment](#free-tier-deployment)). Multi-tenant **egress isolation** is live on that host. Two things are still in build: **Pro** has no self-serve checkout, so Pro runs BYOC today and we set it up by email, and the Firecracker managed-*dedicated* path is written but not deployed.
+Prefer to self-host? See [Quickstart](#quickstart) below.
 
 ## Quickstart
 
-One command brings up the whole platform: Control Plane in Docker plus a Data Plane daemon on your host. Put provider keys in `deploy/.env` and it runs real tasks immediately:
+One command brings up the whole platform — Control Plane in Docker, plus a Data Plane daemon on your host. Put provider keys in `deploy/.env` and it runs real tasks immediately:
 
 ```bash
 make local          # Control Plane + daemon; prints the URLs and admin token
 make local-down     # stop         (make local-clean wipes the database)
 ```
 
-Then submit a task (see [the CLI](#2-use-the-kiwi-cli)) or open the dashboard. To bring up the full production stack (Postgres + Control Plane + Caddy TLS + containerized daemon) on a single box, use `make prod` (requires a filled `deploy/.env`; see [`deploy/`](deploy/)).
+Then submit a task via [the CLI](#self-hosting) or the dashboard. `make prod` brings up the full production stack (Postgres + Control Plane + Caddy TLS + containerized daemon) on a single box — see [`deploy/`](deploy/).
 
-## How it works
+## Architecture
 
+```mermaid
+flowchart LR
+    U(["you"]) -- "submit a task" --> CP["Control Plane\nplan · queue · seal credentials"]
+    CP -- "lease" --> DP["Data Plane daemon\nArchitect + Implementer"]
+    DP -- "edit · run · verify" --> SB[("sandbox\ntwo-phase, network-isolated")]
+    DP -- "opens" --> PR(["pull request"])
 ```
-you ──▶ Control Plane ──lease──▶ Data Plane daemon ──▶ your repo ──▶ PR
-        plan · queue · seal      loop · sandbox · git
-```
 
-- **Control Plane** (`ee/cmd/kiwid`, `ee/orchestrator` — BSL, see [License](#license)): API, auth, the planner that turns one task into a DAG of `worker-spec` payloads, a Postgres **lease queue** that releases a worker only once its dependencies have succeeded, and sealed credential storage. Runs as split roles (`-role api | orchestrator | migrate | all`). It never executes your code. → [Control Plane](https://docs.runkiwi.dev/control-plane), [Planner](https://docs.runkiwi.dev/planner), [DAGs](https://docs.runkiwi.dev/dags)
-- **Data Plane** (`cmd/kiwidaemon`, `pkg/daemon`): a pull-model daemon that polls over HTTPS, opens its org's credentials in memory, provisions a workspace with `git worktree` from a cached bare clone, runs the loop, and opens the PR. Outbound connections only, so it sits inside a customer VPC with no inbound firewall holes. → [Data Plane](https://docs.runkiwi.dev/data-plane)
-- **Two execution loops.** **File Loop** is the default: an Actor proposes a patch, a Critic reviews it before anything reaches disk, and your test command verifies. **Session mode** (`mode: session`) is for open-ended work: an Architect sets each round's objective and reviews the diff while an Implementer works the repo with real tools. → [Session mode](https://docs.runkiwi.dev/session-mode)
-- **The task is the goal; the test is a guard.** Your description is what Kiwi tries to achieve. The test command proves the change broke nothing, and is never the definition of done. A green suite is no reason to skip the work, a run that changes no code is reported as a failure, and while the suite is red the agent may not edit the failing test.
-- **Isolation.** The Actor and Critic run **in the daemon process**; only your test command runs in the sandbox, so model-generated code never sees an API key. The sandbox is **two-phase**: dependencies install with a network and an empty environment, then verification runs offline. Model-generated code never has network access, and the phase that does never holds a secret. Drivers are pluggable (Docker, gVisor `runsc` for the shared Free tier, Firecracker). → [Sandbox & isolation](https://docs.runkiwi.dev/sandbox)
-- **Zero setup.** No image, no test command, no file list. The daemon reads what your repository declares (`devcontainer.json`, the test command's own executable, then `go.mod` / `.nvmrc` / `.python-version`), picks the runtime, infers the test command, and resolves the planner's file hints against the real tree. A wrong runtime guess self-corrects and re-runs once before the Actor sees the error.
-- **Credentials.** The daemon generates an X25519 keypair (sealing) and an Ed25519 keypair (signing) on boot. Customer credentials are stored **sealed to that daemon's public key**, encrypted at rest by the configured key manager, and opened only in the daemon's memory. Cloning happens in the daemon, never in a sandbox. → [Security & credentials](https://docs.runkiwi.dev/security)
-- **Repository access.** Where a **GitHub App** installation exists, the daemon exchanges the lease it holds for an installation token minted per git operation: scoped to the repositories you ticked, valid about an hour, revocable by you without asking us. No long-lived git credential is stored for those orgs. `GIT_TOKEN` remains the fallback and still authenticates non-GitHub remotes (GitLab, Bitbucket, self-hosted) and any org that has not installed the App, so nothing changes until you connect one.
-- **Review comments continue the run.** A Kiwi pull request is not the end of the conversation. Comment `@runkiwi <what to change>` on it and the task that opened it resumes at its next round — same session, same branch, so the existing PR updates rather than a second one appearing. The Architect keeps the whole history, so "actually, rename that" costs a round rather than a fresh task starting from nothing. Per-org setting: `off`, `mention` (the default), or `any` comment from someone with write access.
-- **Every run is on the record.** Each phase is persisted with its model, verdict, tokens, cost and duration, and streamed to the dashboard while the run is still going. The live view names what is running *now*, including the model calls — planning, reviewing, the Implementer's turns — and not only the sandbox commands, so the long stretches of a session say what they are instead of continuing to display whichever command finished last. When a job finishes, the Control Plane assembles a per-job **execution record**, signed by the daemon's own key and hash-chained per org. Raw output is never stored, only digests. → [Execution record](https://docs.runkiwi.dev/execution-record), [Observability](https://docs.runkiwi.dev/observability)
-- **Tiers.** **Free** runs every signup on a Kiwi-operated shared fleet: one daemon process per org, cold-started on submit by the provisioner, gVisor-sandboxed, bounded by one concurrent job, a 20-minute per-task cap and a monthly agent-minute ceiling. **Pro** moves to a dedicated fleet. → [Tiers & the Free fleet](https://docs.runkiwi.dev/tiers)
-- **Surfaces.** The `kiwi` CLI, a Next.js dashboard (`frontend/`), Node and Python SDKs, and Linear and GitHub webhooks.
+- **Control Plane** (`ee/cmd/kiwid`, `ee/orchestrator` — BSL, see [License](#license)) — API, auth, the planner, a Postgres lease queue, sealed credential storage. It never executes your code. → [docs](https://docs.runkiwi.dev/control-plane)
+- **Data Plane** (`cmd/kiwidaemon`, `pkg/daemon`) — a pull-model daemon: polls over HTTPS, opens your org's credentials in memory, provisions a workspace, runs the session loop, opens the PR. Outbound connections only, so it sits inside your VPC with no inbound firewall holes. → [docs](https://docs.runkiwi.dev/data-plane)
 
-Full documentation lives at **[docs.runkiwi.dev](https://docs.runkiwi.dev)**. What shipped when is in [Status](#status) below; why a given design is the way it is tends to be written down next to the code.
+Full documentation: **[docs.runkiwi.dev](https://docs.runkiwi.dev)**.
+
+## Features
+
+- **Session-driven.** A task-long Architect plans and reviews while an agentic Implementer works the repo with real tools, verified each round in the sandbox until it passes. → [docs](https://docs.runkiwi.dev/session-mode)
+- **The test is a guard, not the goal.** Your task description is what Kiwi tries to achieve; the test command only proves nothing broke. A green suite alone isn't "done," and a run that changes no code is reported as a failure.
+- **Two-phase, isolated sandbox.** Dependencies install with network and no secrets; verification then runs offline. Model-generated code never has both a network and a credential at once. → [docs](https://docs.runkiwi.dev/sandbox)
+- **Zero setup.** No image, test command, or file list required — Kiwi reads what your repo declares and infers the rest, self-correcting a wrong runtime guess before you ever see an error.
+- **Sealed credentials.** Your keys are sealed to your daemon's own keypair and opened only in its memory. Cloning happens in the daemon, never in a sandbox. → [docs](https://docs.runkiwi.dev/security)
+- **Scoped GitHub access.** Where the GitHub App is installed, tokens are minted per operation, scoped to the repos you picked, valid about an hour, and revocable by you at any time.
+- **PR comments continue the task.** Comment `@runkiwi <what to change>` on a Kiwi PR and the same session resumes at its next round, updating that PR instead of opening a new one.
+- **Every run is provenance.** Each phase streams live to the dashboard and is assembled into a signed, hash-chained execution record when the job finishes. → [docs](https://docs.runkiwi.dev/execution-record)
 
 ## Status
 
 | Area | State |
 | :--- | :--- |
-| End-to-end seam: admit → lease → sandboxed Architect/Implementer session → PR | ✅ Works ([#115](https://github.com/RunKiwi/kiwi/issues/115)) |
+| End-to-end seam: submit → plan → sandboxed Architect/Implementer session → PR | ✅ Live |
+| **Free tier: live in production** (`app.runkiwi.dev`) — per-org daemon, gVisor sandbox, agent-minute metering & abuse auto-suspend | ✅ Live |
+| Session loop — the only execution loop; the single-file loop it replaced has been removed | ✅ Live |
+| GitHub App — per-repo installation tokens minted per operation, `GIT_TOKEN` kept as fallback | ✅ Live |
+| Execution record — signed, hash-chained provenance per job | ✅ Live (set `KIWI_VER_SIGNING_KEY`) |
+| Dashboard, `kiwi` CLI, Node/Python SDKs, Linear + GitHub webhooks | ✅ Live |
+| Fleet-host autoscaling — scale the free-fleet machine to zero when idle | ✅ Live (opt-in) |
+| **Pro** (dedicated fleet) — billing wired, self-serve checkout not yet enabled | 🚧 Contact-flow today |
+| Managed-**dedicated** — per-org VM Terraform, KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed |
+
+<details>
+<summary><b>Full history</b> (deep implementation notes, kept for contributors)</summary>
+
+| Area | State |
+| :--- | :--- |
 | One-command local / single-box prod (`make local` / `make prod`) | ✅ |
 | Dashboard: jobs, fleets, models, integrations, topology, settings | ✅ |
 | Multi-file agent: file discovery + multi-file edits | ✅ |
 | Provider robustness: key validation on save, quota/error surfacing | ✅ |
-| GitHub App: per-repo installation tokens minted per git operation, PAT kept as fallback | ✅ Auth path, self-serve install/callback, revocation webhook, installation-backed repo picker, submit-time rejection when nothing can reach the repo, and a Connect GitHub flow in onboarding and Integrations. Set `KIWI_GITHUB_APP_ID`, `KIWI_GITHUB_APP_PRIVATE_KEY` and `KIWI_GITHUB_APP_SLUG`; unset means every org keeps using `GIT_TOKEN` |
 | Fleet routing: tasks lease only their fleet's daemons | ✅ |
 | Queue diagnostics: a queued task reports *why* it hasn't started | ✅ |
 | Job control: stop / retry / delete, with a real abort on the daemon | ✅ |
-| Fleet-host autoscaling: scale the free-fleet machine to zero when idle | ✅ (opt-in) |
-| Integration layer: `kiwi` CLI, Node/Python SDKs, Linear webhook | ✅ |
 | Shared context: plan with prior-job learnings (Auto pgvector search / Manual select), org-scoped, opt-in | ✅ |
-| Execution record: per-job provenance, daemon-attested + CP-signed, hash-chained per org (`pkg/ver`) | ✅ Records assemble and sign; set `KIWI_VER_SIGNING_KEY` or they persist `unsigned` |
 | Plan validation: reject cyclic/dangling dependencies, duplicate IDs, and undeclared file conflicts at submit time | ✅ |
 | Merge provenance: GitHub PR-merge webhook appends a signed `kiwi.ver/merge/v1` link capturing the approver | ✅ Set `GITHUB_WEBHOOK_SECRET` |
-| **Free tier: live in production** (`app.runkiwi.dev`): per-org daemon provisioner, gVisor sandbox, agent-minute metering & abuse suspend | ✅ Deployed: Cloud Run control plane + Docker/gVisor free-fleet host (see [Deployment](#free-tier-deployment)) |
 | Control plane on GCP: Cloud Run (`kiwi-api`/`kiwi-orchestrator`/`kiwi-frontend`), Cloud SQL, KMS, OAuth sign-in | ✅ Deployed |
-| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ Signup path live. An org is **active on creation** — no operator step. The state that gates the run path is `suspended`, set by abuse auto-suspend; `inactive` described a gate nothing enforced and is gone. A GitHub sign-in records the account's username alongside its verified primary email |
-| Billing: Stripe Checkout for the **Pro** upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable, else the free path is unaffected |
-| Managed-**dedicated** (Pro): per-org VM Terraform (`deploy/gcp/`), KMS envelope crypto, Firecracker driver | 🚧 Built; not yet deployed or hardware-validated |
-| Egress isolation: sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening (`deploy/free-fleet/`) | ✅ Shipped; apply on the fleet host |
-| Session loop: a task-long Architect (plan + review) driving an agentic Implementer with real tool calls, in reviewed rounds | ✅ The only execution loop. The single-file `pkg/loop` it replaced has been removed |
-| ├ Tool-calling seam (`provider.ToolRunner`) + persistent sandbox (`sandbox.Session`) + cache-aware pricing | ✅ Phase 0 |
-| ├ `pkg/session`: Architect plans/reviews, Implementer works with tools; opt-in via `spec.mode: session` | ✅ Phase 1: the sandbox gets **no credentials** in this mode (`KIWI_SESSION_ALLOW_TEST_CREDS` opts back in) |
-| ├ Crash recovery: round-level checkpoints (`agent_sessions`, migration 0021); a re-leased task resumes at its last finished round | ✅ Phase 2 |
-| ├ Cost: prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ Phase 3 |
-| ├ Planner collapse: one worker per session job, **no LLM call and no credential decryption on the Control Plane** (`KIWI_SESSION_MODE=off` disables) | ✅ Phase 4 |
-| └ Provider parity: tool-calling on Anthropic, Gemini and OpenAI, so session mode is not one vendor's feature | ✅ Phase 5: Gemini additionally echoes the `thoughtSignature` it requires back on replay; without it the second tool turn of every conversation is rejected |
-| └ Reachable from the clients | ✅ Proven end to end in production: Architect plans, Implementer works with tools, reviewer approves, PR opened. There is no mode to choose any more — `mode` is still accepted on the CLI, SDK and API and ignored, so nothing written against the two-mode API breaks. The **Plan** model chip is gone with it: planning happens in the daemon, so the Control Plane has no planner model to pick. **Architect model** under Advanced is the control that replaced it |
-| └ Partial edits: `edit_file` replaces an exact string instead of rewriting the file whole | ✅ The Implementer previously had one way to change a file: supply its complete new contents. Output tokens (and the latency that comes with them) therefore scaled with file size rather than change size, and every edit produced a diff full of reformatting for the reviewer to read. `edit_file` refuses rather than guesses: an `old_string` that is missing, ambiguous, or belongs to a file this round has not read is an error with a hint, because each quiet alternative writes a plausible-looking edit somewhere the test command may never look. `read_file` gained `offset`/`limit` and line numbers, and now truncates from the **end**: it kept the last 64KB, which is right for a failing build and wrong for source, where a model that saw only the bottom of a file then reconstructed its imports from memory |
+| Self-serve signup & tenancy (GitHub/Google OAuth, per-org isolation) | ✅ An org is active on creation — no operator step. `suspended` (abuse auto-suspend) is the only run-path gate |
+| Billing: Stripe Checkout for the Pro upgrade + signed webhook (plan/limits) | ✅ Wired (test mode); set `STRIPE_*` env to enable |
+| Egress isolation: sandbox `--network none` (enforced + tested) + host metadata-endpoint hardening | ✅ Shipped; apply on the fleet host |
+| Tool-calling seam (`provider.ToolRunner`) + persistent sandbox (`sandbox.Session`) + cache-aware pricing | ✅ |
+| Crash recovery: round-level checkpoints (`agent_sessions`); a re-leased task resumes at its last finished round | ✅ |
+| Cost: prompt caching on by default, cache-priced budgets, mid-round transcript compaction | ✅ |
+| Planner collapse: one worker per session job, no LLM call and no credential decryption on the Control Plane | ✅ |
+| Provider parity: tool-calling on Anthropic, Gemini and OpenAI | ✅ |
+| Partial edits: `edit_file` replaces an exact string instead of rewriting the file whole | ✅ |
 
-## Building
+</details>
+
+## Self-hosting
+
+<details>
+<summary><b>Building from source</b></summary>
 
 `make local` builds and runs everything. To build individual binaries manually, note that newer macOS `dyld` requires external linking and an ad-hoc signature:
 
@@ -100,58 +133,46 @@ go build -ldflags="-linkmode=external" -o kiwid       ee/cmd/kiwid/main.go      
 go build -ldflags="-linkmode=external" -o kiwidaemon  cmd/kiwidaemon/main.go  && codesign -s - -f ./kiwidaemon   # Data Plane daemon
 ```
 
-## Running (manual)
+</details>
 
-`make local` does all of this for you; the manual steps are below for reference.
+<details>
+<summary><b>Running each piece manually</b> (<code>make local</code> does this for you)</summary>
 
-### 1. Start the Control Plane
-
-Requires Postgres. NATS is optional, and the Control Plane degrades with a warning if it is unreachable.
+**1. Control Plane** — requires Postgres; NATS is optional and degrades with a warning if unreachable.
 
 ```bash
 export KIWI_SERVER_TOKEN="my-secret-token-1234"
 ./kiwid -addr :8080 -dsn "host=localhost user=postgres password=postgres dbname=kiwi port=5432 sslmode=disable"
 ```
 
-Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-nats`. `-role migrate` applies migrations and exits (run it before rolling serving instances). Health checks: `/healthz` (liveness) and `/readyz` (DB-checked readiness).
+Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-nats`. `-role migrate` applies migrations and exits. Health checks: `/healthz`, `/readyz`.
 
-### 2. Use the `kiwi` CLI
+**2. The `kiwi` CLI**
 
 ```bash
-# Store your API token in ~/.config/kiwi/config.json
-./kiwi login -token "my-secret-token-1234"
-
-# Store credentials for the daemon to use (held daemon-side, never in the sandbox)
-./kiwi creds set anthropic "sk-ant-..."   # or: gemini "AI..." / openai "sk-..."
+./kiwi login -token "my-secret-token-1234"                 # stored in ~/.config/kiwi/config.json
+./kiwi creds set anthropic "sk-ant-..."                     # or: gemini "AI..." / openai "sk-..."
 ./kiwi creds set git "github_pat_..."
 
-# Submit a task. The agent can discover the file(s) and infer the test command,
-# so via the API/dashboard only the task and repo are required. The CLI still
-# asks for -file and -test-cmd:
 ./kiwi submit -task "Fix the divide-by-zero panic in Divide()" \
     -repo https://github.com/you/yourrepo -ref main \
     -file math_utils.go -test-cmd "go test ./..."
 
-# Run it as an agentic session instead: an Architect plans the whole task and
-# reviews each round, an Implementer works with real tool calls (read, grep,
-# write, run). -architect-model is optional and defaults to -model; it is worth
-# setting to something more capable, since the reviewer is called a handful of
-# times per task while the implementer runs constantly.
+# -architect-model is optional (defaults to -model); worth setting to something
+# more capable, since the reviewer runs a handful of times per task while the
+# implementer runs constantly.
 ./kiwi submit -task "Add a Modulo function mirroring Divide, with table-driven tests" \
     -repo https://github.com/you/yourrepo -ref main \
     -file math_utils.go -test-cmd "go test ./..." \
     -model claude-haiku-4-5-20251001 -architect-model claude-sonnet-5
 
-# Resume an existing task
-./kiwi submit -resume -task-id <task-id>
-
-# Launch Claude Code wrapped with Kiwi Swarm offloading instructions
-./kiwi claude
+./kiwi submit -resume -task-id <task-id>   # resume an existing task
+./kiwi claude                              # launch Claude Code with Kiwi Swarm offloading
 ```
 
-`kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config. Use `-server` to target a non-local Control Plane and `-idempotency-key` to dedupe retried submissions.
+`kiwi submit` resolves the token from `-token`, then `KIWI_SERVER_TOKEN`, then the saved login config.
 
-**LLM providers.** The model catalog serves as the authoritative source for model-to-provider routing. When a model is requested, it is resolved against the catalog to determine its provider, tier, and whether it is funded by a Kiwi platform key. If a model is not found in the catalog, it falls back to prefix inference to keep existing submissions working. The daemon then reads that provider's key from your stored credentials:
+**Model routing** — the model catalog is the source of truth; unmatched models fall back to prefix inference:
 
 | Model id | Provider | Credential |
 | --- | --- | --- |
@@ -159,13 +180,7 @@ Flags: `-addr`, `-dsn`, `-role` (`api` | `orchestrator` | `migrate` | `all`), `-
 | `gpt-*`, `o1*`, `o3*`, `o4*`, `chatgpt-*` (e.g. `gpt-5-mini`) | OpenAI | `OPENAI_API_KEY` |
 | anything else (e.g. `claude-opus-4-8`) | Anthropic | `ANTHROPIC_API_KEY` |
 
-Anthropic's **adaptive thinking** is requested only for models that support it (Claude 4.6 and later, see `pkg/provider/thinking.go`). It arrived with that generation, and older models reject it outright with `400 adaptive thinking is not supported on this model` rather than ignoring the field, so sending it unconditionally broke every task on `claude-haiku-4-5`, the default worker model. Unknown models get no thinking rather than a guess: losing thinking costs quality on one call, guessing wrong fails the task.
-
-The same rule decides which key the planner uses, how a call is priced, and which provider the signed execution record names. It is one function (`provider.ProviderOf`) rather than a rule repeated per component. If a task fails because a key is missing, invalid, or out of credits, the reason is surfaced on the job.
-
-**Model discovery.** Rather than a hand-kept list, each provider's model list is read from its own API — at boot, once a day, and immediately when you save a key. Discovered models land in `model_catalog` with their pricing, context window and tool support, and only models that can actually drive the session loop (tool-capable, 32k+ context, text-to-text) are offered in the task form. A provider that is unreachable during a refresh leaves its existing rows untouched: a stale catalog is a much better failure than an empty one. Models that disappear from a provider's list are marked rather than deleted, so past jobs still name the model they ran.
-
-**Kiwi-provided models.** An operator can supply Kiwi's own API keys so users can run tasks without bringing their own:
+An operator can also fund usage with Kiwi's own keys so users bring nothing:
 
 ```bash
 KIWI_PLATFORM_OPENROUTER_API_KEY=...   # one key reaches many model families
@@ -174,32 +189,20 @@ KIWI_PLATFORM_GEMINI_API_KEY=...
 KIWI_PLATFORM_OPENAI_API_KEY=...
 ```
 
-A provider whose variable is unset is simply BYOK-only, and the dashboard shows it as *Coming soon* — no migration or config beyond the variable itself. Usage is capped per organisation per calendar month by a token allowance, banded by model price (`free` / `economy` / `frontier`) because a token is not a unit of cost: the same count is worth two orders of magnitude more on a frontier model than an economy one. Allowances are set per plan in `pkg/entitlement`.
+Usage is capped per org per month by a token allowance banded by model price (`free` / `economy` / `frontier`), set in `pkg/entitlement`. These keys are sealed only to daemons Kiwi itself operates — a BYOC fleet never receives one. Full routing, retry and discovery details: → [docs](https://docs.runkiwi.dev/models).
 
-Session mode runs two models — an Architect that plans and reviews, and an Implementer that edits — and either or both can be Kiwi-provided. Each is routed, keyed and metered on its own: a frontier Architect over an economy Implementer draws on the frontier allowance only for the reviewer's tokens. Both must be paid for the same way, though, because a task records one payer; mixing a Kiwi-provided model with one of your own is refused at submit rather than producing a bill that cannot be attributed.
-
-These keys are sealed **only** to daemons Kiwi itself operates. A daemon running on your own hardware never receives one, and Kiwi-provided models are unavailable on a BYOC fleet — submitting one there is refused up front rather than failing later for want of a key. Set a spend cap on the upstream provider account regardless: the allowance divides usage fairly between organisations, it is not a backstop against a bug.
-
-Spend reporting keeps the two apart. The dollar figure on `/spend` counts only work billed to your own keys; work Kiwi funded is reported in tokens against the allowance, so the page never shows a total you do not owe.
-
-**Transient provider failures are retried** (`pkg/provider/retry.go`): `429` and `5xx` are retried with exponential backoff and jitter, honouring the provider's own `Retry-After` when it sends one, and never sleeping past the caller's deadline. This matters most for session mode, since a session makes dozens of calls per round, so meeting at least one throttle is close to certain, and without a retry a single blip discarded a task that had already spent minutes and dollars. A retried-away failure is not billed: usage is recorded from the decoded response, which the swallowed attempts never reach. Only Gemini and OpenAI are wrapped; the Anthropic provider uses the official SDK, which already retries.
-
-Set `KIWI_OPENAI_BASE_URL` to point the OpenAI provider at a compatible endpoint (Azure, a gateway, a self-hosted server) instead of `api.openai.com`.
-
-The **worker model is yours to choose, not the planner's**: `-model` (and the dashboard's model selector) is applied to every worker the plan produces, overriding anything the planning model suggested. The planner is never told which providers your org holds keys for, so we never ask it to pick one. A model id selects the provider, and a guessed one would route the work to a key you never connected. `-planner-model` selects the model that decomposes the task; both run on your own provider key.
-
-### 3. Run the Data Plane daemon
+**3. The Data Plane daemon**
 
 ```bash
 ./kiwidaemon -api-url https://api.runkiwi.dev \
     -key-path ~/.kiwi/daemon.key -cache-dir /tmp/kiwi-cache \
     -poll-interval 5s -max-cached-repos 20 -session-budget 5.00 \
-    -session-budget 5.00 -join-token "$KIWI_JOIN_TOKEN"
+    -join-token "$KIWI_JOIN_TOKEN"
 ```
 
-On first boot the daemon generates its keypairs and registers with the Control Plane using a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page). Once registered its persisted identity key is sufficient and the token can be omitted on restart. It then heartbeat-polls for work and runs each task through the Architect/Implementer session. Per-task spend is capped by `-session-budget` (or `KIWI_SESSION_BUDGET_USD`), default `5.00`; rounds are capped by `-max-rounds` (0 uses the session default). `-max-steps` is a deprecated alias for `-max-rounds` and `-max-budget` is ignored — both named the retired single-file loop, and they are still accepted so a launcher that passes them keeps starting rather than failing on an unknown flag. The env fallback is what makes the budget reachable on the shared Free tier, where the provisioner launches per-org daemons with a fixed argv. The git cache keeps at most `-max-cached-repos` bare clones (default 20), evicting the least-frequently-used; `0` disables the bound. Sandbox memory is sized from the host rather than fixed — an eighth of total RAM, floored at 1 GB and capped at 4 GB — and `KIWI_SANDBOX_MEMORY` overrides it for a repository whose build needs more. It was a hardcoded 512 MB, which a large Go build exceeds while compiling; under gVisor the kernel kills the *sentry*, so the sandbox does not fail a test, it stops existing, and every later command in that session returns `No such container`. A sandbox that disappears is now detected and reported as itself, instead of being handed to the model as though the repository had printed it. For the shared Free tier, pass `-sandbox-runtime runsc` (or `KIWI_SANDBOX_RUNTIME=runsc`) so the test command runs under gVisor; the wall-clock cap per task comes from the org's `TaskTimeoutSeconds` limit: **20 minutes on Free**, 30 on every other plan. Free is deliberately shorter because wall clock is what the tier meters: 20 minutes is 20 of the org's 500 agent-minutes, so the cap and the monthly allowance are one lever, not two. Within a session that budget is spread across rounds rather than spent on one. The per-round deadline derives from the session's own clock (a third of it, up to a 15-minute ceiling), because the value of several rounds is the Architect review *between* them, and a single round that consumes the whole cap produces no review anyone can act on.
+On first boot the daemon generates its keypairs and registers with a **single-use join token** (mint one with `POST /api/v1/daemon/join-token`, or from the dashboard's Fleets page); its persisted identity key is sufficient after that. Per-task spend is capped by `-session-budget` / `KIWI_SESSION_BUDGET_USD` (default `5.00`); rounds by `-max-rounds`. The git cache keeps at most `-max-cached-repos` bare clones (default 20, `0` disables the bound). Sandbox memory sizes itself from the host (an eighth of RAM, floored at 1 GB, capped at 4 GB); override with `KIWI_SANDBOX_MEMORY`. For the shared Free tier, pass `-sandbox-runtime runsc` so tests run under gVisor. The per-task wall-clock cap comes from the org's plan: **20 minutes on Free**, 30 elsewhere.
 
-### 4. Dashboard
+**4. Dashboard**
 
 ```bash
 KIWI_CORS_ALLOWED_ORIGINS=http://localhost:3000 ./kiwid -addr :8080 -dsn "..."
@@ -207,11 +210,36 @@ cd frontend && cp .env.local.example .env.local   # set NEXT_PUBLIC_KIWI_API_URL
 npm ci && npm run dev                               # http://localhost:3000
 ```
 
-**Product analytics are optional and off.** Set `NEXT_PUBLIC_POSTHOG_KEY` (a build arg, since `NEXT_PUBLIC_*` is baked at build time) and the dashboard reports an activation funnel — sign-in, repo connected, model key added, task submitted, PR opened. Leave it unset, as every self-hosted deployment should, and `posthog-js` is never downloaded or initialized and no request leaves the browser. What is sent is allow-listed by type in `frontend/src/lib/analytics.ts`: no repository names, task text, branch names or credential values, and PostHog's autocapture and session replay are both disabled, because a dashboard for a product that contains customer code has no business shipping the contents of that dashboard to a third party.
+Product analytics are optional and off by default: set `NEXT_PUBLIC_POSTHOG_KEY` to enable an activation funnel with no repository names, task text, or credentials sent — leave it unset (as any self-hosted deployment should) and no analytics code is even downloaded.
+
+</details>
+
+<details>
+<summary><b>Deployment reference</b> (Free-tier substrate, operational env vars)</summary>
+
+**Free-tier deployment.** Split across two substrates, since Cloud Run cannot run the provisioner's `docker run` launches or a gVisor sandbox:
+
+1. **Control plane on Cloud Run** — `kiwi-api`, `kiwi-orchestrator`, `kiwi-frontend`, backed by Cloud SQL. `KIWI_PROVISIONER` is left unset here.
+2. **A Docker + gVisor GCE VM** ("free-fleet host") running `KIWI_PROVISIONER=docker`, supervised by the `kiwi-provisioner` systemd unit in [`deploy/free-fleet/`](deploy/free-fleet/). It cold-starts a per-org `kiwidaemon` container on submit, sandboxed under `runsc`. `KIWI_DAEMON_IMAGE` is deliberately left unset — see [`deploy/free-fleet/`](deploy/free-fleet/) for why.
+3. The **`kiwidaemon` image**, built with `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets).
+
+Deploys to this environment are automated on merge to `main` — see [Continuous Deployment](deploy/gcp/control-plane/README.md#continuous-deployment). Schema changes apply via the standard `kiwid -role migrate` job. **Pro** (dedicated) stays on per-org VMs.
+
+**Operational env vars.**
+
+- `production` mode requires `KIWI_ENCRYPTION_KEY`, `KIWI_SERVER_TOKEN`, `KIWI_CORS_ALLOWED_ORIGINS`. For managed, set `KIWI_KMS_KEY` for Cloud KMS envelope encryption.
+- `KIWI_VER_SIGNING_KEY` (base64 Ed25519 seed or key) + `KIWI_VER_SIGNING_KEY_ID` sign execution records; generate with `openssl rand -base64 32`. Must be stable and shared across replicas. Unset means records are still assembled but marked `"attestation": "unsigned"`.
+- `POST /api/v1/planner/plan` supports idempotent submissions via `Idempotency-Key`.
+- Job control: `POST /api/v1/jobs/{id}/cancel|retry`, `DELETE /api/v1/jobs/{id}`.
+- `KIWI_FLEET_HOST_{PROJECT,ZONE,INSTANCE}` enables fleet-host autoscaling (`pkg/fleethost`); unset disables it, which is what BYOC and local dev want.
+- `KIWI_COMPLETION_MAX_TOKENS` (default 16000) bounds a single completion.
+- Migrations apply automatically on boot; in a multi-replica deployment run `kiwid -role migrate` once first and set `KIWI_SKIP_BOOT_MIGRATE=true` on serving roles.
+
+</details>
 
 ## SDKs
 
-Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`, published as `@runkiwi/sdk` on npm and `kiwi-sdk` on PyPI. Each directory carries its own README, which is what the registry renders as the package page.
+Minimal v1 SDKs for programmatic submission (CI/CD, Sentry auto-triage) live in `sdk/`, published as [`@runkiwi/sdk`](https://www.npmjs.com/package/@runkiwi/sdk) on npm and [`kiwi-sdk`](https://pypi.org/project/kiwi-sdk/) on PyPI.
 
 ```js
 // Node (sdk/node): zero dependencies, Node 18+
@@ -231,45 +259,17 @@ result = client.submit_task(task="Fix flaky test", file="pkg/foo/foo.go", test_c
 job = client.get_job(result["job_id"])
 ```
 
-Both submit to `/api/v1/planner/plan`, the daemon-fed path `kiwi submit` uses, so a submission is planned into a DAG and leased by a daemon. Workers run asynchronously; poll `getJob` / `get_job` for the PR. Both constructors refuse to send a token over cleartext HTTP to a non-local host.
+Both submit to `/api/v1/planner/plan`; workers run asynchronously, so poll `getJob` / `get_job` for the PR.
 
 ## Webhooks
 
-The Control Plane exposes webhooks for third-party integrations:
-- `POST /api/v1/webhooks/linear`: Issues labeled `kiwi` (or moved to **In Progress**) are converted into planner jobs. Requires `LINEAR_WEBHOOK_SECRET` to be set.
-- `POST /api/v1/webhooks/github`: on a PR `closed` event where `merged` is true, Kiwi appends a `kiwi.ver/merge/v1` record to the org's chain, capturing **who approved the merge**, when, and the merge commit. A sealed record is never edited, so the approver arrives as a new link rather than a change to the execution record. Requires `GITHUB_WEBHOOK_SECRET`; without it the endpoint fails closed (503). Deliveries that are not a merged PR return 200 and do nothing, and a redelivery is a no-op. `GET /api/v1/jobs/{id}/record` continues to return the **execution** record, since the merge record is a separate link in the same chain.
-- `POST /api/v1/webhooks/github`: on `issue_comment`, `pull_request_review_comment` or `pull_request_review`, a comment on a Kiwi pull request continues the task that opened it. Guarded in order: Kiwi's own replies are ignored, the org's mode must allow it, the pull request must resolve to a task and still be open, the comment must not already have been handled, and the commenter must have write access to the repository. Every rejection returns 200 — a non-2xx teaches GitHub to disable the hook. One continuation runs at a time per thread; a second comment gets a reply saying so.
-
-## Free-tier deployment
-
-The Free tier is **live in production**, split across two execution substrates because `kiwi-api` / `kiwi-orchestrator` run on **Cloud Run**, which cannot run the provisioner's `docker run` launches or a gVisor (`runsc`) sandbox:
-
-1. **Control plane on Cloud Run**: `kiwi-api`, `kiwi-orchestrator`, `kiwi-frontend`, backed by Cloud SQL (private IP). Cloud Run leaves `KIWI_PROVISIONER` unset, so its orchestrator keeps only the singleton sweepers and never attempts a `docker run`.
-2. **A Docker + gVisor GCE VM** ("free-fleet host", `kiwi-free-fleet`) with `runsc` registered as a Docker runtime, on the same VPC as Cloud SQL. It runs the control-plane binary with `KIWI_PROVISIONER=docker` (which starts the provisioner independently of `-role`, so the host needs no orchestrator sweepers), and `KIWI_PUBLIC_API_URL=https://api.runkiwi.dev`, supervised by the `kiwi-provisioner` systemd unit in [`deploy/free-fleet/`](deploy/free-fleet/). The provisioner cold-starts a per-org `kiwidaemon` container on submit; the launcher bind-mounts the host `docker.sock` so each daemon's test sandbox runs as a sibling container under `runsc`.
-
-   `KIWI_DAEMON_IMAGE` is deliberately **left unset**. Setting it to a registry reference turns on `docker run --pull=always` for every launch, but Docker resolves registry credentials client-side, inside the provisioner container, which is cut off from the cloud metadata endpoint by `harden-egress.sh`, so every cold start would fail to pull. The launcher instead uses the local `kiwidaemon:latest` tag, refreshed on the *host* by a systemd timer, where the credentials live.
-3. The **`kiwidaemon` image** in Artifact Registry, built with `docker build --target kiwidaemon` (the root `Dockerfile` ships both `kiwid` and `kiwidaemon` targets).
-
-Deploys to this environment are automated on merge to `main` — see
-[Continuous Deployment](deploy/gcp/control-plane/README.md#continuous-deployment).
-
-Schema changes (`queued_tasks.started_at`, `jobs.agent_minutes`, `org_limits.max_agent_minutes_per_month`, the `fleets.type` `self-managed`→`managed` rename, and the provisioner's partial unique index) apply via the standard `kiwid -role migrate` job. **Pro** (dedicated) stays on per-org VMs.
-
-## Operational notes
-
-- In `production` mode, `KIWI_ENCRYPTION_KEY`, `KIWI_SERVER_TOKEN`, and `KIWI_CORS_ALLOWED_ORIGINS` must be set explicitly. For managed, set `KIWI_KMS_KEY` to use Cloud KMS envelope encryption instead of a static key.
-- **Execution-record signing.** `KIWI_VER_SIGNING_KEY` is a base64 Ed25519 seed (32 bytes) or private key (64 bytes); `KIWI_VER_SIGNING_KEY_ID` names it so records stay verifiable across a rotation. Generate one with `openssl rand -base64 32`. **The key must be stable and shared across replicas.** A per-process key would make every record it signed unverifiable after a restart. When unset, records are still assembled and stored but marked `"attestation": "unsigned"`, and `/.well-known/kiwi-signing-keys.json` returns an empty key set; nothing else is affected. `KIWI_EXECUTION_MODE` (`managed`|`byoc`) is recorded per job and defaults from `KIWI_PROVISIONER`, and decides how the record describes who operated the data plane.
-- The `/api/v1/planner/plan` endpoint supports idempotent submissions via the `Idempotency-Key` header.
-- **Job control.** `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/retry`, `DELETE /api/v1/jobs/{id}`. Cancelling a *running* task works by revoking its lease, since the Control Plane cannot dial a daemon: the daemon's next renewal returns 409 and it aborts. Retry requeues only failed and cancelled tasks. Delete removes the queue rows but keeps the job's execution record, because those are hash-chained per org and removing a link breaks verification for every record after it.
-- **Fleet-host autoscaling** (`pkg/fleethost`, optional). The machine the free-tier provisioner runs on can scale to zero. Set `KIWI_FLEET_HOST_{PROJECT,ZONE,INSTANCE}` to enable it; leaving them unset disables it entirely, which is what BYOC and local dev want. The Control Plane starts the VM through the cloud API on submit and an idle sweeper stops it after the queue has been empty for `KIWI_FLEET_HOST_IDLE_TTL` (default 20m). Work distribution stays a pull model throughout, since host lifecycle is a separate channel from task handout.
-- **Actor output ceiling.** `KIWI_COMPLETION_MAX_TOKENS` (default 16000) bounds a completion, because the right value is a property of the model rather than of Kiwi. The multi-file Actor returns whole file contents as JSON, so output tokens bind first; a provider that hits the ceiling reports `provider.ErrTruncated` rather than returning partial text as though it were whole. Adaptive thinking draws on the same budget.
-- Database migrations apply automatically on boot; in a multi-replica deployment run `kiwid -role migrate` once before serving instead (`KIWI_SKIP_BOOT_MIGRATE=true` on serving roles).
-
----
+- `POST /api/v1/webhooks/linear` — issues labeled `kiwi` (or moved to **In Progress**) become planner jobs. Requires `LINEAR_WEBHOOK_SECRET`.
+- `POST /api/v1/webhooks/github` — on a merged PR, appends a signed `kiwi.ver/merge/v1` link capturing the approver. Requires `GITHUB_WEBHOOK_SECRET`.
+- `POST /api/v1/webhooks/github` — a comment on a Kiwi PR continues the task that opened it, guarded by org mode and write access. Every rejection returns 200, so GitHub never disables the hook.
 
 ## Contributing & context for AI
 
-For build/test conventions, the PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md).
+For build/test conventions, the PR checklist, and instructions for AI assistants, see [CLAUDE.md](CLAUDE.md). Contributions are accepted under the [DCO](CONTRIBUTING.md).
 
 Every PR modifying the codebase must keep this README current. If no update is needed, add the `skip-readme-check` label to the PR.
 
@@ -282,8 +282,8 @@ Kiwi is open core. Two licences, split along one line: **the Data Plane and the 
 | Everything outside `ee/` | [Apache 2.0](LICENSE) | `kiwidaemon`, `kiwi`, `kiwi-agent`, the Architect/Implementer session loop, the sandbox, the provider clients, the execution record, model discovery, the store |
 | `ee/` | [BSL 1.1](ee/LICENSE) | The Control Plane: `kiwid`, orchestration, planning, orgs and auth, billing, entitlements, provisioning, fleet control |
 
-**If you run Kiwi in your own cloud, the part you run is Apache-2.0.** `cmd/kiwidaemon` — the daemon that clones your repo, runs the loop, and executes your tests — depends on nothing under `ee/`. That is enforced by a test (`pkg/licensing_boundary_test.go`), not by convention, so it cannot quietly stop being true.
+**If you run Kiwi in your own cloud, the part you run is Apache-2.0.** `cmd/kiwidaemon` — the daemon that clones your repo, runs the loop, and executes your tests — depends on nothing under `ee/`, enforced by a test (`pkg/licensing_boundary_test.go`), not by convention.
 
-The BSL permits reading, modifying, and running the Control Plane, including in production for your own organisation's work. What it does not permit is offering it to third parties as a hosted service. Each version converts to Apache-2.0 four years after publication.
+The BSL permits reading, modifying, and running the Control Plane, including in production for your own organisation's work — what it does not permit is offering it to third parties as a hosted service. Each version converts to Apache-2.0 four years after publication.
 
-Copyright © 2026 RunKiwi. Contributions are accepted under the [DCO](CONTRIBUTING.md).
+Copyright © 2026 RunKiwi.
