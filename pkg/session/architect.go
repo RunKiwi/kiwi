@@ -74,16 +74,31 @@ type ReviewInput struct {
 
 // LLMArchitect drives an Architect over any provider that can Complete.
 //
-// Complete is deliberately all it needs. The Architect does not use tools — it
-// reads diffs and reports — so every provider Kiwi already supports can serve
-// this role today, including the two that cannot yet hold a tool conversation.
-// That is what makes the expensive-planner / cheap-implementer split available
-// to every org rather than only to Anthropic ones.
+// Complete is the minimum it needs — every provider Kiwi supports can serve
+// this role, including ones that cannot hold a tool conversation, which is
+// what makes the expensive-planner / cheap-implementer split available to
+// every org rather than only to Anthropic ones. When Tools is set and the
+// Provider also implements provider.ToolRunner, Plan and Review explore the
+// repository with read_file and grep first instead of reasoning from a bare
+// filename listing; otherwise this falls back to the single-shot behaviour
+// silently; the same "never turn a valid submit into a rejected one" stance
+// architectModelFor takes.
 type LLMArchitect struct {
 	Provider provider.Provider
 	Model    string
-	usage    provider.ToolUsage
+	// Tools, when non-nil, is offered to the Architect for exploration. It
+	// must be read-only — see ArchitectTools — since the Architect must never
+	// edit the repository.
+	Tools ToolHost
+	// MaxToolCalls bounds one exploration, separately from the session's
+	// dollar budget: an Architect that could spend without limit on reading
+	// files would compete with the Implementer for the same $/task ceiling
+	// before any code gets written. Zero uses defaultArchitectMaxToolCalls.
+	MaxToolCalls int
+	usage        provider.ToolUsage
 }
+
+const defaultArchitectMaxToolCalls = 8
 
 func (a *LLMArchitect) Usage() provider.ToolUsage { return a.usage }
 
@@ -96,6 +111,79 @@ func (a *LLMArchitect) record() {
 		u.InputTokens, u.OutputTokens = r.LastUsage()
 	}
 	a.usage.Add(u)
+}
+
+// complete answers one prompt, exploring first when tools are available and
+// the provider can hold a conversation, falling back to a single Complete
+// otherwise.
+func (a *LLMArchitect) complete(ctx context.Context, prompt string) (string, error) {
+	if a.Tools != nil {
+		if runner, ok := a.Provider.(provider.ToolRunner); ok {
+			return a.exploreAndAnswer(ctx, runner, prompt)
+		}
+	}
+	resp, err := a.Provider.Complete(ctx, architectSystem, prompt)
+	a.record()
+	return resp, err
+}
+
+// exploreAndAnswer runs a bounded read-only tool loop, then returns the final
+// text turn — the same JSON response Plan/Review expect from Complete, just
+// arrived at after looking rather than guessing.
+func (a *LLMArchitect) exploreAndAnswer(ctx context.Context, runner provider.ToolRunner, prompt string) (string, error) {
+	conv := runner.StartConversation(architectSystem+architectToolsAddendum, a.Tools.Defs(), provider.ConversationOpts{})
+	maxCalls := a.MaxToolCalls
+	if maxCalls <= 0 {
+		maxCalls = defaultArchitectMaxToolCalls
+	}
+
+	prevUsage := provider.ToolUsage{}
+	text, results := prompt, []provider.ToolResult(nil)
+	for i := 0; i < maxCalls; i++ {
+		turn, err := conv.Send(ctx, text, results)
+		a.accumulate(conv, &prevUsage)
+		if err != nil {
+			return "", err
+		}
+		if len(turn.Calls) == 0 {
+			return turn.Text, nil
+		}
+		text, results = "", nil
+		for _, call := range turn.Calls {
+			out, cerr := a.Tools.Call(ctx, call)
+			if cerr != nil {
+				return "", cerr
+			}
+			results = append(results, out)
+		}
+	}
+
+	// The cap was reached with tool calls still outstanding — every one needs
+	// an answered result before the conversation can produce a final text
+	// turn, so this Send carries both the last batch of results and the nudge
+	// to stop exploring.
+	turn, err := conv.Send(ctx, fmt.Sprintf(
+		"You have used your exploration budget (%d tool calls). Answer now with your JSON response — no more tool calls.", maxCalls), results)
+	a.accumulate(conv, &prevUsage)
+	if err != nil {
+		return "", err
+	}
+	return turn.Text, nil
+}
+
+// accumulate folds a conversation's cumulative usage into the Architect's
+// running total, the same delta-tracking Runner.trackImplementer uses for the
+// Implementer's own conversations.
+func (a *LLMArchitect) accumulate(conv provider.ToolConversation, prev *provider.ToolUsage) {
+	total := conv.Usage()
+	a.usage.Add(provider.ToolUsage{
+		InputTokens:      total.InputTokens - prev.InputTokens,
+		OutputTokens:     total.OutputTokens - prev.OutputTokens,
+		CacheReadTokens:  total.CacheReadTokens - prev.CacheReadTokens,
+		CacheWriteTokens: total.CacheWriteTokens - prev.CacheWriteTokens,
+		CostUSD:          total.CostUSD - prev.CostUSD,
+	})
+	*prev = total
 }
 
 const architectSystem = `You are the Architect on an automated software change. You own one task from
@@ -139,6 +227,18 @@ Respond ONLY with a JSON object:
   "summary": "on approve: the pull request body describing what changed and why"
 }`
 
+// architectToolsAddendum is appended to architectSystem only when the
+// Architect actually has tools — appending it unconditionally would describe
+// a capability a plain Complete() call structurally cannot use.
+const architectToolsAddendum = `
+
+You also have read-only tools: list_files, read_file, grep. Use them to explore the repository before
+committing to a spec or a review, instead of reasoning from the filename listing alone — read the
+files you expect to touch, and grep for callers before assuming something is unused. You have a
+bounded number of tool calls; when you have seen enough, or reach the limit, respond with your JSON
+object and no further tool calls. You have no tools to write or run anything — that is the
+Implementer's job, not yours.`
+
 // Plan writes the opening spec.
 func (a *LLMArchitect) Plan(ctx context.Context, in PlanInput) (Spec, error) {
 	var b strings.Builder
@@ -165,8 +265,7 @@ func (a *LLMArchitect) Plan(ctx context.Context, in PlanInput) (Spec, error) {
 	fmt.Fprintf(&b, "\n# Repository files\n%s\n", strings.Join(in.RepoMap, "\n"))
 	fmt.Fprintf(&b, "\nYou have at most %d rounds. Write the spec for round 1.\n", in.MaxRoundsBudget)
 
-	resp, err := a.Provider.Complete(ctx, architectSystem, b.String())
-	a.record()
+	resp, err := a.complete(ctx, b.String())
 	if err != nil {
 		return Spec{}, fmt.Errorf("architect planning failed: %w", err)
 	}
@@ -238,8 +337,7 @@ func (a *LLMArchitect) Review(ctx context.Context, in ReviewInput) (Spec, error)
 
 	fmt.Fprintf(&b, "\n%d round(s) remain after this one. Review and return your verdict.\n", in.RoundsRemaining)
 
-	resp, err := a.Provider.Complete(ctx, architectSystem, b.String())
-	a.record()
+	resp, err := a.complete(ctx, b.String())
 	if err != nil {
 		return Spec{}, fmt.Errorf("architect review failed: %w", err)
 	}

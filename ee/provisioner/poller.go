@@ -191,7 +191,15 @@ func (p *Provisioner) execute(ctx context.Context, req auth.ProvisioningRequest)
 		if err != nil {
 			return statusFailed, fmt.Errorf("mint join token for org %s: %w", req.OrgID, err)
 		}
-		if _, err := p.launcher.Launch(ctx, req.OrgID, auth.SharedFreeFleet, joinToken, p.apiURL, p.noTaskInFlight(ctx, req.OrgID)); err != nil {
+		// GetOrgLimits always returns a usable value (falling back to FreeLimits
+		// or DefaultLimits), so this is a real lookup failure, not a missing-row
+		// case — failing the provision here beats launching a daemon with an
+		// unknown budget.
+		limits, err := auth.GetOrgLimits(p.db, req.OrgID)
+		if err != nil {
+			return statusFailed, fmt.Errorf("get budget for org %s: %w", req.OrgID, err)
+		}
+		if _, err := p.launcher.Launch(ctx, req.OrgID, auth.SharedFreeFleet, joinToken, p.apiURL, limits.MaxBudgetPerJob, p.noTaskInFlight(ctx, req.OrgID)); err != nil {
 			return statusFailed, fmt.Errorf("launch daemon for org %s: %w", req.OrgID, err)
 		}
 		return statusCompleted, nil

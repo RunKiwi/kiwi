@@ -32,7 +32,7 @@ func argValues(args []string, flag string) []string {
 // directory at that path and mounted that instead. Every test command ran
 // against an empty workspace and reported "reached max steps without passing".
 func TestLaunchArgs_CacheMountIsIdenticalOnBothSides(t *testing.T) {
-	args := launchArgs("kiwi-free-org-o1", "img", "o1", auth.SharedFreeFleet, "tok", "https://api", false)
+	args := launchArgs("kiwi-free-org-o1", "img", "o1", auth.SharedFreeFleet, "tok", "https://api", 0.50, false)
 
 	var cacheMount string
 	for _, v := range argValues(args, "-v") {
@@ -61,7 +61,7 @@ func TestLaunchArgs_CacheMountIsIdenticalOnBothSides(t *testing.T) {
 // The daemon has to be told to use the mounted directory; the default
 // (/tmp/kiwi-cache) is inside the container and invisible to sibling sandboxes.
 func TestLaunchArgs_DaemonIsPointedAtTheMountedCache(t *testing.T) {
-	args := launchArgs("n", "img", "o1", auth.SharedFreeFleet, "tok", "https://api", false)
+	args := launchArgs("n", "img", "o1", auth.SharedFreeFleet, "tok", "https://api", 0.50, false)
 
 	dirs := argValues(args, "-cache-dir")
 	if len(dirs) != 1 {
@@ -100,13 +100,14 @@ func TestLaunchArgs_HostRootIsOverridable(t *testing.T) {
 
 // The rest of the launch contract must survive the refactor.
 func TestLaunchArgs_KeepsExistingBehaviour(t *testing.T) {
-	args := launchArgs("kiwi-free-org-o1", "reg/kiwidaemon:latest", "o1", auth.SharedFreeFleet, "tok", "https://api", true)
+	args := launchArgs("kiwi-free-org-o1", "reg/kiwidaemon:latest", "o1", auth.SharedFreeFleet, "tok", "https://api", 0.50, true)
 	joined := strings.Join(args, " ")
 
 	for _, want := range []string{
 		"--pull=always",                   // a moving tag must be re-fetched
 		"KIWI_SANDBOX_RUNTIME=runsc",      // free work runs under gVisor
 		"KIWI_JOIN_TOKEN=tok",             // single-use registration secret
+		"KIWI_SESSION_BUDGET_USD=0.50",    // the org's own cap, not the binary's $5 default
 		dockerSocket + ":" + dockerSocket, // sandboxes are sibling containers
 		"-api-url https://api",            // daemons must reach the public CP
 		"reg/kiwidaemon:latest",           // the image itself
@@ -120,7 +121,7 @@ func TestLaunchArgs_KeepsExistingBehaviour(t *testing.T) {
 // gVisor is only for the shared free fleet; a dedicated fleet's daemon must not
 // silently acquire it.
 func TestLaunchArgs_RunscOnlyForTheFreeFleet(t *testing.T) {
-	args := launchArgs("n", "img", "o1", "dedicated-fleet", "tok", "https://api", false)
+	args := launchArgs("n", "img", "o1", "dedicated-fleet", "tok", "https://api", 0.50, false)
 	if strings.Contains(strings.Join(args, " "), "runsc") {
 		t.Error("runsc was applied to a non-free fleet")
 	}

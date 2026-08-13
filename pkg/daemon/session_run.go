@@ -181,7 +181,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	runner := &session.Runner{
 		Store:            store,
 		SessionID:        sessionIDFor(spec.ID),
-		Architect:        &session.LLMArchitect{Provider: architectProv, Model: architectModel},
+		Architect:        &session.LLMArchitect{Provider: architectProv, Model: architectModel, Tools: session.NewArchitectTools(deps.worktreePath)},
 		Implementer:      implementer,
 		ImplementerModel: spec.Model,
 		Tools:            tools,

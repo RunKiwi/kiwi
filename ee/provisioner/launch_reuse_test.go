@@ -73,7 +73,7 @@ func TestLaunchDoesNotKillARunningDaemon(t *testing.T) {
 	logPath := fakeDocker(t, true)
 
 	d := NewDockerLauncher()
-	handle, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", true)
+	handle, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", 0.50, true)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLaunchReplacesAContainerThatIsNotRunning(t *testing.T) {
 	logPath := fakeDocker(t, false)
 
 	d := NewDockerLauncher()
-	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", true); err != nil {
+	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", 0.50, true); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestLaunchReplacesAStaleImageWhenOrgIsIdle(t *testing.T) {
 	logPath := fakeDockerStale(t)
 
 	d := NewDockerLauncher()
-	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", true); err != nil {
+	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", 0.50, true); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestLaunchKeepsAStaleImageWhileTheOrgIsBusy(t *testing.T) {
 	logPath := fakeDockerStale(t)
 
 	d := NewDockerLauncher()
-	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", false); err != nil {
+	if _, err := d.Launch(context.Background(), "org_abc", "fleet", "tok", "https://api.example", 0.50, false); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 

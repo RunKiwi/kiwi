@@ -29,8 +29,8 @@ func setupTestDB(t *testing.T) (*auth.Organization, *provisioner.Provisioner, *p
 	if err != nil {
 		t.Fatalf("failed to open in-memory db: %v", err)
 	}
-	if err := db.AutoMigrate(&store.DaemonJoinToken{}); err != nil {
-		t.Fatalf("failed to auto-migrate store.DaemonJoinToken: %v", err)
+	if err := db.AutoMigrate(&store.DaemonJoinToken{}, &auth.OrgLimits{}); err != nil {
+		t.Fatalf("failed to auto-migrate: %v", err)
 	}
 
 	s := store.NewPostgresStore(db)
@@ -95,6 +95,12 @@ func TestPoller_Provision(t *testing.T) {
 	}
 	if call.JoinToken == "" {
 		t.Error("expected a non-empty join token")
+	}
+	// The org has no explicit org_limits row and Plan == "free", so this must
+	// come from auth.FreeLimits — not the launcher's own $5.00 default, which
+	// is exactly the bug this pins.
+	if call.SessionBudgetUSD != 0.50 {
+		t.Errorf("session budget = %.2f, want the org's Free cap of 0.50", call.SessionBudgetUSD)
 	}
 	if s := statusOf(t, db, "prov_1"); s != "completed" {
 		t.Errorf("expected status completed, got %s", s)

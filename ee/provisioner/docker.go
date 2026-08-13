@@ -91,10 +91,13 @@ func cacheDirFor(orgID string) string {
 // Mounting a host directory at the identical path inside the container makes
 // the path mean the same thing on both sides, which is what a sibling-container
 // setup requires. -cache-dir points the daemon at it.
-func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, pullAlways bool) []string {
+func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, sessionBudgetUSD float64, pullAlways bool) []string {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-e", "KIWI_JOIN_TOKEN=" + joinToken,
+		// Without this the daemon falls back to its own -session-budget default
+		// ($5.00), ignoring the org's actual per-task cap entirely.
+		"-e", fmt.Sprintf("KIWI_SESSION_BUDGET_USD=%.2f", sessionBudgetUSD),
 	}
 
 	if pullAlways {
@@ -117,7 +120,7 @@ func launchArgs(name, image, orgID, fleetID, joinToken, apiURL string, pullAlway
 	return args
 }
 
-func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string, orgIdle bool) (Handle, error) {
+func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, apiURL string, sessionBudgetUSD float64, orgIdle bool) (Handle, error) {
 	name := d.containerName(orgID)
 
 	// A running container is left alone.
@@ -164,7 +167,7 @@ func (d *DockerLauncher) Launch(ctx context.Context, orgID, fleetID, joinToken, 
 		return "", fmt.Errorf("failed to create cache dir for %s: %w", orgID, err)
 	}
 
-	args := launchArgs(name, d.image, orgID, fleetID, joinToken, apiURL, d.pullAlways)
+	args := launchArgs(name, d.image, orgID, fleetID, joinToken, apiURL, sessionBudgetUSD, d.pullAlways)
 
 	// The daemon runs its test-command sandbox via `docker run`, so it needs a
 	// Docker endpoint. We bind-mount the host socket, making test sandboxes

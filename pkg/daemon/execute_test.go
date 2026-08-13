@@ -15,10 +15,10 @@ import (
 )
 
 // sessionMock is the daemon-side test double for a model that can both plan and
-// implement: Complete serves the Architect (which needs no tools) and the
-// embedded MockToolRunner serves the Implementer (which needs nothing else).
-// One type covers both because executeSession resolves the two roles through
-// the same newProvider seam.
+// implement. One type covers both because executeSession resolves the two
+// roles through the same newProvider seam, so in this test they are
+// literally the same value — StartConversation (below) tells the roles apart
+// by which tool set they were offered.
 type sessionMock struct {
 	provider.MockToolRunner
 	// specs are returned by Complete in order — one per Architect turn, so a
@@ -40,6 +40,43 @@ func (m *sessionMock) Complete(ctx context.Context, system, user string) (string
 	b, err := json.Marshal(spec)
 	return string(b), err
 }
+
+// StartConversation shadows the embedded MockToolRunner's, so sessionMock can
+// serve the Architect's tool-calling path too — the Architect's ArchitectTools
+// only ever offers list_files/read_file/grep, which is what distinguishes an
+// Architect conversation from the Implementer's larger tool set here. An
+// Architect turn answers directly from the scripted specs, the same as
+// Complete always did; anything else is the Implementer's Script.
+func (m *sessionMock) StartConversation(system string, tools []provider.ToolDef, opts provider.ConversationOpts) provider.ToolConversation {
+	if isArchitectToolset(tools) {
+		return &architectMockConversation{m: m}
+	}
+	return m.MockToolRunner.StartConversation(system, tools, opts)
+}
+
+func isArchitectToolset(tools []provider.ToolDef) bool {
+	if len(tools) == 0 {
+		return false
+	}
+	for _, d := range tools {
+		if d.Name != session.ToolListFiles && d.Name != session.ToolReadFile && d.Name != session.ToolGrep {
+			return false
+		}
+	}
+	return true
+}
+
+// architectMockConversation answers a single turn from sessionMock.Complete,
+// with no tool calls of its own — the scripted specs assume no exploration,
+// which keeps every existing session test's round count exactly as scripted.
+type architectMockConversation struct{ m *sessionMock }
+
+func (c *architectMockConversation) Send(ctx context.Context, text string, results []provider.ToolResult) (provider.Turn, error) {
+	resp, err := c.m.Complete(ctx, "", text)
+	return provider.Turn{Text: resp}, err
+}
+func (c *architectMockConversation) Usage() provider.ToolUsage { return provider.ToolUsage{} }
+func (c *architectMockConversation) Turns() int                { return 1 }
 
 // newSessionTestDaemon wires a Daemon whose only model is the given double and
 // whose test command runs locally rather than in Docker, so executeTask drives
