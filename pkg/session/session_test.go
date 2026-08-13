@@ -178,6 +178,54 @@ func TestReviewerSeesTheHistoryOfEarlierRounds(t *testing.T) {
 	}
 }
 
+// Spec.OpenQuestions is a channel out to the Implementer; Report.Answers and
+// Report.NewQuestions are the channel back. Before this existed, whatever the
+// Implementer had to say about an open question was indistinguishable prose
+// inside the handoff note — there was no field to check it against.
+func TestReviewSeesStructuredAnswersAndNewQuestions(t *testing.T) {
+	arch := &fakeArchitect{
+		plan: Spec{Verdict: VerdictProceed, Objective: "migrate the store", OpenQuestions: []string{
+			"is the fs backend used anywhere else?",
+		}},
+		reviews: []Spec{{Verdict: VerdictApprove, Summary: "done"}},
+	}
+	ws := &fakeWorkspace{tree: []string{"store.go"}, diff: "+postgres", head: "base"}
+	impl := &provider.MockToolRunner{
+		Script: func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+			if n == 1 {
+				return provider.Turn{Calls: []provider.ToolCall{
+					provider.MockCall("f", ToolFinish, map[string]any{
+						"note":          "switched the store to Postgres",
+						"answers":       []string{"no, only referenced from its own test"},
+						"new_questions": []string{"should the migration run for existing rows too?"},
+						"decisions":     []string{"kept the interface pkg/store already expects"},
+					}),
+				}}, nil
+			}
+			return provider.Turn{Text: "done"}, nil
+		},
+	}
+	r, _ := newRunner(t, arch, impl, ws, passing("ok"))
+
+	res, err := r.Run(context.Background(), Task{Description: "migrate auth to postgres"})
+	if err != nil || !res.Success {
+		t.Fatalf("expected success, got %+v err=%v", res, err)
+	}
+	if len(arch.seen) != 1 {
+		t.Fatalf("expected one review, got %d", len(arch.seen))
+	}
+	review := arch.seen[0]
+	if len(review.Answers) != 1 || review.Answers[0] != "no, only referenced from its own test" {
+		t.Errorf("answers did not reach the review: %#v", review.Answers)
+	}
+	if len(review.NewQuestions) != 1 || review.NewQuestions[0] != "should the migration run for existing rows too?" {
+		t.Errorf("new_questions did not reach the review: %#v", review.NewQuestions)
+	}
+	if len(review.Decisions) != 1 || review.Decisions[0] != "kept the interface pkg/store already expects" {
+		t.Errorf("decisions did not reach the review: %#v", review.Decisions)
+	}
+}
+
 // The reviewer always sees the accumulated diff for the whole task — reviewing
 // one round's slice in isolation is the single-file Critic's central weakness.
 func TestReviewerSeesTheWholeTaskDiff(t *testing.T) {

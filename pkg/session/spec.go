@@ -60,6 +60,30 @@ type Spec struct {
 	Summary string `json:"summary"`
 }
 
+// Report is the Implementer's return value from a round, via the finish tool.
+// It is the answer half of the channel Spec opens: OpenQuestions goes out with
+// the brief, and this is what comes back — instead of both directions being
+// flattened into one paragraph of prose the Architect has to parse to tell
+// whether a question actually got answered.
+type Report struct {
+	// Note is the free-text handoff: what changed, what to know. Always present.
+	Note string
+	// Answers responds to this round's Spec.OpenQuestions, in the same order.
+	// Not enforced positionally — the Architect reads both lists and matches
+	// them the way a person would — but structured rather than buried in Note
+	// is what makes "was this actually answered" checkable instead of assumed.
+	Answers []string
+	// NewQuestions are things this round could not resolve on its own. Before
+	// this field existed, an Implementer that hit something undecidable had no
+	// way to say so — it could only guess and hope the guess survived review,
+	// or bury a hedge in Note where nothing downstream looked for it.
+	NewQuestions []string
+	// Decisions are implementation choices worth the reviewer knowing about
+	// even though nothing forced the question — e.g. "used the existing fs
+	// backend since pkg/store owns the interface it expects."
+	Decisions []string
+}
+
 // Opens reports whether this verdict starts another round.
 func (s Spec) Opens() bool { return s.Verdict == VerdictProceed || s.Verdict == VerdictRevise }
 
@@ -99,7 +123,7 @@ func (s Spec) Prompt() string {
 	writeList(&b, "Files expected to change", s.MustChange)
 	writeList(&b, "Files you must NOT change", s.MustNotChange)
 	writeList(&b, "Hints", s.Hints)
-	writeList(&b, "Open questions — answer them from the code if you can", s.OpenQuestions)
+	writeList(&b, "Open questions — call finish with one entry per question in `answers`, in this order; put anything you cannot resolve in `new_questions` instead of guessing", s.OpenQuestions)
 	return b.String()
 }
 

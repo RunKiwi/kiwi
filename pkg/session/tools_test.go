@@ -188,14 +188,44 @@ func TestFinishCapturesTheHandoffNote(t *testing.T) {
 	}
 
 	call(t, ft, ToolFinish, map[string]string{"note": "added the retry wrapper"})
-	done, note := ft.Finished()
-	if !done || note != "added the retry wrapper" {
-		t.Fatalf("finish not recorded: done=%v note=%q", done, note)
+	done, report := ft.Finished()
+	if !done || report.Note != "added the retry wrapper" {
+		t.Fatalf("finish not recorded: done=%v note=%q", done, report.Note)
 	}
 
 	ft.Reset()
 	if done, _ := ft.Finished(); done {
 		t.Fatal("Reset must clear the finish state so the next round starts clean")
+	}
+}
+
+func TestFinishCapturesAnswersNewQuestionsAndDecisions(t *testing.T) {
+	ft, _ := newTools(t)
+
+	call(t, ft, ToolFinish, map[string]any{
+		"note":          "switched the store to Postgres",
+		"answers":       []string{"the fs backend is unused elsewhere, safe to drop"},
+		"new_questions": []string{"should the migration run for existing rows too?"},
+		"decisions":     []string{"kept the interface pkg/store already expects"},
+	})
+
+	done, report := ft.Finished()
+	if !done {
+		t.Fatal("finish should have been recorded")
+	}
+	if len(report.Answers) != 1 || report.Answers[0] != "the fs backend is unused elsewhere, safe to drop" {
+		t.Errorf("answers not captured: %#v", report.Answers)
+	}
+	if len(report.NewQuestions) != 1 || report.NewQuestions[0] != "should the migration run for existing rows too?" {
+		t.Errorf("new_questions not captured: %#v", report.NewQuestions)
+	}
+	if len(report.Decisions) != 1 || report.Decisions[0] != "kept the interface pkg/store already expects" {
+		t.Errorf("decisions not captured: %#v", report.Decisions)
+	}
+
+	ft.Reset()
+	if _, report := ft.Finished(); len(report.Answers) != 0 {
+		t.Fatal("Reset must clear the report, not just the finished flag")
 	}
 }
 

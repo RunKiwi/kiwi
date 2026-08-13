@@ -54,6 +54,15 @@ type ReviewInput struct {
 	Diff         string
 	FilesChanged []string
 	HandoffNote  string
+	// Answers, NewQuestions and Decisions are the structured half of the round's
+	// Report — the return channel Spec.OpenQuestions opens. Before this existed,
+	// whatever the Implementer had to say about an open question was folded into
+	// HandoffNote as prose, indistinguishable from everything else in it: there
+	// was no way to check that a question actually got answered rather than
+	// quietly dropped.
+	Answers      []string
+	NewQuestions []string
+	Decisions    []string
 	VerifyOutput string
 	VerifyPassed bool
 	// History is the compacted account of earlier rounds: what was asked, what
@@ -111,6 +120,10 @@ Hold these in mind:
    user money and time.
 5. If the task cannot be done in this repository, or the request is based on a false premise, return
    verdict "abandon" and explain. That is a real answer, not a failure.
+6. open_questions are answered, not just asked. A round that received them returns answers, in order,
+   or — where it could not resolve one — a new question of its own; both appear in your next review
+   under their own headings, along with any implementation decisions worth knowing. Read them before
+   writing the next spec. Do not ask a question that was already answered.
 
 Respond ONLY with a JSON object:
 
@@ -183,6 +196,25 @@ func (a *LLMArchitect) Review(ctx context.Context, in ReviewInput) (Spec, error)
 
 	fmt.Fprintf(&b, "\n# The spec you wrote for round %d\n%s\n", in.Round, in.Spec.Prompt())
 	fmt.Fprintf(&b, "\n# The implementer's handoff note\n%s\n", orNone(in.HandoffNote))
+
+	if len(in.Answers) > 0 {
+		b.WriteString("\n# Answers to this round's open questions\n")
+		for _, a := range in.Answers {
+			fmt.Fprintf(&b, "- %s\n", a)
+		}
+	}
+	if len(in.NewQuestions) > 0 {
+		b.WriteString("\n# Questions the implementer could not resolve\nAddress these in your next spec — as a new open_question, a hint, or by changing the objective.\n")
+		for _, q := range in.NewQuestions {
+			fmt.Fprintf(&b, "- %s\n", q)
+		}
+	}
+	if len(in.Decisions) > 0 {
+		b.WriteString("\n# Implementation decisions made this round\n")
+		for _, d := range in.Decisions {
+			fmt.Fprintf(&b, "- %s\n", d)
+		}
+	}
 
 	if len(in.FilesChanged) > 0 {
 		fmt.Fprintf(&b, "\n# Files changed so far\n%s\n", strings.Join(in.FilesChanged, "\n"))
