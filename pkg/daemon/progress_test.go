@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -105,6 +106,7 @@ func TestProgress_PhaseSinceResetsOnlyOnPhaseChange(t *testing.T) {
 		t.Errorf("same phase text should not reset phaseSince: got %v, want %v", sameSince, firstSince)
 	}
 
+	time.Sleep(time.Millisecond)
 	p.setActivity("install: npm ci", "")
 	_, _, _, newSince, _ := p.pending()
 	if !newSince.After(firstSince) {
