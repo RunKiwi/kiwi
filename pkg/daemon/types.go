@@ -110,6 +110,10 @@ type ProgressReq struct {
 	// OutputTail is the end of the running command's output. The end is the part
 	// that says what it is doing; the start is usually a banner.
 	OutputTail string `json:"output_tail,omitempty"`
+	// PhaseSince is when the current Phase started, so the dashboard can show
+	// how long this step has actually been running — not just that the feed
+	// is still alive (which ProgressAt on the receiving end already answers).
+	PhaseSince time.Time `json:"phase_since,omitempty"`
 }
 
 // SessionCheckpointReq carries a session's durable position and the events that

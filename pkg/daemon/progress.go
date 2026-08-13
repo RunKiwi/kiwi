@@ -52,6 +52,11 @@ type progressReporter struct {
 	sent  int
 	tail  string
 	phase string
+	// phaseSince is when the current phase started, set only when the phase
+	// text actually changes — a long command reports the same phase text
+	// across several setActivity calls (before it runs, then with its output
+	// tail attached), and none of those should make it look freshly started.
+	phaseSince time.Time
 }
 
 // add records one loop phase. Called inline on the loop goroutine.
@@ -73,26 +78,32 @@ func (p *progressReporter) add(ev ver.TaskEvent) {
 }
 
 // setActivity records what is running now and the tail of its output, so a long
-// command reports something other than silence.
+// command reports something other than silence. phaseSince advances only when
+// the phase itself changes, so the live view can say how long the CURRENT
+// phase has taken — not just that something is happening.
 func (p *progressReporter) setActivity(phase, output string) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if phase != p.phase {
+		p.phaseSince = time.Now().UTC()
+	}
 	p.phase = phase
 	p.tail = outputTail(output, maxTailBytes)
 }
 
-// pending returns the events not yet accepted, plus the current activity.
-func (p *progressReporter) pending() (events []ver.TaskEvent, phase, tail string, upto int) {
+// pending returns the events not yet accepted, plus the current activity and
+// when that activity started.
+func (p *progressReporter) pending() (events []ver.TaskEvent, phase, tail string, phaseSince time.Time, upto int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	upto = len(p.events)
 	if p.sent < upto {
 		events = append(events, p.events[p.sent:upto]...)
 	}
-	return events, p.phase, p.tail, upto
+	return events, p.phase, p.tail, p.phaseSince, upto
 }
 
 // ack marks everything below upto as accepted by the Control Plane.
@@ -130,7 +141,7 @@ func (d *Daemon) streamProgress(ctx context.Context, taskID, leaseID string, p *
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			events, phase, tail, upto := p.pending()
+			events, phase, tail, phaseSince, upto := p.pending()
 			// Nothing new to say. An unchanged phase with no new events is the
 			// common case between steps, and posting it would be pure noise.
 			if len(events) == 0 && phase == "" {
@@ -145,6 +156,7 @@ func (d *Daemon) streamProgress(ctx context.Context, taskID, leaseID string, p *
 				Events:     events,
 				Phase:      phase,
 				OutputTail: tail,
+				PhaseSince: phaseSince,
 			}); err != nil {
 				// Best-effort by design: telemetry must never affect a run. The
 				// unsent delta stays pending and the next tick retries it.

@@ -16,18 +16,18 @@ func TestProgress_SendsOnlyTheDelta(t *testing.T) {
 	p.add(ver.TaskEvent{Step: 0, Phase: "initial_test", Outcome: "fail"})
 	p.add(ver.TaskEvent{Step: 1, Phase: "actor", Outcome: "proposed"})
 
-	events, _, _, upto := p.pending()
+	events, _, _, _, upto := p.pending()
 	if len(events) != 2 {
 		t.Fatalf("first flush should carry both events, got %d", len(events))
 	}
 	p.ack(upto)
 
-	if events, _, _, _ := p.pending(); len(events) != 0 {
+	if events, _, _, _, _ := p.pending(); len(events) != 0 {
 		t.Errorf("acknowledged events must not be re-sent, got %d", len(events))
 	}
 
 	p.add(ver.TaskEvent{Step: 1, Phase: "critic", Outcome: "rejected"})
-	events, _, _, _ = p.pending()
+	events, _, _, _, _ = p.pending()
 	if len(events) != 1 || events[0].Phase != "critic" {
 		t.Errorf("only the new event should be pending, got %+v", events)
 	}
@@ -40,12 +40,12 @@ func TestProgress_UnacknowledgedEventsSurviveAFailedFlush(t *testing.T) {
 	p := &progressReporter{}
 	p.add(ver.TaskEvent{Step: 1, Phase: "actor", Outcome: "proposed"})
 
-	events, _, _, _ := p.pending() // flush "fails": no ack
+	events, _, _, _, _ := p.pending() // flush "fails": no ack
 	if len(events) != 1 {
 		t.Fatalf("expected 1 pending event, got %d", len(events))
 	}
 
-	again, _, _, _ := p.pending()
+	again, _, _, _, _ := p.pending()
 	if len(again) != 1 {
 		t.Errorf("an unacknowledged event must stay pending, got %d", len(again))
 	}
@@ -58,7 +58,7 @@ func TestProgress_AllReturnsTheFullHistory(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		p.add(ver.TaskEvent{Step: i, Phase: "actor"})
 	}
-	_, _, _, upto := p.pending()
+	_, _, _, _, upto := p.pending()
 	p.ack(upto)
 
 	if got := p.all(); len(got) != 3 {
@@ -74,7 +74,7 @@ func TestProgress_OutputTailIsBoundedAndKeepsTheEnd(t *testing.T) {
 	long := strings.Repeat("x", maxTailBytes*3) + "THE-END"
 	p.setActivity("test: npm test", long)
 
-	_, phase, tail, _ := p.pending()
+	_, phase, tail, _, _ := p.pending()
 	if phase != "test: npm test" {
 		t.Errorf("phase = %q", phase)
 	}
@@ -83,6 +83,32 @@ func TestProgress_OutputTailIsBoundedAndKeepsTheEnd(t *testing.T) {
 	}
 	if !strings.HasSuffix(tail, "THE-END") {
 		t.Error("the tail must keep the end of the output, which is the part that is current")
+	}
+}
+
+// The elapsed clock resets only when the phase itself changes — not on every
+// setActivity call. daemon.go calls setActivity twice for the same command
+// (once before it runs, once after with the output tail attached), and that
+// second call must not make a phase look like it just started.
+func TestProgress_PhaseSinceResetsOnlyOnPhaseChange(t *testing.T) {
+	p := &progressReporter{}
+
+	p.setActivity("test: go test ./...", "")
+	_, _, _, firstSince, _ := p.pending()
+	if firstSince.IsZero() {
+		t.Fatal("phaseSince should be set on the first activity")
+	}
+
+	p.setActivity("test: go test ./...", "some output")
+	_, _, _, sameSince, _ := p.pending()
+	if !sameSince.Equal(firstSince) {
+		t.Errorf("same phase text should not reset phaseSince: got %v, want %v", sameSince, firstSince)
+	}
+
+	p.setActivity("install: npm ci", "")
+	_, _, _, newSince, _ := p.pending()
+	if !newSince.After(firstSince) {
+		t.Errorf("a genuinely new phase should advance phaseSince: got %v, want after %v", newSince, firstSince)
 	}
 }
 
@@ -113,7 +139,7 @@ func TestProgress_ConcurrentAddAndFlush(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			_, _, _, upto := p.pending()
+			_, _, _, _, upto := p.pending()
 			p.ack(upto)
 			p.setActivity("test", "chunk")
 		}
