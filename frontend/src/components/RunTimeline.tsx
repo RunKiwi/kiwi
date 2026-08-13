@@ -76,6 +76,8 @@ const PHASE_LABEL: Record<string, string> = {
   actor: "Actor",
   critic: "Critic",
   test: "Test",
+  clone: "Cloning repository",
+  install: "Installing dependencies",
   // Session mode emits these raw (pkg/daemon/session_run.go sessionPhase), so
   // without them a session run showed bare snake_case rows.
   round_start: "Round started",
