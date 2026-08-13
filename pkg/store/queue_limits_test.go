@@ -149,3 +149,42 @@ func TestLeaseEnforcesBudgetCap(t *testing.T) {
 		t.Errorf("Expected j-bad to be FAILED, got %s", badJob.Status)
 	}
 }
+
+// A Free org with no explicit org_limits row (the common case — nothing
+// writes one until the org is created via a signup path) must fall back to
+// the Free profile's real budget, not the unconditional 5.00 every other
+// plan's absent row falls back to. Before this fix, effectiveOrgLimits never
+// looked at the org's plan at all, so this enforcement point disagreed with
+// ee/auth.GetOrgLimits (used everywhere else the cap is read) about what a
+// Free org's cap actually is — independent of whatever ee/auth.FreeLimits
+// itself said.
+func TestLeaseFreeOrgWithNoLimitsRowUsesFreeBudgetNotDefault(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.db.Create(&Organization{ID: "o-free", Plan: "free"}).Error; err != nil {
+		t.Fatalf("Create Organization: %v", err)
+	}
+	// No OrgLimits row for o-free — this is the fallback path under test.
+
+	s.db.Create(&Job{ID: "j-over-free-cap", OrgID: "o-free", UserID: "u1", Status: "RUNNING", CostUSD: 3.00})
+	enqueueTask(t, s, "t-over", "o-free", "j-over-free-cap")
+
+	// 3.00 is under the wrong (5.00) fallback but over the correct Free one
+	// (2.00) — so this only fails the way it should if the fix landed.
+	l, err := s.LeaseNextTask(ctx, "o-free", "d1", "", time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseNextTask: %v", err)
+	}
+	if l != nil {
+		t.Fatalf("expected no lease — a Free org with no row should cap at 2.00, not fall back to 5.00; got task %s", l.ID)
+	}
+
+	var task QueuedTask
+	if err := s.db.First(&task, "id = ?", "t-over").Error; err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if task.Status != TaskFailed {
+		t.Errorf("expected t-over FAILED (over the Free cap), got %s", task.Status)
+	}
+}
