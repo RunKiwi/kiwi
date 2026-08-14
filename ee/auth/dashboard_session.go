@@ -5,7 +5,11 @@
 package auth
 
 import (
+	"net/http"
 	"time"
+
+	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"gorm.io/gorm"
 )
 
 // DashboardSession is a sessionized span of browser-dashboard activity for a
@@ -30,3 +34,76 @@ type DashboardSession struct {
 
 // TableName overrides the default GORM table name.
 func (DashboardSession) TableName() string { return "dashboard_sessions" }
+
+const (
+	// dashboardSessionGap is the inactivity gap that closes a session and
+	// starts a new one on the next activity. 30 minutes matches the
+	// industry-standard default (e.g. Google Analytics) for sessionizing
+	// activity when there is no explicit login/logout pair to bound it.
+	dashboardSessionGap = 30 * time.Minute
+
+	// dashboardActivityWriteThrottle bounds how often a single user's
+	// activity is written to the database. The dashboard SPA polls several
+	// endpoints every few seconds; without this, every one of those
+	// requests would trigger a write. Last-seen lagging real activity by
+	// under a minute is immaterial at the granularity internal ops needs
+	// this for.
+	dashboardActivityWriteThrottle = 60 * time.Second
+)
+
+// dashboardActivityClock is overridden in tests to control what
+// recordDashboardActivity treats as "now", so sessionization (extend vs.
+// new vs. gap-close) can be tested without sleeping. Mirrors the
+// githubEndpoint/githubAPIURL var-override pattern already used in
+// oauth_test.go.
+var dashboardActivityClock = time.Now
+
+// resolveCookieUser resolves the session cookie on r, if present and valid,
+// to the User it names. It returns nil — not an error — when there is no
+// usable cookie, since the caller (AuthMiddleware / AuthFunc) falls back to
+// bearer-token auth in that case.
+func resolveCookieUser(db *gorm.DB, r *http.Request) *User {
+	cookie, err := r.Cookie(SessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return nil
+	}
+	sess, err := VerifySession(cookie.Value)
+	if err != nil {
+		return nil
+	}
+	var user User
+	if err := db.First(&user, "id = ?", sess.UserID).Error; err != nil {
+		return nil
+	}
+	return &user
+}
+
+// recordDashboardActivity extends or starts a DashboardSession for user and
+// bumps User.LastSeenAt. It is called only from the cookie-authenticated
+// path — API-key and bootstrap-token auth never reach it, so CLI/SDK/daemon
+// traffic is never tracked as dashboard activity. This is best-effort:
+// write failures are silently dropped, since recording activity must never
+// fail the request it rode in on.
+func recordDashboardActivity(db *gorm.DB, user *User) {
+	now := dashboardActivityClock()
+
+	var last DashboardSession
+	err := db.Where("user_id = ?", user.ID).Order("started_at DESC").First(&last).Error
+	if err == nil && now.Sub(last.LastActivityAt) < dashboardActivityWriteThrottle {
+		return
+	}
+
+	if err == nil && now.Sub(last.LastActivityAt) <= dashboardSessionGap {
+		db.Model(&DashboardSession{}).Where("id = ?", last.ID).Update("last_activity_at", now)
+	} else {
+		db.Create(&DashboardSession{
+			ID:             store.NewDashID("dsess"),
+			UserID:         user.ID,
+			OrgID:          user.OrgID,
+			StartedAt:      now,
+			LastActivityAt: now,
+		})
+	}
+
+	db.Model(&User{}).Where("id = ?", user.ID).Update("last_seen_at", now)
+}
