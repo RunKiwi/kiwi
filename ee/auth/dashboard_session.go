@@ -13,7 +13,10 @@ import (
 )
 
 // DashboardSession is a sessionized span of browser-dashboard activity for a
-// user, derived from cookie-authenticated requests. It is deliberately not
+// user, derived from cookie-authenticated requests and — the common case in
+// practice, since the SPA authenticates with a bearer token — from
+// bearer-token requests whose resolved API key is labeled
+// WebSessionAPIKeyLabel. It is deliberately not
 // named Session/UserSession: store.AgentSession
 // (pkg/store/session_models.go) already uses "session" for a task's
 // Architect/Implementer run, an unrelated concept, and reusing the word here
@@ -79,11 +82,15 @@ func resolveCookieUser(db *gorm.DB, r *http.Request) *User {
 }
 
 // recordDashboardActivity extends or starts a DashboardSession for user and
-// bumps User.LastSeenAt. It is called only from the cookie-authenticated
-// path — API-key and bootstrap-token auth never reach it, so CLI/SDK/daemon
-// traffic is never tracked as dashboard activity. This is best-effort:
-// write failures are silently dropped, since recording activity must never
-// fail the request it rode in on.
+// bumps User.LastSeenAt. It is called from the cookie-fallback path in both
+// AuthMiddleware and AuthFunc, and from the bearer-token path in both when
+// the resolved API key's Label equals WebSessionAPIKeyLabel — that label is
+// the actual "this is the browser dashboard" signal, since the SPA
+// authenticates every request with that key as a bearer token, not the
+// session cookie. Bootstrap-token auth and any other API key label never
+// reach it, so CLI/SDK/daemon traffic is never tracked as dashboard
+// activity. This is best-effort: write failures are silently dropped, since
+// recording activity must never fail the request it rode in on.
 func recordDashboardActivity(db *gorm.DB, user *User) {
 	now := dashboardActivityClock()
 

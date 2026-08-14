@@ -386,7 +386,7 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 	// Mint a fresh API key so the SPA (which authenticates with a bearer token
 	// held in localStorage) has a credential. An existing key's plaintext can't
 	// be recovered, so each OAuth sign-in issues a new "Web Session" key.
-	apiKey, apiKeyRecord, keyErr := GenerateAPIKey(user.ID, "Web Session", nil)
+	apiKey, apiKeyRecord, keyErr := GenerateAPIKey(user.ID, WebSessionAPIKeyLabel, nil)
 	if keyErr != nil {
 		http.Error(w, "Failed to create session key", http.StatusInternalServerError)
 		return

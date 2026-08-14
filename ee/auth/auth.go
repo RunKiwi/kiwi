@@ -25,6 +25,16 @@ type contextKey int
 
 const claimsKey contextKey = 0
 
+// WebSessionAPIKeyLabel is the Label GenerateAPIKey is given for the API
+// key minted by the OAuth callback (oauth.go) for the SPA. The SPA
+// authenticates every request with this key as a bearer token from the
+// moment login completes — never the session cookie — so a bearer-token
+// request presenting a key with this exact label IS real browser dashboard
+// activity, and is the actual "browser vs. CLI" boundary this package
+// needs, not "cookie vs. bearer" (which the SPA never uses for its own API
+// calls; see recordDashboardActivity's call sites below and in AuthFunc).
+const WebSessionAPIKeyLabel = "Web Session"
+
 // UserClaims represents the identity extracted from a valid API key.
 type UserClaims struct {
 	UserID string
@@ -143,6 +153,10 @@ func AuthMiddleware(db *gorm.DB, next http.Handler) http.Handler {
 			return
 		}
 
+		if apiKey.Label == WebSessionAPIKeyLabel {
+			recordDashboardActivity(db, &user)
+		}
+
 		claims := &UserClaims{
 			UserID: user.ID,
 			Email:  user.Email,
@@ -200,6 +214,10 @@ func AuthFunc(db *gorm.DB, r *http.Request) (*UserClaims, error) {
 	var user User
 	if err := db.First(&user, "id = ?", apiKey.UserID).Error; err != nil {
 		return nil, fmt.Errorf("user not found")
+	}
+
+	if apiKey.Label == WebSessionAPIKeyLabel {
+		recordDashboardActivity(db, &user)
 	}
 
 	return &UserClaims{
