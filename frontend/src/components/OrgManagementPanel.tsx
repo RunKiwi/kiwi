@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
-import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, type AdminJoinRequest, formatTokens, providerLabel } from "@/lib/api";
-import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X, ShieldCheck } from "lucide-react";
+import { client, type AdminOrg, type AdminUser, type AdminAuditLog, type AdminProviderConfig, type AdminOrgModelUsage, type AdminAPIKey, type AdminDashboardSession, type AdminJoinRequest, formatTokens, providerLabel } from "@/lib/api";
+import { shortTime, exactTime, formatDuration } from "@/lib/datetime";
+import { Loader2, Users, Activity, Settings, Database, Plus, BarChart3, KeyRound, Pencil, Check, X, ShieldCheck, History } from "lucide-react";
 
 export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgUpdate: (org: AdminOrg) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -25,6 +26,13 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
   const [keysLoading, setKeysLoading] = useState<string | null>(null);
   const [newKey, setNewKey] = useState<{ userId: string; plaintext: string } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Dashboard sessions, expanded per user — independent of the Keys panel
+  // above (a superadmin may want either, both, or neither open for a given
+  // user; they answer unrelated questions about the same row).
+  const [expandedSessionsUserId, setExpandedSessionsUserId] = useState<string | null>(null);
+  const [sessionsByUser, setSessionsByUser] = useState<Record<string, AdminDashboardSession[]>>({});
+  const [sessionsLoading, setSessionsLoading] = useState<string | null>(null);
 
   // Provider form
   const [provName, setProvName] = useState("");
@@ -96,6 +104,21 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
         .then(keys => setKeysByUser(prev => ({ ...prev, [userId]: keys })))
         .catch(() => setKeysByUser(prev => ({ ...prev, [userId]: [] })))
         .finally(() => setKeysLoading(null));
+    }
+  };
+
+  const toggleSessions = (userId: string) => {
+    if (expandedSessionsUserId === userId) {
+      setExpandedSessionsUserId(null);
+      return;
+    }
+    setExpandedSessionsUserId(userId);
+    if (!sessionsByUser[userId]) {
+      setSessionsLoading(userId);
+      client.listAdminUserSessions(org.id, userId)
+        .then(sessions => setSessionsByUser(prev => ({ ...prev, [userId]: sessions })))
+        .catch(() => setSessionsByUser(prev => ({ ...prev, [userId]: [] })))
+        .finally(() => setSessionsLoading(null));
     }
   };
 
@@ -336,7 +359,9 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">Joined</th>
-                    <th className="px-4 py-3 text-right">API Keys</th>
+                    <th className="px-4 py-3">Sign-ins</th>
+                    <th className="px-4 py-3">Last seen</th>
+                    <th className="px-4 py-3 text-right">Details</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -351,18 +376,34 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                           </span>
                         </td>
                         <td className="px-4 py-3 text-zinc-400">{new Date(user.created_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-zinc-300">{user.sign_in_count}</td>
+                        <td className="px-4 py-3 text-zinc-400">
+                          {user.last_seen_at ? (
+                            <span title={exactTime(user.last_seen_at)}>{shortTime(user.last_seen_at)}</span>
+                          ) : (
+                            <span className="text-zinc-600">Never</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => toggleKeys(user.id)}
-                            className="inline-flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-2 py-1 transition-colors"
-                          >
-                            <KeyRound className="w-3 h-3" /> Keys
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => toggleKeys(user.id)}
+                              className="inline-flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-2 py-1 transition-colors"
+                            >
+                              <KeyRound className="w-3 h-3" /> Keys
+                            </button>
+                            <button
+                              onClick={() => toggleSessions(user.id)}
+                              className="inline-flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded px-2 py-1 transition-colors"
+                            >
+                              <History className="w-3 h-3" /> Sessions
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       {expandedUserId === user.id && (
                         <tr>
-                          <td colSpan={5} className="px-4 py-4 bg-black/20">
+                          <td colSpan={7} className="px-4 py-4 bg-black/20">
                             <div className="flex items-center justify-between mb-3">
                               <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">API Keys for {user.email}</h3>
                               <button
@@ -436,11 +477,48 @@ export function OrgManagementPanel({ org, onOrgUpdate }: { org: AdminOrg; onOrgU
                           </td>
                         </tr>
                       )}
+                      {expandedSessionsUserId === user.id && (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-4 bg-black/20">
+                            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Dashboard Sessions for {user.email}</h3>
+
+                            {sessionsLoading === user.id ? (
+                              <div className="text-xs text-zinc-500">Loading sessions…</div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                              <table className="w-full text-xs text-left">
+                                <thead className="text-zinc-500">
+                                  <tr>
+                                    <th className="py-1 pr-4 font-medium">Started</th>
+                                    <th className="py-1 pr-4 font-medium">Last Activity</th>
+                                    <th className="py-1 font-medium">Duration</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                  {(sessionsByUser[user.id] ?? []).map(session => (
+                                    <tr key={session.id}>
+                                      <td className="py-1.5 pr-4 text-zinc-300" title={exactTime(session.started_at)}>{shortTime(session.started_at)}</td>
+                                      <td className="py-1.5 pr-4 text-zinc-300" title={exactTime(session.last_activity_at)}>{shortTime(session.last_activity_at)}</td>
+                                      <td className="py-1.5 text-zinc-300">{formatDuration(session.duration_seconds * 1000)}</td>
+                                    </tr>
+                                  ))}
+                                  {(sessionsByUser[user.id] ?? []).length === 0 && (
+                                    <tr>
+                                      <td colSpan={3} className="py-2 text-zinc-500">No dashboard sessions recorded yet.</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
                     </Fragment>
                   ))}
                   {users.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
+                      <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No users found.</td>
                     </tr>
                   )}
                 </tbody>
