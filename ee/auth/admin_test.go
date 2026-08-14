@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/audit"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -437,6 +438,84 @@ func TestAPIKeyHandlers_RejectCrossOrgUser(t *testing.T) {
 	}
 	if stillActive.RevokedAt != nil {
 		t.Errorf("cross-org revoke must not have taken effect, but revoked_at is set")
+	}
+}
+
+func TestListSessions(t *testing.T) {
+	db := setupTestDB(t)
+	mux := http.NewServeMux()
+	AdminRouter(db, mux)
+
+	orgA := Organization{ID: "org-sess-a", Name: "Sessions Org A"}
+	orgB := Organization{ID: "org-sess-b", Name: "Sessions Org B"}
+	db.Create(&orgA)
+	db.Create(&orgB)
+	userInA := User{ID: "user-sess-a", Email: "a@example.com", Name: "User A", OrgID: "org-sess-a", Role: "member"}
+	userInB := User{ID: "user-sess-b", Email: "b@example.com", Name: "User B", OrgID: "org-sess-b", Role: "member"}
+	db.Create(&userInA)
+	db.Create(&userInB)
+
+	claims := &UserClaims{UserID: "system"}
+	ctx := ContextWithClaims(context.Background(), claims)
+
+	// Empty: no sessions recorded yet.
+	reqEmpty := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-sess-a/users/user-sess-a/sessions", nil).WithContext(ctx)
+	wEmpty := httptest.NewRecorder()
+	mux.ServeHTTP(wEmpty, reqEmpty)
+	if wEmpty.Code != http.StatusOK {
+		t.Fatalf("expected 200 for empty session list, got %d: %s", wEmpty.Code, wEmpty.Body.String())
+	}
+	var emptyResult []dashboardSessionResponse
+	if err := json.Unmarshal(wEmpty.Body.Bytes(), &emptyResult); err != nil {
+		t.Fatalf("decode empty response: %v", err)
+	}
+	if len(emptyResult) != 0 {
+		t.Errorf("expected 0 sessions, got %d", len(emptyResult))
+	}
+
+	// Populated: two sessions, must come back newest first, each carrying
+	// its computed duration_seconds.
+	olderStart := time.Now().Add(-2 * time.Hour)
+	olderEnd := olderStart.Add(10 * time.Minute)
+	older := DashboardSession{ID: "dsess_older", UserID: userInA.ID, OrgID: orgA.ID,
+		StartedAt: olderStart, LastActivityAt: olderEnd}
+	newerStart := time.Now()
+	newer := DashboardSession{ID: "dsess_newer", UserID: userInA.ID, OrgID: orgA.ID,
+		StartedAt: newerStart, LastActivityAt: newerStart}
+	db.Create(&older)
+	db.Create(&newer)
+
+	reqList := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-sess-a/users/user-sess-a/sessions", nil).WithContext(ctx)
+	wList := httptest.NewRecorder()
+	mux.ServeHTTP(wList, reqList)
+	if wList.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", wList.Code, wList.Body.String())
+	}
+	var result []dashboardSessionResponse
+	if err := json.Unmarshal(wList.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(result))
+	}
+	if result[0].ID != "dsess_newer" || result[1].ID != "dsess_older" {
+		t.Errorf("expected newest-first order, got %s then %s", result[0].ID, result[1].ID)
+	}
+	// The still-open session (last activity == start) has ~zero duration;
+	// the closed one ran 10 minutes.
+	if result[0].DurationSeconds < 0 || result[0].DurationSeconds > 1 {
+		t.Errorf("expected the newer session's duration to be ~0s, got %v", result[0].DurationSeconds)
+	}
+	if result[1].DurationSeconds < 599 || result[1].DurationSeconds > 601 {
+		t.Errorf("expected the older session's duration to be ~600s, got %v", result[1].DurationSeconds)
+	}
+
+	// Cross-org: user-sess-b belongs to org-sess-b, not org-sess-a.
+	reqCross := httptest.NewRequest(http.MethodGet, "/admin/orgs/org-sess-a/users/user-sess-b/sessions", nil).WithContext(ctx)
+	wCross := httptest.NewRecorder()
+	mux.ServeHTTP(wCross, reqCross)
+	if wCross.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for cross-org user, got %d: %s", wCross.Code, wCross.Body.String())
 	}
 }
 

@@ -173,6 +173,19 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
+		case len(parts) == 4 && parts[1] == "users" && parts[3] == "sessions":
+			orgID := parts[0]
+			userID := parts[2]
+			if !authorizeOrgAccess(r, orgID) {
+				http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+				return
+			}
+			if r.Method != http.MethodGet {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleListSessions(db, w, r, orgID, userID)
+
 		case len(parts) == 5 && parts[1] == "users" && parts[3] == "keys":
 			orgID := parts[0]
 			keyID := parts[4]
@@ -574,6 +587,48 @@ func handleListAPIKeys(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgI
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(keys)
+}
+
+// dashboardSessionResponse is what handleListSessions returns: the stored
+// DashboardSession fields plus the derived length ops actually asked for
+// ("how long was their session"), so the API answers that directly instead
+// of making every caller subtract LastActivityAt - StartedAt itself.
+type dashboardSessionResponse struct {
+	ID              string    `json:"id"`
+	UserID          string    `json:"user_id"`
+	OrgID           string    `json:"org_id"`
+	StartedAt       time.Time `json:"started_at"`
+	LastActivityAt  time.Time `json:"last_activity_at"`
+	DurationSeconds float64   `json:"duration_seconds"`
+}
+
+// handleListSessions returns a user's most recent dashboard sessions,
+// newest first, so ops can see session-length history rather than a single
+// last-seen timestamp.
+func handleListSessions(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, userID string) {
+	var user User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil || user.OrgID != orgID {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", userID).Order("started_at desc").Limit(20).Find(&sessions).Error; err != nil {
+		http.Error(w, "Failed to list sessions", http.StatusInternalServerError)
+		return
+	}
+	resp := make([]dashboardSessionResponse, len(sessions))
+	for i, s := range sessions {
+		resp[i] = dashboardSessionResponse{
+			ID:              s.ID,
+			UserID:          s.UserID,
+			OrgID:           s.OrgID,
+			StartedAt:       s.StartedAt,
+			LastActivityAt:  s.LastActivityAt,
+			DurationSeconds: s.LastActivityAt.Sub(s.StartedAt).Seconds(),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleRevokeAPIKey(db *gorm.DB, w http.ResponseWriter, r *http.Request, orgID, keyID string) {

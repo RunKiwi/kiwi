@@ -155,3 +155,144 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Errorf("claims not injected correctly")
 	}
 }
+
+// Activity tracking must never fire for API-key authentication UNLESS the
+// key is labeled WebSessionAPIKeyLabel — that label, not "cookie vs.
+// bearer", is the actual browser-vs-CLI signal (see recordDashboardActivity
+// and TestAuthMiddleware_WebSessionAPIKeyRecordsDashboardActivity). This
+// test uses a "cli-key"-labeled key and proves the negative case: keys
+// long-lived and reused across CLI/SDK/daemon calls for weeks must not have
+// that reuse misrepresented as "dashboard activity", and must not turn
+// every CLI invocation and daemon poll into a write.
+func TestAuthMiddleware_APIKeyDoesNotRecordDashboardActivity(t *testing.T) {
+	db := setupTestDB(t)
+
+	org := Organization{ID: "org-nodash", Name: "No-Dashboard Org"}
+	db.Create(&org)
+	user := User{ID: "user-nodash", Email: "nodash@test.com", Name: "No Dash User", OrgID: org.ID, Role: "member"}
+	db.Create(&user)
+	plaintext, apiKey, _ := GenerateAPIKey(user.ID, "cli-key", nil)
+	db.Create(apiKey)
+
+	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	middleware := AuthMiddleware(db, testHandler)
+
+	req := httptest.NewRequest("GET", "/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+	w := httptest.NewRecorder()
+	middleware.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var reloaded User
+	if err := db.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt != nil {
+		t.Errorf("expected last_seen_at to stay nil for API-key auth, got %v", reloaded.LastSeenAt)
+	}
+
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 dashboard sessions for API-key auth, got %d", len(sessions))
+	}
+}
+
+// The real SPA authenticates every request with a bearer token minted by
+// the OAuth callback (GenerateAPIKey(user.ID, "Web Session", nil) in
+// oauth.go) — never the session cookie. So a bearer-token request
+// presenting a WebSessionAPIKeyLabel key IS real browser dashboard
+// activity, and must be tracked exactly like the cookie-fallback path. This
+// is the actual production-fix verification for the bug where
+// dashboard_sessions stayed empty and last_seen_at stayed null despite the
+// cookie-path tests passing, because real traffic never took the cookie
+// branch. AuthMiddleware and AuthFunc have independent, duplicated
+// branches, so both are covered here and in the AuthFunc test below.
+func TestAuthMiddleware_WebSessionAPIKeyRecordsDashboardActivity(t *testing.T) {
+	db := setupTestDB(t)
+
+	org := Organization{ID: "org-websess-mw", Name: "Web Session MW Org"}
+	db.Create(&org)
+	user := User{ID: "user-websess-mw", Email: "websess-mw@test.com", Name: "Web Session MW User", OrgID: org.ID, Role: "member"}
+	db.Create(&user)
+	plaintext, apiKey, _ := GenerateAPIKey(user.ID, WebSessionAPIKeyLabel, nil)
+	db.Create(apiKey)
+
+	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	middleware := AuthMiddleware(db, testHandler)
+
+	req := httptest.NewRequest("GET", "/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+	w := httptest.NewRecorder()
+	middleware.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var reloaded User
+	if err := db.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt == nil {
+		t.Errorf("expected last_seen_at to be set for Web Session bearer auth, got nil")
+	}
+
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 dashboard session for Web Session bearer auth, got %d", len(sessions))
+	}
+}
+
+// AuthFunc counterpart to TestAuthMiddleware_WebSessionAPIKeyRecordsDashboardActivity
+// — AuthFunc has its own independent bearer-token branch, so the fix must
+// be verified there too, not just in AuthMiddleware.
+func TestAuthFunc_WebSessionAPIKeyRecordsDashboardActivity(t *testing.T) {
+	db := setupTestDB(t)
+
+	org := Organization{ID: "org-websess-fn", Name: "Web Session Func Org"}
+	db.Create(&org)
+	user := User{ID: "user-websess-fn", Email: "websess-fn@test.com", Name: "Web Session Func User", OrgID: org.ID, Role: "member"}
+	db.Create(&user)
+	plaintext, apiKey, _ := GenerateAPIKey(user.ID, WebSessionAPIKeyLabel, nil)
+	db.Create(apiKey)
+
+	req := httptest.NewRequest("GET", "/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+
+	claims, err := AuthFunc(db, req)
+	if err != nil {
+		t.Fatalf("AuthFunc returned error: %v", err)
+	}
+	if claims == nil || claims.UserID != user.ID {
+		t.Fatalf("expected claims for %s, got %+v", user.ID, claims)
+	}
+
+	var reloaded User
+	if err := db.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt == nil {
+		t.Errorf("expected last_seen_at to be set for Web Session bearer auth, got nil")
+	}
+
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 dashboard session for Web Session bearer auth, got %d", len(sessions))
+	}
+}
