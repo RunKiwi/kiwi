@@ -5,6 +5,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -30,7 +31,7 @@ import (
 type DashboardSession struct {
 	ID             string    `json:"id" gorm:"primaryKey"`
 	UserID         string    `json:"user_id" gorm:"index;not null"`
-	OrgID          string    `json:"org_id" gorm:"index;not null"`
+	OrgID          string    `json:"org_id" gorm:"not null"`
 	StartedAt      time.Time `json:"started_at" gorm:"not null"`
 	LastActivityAt time.Time `json:"last_activity_at" gorm:"not null"`
 }
@@ -96,6 +97,14 @@ func recordDashboardActivity(db *gorm.DB, user *User) {
 
 	var last DashboardSession
 	err := db.Where("user_id = ?", user.ID).Order("started_at DESC").First(&last).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		// A real DB error, not "no prior session" — best-effort means
+		// dropping this update rather than risking a transient read
+		// failure fabricating a duplicate session (see the ErrRecordNotFound
+		// distinction below).
+		return
+	}
+
 	if err == nil && now.Sub(last.LastActivityAt) < dashboardActivityWriteThrottle {
 		return
 	}

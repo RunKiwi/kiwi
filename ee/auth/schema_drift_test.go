@@ -28,6 +28,15 @@ func TestDashboardSessionColumnsExistInMigrations(t *testing.T) {
 	assertColumnsInMigrations(t, DashboardSession{})
 }
 
+// Known limitation: this is a substring match against all .up.sql files
+// concatenated together, not scoped to the specific table a column belongs
+// to — a column name that happens to also appear in some other table's
+// migration (e.g. a generic "id" or "org_id") would satisfy this check even
+// if the column being tested was never actually added to ITS table. This
+// matches the same simplification in the pre-existing
+// ee/orchestrator/schema_drift_test.go this pattern was ported from. Fine
+// for the specific, sufficiently-distinctive columns this test currently
+// checks; be more careful if you ever add a check for a short/generic name.
 func assertColumnsInMigrations(t *testing.T, model interface{}) {
 	t.Helper()
 	sql := allMigrationSQL(t)
@@ -75,7 +84,7 @@ func allMigrationSQL(t *testing.T) string {
 	}
 	var b strings.Builder
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".sql") {
+		if !strings.HasSuffix(e.Name(), ".up.sql") {
 			continue
 		}
 		data, err := migrations.FS.ReadFile(e.Name())

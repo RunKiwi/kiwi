@@ -7,8 +7,12 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestDashboardSession_CreateAndQuery(t *testing.T) {
@@ -196,5 +200,81 @@ func TestResolveCookieUser_ValidCookieReturnsUser(t *testing.T) {
 	got := resolveCookieUser(db, req)
 	if got == nil || got.ID != user.ID {
 		t.Errorf("expected resolved user %s, got %+v", user.ID, got)
+	}
+}
+
+// A transient DB error on the initial session lookup (a connection blip, a
+// timeout — anything that isn't "no row found") must abort the activity
+// recording entirely, not be treated as "no prior session exists" and
+// fabricate a new session row. This uses a file-backed sqlite DB (not the
+// usual in-memory one) so the underlying *sql.DB can be closed to force a
+// real, deterministic non-ErrRecordNotFound error on the next query, then
+// reopened against the same file to inspect what was (and wasn't) written —
+// without pulling in a mocking library.
+func TestRecordDashboardActivity_TransientDBErrorDoesNotFabricateSession(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := InitAuthDB(db); err != nil {
+		t.Fatalf("migrate auth db: %v", err)
+	}
+
+	org := Organization{ID: "org-rda5", Name: "RDA Org 5"}
+	db.Create(&org)
+	user := User{ID: "user-rda5", Email: "rda5@test.com", Name: "RDA User", OrgID: org.ID, Role: "member"}
+	db.Create(&user)
+
+	oldClock := dashboardActivityClock
+	defer func() { dashboardActivityClock = oldClock }()
+
+	t0 := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	dashboardActivityClock = func() time.Time { return t0 }
+	recordDashboardActivity(db, &user)
+
+	// Force every subsequent query on this *gorm.DB to fail with a real
+	// connection error (not gorm.ErrRecordNotFound) by closing the
+	// underlying *sql.DB out from under it.
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close sql.DB: %v", err)
+	}
+
+	// 31 minutes later: past the inactivity gap, so absent the fix this
+	// would take the "start a new session" branch on a fabricated "not
+	// found". recordDashboardActivity must not panic, and must not write
+	// anything, since the lookup itself failed for a non-not-found reason.
+	t1 := t0.Add(31 * time.Minute)
+	dashboardActivityClock = func() time.Time { return t1 }
+	recordDashboardActivity(db, &user)
+
+	// Reopen a fresh connection against the same file to inspect state
+	// without going through the now-closed *gorm.DB.
+	verifyDB, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+
+	var sessions []DashboardSession
+	if err := verifyDB.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected the transient error to prevent a second session from being fabricated, got %d sessions", len(sessions))
+	}
+	if !sessions[0].LastActivityAt.Equal(t0) {
+		t.Errorf("expected last_activity_at to remain at %v (write dropped on transient error), got %v", t0, sessions[0].LastActivityAt)
+	}
+
+	var reloaded User
+	if err := verifyDB.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt == nil || !reloaded.LastSeenAt.Equal(t0) {
+		t.Errorf("expected last_seen_at to remain at %v (write dropped on transient error), got %v", t0, reloaded.LastSeenAt)
 	}
 }
