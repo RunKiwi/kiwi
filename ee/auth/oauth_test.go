@@ -128,6 +128,13 @@ func TestOAuthFlow_Github(t *testing.T) {
 	if user.Email != "test@github.local" || user.Name != "Test User" || *user.OAuthProvider != "github" || *user.OAuthSubject != "12345" {
 		t.Errorf("user fields mismatch: %+v", user)
 	}
+	if user.SignInCount != 1 {
+		t.Errorf("expected sign_in_count 1 after first login, got %d", user.SignInCount)
+	}
+	if user.LastSignInAt == nil {
+		t.Errorf("expected last_sign_in_at to be set after first login")
+	}
+	firstSignInAt := user.LastSignInAt
 
 	// The token handed back in the fragment must be persisted in api_keys and
 	// map to this user — otherwise the SPA's bearer auth (validate) 401s.
@@ -169,6 +176,24 @@ func TestOAuthFlow_Github(t *testing.T) {
 	db.Where("type = ?", "personal").Find(&orgs)
 	if len(orgs) != 1 {
 		t.Fatalf("expected 1 personal organization after duplicate login, got %d", len(orgs))
+	}
+
+	var userAfterSecondLogin User
+	if err := db.First(&userAfterSecondLogin, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user after second login: %v", err)
+	}
+	if userAfterSecondLogin.SignInCount != 2 {
+		t.Errorf("expected sign_in_count 2 after second login, got %d", userAfterSecondLogin.SignInCount)
+	}
+	// Not a strict "after" comparison: the two logins in this test happen
+	// within the same test function, potentially within the same
+	// millisecond, and glebarez/sqlite's stored precision isn't guaranteed
+	// finer than that — a strict .After() check would be a flaky/red
+	// assertion on driver timestamp resolution, not on the behavior under
+	// test. What must hold is "last_sign_in_at was re-set on the second
+	// login", i.e. it did not go backwards.
+	if userAfterSecondLogin.LastSignInAt == nil || userAfterSecondLogin.LastSignInAt.Before(*firstSignInAt) {
+		t.Errorf("expected last_sign_in_at to be re-set (not go backwards) on second login: first=%v second=%v", firstSignInAt, userAfterSecondLogin.LastSignInAt)
 	}
 }
 

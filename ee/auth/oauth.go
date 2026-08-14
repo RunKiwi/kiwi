@@ -353,6 +353,22 @@ func handleOAuthCallback(db *gorm.DB, w http.ResponseWriter, r *http.Request, pr
 		}
 	}
 
+	// Record the sign-in. This runs once, after user is guaranteed to be the
+	// row for this login — covering all three resolution paths above
+	// (returning user matched by provider+subject with no code path of its
+	// own, existing user now connecting this provider, and a brand-new
+	// user) without duplicating the update into each branch.
+	//
+	// Best-effort, matching recordDashboardActivity (dashboard_session.go):
+	// a failed metrics write must never be the reason a login fails, so the
+	// error is dropped rather than turned into a 500. Per the Global
+	// Constraints, all activity/sign-in tracking writes in this feature are
+	// best-effort for the same reason.
+	db.Model(&User{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
+		"sign_in_count":   gorm.Expr("sign_in_count + 1"),
+		"last_sign_in_at": time.Now(),
+	})
+
 	// Issue session cookie (used by the server-rendered surfaces; the SPA
 	// authenticates with the bearer API key handed back below).
 	sessionVal := CreateSessionCookieValue(user.ID)
