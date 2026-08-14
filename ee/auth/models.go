@@ -74,6 +74,16 @@ type User struct {
 	// id) remains the thing that identifies the account.
 	GitHubLogin *string   `json:"github_login,omitempty" gorm:"column:github_login;index"`
 	CreatedAt   time.Time `json:"created_at"`
+	// SignInCount and LastSignInAt are bumped once per completed OAuth login
+	// (ee/auth/oauth.go handleOAuthCallback) — a real, infrequent event, not
+	// per-request activity.
+	SignInCount  int        `json:"sign_in_count" gorm:"not null;default:0"`
+	LastSignInAt *time.Time `json:"last_sign_in_at"`
+	// LastSeenAt is set by recordDashboardActivity (dashboard_session.go)
+	// from cookie-authenticated requests only — API keys (CLI/SDK/daemon
+	// traffic) never touch it, so it reflects browser dashboard use, and is
+	// more current than LastSignInAt since one login's cookie can span days.
+	LastSeenAt *time.Time `json:"last_seen_at"`
 }
 
 // TableName overrides the default GORM table name.

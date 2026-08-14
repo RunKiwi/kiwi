@@ -1,0 +1,3 @@
+ALTER TABLE users DROP COLUMN IF EXISTS last_seen_at;
+ALTER TABLE users DROP COLUMN IF EXISTS last_sign_in_at;
+ALTER TABLE users DROP COLUMN IF EXISTS sign_in_count;
