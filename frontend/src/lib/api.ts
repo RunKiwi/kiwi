@@ -439,6 +439,9 @@ export interface AdminUser {
   org_id: string;
   role: string;
   created_at: string;
+  sign_in_count: number;
+  last_sign_in_at: string | null;
+  last_seen_at: string | null;
 }
 
 export interface AdminAuditLog {
@@ -478,6 +481,15 @@ export interface AdminAPIKeyCreated {
   user_id: string;
   created_at: string;
   expires_at: string | null;
+}
+
+export interface AdminDashboardSession {
+  id: string;
+  user_id: string;
+  org_id: string;
+  started_at: string;
+  last_activity_at: string;
+  duration_seconds: number;
 }
 
 export interface AdminUserUsageRow {
@@ -596,6 +608,7 @@ export const client = {
   listAdminOrgUsers: (orgId: string) => fetchApi<AdminUser[]>(`/admin/orgs/${orgId}/users`),
   createAdminOrgUser: (orgId: string, email: string, name: string, role: string) => fetchApi<AdminUser>(`/admin/orgs/${orgId}/users`, { method: "POST", body: JSON.stringify({ email, name, role }) }),
   listAdminUserAPIKeys: (orgId: string, userId: string) => fetchApi<AdminAPIKey[]>(`/admin/orgs/${orgId}/users/${userId}/keys`),
+  listAdminUserSessions: (orgId: string, userId: string) => fetchApi<AdminDashboardSession[]>(`/admin/orgs/${orgId}/users/${userId}/sessions`),
   createAdminUserAPIKey: (orgId: string, userId: string, label: string) => fetchApi<AdminAPIKeyCreated>(`/admin/orgs/${orgId}/users/${userId}/keys`, { method: "POST", body: JSON.stringify({ label }) }),
   revokeAdminUserAPIKey: (orgId: string, userId: string, keyId: string) => fetchApi<void>(`/admin/orgs/${orgId}/users/${userId}/keys/${keyId}`, { method: "DELETE" }),
   getAdminOrgAuditLogs: (orgId: string) => fetchApi<AdminAuditLog[]>(`/admin/orgs/${orgId}/audit`),
