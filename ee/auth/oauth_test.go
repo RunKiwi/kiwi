@@ -328,4 +328,20 @@ func TestSessionAndMiddleware(t *testing.T) {
 	if !handlerCalled {
 		t.Fatal("handler not called")
 	}
+
+	var reloaded User
+	if err := db.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt == nil {
+		t.Errorf("expected last_seen_at to be set after a cookie-authenticated request")
+	}
+
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 dashboard session after a cookie-authenticated request, got %d", len(sessions))
+	}
 }

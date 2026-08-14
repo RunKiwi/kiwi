@@ -155,3 +155,49 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Errorf("claims not injected correctly")
 	}
 }
+
+// Activity tracking must never fire for API-key authentication — only the
+// browser dashboard's session cookie counts. API keys are long-lived and
+// reused across CLI/SDK/daemon calls for weeks; treating that as "dashboard
+// activity" would misrepresent what a human actually did, and would turn
+// every CLI invocation and daemon poll into a write.
+func TestAuthMiddleware_APIKeyDoesNotRecordDashboardActivity(t *testing.T) {
+	db := setupTestDB(t)
+
+	org := Organization{ID: "org-nodash", Name: "No-Dashboard Org"}
+	db.Create(&org)
+	user := User{ID: "user-nodash", Email: "nodash@test.com", Name: "No Dash User", OrgID: org.ID, Role: "member"}
+	db.Create(&user)
+	plaintext, apiKey, _ := GenerateAPIKey(user.ID, "cli-key", nil)
+	db.Create(apiKey)
+
+	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	middleware := AuthMiddleware(db, testHandler)
+
+	req := httptest.NewRequest("GET", "/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+	w := httptest.NewRecorder()
+	middleware.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var reloaded User
+	if err := db.First(&reloaded, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.LastSeenAt != nil {
+		t.Errorf("expected last_seen_at to stay nil for API-key auth, got %v", reloaded.LastSeenAt)
+	}
+
+	var sessions []DashboardSession
+	if err := db.Where("user_id = ?", user.ID).Find(&sessions).Error; err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 dashboard sessions for API-key auth, got %d", len(sessions))
+	}
+}
