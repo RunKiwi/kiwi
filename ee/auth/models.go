@@ -148,7 +148,7 @@ type ProvisioningRequest struct {
 
 // InitAuthDB initializes the auth database tables within an existing GORM DB.
 func InitAuthDB(db *gorm.DB) error {
-	return db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{}, &store.Fleet{})
+	return db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{}, &store.Fleet{}, &DashboardSession{})
 }
 
 // OpenDB initializes GORM with pure-Go SQLite and runs all migrations
@@ -162,7 +162,7 @@ func OpenDB(dbPath string, additionalModels ...interface{}) (*gorm.DB, error) {
 	}
 
 	// Migrate auth models
-	if err := db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{}, &store.Fleet{}); err != nil {
+	if err := db.AutoMigrate(&Organization{}, &User{}, &APIKey{}, &OrgLimits{}, &OrgProviderConfig{}, &OrgJoinRequest{}, &ProvisioningRequest{}, &store.Fleet{}, &DashboardSession{}); err != nil {
 		return nil, err
 	}
 

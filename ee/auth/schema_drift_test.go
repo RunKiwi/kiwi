@@ -24,6 +24,10 @@ func TestUserColumnsExistInMigrations(t *testing.T) {
 	assertColumnsInMigrations(t, User{})
 }
 
+func TestDashboardSessionColumnsExistInMigrations(t *testing.T) {
+	assertColumnsInMigrations(t, DashboardSession{})
+}
+
 func assertColumnsInMigrations(t *testing.T, model interface{}) {
 	t.Helper()
 	sql := allMigrationSQL(t)
