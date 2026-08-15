@@ -5,6 +5,7 @@
 package orchestrator
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -26,7 +27,10 @@ import (
 type githubWebhookPayload struct {
 	Action      string `json:"action"`
 	PullRequest struct {
+		Number         int    `json:"number"`
 		HTMLURL        string `json:"html_url"`
+		Title          string `json:"title"`
+		Body           string `json:"body"`
 		Merged         bool   `json:"merged"`
 		MergedAt       string `json:"merged_at"`
 		MergeCommitSHA string `json:"merge_commit_sha"`
@@ -34,6 +38,12 @@ type githubWebhookPayload struct {
 			Login string `json:"login"`
 		} `json:"merged_by"`
 	} `json:"pull_request"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
 }
 
 func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
@@ -226,11 +236,43 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 
 	switch {
-	case err == nil, errors.Is(err, store.ErrRecordExists):
+	case err == nil:
+		s.createPostMergeMonitor(r.Context(), orgID, jobID, payload)
+		w.WriteHeader(http.StatusOK)
+	case errors.Is(err, store.ErrRecordExists):
 		// A concurrent redelivery losing the race is success, not an error.
 		w.WriteHeader(http.StatusOK)
 	default:
 		log.Printf("[webhook] append merge record for job %s: %v", jobID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+// createPostMergeMonitor starts Phase 1a monitoring for a freshly merged job.
+// Best-effort: a failure here must not turn the merge-record append (already
+// committed) into a 500, so errors are logged, not returned. Phase 1a treats
+// merge as deploy — window_ends_at is always mergedAt + 24h, with no deploy-
+// webhook override (out of scope for Phase 1a; see the plan's Global
+// Constraints).
+func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string, payload githubWebhookPayload) {
+	mergedAt, err := time.Parse(time.RFC3339, payload.PullRequest.MergedAt)
+	if err != nil {
+		log.Printf("[webhook] monitor for job %s: parse merged_at %q: %v", jobID, payload.PullRequest.MergedAt, err)
+		return
+	}
+	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
+	mon := &store.PostMergeMonitor{
+		ID:             "mon_" + uuid.New().String(),
+		OrgID:          orgID,
+		JobID:          jobID,
+		Repo:           repo,
+		PRNumber:       payload.PullRequest.Number,
+		MergeCommitSHA: payload.PullRequest.MergeCommitSHA,
+		Status:         store.MonitorStatusMonitoring,
+		DeployedAt:     mergedAt,
+		WindowEndsAt:   mergedAt.Add(24 * time.Hour),
+	}
+	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
+		log.Printf("[webhook] create monitor for job %s: %v", jobID, err)
 	}
 }
