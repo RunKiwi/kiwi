@@ -16,6 +16,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,6 +133,12 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	var payload githubWebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if payload.Action == "opened" {
+		s.checkForRevert(r.Context(), payload)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -275,4 +283,40 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
 		log.Printf("[webhook] create monitor for job %s: %v", jobID, err)
 	}
+}
+
+var revertCommitPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{7,40})\.`)
+
+// checkForRevert looks for GitHub's auto-generated revert-PR body pattern
+// ("This reverts commit <sha>.") and, if it references the merge commit of an
+// active monitor, finalizes that monitor as REGRESSION — a human reverting a
+// Kiwi PR is the highest-confidence, zero-telemetry-cost regression signal
+// there is.
+func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayload) {
+	m := revertCommitPattern.FindStringSubmatch(payload.PullRequest.Body)
+	if m == nil {
+		return
+	}
+	revertedSHA := m[1]
+
+	// The org isn't known from this payload alone (unlike the merge path,
+	// which resolves org via the QueuedTask.result_url lookup) — GetMonitorByMergeCommit
+	// is queried per-org below via the repository, resolving org the same way
+	// the merge path does: through the QueuedTask that the original PR's
+	// result_url points at.
+	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
+	var qt store.QueuedTask
+	if err := s.db.WithContext(ctx).
+		Where("result_url LIKE ?", "https://github.com/"+repo+"/pull/%").
+		Order("created_at DESC").
+		First(&qt).Error; err != nil {
+		return
+	}
+
+	mon, err := s.storage.GetMonitorByMergeCommit(ctx, qt.OrgID, revertedSHA)
+	if err != nil {
+		return // no active monitor for this commit — nothing to do
+	}
+	evidence := "reverted by " + payload.Repository.Owner.Login + "/" + payload.Repository.Name + "#" + strconv.Itoa(payload.PullRequest.Number)
+	s.finalizeMonitor(ctx, mon, store.MonitorStatusRegression, evidence)
 }

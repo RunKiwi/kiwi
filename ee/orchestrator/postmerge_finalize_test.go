@@ -51,7 +51,7 @@ func seedMonitorWithRecord(t *testing.T, s *store.PostgresStore, orgID, jobID st
 
 	mon := &store.PostMergeMonitor{
 		ID: "mon_1", OrgID: orgID, JobID: jobID, Repo: "acme/widgets", PRNumber: 42,
-		MergeCommitSHA: "abc123", Status: store.MonitorStatusMonitoring,
+		MergeCommitSHA: "582815c759063ccccca66c869360464f8dbcbc75", Status: store.MonitorStatusMonitoring,
 		DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
 	}
 	if err := s.CreateMonitor(ctx, mon); err != nil {
