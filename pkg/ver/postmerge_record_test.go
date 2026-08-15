@@ -42,3 +42,12 @@ func TestPostMergeVerificationRecordSignAndVerify(t *testing.T) {
 		t.Errorf("verify should fail after the record is tampered with")
 	}
 }
+
+// A nil record must fail closed with an error, not panic — the same
+// contract signingPayload and mergeSigningPayload guarantee for their
+// record types.
+func TestPostMergeVerificationRecordHashNilRecord(t *testing.T) {
+	if _, err := PostMergeVerificationRecordHash(nil); err == nil {
+		t.Fatal("expected an error for a nil record, got nil")
+	}
+}

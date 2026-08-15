@@ -160,6 +160,9 @@ func VerifyMergeRecord(rec *MergeRecord, sig *Signature, pub ed25519.PublicKey) 
 // same reason — attaching a signature must not change what the signature
 // covers, or what was chained.
 func postMergeSigningPayload(rec *PostMergeVerificationRecord) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New("ver: nil postmerge verification record")
+	}
 	clone := *rec
 	clone.RecordSignature = nil
 	return Canonicalize(&clone)
