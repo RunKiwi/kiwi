@@ -3,8 +3,9 @@ package ver
 // SchemaVersion gates the canonicalization and signing rules. A verifier that
 // does not recognise the version must fail closed rather than guess.
 const (
-	SchemaVersion      = "kiwi.ver/v1"
-	MergeSchemaVersion = "kiwi.ver/merge/v1"
+	SchemaVersion                = "kiwi.ver/v1"
+	MergeSchemaVersion           = "kiwi.ver/merge/v1"
+	PostMergeVerifySchemaVersion = "kiwi.ver/postmerge/v1"
 )
 
 // Attestation states. Both are inside the signing payload, so they can only be
@@ -140,6 +141,27 @@ type MergeRecord struct {
 	ApprovedBy      string     `json:"approved_by"`
 	MergedAt        string     `json:"merged_at"`
 	MergeCommit     string     `json:"merge_commit"`
+	RecordSignature *Signature `json:"record_signature,omitempty"`
+}
+
+// PostMergeVerificationRecord is Phase 1a's verdict, chained off the
+// MergeRecord exactly the way MergeRecord chains off the original Record —
+// OriginalRecordID always points at the base kiwi.ver/v1 record, not
+// whatever the immediately-previous record in the chain happens to be, so a
+// verifier can find "what was this change" without walking the whole chain.
+type PostMergeVerificationRecord struct {
+	Ver              string `json:"ver"`
+	RecordID         string `json:"record_id"`
+	OriginalRecordID string `json:"original_record_id"`
+	OrgID            string `json:"org_id"`
+	JobID            string `json:"job_id"`
+	PrevRecordHash   string `json:"prev_record_hash"`
+
+	Attestation string `json:"attestation"`
+	Verdict     string `json:"verdict"`  // VERIFIED | REGRESSION
+	Evidence    string `json:"evidence"` // human-readable justification, e.g. "revert PR #43" or "check run X failed"
+	FinalizedAt string `json:"finalized_at"`
+
 	RecordSignature *Signature `json:"record_signature,omitempty"`
 }
 
