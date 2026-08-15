@@ -17,6 +17,7 @@ type Organization struct {
 	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
 	// mention, so Kiwi acts only when it is spoken to.
 	PRCommentMode string    `gorm:"not null;default:mention" json:"pr_comment_mode"`
+	AutoRemediate bool      `gorm:"not null;default:false" json:"auto_remediate"`
 	CreatedAt     time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 
