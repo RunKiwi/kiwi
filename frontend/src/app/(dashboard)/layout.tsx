@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Network, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt, Users } from "lucide-react";
+import { LayoutDashboard, Activity, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt, Users } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft, Menu, X as CloseIcon } from "lucide-react";
@@ -84,7 +84,7 @@ export default function DashboardLayout({
   const navItems = [
     { name: "Tasks", href: "/", icon: LayoutDashboard },
     { name: "Spend", href: "/spend", icon: Receipt },
-    { name: "Topology", href: "/topology", icon: Network },
+    { name: "Activity", href: "/activity", icon: Activity },
     { name: "Fleets", href: "/fleet", icon: Server },
     { name: "Models", href: "/models", icon: Cpu },
     { name: "Integrations", href: "/integrations", icon: Link2 },
