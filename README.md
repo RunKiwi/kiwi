@@ -98,7 +98,7 @@ Full documentation: **[docs.runkiwi.dev](https://docs.runkiwi.dev)**.
 | Area | State |
 | :--- | :--- |
 | One-command local / single-box prod (`make local` / `make prod`) | ✅ |
-| Dashboard: jobs, fleets, models, integrations, topology, settings | ✅ |
+| Dashboard: jobs, fleets, models, integrations, activity, settings | ✅ |
 | Multi-file agent: file discovery + multi-file edits | ✅ |
 | Provider robustness: key validation on save, quota/error surfacing | ✅ |
 | Fleet routing: tasks lease only their fleet's daemons | ✅ |
