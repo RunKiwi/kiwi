@@ -125,6 +125,12 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if event == "check_run" {
+		s.handleCheckRun(r.Context(), body)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if event != "pull_request" {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -319,4 +325,39 @@ func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayloa
 	}
 	evidence := "reverted by " + payload.Repository.Owner.Login + "/" + payload.Repository.Name + "#" + strconv.Itoa(payload.PullRequest.Number)
 	s.finalizeMonitor(ctx, mon, store.MonitorStatusRegression, evidence)
+}
+
+type checkRunWebhookPayload struct {
+	Action   string `json:"action"`
+	CheckRun struct {
+		HeadSHA    string `json:"head_sha"`
+		Conclusion string `json:"conclusion"`
+	} `json:"check_run"`
+}
+
+// handleCheckRun finalizes a monitor as REGRESSION the moment any check run
+// on its merge commit fails. Coarse by design for Phase 1a: one failing
+// check finalizes immediately rather than waiting to see if a retry
+// succeeds, which trades a rare false positive (a genuinely flaky check) for
+// not missing a real one — refining this is future work, not blocking here.
+func (s *Server) handleCheckRun(ctx context.Context, body []byte) {
+	var payload checkRunWebhookPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return
+	}
+	if payload.Action != "completed" || payload.CheckRun.Conclusion != "failure" {
+		return
+	}
+
+	// Org isn't in this payload either — check every org's monitors for this
+	// SHA rather than resolving org first, since check_run carries no PR/repo
+	// linkage as directly as pull_request events do. Small scan: monitors are
+	// short-lived (finalized within 24h) and MergeCommitSHA is indexed.
+	var mon store.PostMergeMonitor
+	if err := s.db.WithContext(ctx).
+		Where("merge_commit_sha = ? AND status = ?", payload.CheckRun.HeadSHA, store.MonitorStatusMonitoring).
+		First(&mon).Error; err != nil {
+		return
+	}
+	s.finalizeMonitor(ctx, &mon, store.MonitorStatusRegression, "check run failed on "+payload.CheckRun.HeadSHA)
 }
