@@ -142,16 +142,16 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.Action == "opened" {
-		s.checkForRevert(r.Context(), payload)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
 	if payload.Action != "closed" || !payload.PullRequest.Merged {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+
+	// Revert detection requires the reverting PR to be MERGED, not merely
+	// opened — see checkForRevert's doc comment for why. A no-op unless the
+	// body matches the revert pattern, so this never interferes with the
+	// merge-record logic below.
+	s.checkForRevert(r.Context(), payload)
 
 	prURL := payload.PullRequest.HTMLURL
 
@@ -291,13 +291,37 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 	}
 }
 
-var revertCommitPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{7,40})\.`)
+// escapeLikePattern escapes SQL LIKE wildcards (%, _) and the escape
+// character itself in s, so it can be safely interpolated into a LIKE
+// pattern without unintended wildcard matches — repo names commonly
+// contain underscores, and an unescaped one would make the pattern match
+// results outside the intended repo (e.g. "my_repo" would also match
+// "myXrepo").
+func escapeLikePattern(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// GetMonitorByMergeCommit does exact equality against a stored 40-character
+// SHA, so a shorter capture could never match anything — git revert always
+// writes the full 40-char SHA in the commit message this pattern matches
+// anyway. Requiring exactly 40 hex characters just makes that explicit.
+var revertCommitPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{40})\.`)
 
 // checkForRevert looks for GitHub's auto-generated revert-PR body pattern
 // ("This reverts commit <sha>.") and, if it references the merge commit of an
 // active monitor, finalizes that monitor as REGRESSION — a human reverting a
 // Kiwi PR is the highest-confidence, zero-telemetry-cost regression signal
 // there is.
+//
+// Requires the reverting PR to be MERGED, not merely opened. An opened PR
+// needs no authorization at all — on a public repository, anyone can open one
+// with a forged revert body and force a REGRESSION verdict, a signed record,
+// and (with auto_remediate on) a billable run. Requiring a merge reuses the
+// trust boundary the rest of this file already relies on for the original
+// merge record: GitHub's merge action is the authorization, since merging
+// requires real write access or passing branch protection, enforced by
+// GitHub, not by Kiwi.
 func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayload) {
 	m := revertCommitPattern.FindStringSubmatch(payload.PullRequest.Body)
 	if m == nil {
@@ -313,7 +337,7 @@ func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayloa
 	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
 	var qt store.QueuedTask
 	if err := s.db.WithContext(ctx).
-		Where("result_url LIKE ?", "https://github.com/"+repo+"/pull/%").
+		Where("result_url LIKE ? ESCAPE '\\'", "https://github.com/"+escapeLikePattern(repo)+"/pull/%").
 		Order("created_at DESC").
 		First(&qt).Error; err != nil {
 		return
@@ -346,12 +370,23 @@ type checkRunWebhookPayload struct {
 // check finalizes immediately rather than waiting to see if a retry
 // succeeds, which trades a rare false positive (a genuinely flaky check) for
 // not missing a real one — refining this is future work, not blocking here.
+//
+// "Failure" covers every conclusion GitHub's own vocabulary treats as a
+// failing outcome, not just the literal "failure" value: "timed_out" and
+// "action_required" are failing outcomes too, and missing them would let a
+// stuck or blocked check silently fall through to VERIFIED.
 func (s *Server) handleCheckRun(ctx context.Context, body []byte) {
 	var payload checkRunWebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return
 	}
-	if payload.Action != "completed" || payload.CheckRun.Conclusion != "failure" {
+	if payload.Action != "completed" {
+		return
+	}
+	switch payload.CheckRun.Conclusion {
+	case "failure", "timed_out", "action_required":
+		// fall through to finalize
+	default:
 		return
 	}
 
@@ -363,7 +398,7 @@ func (s *Server) handleCheckRun(ctx context.Context, body []byte) {
 	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
 	var qt store.QueuedTask
 	if err := s.db.WithContext(ctx).
-		Where("result_url LIKE ?", "https://github.com/"+repo+"/pull/%").
+		Where("result_url LIKE ? ESCAPE '\\'", "https://github.com/"+escapeLikePattern(repo)+"/pull/%").
 		Order("created_at DESC").
 		First(&qt).Error; err != nil {
 		return

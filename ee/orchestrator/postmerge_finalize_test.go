@@ -112,6 +112,78 @@ func TestFinalizeMonitorRegressionWithAutoRemediateSubmitsContinuation(t *testin
 	}
 }
 
+// TestSubmitRemediationPicksMostRecentTaskInThreadNotRoot proves the fix to
+// submitRemediation's parent-task lookup: when a job's thread already has a
+// PR-comment continuation (i.e. more than one task), remediation must attach
+// to the most recent task in the thread, not the root task the old
+// "parent_task_id IS NULL" query picked. Attaching to the root would fork a
+// sibling branch off round one instead of extending the thread's actual
+// latest state.
+func TestSubmitRemediationPicksMostRecentTaskInThreadNotRoot(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	mon := seedMonitorWithRecord(t, s, "org1", "job1", true)
+	ctx := context.Background()
+
+	// A second, later task in the same thread — as a PR-comment continuation
+	// would create — sharing the root's job id and root_task_id, with a
+	// later CreatedAt than the root.
+	rootID := "job1-impl"
+	second := &store.QueuedTask{
+		ID: "job1-c0001", OrgID: "org1", JobID: "job1", RootTaskID: rootID,
+		ParentTaskID: &rootID, Origin: store.OriginPRComment,
+		Status: store.TaskSucceeded,
+		Spec:   map[string]interface{}{"task": "address review comment", "repo_url": "https://github.com/acme/widgets"},
+	}
+	if err := s.EnqueueTask(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	// EnqueueTask/BeforeCreate does not control CreatedAt — force it later
+	// than the root's so the "most recent" ordering is unambiguous rather
+	// than depending on two rows landing on the same clock tick.
+	if err := s.DB().Model(&store.QueuedTask{}).Where("id = ?", second.ID).
+		Update("created_at", time.Now().Add(1*time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// A session on the second task, to prove submitRemediation also carries
+	// the session of the task it actually picks, not the root's (which has
+	// none here).
+	if err := s.DB().Create(&store.AgentSession{
+		ID: "sess-second", OrgID: "org1", JobID: "job1", TaskID: second.ID, Phase: "done",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	srv.finalizeMonitor(ctx, mon, store.MonitorStatusRegression, "check run failed")
+
+	all, err := s.ThreadTasks(ctx, "org1", rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remediation *store.QueuedTask
+	for i := range all {
+		if all[i].Origin == store.OriginPostMergeRemediation {
+			remediation = &all[i]
+		}
+	}
+	if remediation == nil {
+		t.Fatalf("no remediation continuation found among %d thread tasks", len(all))
+	}
+	if remediation.ParentTaskID == nil || *remediation.ParentTaskID != second.ID {
+		t.Errorf("remediation.parent_task_id = %v, want %q (the most recent task, not the root)", remediation.ParentTaskID, second.ID)
+	}
+
+	// The session moved onto the remediation task rather than being dropped —
+	// ReattachSessionIn (called inside SubmitContinuation) reassigns task_id.
+	var sess store.AgentSession
+	if err := s.DB().First(&sess, "id = ?", "sess-second").Error; err != nil {
+		t.Fatal(err)
+	}
+	if sess.TaskID != remediation.ID {
+		t.Errorf("session.task_id = %q, want %q (reattached onto the remediation task)", sess.TaskID, remediation.ID)
+	}
+}
+
 func TestFinalizeMonitorRegressionWithoutAutoRemediateDoesNotSubmit(t *testing.T) {
 	srv, s := setupWebhookTest(t)
 	mon := seedMonitorWithRecord(t, s, "org1", "job1", false)

@@ -112,7 +112,7 @@ export interface JobTask {
   parent_task_id?: string;
   /** The thread this run belongs to; equals its own id on the first run. */
   root_task_id?: string;
-  /** submit | pr_comment | fork */
+  /** submit | pr_comment | fork | postmerge_remediation */
   origin?: string;
 }
 

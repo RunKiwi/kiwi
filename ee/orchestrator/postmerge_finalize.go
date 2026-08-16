@@ -147,7 +147,10 @@ func (s *Server) notifyMonitorVerdict(ctx context.Context, mon *store.PostMergeM
 // continuation at a time" rule so a REGRESSION verdict never opens two.
 func (s *Server) submitRemediation(ctx context.Context, mon *store.PostMergeMonitor, evidence string) {
 	var parent store.QueuedTask
-	if err := s.db.WithContext(ctx).Where("job_id = ? AND parent_task_id IS NULL", mon.JobID).First(&parent).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND job_id = ?", mon.OrgID, mon.JobID).
+		Order("created_at DESC, id DESC").
+		First(&parent).Error; err != nil {
 		log.Printf("[postmerge] find parent task for job %s: %v", mon.JobID, err)
 		return
 	}
@@ -158,6 +161,15 @@ func (s *Server) submitRemediation(ctx context.Context, mon *store.PostMergeMoni
 	if active, err := s.storage.ActiveTaskInThread(ctx, mon.OrgID, root); err == nil && active != nil {
 		log.Printf("[postmerge] skipping remediation for monitor %s: a task is already active in thread %s", mon.ID, root)
 		return
+	}
+
+	// The session, when there is one — same pattern as handleCommentTrigger
+	// (pr_comment_trigger.go). Without this the remediation run starts from
+	// round zero with no Architect history, discarding exactly the context
+	// this feature is supposed to preserve.
+	sessionID := ""
+	if sess, err := s.storage.GetAgentSessionByTask(ctx, mon.OrgID, parent.ID); err == nil && sess != nil {
+		sessionID = sess.ID
 	}
 
 	// Synthetic non-positive comment id: real GitHub comment ids are always
@@ -176,6 +188,7 @@ func (s *Server) submitRemediation(ctx context.Context, mon *store.PostMergeMoni
 		Instruction: "Production regression detected after this change merged: " + evidence + ". Investigate and fix.",
 		CommentID:   syntheticCommentID,
 		Origin:      store.OriginPostMergeRemediation,
+		SessionID:   sessionID,
 	})
 	if err != nil {
 		log.Printf("[postmerge] submit remediation for monitor %s: %v", mon.ID, err)

@@ -68,10 +68,19 @@ func (s *PostgresStore) SetMonitorRemediationTaskID(ctx context.Context, id, tas
 // ListMonitorsPastWindow returns MONITORING monitors whose window has
 // elapsed — candidates for the periodic sweep to finalize as VERIFIED (no
 // bad signal arrived in time).
+//
+// Capped at 200 rows and intentionally not exhaustive per call: after a long
+// orchestrator outage the backlog could be large, and finalizing each one
+// makes a PR comment API call, so an unbounded sweep could turn the first
+// tick after restart into one very long call. The remainder isn't lost —
+// the next 5-minute tick re-runs this same query, which still matches every
+// row still in MONITORING, so the backlog drains over a few ticks instead
+// of one.
 func (s *PostgresStore) ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error) {
 	var out []PostMergeMonitor
 	err := s.db.WithContext(ctx).
 		Where("status = ? AND window_ends_at <= ?", MonitorStatusMonitoring, now).
+		Limit(200).
 		Find(&out).Error
 	return out, err
 }

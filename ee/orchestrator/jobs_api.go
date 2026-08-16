@@ -65,7 +65,7 @@ type JobTaskResponse struct {
 	// draw it as one.
 	//
 	// ParentTaskID is empty on a task submitted directly. RootTaskID identifies
-	// the thread. Origin is submit | pr_comment | fork.
+	// the thread. Origin is submit | pr_comment | fork | postmerge_remediation.
 	ParentTaskID string `json:"parent_task_id,omitempty"`
 	RootTaskID   string `json:"root_task_id,omitempty"`
 	Origin       string `json:"origin,omitempty"`
