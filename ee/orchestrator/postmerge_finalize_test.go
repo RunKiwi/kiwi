@@ -148,3 +148,55 @@ func TestFinalizeMonitorIsNoOpIfAlreadyFinalized(t *testing.T) {
 		t.Errorf("status = %q, want VERIFIED (the winning call's verdict, unchanged)", got.Status)
 	}
 }
+
+func TestFinalizePastWindowMonitorsMarksCleanOnesVerified(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	if err := s.DB().Create(&store.Organization{ID: "org1", Name: "acme"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	mon := &store.PostMergeMonitor{
+		ID: "mon_past", OrgID: "org1", JobID: "job1", Repo: "acme/widgets", PRNumber: 42,
+		MergeCommitSHA: "abc123", Status: store.MonitorStatusMonitoring,
+		DeployedAt:   time.Now().Add(-25 * time.Hour),
+		WindowEndsAt: time.Now().Add(-1 * time.Hour), // already elapsed
+	}
+	if err := s.CreateMonitor(context.Background(), mon); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.FinalizePastWindowMonitors(context.Background())
+
+	var got store.PostMergeMonitor
+	if err := s.DB().First(&got, "id = ?", "mon_past").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.MonitorStatusVerified {
+		t.Errorf("status = %q, want VERIFIED", got.Status)
+	}
+}
+
+func TestFinalizePastWindowMonitorsLeavesFutureOnesAlone(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	if err := s.DB().Create(&store.Organization{ID: "org1", Name: "acme"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	mon := &store.PostMergeMonitor{
+		ID: "mon_future", OrgID: "org1", JobID: "job1", Repo: "acme/widgets", PRNumber: 42,
+		MergeCommitSHA: "abc123", Status: store.MonitorStatusMonitoring,
+		DeployedAt:   time.Now(),
+		WindowEndsAt: time.Now().Add(23 * time.Hour), // not yet elapsed
+	}
+	if err := s.CreateMonitor(context.Background(), mon); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.FinalizePastWindowMonitors(context.Background())
+
+	var got store.PostMergeMonitor
+	if err := s.DB().First(&got, "id = ?", "mon_future").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.MonitorStatusMonitoring {
+		t.Errorf("status = %q, want unchanged MONITORING", got.Status)
+	}
+}

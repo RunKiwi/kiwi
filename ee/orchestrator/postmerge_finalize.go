@@ -199,3 +199,19 @@ func fnv64a(s string) uint64 {
 	}
 	return h
 }
+
+// FinalizePastWindowMonitors finalizes every MONITORING monitor whose window
+// has elapsed as VERIFIED — no bad signal (revert, failed check run) arrived
+// in time. Called on a periodic ticker from ee/cmd/kiwid/main.go, the same
+// pattern as the existing 30s RequeueExpiredLeases/ExpireStaleQueuedTasks
+// ticker.
+func (s *Server) FinalizePastWindowMonitors(ctx context.Context) {
+	monitors, err := s.storage.ListMonitorsPastWindow(ctx, time.Now())
+	if err != nil {
+		log.Printf("[postmerge] list monitors past window: %v", err)
+		return
+	}
+	for i := range monitors {
+		s.finalizeMonitor(ctx, &monitors[i], store.MonitorStatusVerified, "24h window elapsed with no regression signal")
+	}
+}
