@@ -333,6 +333,12 @@ type checkRunWebhookPayload struct {
 		HeadSHA    string `json:"head_sha"`
 		Conclusion string `json:"conclusion"`
 	} `json:"check_run"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
 }
 
 // handleCheckRun finalizes a monitor as REGRESSION the moment any check run
@@ -349,15 +355,23 @@ func (s *Server) handleCheckRun(ctx context.Context, body []byte) {
 		return
 	}
 
-	// Org isn't in this payload either — check every org's monitors for this
-	// SHA rather than resolving org first, since check_run carries no PR/repo
-	// linkage as directly as pull_request events do. Small scan: monitors are
-	// short-lived (finalized within 24h) and MergeCommitSHA is indexed.
-	var mon store.PostMergeMonitor
+	// Org isn't in this payload either (like the revert-PR path) — resolve it
+	// the same way checkForRevert does: via the QueuedTask whose result_url
+	// points at a merged PR in this repo. This keeps the monitor lookup
+	// org-scoped like every other query in this file, instead of scanning
+	// across every org's monitors by SHA alone.
+	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
+	var qt store.QueuedTask
 	if err := s.db.WithContext(ctx).
-		Where("merge_commit_sha = ? AND status = ?", payload.CheckRun.HeadSHA, store.MonitorStatusMonitoring).
-		First(&mon).Error; err != nil {
+		Where("result_url LIKE ?", "https://github.com/"+repo+"/pull/%").
+		Order("created_at DESC").
+		First(&qt).Error; err != nil {
 		return
 	}
-	s.finalizeMonitor(ctx, &mon, store.MonitorStatusRegression, "check run failed on "+payload.CheckRun.HeadSHA)
+
+	mon, err := s.storage.GetMonitorByMergeCommit(ctx, qt.OrgID, payload.CheckRun.HeadSHA)
+	if err != nil {
+		return // no active monitor for this commit — nothing to do
+	}
+	s.finalizeMonitor(ctx, mon, store.MonitorStatusRegression, "check run failed on "+payload.CheckRun.HeadSHA)
 }

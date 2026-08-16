@@ -14,13 +14,22 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
+// checkRunPayload builds a check_run webhook body against the
+// "acme/widgets" repo — the repo seedMonitorWithRecord seeds its QueuedTask
+// and monitor under, so this resolves to org1 the same way checkForRevert's
+// org resolution does.
 func checkRunPayload(action, conclusion, sha string) []byte {
+	return checkRunPayloadForRepo(action, conclusion, sha, "acme", "widgets")
+}
+
+func checkRunPayloadForRepo(action, conclusion, sha, owner, repo string) []byte {
 	payload := map[string]any{
 		"action": action,
 		"check_run": map[string]any{
 			"head_sha":   sha,
 			"conclusion": conclusion,
 		},
+		"repository": map[string]any{"name": repo, "owner": map[string]any{"login": owner}},
 	}
 	b, _ := json.Marshal(payload)
 	return b
@@ -90,5 +99,29 @@ func TestInProgressCheckRunDoesNotFinalize(t *testing.T) {
 	}
 	if got.Status != store.MonitorStatusMonitoring {
 		t.Errorf("status = %q, want unchanged MONITORING while the check is still running", got.Status)
+	}
+}
+
+// TestFailedCheckRunFromUnknownRepoDoesNotFinalize covers the org-resolution
+// miss: a failed check run whose repository has no QueuedTask with a
+// matching result_url (so no org can be resolved) must no-op cleanly —
+// no panic, and no monitor in any org gets touched.
+func TestFailedCheckRunFromUnknownRepoDoesNotFinalize(t *testing.T) {
+	withCommentSecret(t)
+	srv, s := setupWebhookTest(t)
+	mon := seedMonitorWithRecord(t, s, "org1", "job1", false)
+
+	body := checkRunPayloadForRepo("completed", "failure", mon.MergeCommitSHA, "someone", "else")
+	rec := postCheckRun(t, srv, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var got store.PostMergeMonitor
+	if err := s.DB().First(&got, "id = ?", mon.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.MonitorStatusMonitoring {
+		t.Errorf("status = %q, want unchanged MONITORING when the reporting repo resolves to no org", got.Status)
 	}
 }
