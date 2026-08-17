@@ -286,6 +286,130 @@ func TestDaemonSeam_ForgedSignatureRejected(t *testing.T) {
 	}
 }
 
+// TestDaemonSeam_TelemetryDueForgedSignatureRejected mirrors
+// TestDaemonSeam_ForgedSignatureRejected for the telemetry/due endpoint: it
+// shares readSignedBody -> GetDaemonBySignPubKey with Heartbeat, but nothing
+// previously exercised that this specific handler wires the same check
+// through rather than skipping it. A body claiming a registered daemon's
+// identity but signed by a different key must be rejected.
+func TestDaemonSeam_TelemetryDueForgedSignatureRejected(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	victim := newDaemonKeys(t, ts.URL)
+	token, _ := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err := victim.client.Register(ctx, daemon.RegisterReq{
+		JoinToken:  token,
+		PubKey:     victim.encPubB64(),
+		SignPubKey: victim.signPubB64(),
+	}); err != nil {
+		t.Fatalf("victim register: %v", err)
+	}
+
+	// Attacker signs with its own key but claims the victim's identity in the body.
+	attacker := newDaemonKeys(t, ts.URL)
+	_, err := attacker.client.TelemetryDue(ctx, daemon.TelemetryDueReq{
+		SignPubKey: victim.signPubB64(), // claims victim, but client signs with attacker key
+		Timestamp:  time.Now().Unix(),
+	})
+	if err == nil {
+		t.Fatal("expected forged-signature telemetry/due request to be rejected")
+	}
+	// Assert the request was rejected at the signature check (401), not
+	// merely by some other error further down the handler (e.g. 403/500) —
+	// distinguishes "the signature check has teeth" from "something failed".
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected 401 (unauthorized/forged signature), got: %v", err)
+	}
+}
+
+// TestDaemonSeam_TelemetryDueUnregisteredRejected proves an unregistered
+// daemon's own, correctly-signed request to telemetry/due is still rejected —
+// same identity check as TestDaemonSeam_UnregisteredHeartbeatRejected, applied
+// to this endpoint.
+func TestDaemonSeam_TelemetryDueUnregisteredRejected(t *testing.T) {
+	ts, _ := newSeamTestServer(t)
+	d := newDaemonKeys(t, ts.URL)
+
+	_, err := d.client.TelemetryDue(context.Background(), daemon.TelemetryDueReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+	})
+	if err == nil {
+		t.Fatal("expected telemetry/due from an unregistered daemon to be rejected")
+	}
+	// Assert rejection happened at GetDaemonBySignPubKey (403), i.e. the
+	// signature verified (it's genuinely this key's own signature) but the
+	// identity lookup found nothing — distinct from the forged-signature
+	// (401) path exercised above.
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 (daemon not registered), got: %v", err)
+	}
+}
+
+// TestDaemonSeam_TelemetryReportForgedSignatureRejected mirrors
+// TestDaemonSeam_ForgedSignatureRejected for the telemetry/report endpoint.
+func TestDaemonSeam_TelemetryReportForgedSignatureRejected(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	victim := newDaemonKeys(t, ts.URL)
+	token, _ := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err := victim.client.Register(ctx, daemon.RegisterReq{
+		JoinToken:  token,
+		PubKey:     victim.encPubB64(),
+		SignPubKey: victim.signPubB64(),
+	}); err != nil {
+		t.Fatalf("victim register: %v", err)
+	}
+
+	// Attacker signs with its own key but claims the victim's identity in the body.
+	attacker := newDaemonKeys(t, ts.URL)
+	err := attacker.client.TelemetryReport(ctx, daemon.TelemetryReportReq{
+		SignPubKey: victim.signPubB64(), // claims victim, but client signs with attacker key
+		Timestamp:  time.Now().Unix(),
+		Results:    []daemon.TelemetryPollResult{{PollID: "poll_1"}},
+	})
+	if err == nil {
+		t.Fatal("expected forged-signature telemetry/report request to be rejected")
+	}
+	// Assert the request was rejected at the signature check (401), not
+	// merely by some other error further down the handler.
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected 401 (unauthorized/forged signature), got: %v", err)
+	}
+}
+
+// TestDaemonSeam_TelemetryReportUnregisteredRejected proves an unregistered
+// daemon's own, correctly-signed request to telemetry/report is still
+// rejected — same identity check as
+// TestDaemonSeam_UnregisteredHeartbeatRejected, applied to this endpoint.
+func TestDaemonSeam_TelemetryReportUnregisteredRejected(t *testing.T) {
+	ts, _ := newSeamTestServer(t)
+	d := newDaemonKeys(t, ts.URL)
+
+	err := d.client.TelemetryReport(context.Background(), daemon.TelemetryReportReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		Results:    []daemon.TelemetryPollResult{{PollID: "poll_1"}},
+	})
+	if err == nil {
+		t.Fatal("expected telemetry/report from an unregistered daemon to be rejected")
+	}
+	// Assert rejection happened at GetDaemonBySignPubKey (403), i.e. the
+	// signature verified but the identity lookup found nothing — distinct
+	// from the forged-signature (401) path exercised above.
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 (daemon not registered), got: %v", err)
+	}
+}
+
 // TestHandleDaemonTelemetryDueReturnsClaimedPolls proves the due-check seam
 // end to end: a registered daemon asking what telemetry is due gets back
 // exactly the polls ClaimDuePolls claimed for its org, translated into the
@@ -328,8 +452,23 @@ func TestHandleDaemonTelemetryDueReturnsClaimedPolls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("telemetry due: %v", err)
 	}
-	if len(res.Due) != 1 || res.Due[0].PollID != "poll_1" {
+	if len(res.Due) != 1 {
 		t.Fatalf("got %+v", res.Due)
+	}
+	got := res.Due[0]
+	want := daemon.TelemetryPollSpec{
+		PollID:        poll.ID,
+		Provider:      poll.Provider,
+		Query:         poll.Query,
+		BaselineStart: poll.BaselineStart,
+		BaselineEnd:   poll.BaselineEnd,
+		CurrentStart:  poll.CurrentStart,
+		CurrentEnd:    poll.CurrentEnd,
+	}
+	if got.PollID != want.PollID || got.Provider != want.Provider || got.Query != want.Query ||
+		!got.BaselineStart.Equal(want.BaselineStart) || !got.BaselineEnd.Equal(want.BaselineEnd) ||
+		!got.CurrentStart.Equal(want.CurrentStart) || !got.CurrentEnd.Equal(want.CurrentEnd) {
+		t.Fatalf("spec mapping mismatch:\n got  %+v\n want %+v", got, want)
 	}
 
 	// A second due-check immediately after must see nothing: the poll was
