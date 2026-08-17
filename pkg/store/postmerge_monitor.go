@@ -40,16 +40,28 @@ func (s *PostgresStore) GetMonitorByMergeCommit(ctx context.Context, orgID, sha 
 // can all race to finalize the same monitor; only the first one's verdict
 // and evidence stick, and only that caller may go on to submit a remediation
 // continuation.
+//
+// A REGRESSION additionally requires window_ends_at > now, in the same
+// UPDATE. GetMonitorByMergeCommit finds a monitor by status alone, so a
+// revert or failed-check webhook that arrives after the window has elapsed
+// — but before the periodic sweep has run and flipped it to VERIFIED — would
+// otherwise still be able to write a REGRESSION verdict for a window that
+// already closed clean. VERIFIED carries no such restriction: the sweep
+// itself finalizes past-window monitors, and a delayed VERIFIED is still the
+// right verdict, unlike a delayed REGRESSION.
 func (s *PostgresStore) FinalizeMonitor(ctx context.Context, id, newStatus, evidence string) (bool, error) {
 	now := time.Now()
-	res := s.db.WithContext(ctx).Model(&PostMergeMonitor{}).
-		Where("id = ? AND status = ?", id, MonitorStatusMonitoring).
-		Updates(map[string]interface{}{
-			"status":           newStatus,
-			"verdict_evidence": evidence,
-			"finalized_at":     now,
-			"updated_at":       now,
-		})
+	q := s.db.WithContext(ctx).Model(&PostMergeMonitor{}).
+		Where("id = ? AND status = ?", id, MonitorStatusMonitoring)
+	if newStatus == MonitorStatusRegression {
+		q = q.Where("window_ends_at > ?", now)
+	}
+	res := q.Updates(map[string]interface{}{
+		"status":           newStatus,
+		"verdict_evidence": evidence,
+		"finalized_at":     now,
+		"updated_at":       now,
+	})
 	if res.Error != nil {
 		return false, res.Error
 	}

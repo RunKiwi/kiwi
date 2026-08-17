@@ -90,8 +90,11 @@ func TestFinalizeMonitorIsSingleFire(t *testing.T) {
 	m := &PostMergeMonitor{
 		ID: "mon_1", OrgID: "org1", JobID: "job1", Repo: "acme/widgets", PRNumber: 42,
 		MergeCommitSHA: "abc123", Status: MonitorStatusMonitoring,
-		DeployedAt:   mustParseTime(t, "2026-08-15T00:00:00Z"),
-		WindowEndsAt: mustParseTime(t, "2026-08-16T00:00:00Z"),
+		// Window must still be open — FinalizeMonitor requires window_ends_at
+		// in the future for a REGRESSION verdict (see its doc comment), and
+		// this test's first call is exactly that verdict.
+		DeployedAt:   time.Now(),
+		WindowEndsAt: time.Now().Add(24 * time.Hour),
 	}
 	if err := s.CreateMonitor(ctx, m); err != nil {
 		t.Fatal(err)
@@ -122,6 +125,51 @@ func TestFinalizeMonitorIsSingleFire(t *testing.T) {
 	}
 	if got.VerdictEvidence != "revert PR #43" {
 		t.Errorf("evidence = %q, want the first call's evidence", got.VerdictEvidence)
+	}
+}
+
+// TestFinalizeMonitorRejectsRegressionPastWindow covers the race between a
+// late-arriving webhook and the periodic sweep: a monitor whose window has
+// already elapsed is still status = MONITORING until the sweep runs, so a
+// revert or failed-check-run event landing in that gap must not be able to
+// write a REGRESSION verdict for a window that already closed clean.
+func TestFinalizeMonitorRejectsRegressionPastWindow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	m := &PostMergeMonitor{
+		ID: "mon_1", OrgID: "org1", JobID: "job1", Repo: "acme/widgets", PRNumber: 42,
+		MergeCommitSHA: "abc123", Status: MonitorStatusMonitoring,
+		DeployedAt:   time.Now().Add(-25 * time.Hour),
+		WindowEndsAt: time.Now().Add(-1 * time.Hour), // already elapsed
+	}
+	if err := s.CreateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+
+	won, err := s.FinalizeMonitor(ctx, "mon_1", MonitorStatusRegression, "check run failed on abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if won {
+		t.Errorf("FinalizeMonitor(REGRESSION) should not win once the window has elapsed")
+	}
+
+	var got PostMergeMonitor
+	if err := s.DB().First(&got, "id = ?", "mon_1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != MonitorStatusMonitoring {
+		t.Errorf("status = %q, want unchanged MONITORING — the sweep, not a late signal, should finalize this one", got.Status)
+	}
+
+	// VERIFIED carries no such restriction — the sweep must still be able to
+	// finalize the same past-window monitor.
+	wonVerified, err := s.FinalizeMonitor(ctx, "mon_1", MonitorStatusVerified, "24h window elapsed with no regression signal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wonVerified {
+		t.Errorf("FinalizeMonitor(VERIFIED) should still win past the window — that's exactly what the sweep does")
 	}
 }
 
