@@ -214,8 +214,32 @@ func TestTelemetryDueNoContentReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res != nil && len(res.Due) != 0 {
-		t.Errorf("got %+v, want empty/nil on 204", res)
+	if res == nil {
+		t.Fatal("expected non-nil &TelemetryDueRes{} on 204, got nil")
+	}
+	if len(res.Due) != 0 {
+		t.Errorf("got %+v, want empty Due on 204", res)
+	}
+}
+
+func TestTelemetryDueError(t *testing.T) {
+	_, priv, err := crypto.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate signing key: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetSigner(priv)
+
+	_, err = c.TelemetryDue(context.Background(), TelemetryDueReq{SignPubKey: "test"})
+	if err == nil {
+		t.Fatal("expected error on 500 response, got nil")
 	}
 }
 
@@ -246,5 +270,56 @@ func TestTelemetryReportPostsResults(t *testing.T) {
 	}
 	if !strings.Contains(string(gotBody), "poll_1") {
 		t.Errorf("body = %s, want it to contain poll_1", gotBody)
+	}
+}
+
+func TestTelemetryReportNoContentReturnsNilError(t *testing.T) {
+	_, priv, err := crypto.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate signing key: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetSigner(priv)
+
+	err = c.TelemetryReport(context.Background(), TelemetryReportReq{
+		SignPubKey: "test",
+		Results: []TelemetryPollResult{
+			{PollID: "poll_1", Baseline: &TelemetryResultDTO{SampleCount: 40, Mean: 100}, Current: &TelemetryResultDTO{SampleCount: 40, Mean: 105}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on 204: %v", err)
+	}
+}
+
+func TestTelemetryReportError(t *testing.T) {
+	_, priv, err := crypto.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate signing key: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetSigner(priv)
+
+	err = c.TelemetryReport(context.Background(), TelemetryReportReq{
+		SignPubKey: "test",
+		Results: []TelemetryPollResult{
+			{PollID: "poll_1", Baseline: &TelemetryResultDTO{SampleCount: 40, Mean: 100}, Current: &TelemetryResultDTO{SampleCount: 40, Mean: 105}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error on 500 response, got nil")
 	}
 }
