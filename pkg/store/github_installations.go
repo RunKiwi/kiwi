@@ -151,6 +151,29 @@ func (s *PostgresStore) ListGitHubInstallations(ctx context.Context, orgID strin
 	return out, nil
 }
 
+// GetGitHubInstallationByID resolves the org that installed the GitHub App
+// with installationID — the identity every GitHub App webhook delivery
+// carries in its top-level "installation" field, and the only tenant-scoping
+// signal available on events (check_run, a revert PR opened by someone other
+// than Kiwi) that carry no QueuedTask to resolve org through.
+//
+// Deliberately not org-scoped in its own arguments, same reasoning as
+// DeleteGitHubInstallation: the installation id is the thing GitHub asserts,
+// and resolving org FROM it is exactly this function's job.
+func (s *PostgresStore) GetGitHubInstallationByID(ctx context.Context, installationID int64) (*GitHubInstallation, error) {
+	var inst GitHubInstallation
+	err := s.db.WithContext(ctx).
+		Where("installation_id = ?", installationID).
+		First(&inst).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInstallationNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get github installation by id: %w", err)
+	}
+	return &inst, nil
+}
+
 // DeleteGitHubInstallation removes a link, for the `installation.deleted`
 // webhook.
 //

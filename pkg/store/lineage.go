@@ -24,6 +24,11 @@ const (
 	OriginSubmit    = "submit"
 	OriginPRComment = "pr_comment"
 	OriginFork      = "fork"
+	// OriginPostMergeRemediation marks a continuation task auto-spawned by a
+	// Post-Merge Verification REGRESSION verdict, not a real PR comment — it
+	// has no GitHub comment behind it, so it must not be labeled
+	// OriginPRComment on the dashboard.
+	OriginPostMergeRemediation = "postmerge_remediation"
 )
 
 // BeforeCreate gives every task a thread, whichever path created it.

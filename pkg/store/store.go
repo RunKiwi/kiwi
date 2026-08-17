@@ -196,4 +196,20 @@ type Store interface {
 	FindGitHubInstallation(ctx context.Context, orgID, accountLogin string) (*GitHubInstallation, error)
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]GitHubInstallation, error)
 	DeleteGitHubInstallation(ctx context.Context, installationID int64) error
+	GetGitHubInstallationByID(ctx context.Context, installationID int64) (*GitHubInstallation, error)
+
+	// Post-Merge Verification (Phase 1a). CreateMonitor opens a monitor at
+	// merge time; GetMonitorByMergeCommit resolves a webhook event back to
+	// its still-open monitor; FinalizeMonitor is the single-fire atomic
+	// transition out of MONITORING (see pkg/store/postmerge_monitor.go for
+	// why the bool return matters); SetMonitorRemediationTaskID records the
+	// continuation task a REGRESSION verdict spawned; ListMonitorsPastWindow
+	// feeds the periodic sweep. AutoRemediate reports an org's opt-in to
+	// auto-spawning that continuation.
+	CreateMonitor(ctx context.Context, m *PostMergeMonitor) error
+	GetMonitorByMergeCommit(ctx context.Context, orgID, sha string) (*PostMergeMonitor, error)
+	FinalizeMonitor(ctx context.Context, id, newStatus, evidence string) (bool, error)
+	SetMonitorRemediationTaskID(ctx context.Context, id, taskID string) error
+	ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error)
+	AutoRemediate(ctx context.Context, orgID string) (bool, error)
 }

@@ -161,6 +161,19 @@ func main() {
 			}
 		}()
 
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					server.FinalizePastWindowMonitors(ctx)
+				}
+			}
+		}()
+
 		if js != nil {
 			consumer := queue.NewConsumer(js, storage, server.LaunchTask)
 			if err := consumer.Start(ctx); err != nil {

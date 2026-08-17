@@ -41,7 +41,7 @@ func parentTask() *store.QueuedTask {
 // a continuation updates the existing pull request instead of opening a second.
 func TestContinuationKeepsTheParentsJobID(t *testing.T) {
 	parent := parentTask()
-	task := buildContinuationTask(parent, "rename the handler", 5551212)
+	task := buildContinuationTask(parent, "rename the handler", 5551212, "")
 
 	if task.JobID != "job_abc" {
 		t.Errorf("job id = %q, want the parent's job_abc", task.JobID)
@@ -56,7 +56,7 @@ func TestContinuationKeepsTheParentsJobID(t *testing.T) {
 
 func TestContinuationCarriesLineage(t *testing.T) {
 	parent := parentTask()
-	task := buildContinuationTask(parent, "rename the handler", 5551212)
+	task := buildContinuationTask(parent, "rename the handler", 5551212, "")
 
 	if task.ParentTaskID == nil || *task.ParentTaskID != "task_root" {
 		t.Errorf("parent = %v, want task_root", task.ParentTaskID)
@@ -82,7 +82,7 @@ func TestContinuationOfAContinuationKeepsTheRoot(t *testing.T) {
 	first := "task_root"
 	parent.ParentTaskID = &first
 
-	task := buildContinuationTask(parent, "one more thing", 999)
+	task := buildContinuationTask(parent, "one more thing", 999, "")
 
 	if task.RootTaskID != "task_root" {
 		t.Errorf("root = %q, want task_root", task.RootTaskID)
@@ -98,7 +98,7 @@ func TestContinuationOfAContinuationKeepsTheRoot(t *testing.T) {
 // question already answered.
 func TestContinuationReplacesTheTaskAndInheritsTheRest(t *testing.T) {
 	parent := parentTask()
-	task := buildContinuationTask(parent, "rename the handler", 1)
+	task := buildContinuationTask(parent, "rename the handler", 1, "")
 
 	if task.Spec["task"] != "rename the handler" {
 		t.Errorf("task = %v, want the instruction", task.Spec["task"])
@@ -123,7 +123,7 @@ func TestContinuationReplacesTheTaskAndInheritsTheRest(t *testing.T) {
 // later write to the continuation's spec mutate the parent's stored row.
 func TestContinuationDoesNotShareTheParentsSpecMap(t *testing.T) {
 	parent := parentTask()
-	task := buildContinuationTask(parent, "rename the handler", 1)
+	task := buildContinuationTask(parent, "rename the handler", 1, "")
 
 	task.Spec["model"] = "something-else"
 	if parent.Spec["model"] != "claude-sonnet-5" {
@@ -306,6 +306,53 @@ func TestContinuationKeepsAPaidOrgsFleet(t *testing.T) {
 	}
 	if task.FleetID != "dedicated-fleet" {
 		t.Errorf("fleet = %q, want the parent's dedicated-fleet", task.FleetID)
+	}
+}
+
+func TestSubmitContinuationWithExplicitOriginOverridesDefault(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedRunnableOrg(t, st, "pro")
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "fix the regression",
+		CommentID: -42, Origin: store.OriginPostMergeRemediation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Origin != store.OriginPostMergeRemediation {
+		t.Errorf("origin = %q, want %q", task.Origin, store.OriginPostMergeRemediation)
+	}
+}
+
+func TestSubmitContinuationDefaultsToCommentOrigin(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	seedRunnableOrg(t, st, "pro")
+	svc := NewService(st, NewHeuristicPlanner(), nil)
+
+	parent := parentTask()
+	if err := st.EnqueueTask(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.SubmitContinuation(ctx, ContinuationInput{
+		OrgID: "org1", ParentTask: parent, Instruction: "rename the handler",
+		CommentID: 111,
+		// Origin left empty — must default to the existing behavior.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Origin != store.OriginPRComment {
+		t.Errorf("origin = %q, want %q (unchanged default)", task.Origin, store.OriginPRComment)
 	}
 }
 

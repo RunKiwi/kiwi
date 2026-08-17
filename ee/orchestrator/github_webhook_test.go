@@ -39,7 +39,8 @@ func setupWebhookTest(t *testing.T) (*Server, *store.PostgresStore) {
 
 	db := newTestDB(t)
 	if err := db.AutoMigrate(&store.Job{}, &store.QueuedTask{}, &store.ExecutionRecord{}, &store.ExecutionRecordHead{},
-		&store.Organization{}, &store.AgentSession{}, &store.AgentSessionEvent{}); err != nil {
+		&store.Organization{}, &store.AgentSession{}, &store.AgentSessionEvent{}, &store.PostMergeMonitor{},
+		&store.GitHubInstallation{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	s := store.NewPostgresStore(db)
@@ -144,6 +145,23 @@ func TestGithubWebhook(t *testing.T) {
 		head, _ := dbStore.GetExecutionRecordChainHead(context.Background(), orgID)
 		if head != mergeRec.RecordHash {
 			t.Errorf("expected chain head %s, got %s", mergeRec.RecordHash, head)
+		}
+	})
+
+	t.Run("merge creates a monitor with a 24h window", func(t *testing.T) {
+		var mon store.PostMergeMonitor
+		if err := dbStore.DB().Where("org_id = ? AND job_id = ?", orgID, jobID).First(&mon).Error; err != nil {
+			t.Fatalf("expected a monitor row: %v", err)
+		}
+		if mon.Status != store.MonitorStatusMonitoring {
+			t.Errorf("status = %q, want %q", mon.Status, store.MonitorStatusMonitoring)
+		}
+		if mon.MergeCommitSHA != "abcdef123" {
+			t.Errorf("merge_commit_sha = %q, want %q", mon.MergeCommitSHA, "abcdef123")
+		}
+		wantWindow := mon.DeployedAt.Add(24 * time.Hour)
+		if !mon.WindowEndsAt.Equal(wantWindow) {
+			t.Errorf("window_ends_at = %v, want deployed_at + 24h = %v", mon.WindowEndsAt, wantWindow)
 		}
 	})
 

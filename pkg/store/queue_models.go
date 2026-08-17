@@ -58,7 +58,7 @@ type QueuedTask struct {
 	// recursive query, and "give me this whole thread" is asked on every task
 	// view in the dashboard.
 	RootTaskID string `gorm:"index" json:"root_task_id"`
-	// Origin records how this task came to exist: submit | pr_comment | fork.
+	// Origin records how this task came to exist: submit | pr_comment | fork | postmerge_remediation.
 	// The dashboard labels a node from it without having to infer, and a
 	// trigger stays auditable after the fact.
 	Origin string `gorm:"not null;default:submit" json:"origin"`

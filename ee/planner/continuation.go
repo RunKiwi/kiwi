@@ -42,11 +42,15 @@ type ContinuationInput struct {
 	// SessionID is the session to move onto the new task. Empty means the
 	// parent never ran in session mode, and there is nothing to resume.
 	SessionID string
+	// Origin overrides the continuation's store.QueuedTask.Origin. Empty
+	// means the existing default, store.OriginPRComment — every caller
+	// before this field existed gets unchanged behavior.
+	Origin string
 }
 
 // buildContinuationTask assembles the queued task, with no I/O, so the rules
 // about what is inherited and what is replaced can be tested exhaustively.
-func buildContinuationTask(parent *store.QueuedTask, instruction string, commentID int64) *store.QueuedTask {
+func buildContinuationTask(parent *store.QueuedTask, instruction string, commentID int64, origin string) *store.QueuedTask {
 	// Copy rather than share. Handing the parent's map through would let a
 	// later write to the continuation's spec mutate the parent's stored row.
 	spec := make(map[string]interface{}, len(parent.Spec)+1)
@@ -69,6 +73,10 @@ func buildContinuationTask(parent *store.QueuedTask, instruction string, comment
 	parentID := parent.ID
 	trigger := commentID
 
+	if origin == "" {
+		origin = store.OriginPRComment
+	}
+
 	return &store.QueuedTask{
 		ID:      parent.JobID + "-c" + randHex(4),
 		OrgID:   parent.OrgID,
@@ -82,7 +90,7 @@ func buildContinuationTask(parent *store.QueuedTask, instruction string, comment
 		Spec:             spec,
 		ParentTaskID:     &parentID,
 		RootTaskID:       root,
-		Origin:           store.OriginPRComment,
+		Origin:           origin,
 		TriggerCommentID: &trigger,
 	}
 }
@@ -154,7 +162,7 @@ func (s *Service) SubmitContinuation(ctx context.Context, in ContinuationInput) 
 		}
 	}
 
-	task := buildContinuationTask(in.ParentTask, in.Instruction, in.CommentID)
+	task := buildContinuationTask(in.ParentTask, in.Instruction, in.CommentID, in.Origin)
 	// A free org's work goes to the shared fleet whatever the parent says.
 	// Inheriting the parent's fleet queues the continuation wherever that task
 	// happened to run — a fleet since retired, or one from before a downgrade —

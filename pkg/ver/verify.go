@@ -155,6 +155,54 @@ func VerifyMergeRecord(rec *MergeRecord, sig *Signature, pub ed25519.PublicKey) 
 	return verifyBytes(b, sig, pub)
 }
 
+// postMergeSigningPayload is the post-merge verification record's equivalent
+// of signingPayload: the record with its signature cleared. Same invariant,
+// same reason — attaching a signature must not change what the signature
+// covers, or what was chained.
+func postMergeSigningPayload(rec *PostMergeVerificationRecord) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New("ver: nil postmerge verification record")
+	}
+	clone := *rec
+	clone.RecordSignature = nil
+	return Canonicalize(&clone)
+}
+
+// PostMergeVerificationRecordHash hashes rec's canonical form (signature
+// fields excluded), for chaining — same shape as MergeRecordHash.
+func PostMergeVerificationRecordHash(rec *PostMergeVerificationRecord) (string, error) {
+	b, err := postMergeSigningPayload(rec)
+	if err != nil {
+		return "", err
+	}
+	return hashBytes(b), nil
+}
+
+// SignPostMergeVerificationRecord signs rec, setting its Attestation to
+// "signed" as a side effect — same contract as SignMergeRecord.
+func SignPostMergeVerificationRecord(rec *PostMergeVerificationRecord, keyID string, priv ed25519.PrivateKey) (*Signature, error) {
+	if len(priv) == 0 {
+		return nil, ErrNoSigningKey
+	}
+	rec.Attestation = AttestationSigned
+	b, err := postMergeSigningPayload(rec)
+	if err != nil {
+		return nil, err
+	}
+	return signBytes(b, keyID, priv), nil
+}
+
+// VerifyPostMergeVerificationRecord checks sig against rec's current content
+// — a tampered Verdict or Evidence after signing will fail this exactly as
+// VerifyMergeRecord catches a tampered MergeCommit.
+func VerifyPostMergeVerificationRecord(rec *PostMergeVerificationRecord, sig *Signature, pub ed25519.PublicKey) error {
+	b, err := postMergeSigningPayload(rec)
+	if err != nil {
+		return err
+	}
+	return verifyBytes(b, sig, pub)
+}
+
 // ExecutionAttestation is the exact payload a daemon signs when it reports a
 // task. Both sides construct it from the same fields in the same order, so the
 // Control Plane can re-derive the bytes and check the signature without

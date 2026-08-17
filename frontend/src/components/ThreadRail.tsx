@@ -20,6 +20,7 @@ const ORIGIN_LABEL: Record<string, string> = {
   submit: "submitted",
   pr_comment: "comment",
   fork: "fork",
+  postmerge_remediation: "auto-fix",
 };
 
 // Colour never carries meaning alone — every node is labelled — so this stays

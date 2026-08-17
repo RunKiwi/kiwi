@@ -50,6 +50,18 @@ func seedCommentTask(t *testing.T, s *store.PostgresStore, mode string) *store.Q
 	if err := s.DB().Create(&store.Organization{ID: "org1", Name: "acme", PRCommentMode: mode}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// requireRepoAuth (ee/planner/repo_auth.go) needs a real installation on
+	// file for "acme" once the github_installations table is migrated in this
+	// test's DB (setupWebhookTest AutoMigrates it, for the Post-Merge
+	// Verification org-resolution path) — otherwise SubmitContinuation
+	// correctly refuses the continuation as unauthorized, and every test
+	// using this fixture would fail closed instead of exercising its actual
+	// scenario.
+	if err := s.DB().Create(&store.GitHubInstallation{
+		InstallationID: testGitHubInstallationID, OrgID: "org1", AccountLogin: "acme",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	prURL := "https://github.com/acme/widgets/pull/42"
 	task := &store.QueuedTask{
 		ID: "job_abc-impl", OrgID: "org1", JobID: "job_abc",
