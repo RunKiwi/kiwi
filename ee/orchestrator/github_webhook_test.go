@@ -39,7 +39,8 @@ func setupWebhookTest(t *testing.T) (*Server, *store.PostgresStore) {
 
 	db := newTestDB(t)
 	if err := db.AutoMigrate(&store.Job{}, &store.QueuedTask{}, &store.ExecutionRecord{}, &store.ExecutionRecordHead{},
-		&store.Organization{}, &store.AgentSession{}, &store.AgentSessionEvent{}, &store.PostMergeMonitor{}); err != nil {
+		&store.Organization{}, &store.AgentSession{}, &store.AgentSessionEvent{}, &store.PostMergeMonitor{},
+		&store.GitHubInstallation{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	s := store.NewPostgresStore(db)

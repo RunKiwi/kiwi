@@ -27,7 +27,10 @@ import (
 )
 
 type githubWebhookPayload struct {
-	Action      string `json:"action"`
+	Action       string `json:"action"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
 	PullRequest struct {
 		Number         int    `json:"number"`
 		HTMLURL        string `json:"html_url"`
@@ -255,6 +258,11 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case errors.Is(err, store.ErrRecordExists):
 		// A concurrent redelivery losing the race is success, not an error.
+		// Still attempt monitor creation: the delivery that wrote the record
+		// may have failed at CreateMonitor (logged, not returned, so it never
+		// surfaced here), and the unique (org_id, job_id) index makes a
+		// repeat call safe — CreateMonitor's own error path just logs again.
+		s.createPostMergeMonitor(r.Context(), orgID, jobID, payload)
 		w.WriteHeader(http.StatusOK)
 	default:
 		log.Printf("[webhook] append merge record for job %s: %v", jobID, err)
@@ -291,17 +299,6 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 	}
 }
 
-// escapeLikePattern escapes SQL LIKE wildcards (%, _) and the escape
-// character itself in s, so it can be safely interpolated into a LIKE
-// pattern without unintended wildcard matches — repo names commonly
-// contain underscores, and an unescaped one would make the pattern match
-// results outside the intended repo (e.g. "my_repo" would also match
-// "myXrepo").
-func escapeLikePattern(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return r.Replace(s)
-}
-
 // GetMonitorByMergeCommit does exact equality against a stored 40-character
 // SHA, so a shorter capture could never match anything — git revert always
 // writes the full 40-char SHA in the commit message this pattern matches
@@ -330,20 +327,19 @@ func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayloa
 	revertedSHA := m[1]
 
 	// The org isn't known from this payload alone (unlike the merge path,
-	// which resolves org via the QueuedTask.result_url lookup) — GetMonitorByMergeCommit
-	// is queried per-org below via the repository, resolving org the same way
-	// the merge path does: through the QueuedTask that the original PR's
-	// result_url points at.
-	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
-	var qt store.QueuedTask
-	if err := s.db.WithContext(ctx).
-		Where("result_url LIKE ? ESCAPE '\\'", "https://github.com/"+escapeLikePattern(repo)+"/pull/%").
-		Order("created_at DESC").
-		First(&qt).Error; err != nil {
-		return
+	// which resolves org via the QueuedTask.result_url lookup) — resolved
+	// instead via the webhook's own "installation" field, which GitHub sends
+	// on every App delivery. This is a hard tenant boundary rather than a
+	// heuristic: the newest matching QueuedTask.result_url this file used to
+	// fall back to could belong to a different org's PR against the same
+	// public repo, misattributing the signal. An installation id is minted
+	// once per (App, account) and cannot be spoofed by an unrelated org.
+	inst, err := s.storage.GetGitHubInstallationByID(ctx, payload.Installation.ID)
+	if err != nil {
+		return // no installation on file for this delivery — nothing to resolve against
 	}
 
-	mon, err := s.storage.GetMonitorByMergeCommit(ctx, qt.OrgID, revertedSHA)
+	mon, err := s.storage.GetMonitorByMergeCommit(ctx, inst.OrgID, revertedSHA)
 	if err != nil {
 		return // no active monitor for this commit — nothing to do
 	}
@@ -352,17 +348,14 @@ func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayloa
 }
 
 type checkRunWebhookPayload struct {
-	Action   string `json:"action"`
+	Action       string `json:"action"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
 	CheckRun struct {
 		HeadSHA    string `json:"head_sha"`
 		Conclusion string `json:"conclusion"`
 	} `json:"check_run"`
-	Repository struct {
-		Name  string `json:"name"`
-		Owner struct {
-			Login string `json:"login"`
-		} `json:"owner"`
-	} `json:"repository"`
 }
 
 // handleCheckRun finalizes a monitor as REGRESSION the moment any check run
@@ -390,21 +383,16 @@ func (s *Server) handleCheckRun(ctx context.Context, body []byte) {
 		return
 	}
 
-	// Org isn't in this payload either (like the revert-PR path) — resolve it
-	// the same way checkForRevert does: via the QueuedTask whose result_url
-	// points at a merged PR in this repo. This keeps the monitor lookup
-	// org-scoped like every other query in this file, instead of scanning
-	// across every org's monitors by SHA alone.
-	repo := payload.Repository.Owner.Login + "/" + payload.Repository.Name
-	var qt store.QueuedTask
-	if err := s.db.WithContext(ctx).
-		Where("result_url LIKE ? ESCAPE '\\'", "https://github.com/"+escapeLikePattern(repo)+"/pull/%").
-		Order("created_at DESC").
-		First(&qt).Error; err != nil {
-		return
+	// Org isn't in this payload either (like the revert-PR path) — resolved
+	// the same way checkForRevert now does: via the webhook's own
+	// "installation" field, a hard tenant boundary rather than a
+	// same-repo-name heuristic. See checkForRevert's comment for why.
+	inst, err := s.storage.GetGitHubInstallationByID(ctx, payload.Installation.ID)
+	if err != nil {
+		return // no installation on file for this delivery — nothing to resolve against
 	}
 
-	mon, err := s.storage.GetMonitorByMergeCommit(ctx, qt.OrgID, payload.CheckRun.HeadSHA)
+	mon, err := s.storage.GetMonitorByMergeCommit(ctx, inst.OrgID, payload.CheckRun.HeadSHA)
 	if err != nil {
 		return // no active monitor for this commit — nothing to do
 	}

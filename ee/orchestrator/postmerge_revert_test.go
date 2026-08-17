@@ -19,7 +19,8 @@ import (
 // has authorized it (see checkForRevert's doc comment).
 func revertPRPayload(revertedSHA string) []byte {
 	payload := map[string]any{
-		"action": "closed",
+		"action":       "closed",
+		"installation": map[string]any{"id": testGitHubInstallationID},
 		"pull_request": map[string]any{
 			"number":           43,
 			"title":            `Revert "add a health endpoint"`,
@@ -41,7 +42,8 @@ func revertPRPayload(revertedSHA string) []byte {
 // it being merged, must never finalize a monitor.
 func unmergedRevertPRPayload(revertedSHA string) []byte {
 	payload := map[string]any{
-		"action": "opened",
+		"action":       "opened",
+		"installation": map[string]any{"id": testGitHubInstallationID},
 		"pull_request": map[string]any{
 			"number":   43,
 			"title":    `Revert "add a health endpoint"`,
