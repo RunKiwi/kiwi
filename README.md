@@ -266,7 +266,7 @@ Both submit to `/api/v1/planner/plan`; workers run asynchronously, so poll `getJ
 - `POST /api/v1/webhooks/linear` — issues labeled `kiwi` (or moved to **In Progress**) become planner jobs. Requires `LINEAR_WEBHOOK_SECRET`.
 - `POST /api/v1/webhooks/github` — on a merged PR, appends a signed `kiwi.ver/merge/v1` link capturing the approver. Requires `GITHUB_WEBHOOK_SECRET`.
 - `POST /api/v1/webhooks/github` — a comment on a Kiwi PR continues the task that opened it, guarded by org mode and write access. Every rejection returns 200, so GitHub never disables the hook.
-- `POST /api/v1/webhooks/github` — after a Kiwi PR merges, watches for a revert PR or a failed CI check on the merge commit for 24h and posts a verdict comment; a REGRESSION verdict can auto-open a fix task if the org has `auto_remediate` enabled. Requires the GitHub App to also subscribe to `check_run` events (configured in the App's settings, not in this repo).
+- `POST /api/v1/webhooks/github` — after a Kiwi PR merges, watches for a **merged** revert PR or a failed CI check on the merge commit for 24h and posts a verdict comment. An opened-but-unmerged revert PR is ignored: the merge is the authorization. A REGRESSION verdict can auto-open a fix task if the org has `auto_remediate` enabled. Requires the GitHub App to also subscribe to `check_run` events (configured in the App's settings, not in this repo).
 
 ## Contributing & context for AI
 
