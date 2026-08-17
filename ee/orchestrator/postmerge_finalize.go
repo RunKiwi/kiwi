@@ -7,6 +7,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"hash/fnv"
 	"log"
 	"strings"
 	"time"
@@ -199,18 +200,13 @@ func (s *Server) submitRemediation(ctx context.Context, mon *store.PostMergeMoni
 	}
 }
 
-// fnv64a is FNV-1a, used only to derive a synthetic negative comment id from
-// a monitor id — collision resistance, not cryptographic strength, is what
-// matters here.
+// fnv64a derives a synthetic negative comment id from a monitor id, via the
+// standard library's FNV-1a rather than a hand-rolled one. Collision
+// resistance, not cryptographic strength, is what matters here.
 func fnv64a(s string) uint64 {
-	const offset64 = 14695981039346656037
-	const prime64 = 1099511628211
-	h := uint64(offset64)
-	for i := 0; i < len(s); i++ {
-		h ^= uint64(s[i])
-		h *= prime64
-	}
-	return h
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
 }
 
 // FinalizePastWindowMonitors finalizes every MONITORING monitor whose window

@@ -13,7 +13,15 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
-// seedMonitorWithRecord installs an Organization, a merged Job/QueuedTask, its
+// testGitHubInstallationID is the installation id seedMonitorWithRecord links
+// to whichever org it's seeding — checkForRevert and handleCheckRun both
+// resolve org via this id (GitHub sends it on every App webhook delivery),
+// not via a repo-name lookup, so a webhook payload built by the tests in this
+// package must carry the same id for the org resolution to succeed.
+const testGitHubInstallationID int64 = 555000001
+
+// seedMonitorWithRecord installs an Organization, a GitHub App installation
+// linking it to testGitHubInstallationID, a merged Job/QueuedTask, its
 // original kiwi.ver/v1 execution record, and a MONITORING PostMergeMonitor —
 // the state finalizeMonitor expects to find.
 func seedMonitorWithRecord(t *testing.T, s *store.PostgresStore, orgID, jobID string, autoRemediate bool) *store.PostMergeMonitor {
@@ -21,6 +29,11 @@ func seedMonitorWithRecord(t *testing.T, s *store.PostgresStore, orgID, jobID st
 	ctx := context.Background()
 
 	if err := s.DB().Create(&store.Organization{ID: orgID, Name: "acme", AutoRemediate: autoRemediate}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB().Create(&store.GitHubInstallation{
+		InstallationID: testGitHubInstallationID, OrgID: orgID, AccountLogin: "acme",
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	prURL := "https://github.com/acme/widgets/pull/42"
@@ -78,6 +91,15 @@ func TestFinalizeMonitorVerifiedAppendsSignedRecord(t *testing.T) {
 	s.DB().Where("job_id = ? AND ver = ?", "job1", ver.PostMergeVerifySchemaVersion).Find(&recs)
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 postmerge record, got %d", len(recs))
+	}
+	// setupWebhookTest injects a signing key (srv.signingKeyFn), so the
+	// record this test's own name claims is "signed" must actually carry a
+	// signature and the key id that produced it — not just exist.
+	if recs[0].RecordSignature == "" {
+		t.Error("postmerge record is unsigned, want a signature")
+	}
+	if recs[0].SigningKeyID != "cp_2026_07" {
+		t.Errorf("signing_key_id = %q, want cp_2026_07", recs[0].SigningKeyID)
 	}
 }
 
