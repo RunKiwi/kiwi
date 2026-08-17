@@ -17,7 +17,8 @@ func TestDefaultCredValidator(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ok := r.Header.Get("x-api-key") == "good" ||
 			r.Header.Get("Authorization") == "Bearer good" ||
-			r.URL.Query().Get("key") == "good"
+			r.URL.Query().Get("key") == "good" ||
+			r.Header.Get("DD-API-KEY") == "good"
 		if ok {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -27,7 +28,7 @@ func TestDefaultCredValidator(t *testing.T) {
 	defer stub.Close()
 
 	// Point every provider endpoint at the stub.
-	anthropicValidateURL, geminiValidateURL, openaiValidateURL, githubValidateURL = stub.URL, stub.URL, stub.URL, stub.URL
+	anthropicValidateURL, geminiValidateURL, openaiValidateURL, githubValidateURL, datadogValidateURL = stub.URL, stub.URL, stub.URL, stub.URL, stub.URL
 
 	cases := []struct {
 		name    string
@@ -43,6 +44,11 @@ func TestDefaultCredValidator(t *testing.T) {
 		{"openai bad", "OPENAI_API_KEY", "bad", true},
 		{"github good", "GITHUB_TOKEN", "good", false},
 		{"github bad", "GIT_TOKEN", "bad", true},
+		{"datadog good", "DATADOG_API_KEY", "good", false},
+		{"datadog bad", "DATADOG_API_KEY", "bad", true},
+		{"datadog app key always allowed (no standalone check)", "DATADOG_APP_KEY", "whatever", false},
+		{"prometheus base url always allowed (no standalone check)", "PROMETHEUS_BASE_URL", "whatever", false},
+		{"prometheus bearer token always allowed (no standalone check)", "PROMETHEUS_BEARER_TOKEN", "whatever", false},
 		{"unknown name always allowed", "SLACK_TOKEN", "whatever", false},
 	}
 	for _, tc := range cases {

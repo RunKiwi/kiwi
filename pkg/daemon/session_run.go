@@ -14,6 +14,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
@@ -319,19 +320,23 @@ func noKeyDetail(model string) string {
 
 // taskTestEnv builds the environment the sandbox runs with.
 //
-// Two exclusions, for two different reasons. LLM keys are always withheld
+// Three exclusions, for two different reasons. LLM keys and telemetry
+// credentials (Datadog/Prometheus — pkg/telemetry) are always withheld
 // because the sandbox executes model-generated code, and that has been true
-// since the Actor/Critic split. Everything else is withheld in session mode
-// because there the model also chooses the commands, and their output is
-// carried back into the event log — so a credential in the environment has a
-// read-and-echo path out that needs no network.
+// for LLM keys since the Actor/Critic split; telemetry credentials are an org
+// infrastructure secret with the same exposure, so they get the same
+// unconditional treatment rather than being left to the opt-in below.
+// Everything else is withheld in session mode because there the model also
+// chooses the commands, and their output is carried back into the event log —
+// so a credential in the environment has a read-and-echo path out that needs
+// no network.
 func taskTestEnv(task string, creds map[string]string, sessionMode bool) []string {
 	env := []string{"TASK=" + task}
 	if sessionMode && !sessionAllowsTestCredentials() {
 		return env
 	}
 	for name, value := range creds {
-		if isLLMKey(name) {
+		if isLLMKey(name) || telemetry.IsTelemetryCredential(name) {
 			continue
 		}
 		env = append(env, name+"="+value)

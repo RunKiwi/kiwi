@@ -4,8 +4,9 @@ import "time"
 
 // Credential kinds.
 const (
-	CredentialLLM = "llm"
-	CredentialGit = "git"
+	CredentialLLM       = "llm"
+	CredentialGit       = "git"
+	CredentialTelemetry = "telemetry"
 )
 
 // Credential is an org-scoped secret (an LLM API key, a Git token, etc.) stored

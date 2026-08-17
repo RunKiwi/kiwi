@@ -86,3 +86,52 @@ func TestSessionCredentialOptInDefaultsOff(t *testing.T) {
 		t.Error("an unparseable value must not be read as opt-in")
 	}
 }
+
+// Telemetry credentials (Datadog/Prometheus) must be withheld from the sandbox
+// test-command environment for the same reason LLM keys are: the sandbox runs
+// model-generated code the org did not write. This must hold both in the
+// credentials-opt-in path (sessionMode=false) and in the session opt-in path
+// (sessionMode=true with KIWI_SESSION_ALLOW_TEST_CREDS set) — a telemetry key
+// must never reach the sandbox regardless of which opt-in let other
+// credentials through.
+func TestTaskTestEnvExcludesTelemetryCredentials(t *testing.T) {
+	creds := map[string]string{
+		anthropicKeyName:          "llm-secret",
+		"GIT_TOKEN":               "git-secret",
+		"DATADOG_API_KEY":         "dd-secret",
+		"DATADOG_APP_KEY":         "dd-app-secret",
+		"PROMETHEUS_BASE_URL":     "https://prom.internal",
+		"PROMETHEUS_BEARER_TOKEN": "prom-secret",
+		"SOME_APP_CONFIG":         "not-a-secret-should-pass-through",
+	}
+
+	excluded := []string{
+		anthropicKeyName, "DATADOG_API_KEY", "DATADOG_APP_KEY",
+		"PROMETHEUS_BASE_URL", "PROMETHEUS_BEARER_TOKEN",
+	}
+
+	t.Run("credentials opt-in (sessionMode=false)", func(t *testing.T) {
+		env := taskTestEnv("do the thing", creds, false)
+		for _, k := range excluded {
+			if envHas(env, k) {
+				t.Errorf("taskTestEnv leaked %s into the sandbox test environment", k)
+			}
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+
+	t.Run("session opt-in (sessionMode=true, KIWI_SESSION_ALLOW_TEST_CREDS=true)", func(t *testing.T) {
+		t.Setenv("KIWI_SESSION_ALLOW_TEST_CREDS", "true")
+		env := taskTestEnv("do the thing", creds, true)
+		for _, k := range excluded {
+			if envHas(env, k) {
+				t.Errorf("taskTestEnv leaked %s into a session sandbox test environment", k)
+			}
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+}
