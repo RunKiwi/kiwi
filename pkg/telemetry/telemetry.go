@@ -98,12 +98,6 @@ func ProviderFor(id string, creds map[string]string) (Provider, error) {
 	}
 }
 
-// NewPrometheusProvider constructs a Prometheus connector.
-// Implemented in Task 4.
-func NewPrometheusProvider(baseURL, bearerToken string) Provider {
-	panic("implemented in Task 4")
-}
-
 // NewDatadogProvider constructs a Datadog connector.
 // Implemented in Task 5.
 func NewDatadogProvider(apiKey, appKey string) Provider {
