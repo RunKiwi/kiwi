@@ -212,4 +212,10 @@ type Store interface {
 	SetMonitorRemediationTaskID(ctx context.Context, id, taskID string) error
 	ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error)
 	AutoRemediate(ctx context.Context, orgID string) (bool, error)
+
+	// TelemetryMetric is org-level, operator-configured metric config a
+	// PostMergeMonitor's telemetry poll (Task 11) picks from via the
+	// originating task's Intent. See pkg/store/telemetry_metric.go.
+	CreateTelemetryMetric(ctx context.Context, m *TelemetryMetric) error
+	ListTelemetryMetrics(ctx context.Context, orgID, repo string) ([]TelemetryMetric, error)
 }
