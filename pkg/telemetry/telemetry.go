@@ -97,9 +97,3 @@ func ProviderFor(id string, creds map[string]string) (Provider, error) {
 		return nil, fmt.Errorf("unknown telemetry provider %q", id)
 	}
 }
-
-// NewDatadogProvider constructs a Datadog connector.
-// Implemented in Task 5.
-func NewDatadogProvider(apiKey, appKey string) Provider {
-	panic("implemented in Task 5")
-}
