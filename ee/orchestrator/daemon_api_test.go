@@ -35,6 +35,7 @@ func newSeamTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.QueuedTask{},
 		&store.Credential{}, &store.Daemon{}, &store.DaemonJoinToken{}, &store.Job{},
+		&store.PostMergeTelemetryPoll{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -46,6 +47,8 @@ func newSeamTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	mux.HandleFunc("/api/v1/daemon/heartbeat", s.handleDaemonHeartbeat)
 	mux.HandleFunc("/api/v1/daemon/progress", s.handleDaemonProgress)
 	mux.HandleFunc("/api/v1/daemon/result", s.handleDaemonResult)
+	mux.HandleFunc("/api/v1/daemon/telemetry/due", s.handleDaemonTelemetryDue)
+	mux.HandleFunc("/api/v1/daemon/telemetry/report", s.handleDaemonTelemetryReport)
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -281,4 +284,76 @@ func TestDaemonSeam_ForgedSignatureRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected forged-signature heartbeat to be rejected")
 	}
+}
+
+// TestHandleDaemonTelemetryDueReturnsClaimedPolls proves the due-check seam
+// end to end: a registered daemon asking what telemetry is due gets back
+// exactly the polls ClaimDuePolls claimed for its org, translated into the
+// wire's TelemetryPollSpec shape — with no LeaseID and no sealed credentials
+// anywhere in the response, since this channel is independent of the task
+// lease queue.
+func TestHandleDaemonTelemetryDueReturnsClaimedPolls(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_1", OrgID: "o1", MonitorID: "mon_1", Provider: "datadog", Query: "q",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(-time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+
+	res, err := d.client.TelemetryDue(ctx, daemon.TelemetryDueReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("telemetry due: %v", err)
+	}
+	if len(res.Due) != 1 || res.Due[0].PollID != "poll_1" {
+		t.Fatalf("got %+v", res.Due)
+	}
+
+	// A second due-check immediately after must see nothing: the poll was
+	// claimed (claimed_at set), so it is no longer a candidate for
+	// ClaimDuePolls. This also proves the first assertion was not vacuous —
+	// the claim actually stuck rather than the poll being returned by chance.
+	res2, err := d.client.TelemetryDue(ctx, daemon.TelemetryDueReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("second telemetry due: %v", err)
+	}
+	if len(res2.Due) != 0 {
+		t.Fatalf("expected no due polls on second check, got %+v", res2.Due)
+	}
+}
+
+// TestHandleDaemonTelemetryReportFinalizesOnRegression is a placeholder.
+// This test's exact shape depends on Task 10's significance-check function
+// existing — write it once Task 10 lands. Assert: given a poll result whose
+// current mean is >20% worse than baseline in the configured direction, the
+// monitor's status becomes REGRESSION and RecordPollResult was called with
+// reschedule=false.
+func TestHandleDaemonTelemetryReportFinalizesOnRegression(t *testing.T) {
+	t.Skip("completed alongside Task 10's significance check")
 }

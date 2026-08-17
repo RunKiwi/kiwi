@@ -493,6 +493,8 @@ func (s *Server) Start(addr string) error {
 	root.HandleFunc("/api/v1/daemon/git-token", s.handleDaemonGitToken)
 	root.HandleFunc("/api/v1/daemon/session", s.handleDaemonSession)
 	root.HandleFunc("/api/v1/daemon/session/load", s.handleDaemonSessionLoad)
+	root.HandleFunc("/api/v1/daemon/telemetry/due", s.handleDaemonTelemetryDue)
+	root.HandleFunc("/api/v1/daemon/telemetry/report", s.handleDaemonTelemetryReport)
 
 	root.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

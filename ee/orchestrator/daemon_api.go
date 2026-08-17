@@ -502,6 +502,139 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// telemetryDueLimit bounds how many polls a single due-check can claim — an
+// org with more concurrent monitors than this waits for the next ~1min tick,
+// never blocks indefinitely.
+const telemetryDueLimit = 20
+
+// handleDaemonTelemetryDue serves POST /api/v1/daemon/telemetry/due.
+//
+// This channel is deliberately independent of the task lease queue: it
+// follows handleDaemonHeartbeat's exact auth pattern (signature over the raw
+// body, timestamp-skew check, GetDaemonBySignPubKey resolution) but claims
+// due telemetry polls instead of leasing a task, and returns them with no
+// LeaseID and no sealed credentials — a daemon polling telemetry needs
+// neither.
+func (s *Server) handleDaemonTelemetryDue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req daemon.TelemetryDueReq
+	_, _, err := readSignedBody(r, func(b []byte) (string, error) {
+		if err := json.Unmarshal(b, &req); err != nil {
+			return "", errors.New("invalid request body")
+		}
+		return req.SignPubKey, nil
+	})
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if req.Timestamp != 0 {
+		age := time.Since(time.Unix(req.Timestamp, 0))
+		if age > heartbeatSkew || age < -heartbeatSkew {
+			http.Error(w, "stale timestamp", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	d, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	if err != nil {
+		if errors.Is(err, store.ErrDaemonNotFound) {
+			http.Error(w, "daemon not registered", http.StatusForbidden)
+			return
+		}
+		log.Printf("[telemetry] lookup daemon: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	claimed, err := s.storage.ClaimDuePolls(r.Context(), d.OrgID, time.Now(), telemetryDueLimit)
+	if err != nil {
+		log.Printf("[telemetry] claim due polls for org %s: %v", d.OrgID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(claimed) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	res := daemon.TelemetryDueRes{Due: make([]daemon.TelemetryPollSpec, 0, len(claimed))}
+	for _, p := range claimed {
+		res.Due = append(res.Due, daemon.TelemetryPollSpec{
+			PollID: p.ID, Provider: p.Provider, Query: p.Query,
+			BaselineStart: p.BaselineStart, BaselineEnd: p.BaselineEnd,
+			CurrentStart: p.CurrentStart, CurrentEnd: p.CurrentEnd,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleDaemonTelemetryReport serves POST /api/v1/daemon/telemetry/report.
+//
+// Like handleDaemonTelemetryDue, this is lease-free: authorization is purely
+// SignPubKey -> GetDaemonBySignPubKey -> OrgID, with no LeaseID anywhere.
+// Each result is handed to handleTelemetryPollResult, which decides whether
+// the poll reschedules or the parent monitor finalizes (Task 10's
+// significance check).
+func (s *Server) handleDaemonTelemetryReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req daemon.TelemetryReportReq
+	_, _, err := readSignedBody(r, func(b []byte) (string, error) {
+		if err := json.Unmarshal(b, &req); err != nil {
+			return "", errors.New("invalid request body")
+		}
+		return req.SignPubKey, nil
+	})
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if req.Timestamp != 0 {
+		age := time.Since(time.Unix(req.Timestamp, 0))
+		if age > heartbeatSkew || age < -heartbeatSkew {
+			http.Error(w, "stale timestamp", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	d, err := s.storage.GetDaemonBySignPubKey(r.Context(), req.SignPubKey)
+	if err != nil {
+		if errors.Is(err, store.ErrDaemonNotFound) {
+			http.Error(w, "daemon not registered", http.StatusForbidden)
+			return
+		}
+		log.Printf("[telemetry] lookup daemon: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	for _, result := range req.Results {
+		s.handleTelemetryPollResult(r.Context(), d.OrgID, result)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleTelemetryPollResult is a temporary stub. Task 10 replaces this with
+// the real significance check (baseline vs. current, finalize the monitor on
+// regression or call RecordPollResult to reschedule) in a different file;
+// this placeholder exists only so handleDaemonTelemetryReport compiles ahead
+// of that task landing.
+func (s *Server) handleTelemetryPollResult(ctx context.Context, orgID string, result daemon.TelemetryPollResult) {
+	// Task 10.
+}
+
 // executionMode reports whether this Control Plane operates the data plane
 // ("managed") or the customer does ("byoc"). It is recorded per job because it
 // is exactly the distinction that decides whether zero-knowledge holds.
