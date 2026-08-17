@@ -144,6 +144,7 @@ function CommandCenterContent() {
     ];
     const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGreeting(`${timeGreeting}, ${randomPrompt}`);
   }, []);
 
