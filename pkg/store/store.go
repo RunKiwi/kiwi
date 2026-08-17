@@ -218,4 +218,11 @@ type Store interface {
 	// originating task's Intent. See pkg/store/telemetry_metric.go.
 	CreateTelemetryMetric(ctx context.Context, m *TelemetryMetric) error
 	ListTelemetryMetrics(ctx context.Context, orgID, repo string) ([]TelemetryMetric, error)
+
+	// PostMergeTelemetryPoll — recurring (monitor, metric) poll schedule with
+	// atomic single-claim mechanism (see pkg/store/telemetry_poll.go).
+	CreateTelemetryPoll(ctx context.Context, p *PostMergeTelemetryPoll) error
+	ClaimDuePolls(ctx context.Context, orgID string, now time.Time, limit int) ([]PostMergeTelemetryPoll, error)
+	RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool) error
+	ReleaseStalePolls(ctx context.Context, olderThan time.Time) (int64, error)
 }
