@@ -305,11 +305,19 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 // anyway. Requiring exactly 40 hex characters just makes that explicit.
 var revertCommitPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{40})\.`)
 
-// checkForRevert looks for GitHub's auto-generated revert-PR body pattern
-// ("This reverts commit <sha>.") and, if it references the merge commit of an
-// active monitor, finalizes that monitor as REGRESSION — a human reverting a
-// Kiwi PR is the highest-confidence, zero-telemetry-cost regression signal
-// there is.
+// revertsPRPattern matches GitHub's own Revert-button body. GitHub's
+// documented auto-template is "Reverts $PRNUM" — a bare "#123" with no
+// owner/repo prefix, since the button only ever reverts a PR in the same
+// repository — but the owner/repo-qualified form is accepted too in case a
+// human edits the generated body or a future GitHub version adds it back.
+// Either way this names the reverted PR by number, not by SHA, so resolving
+// it costs one GitHub API call — see resolveRevertedSHA.
+var revertsPRPattern = regexp.MustCompile(`(?m)^Reverts (?:([\w.-]+)/([\w.-]+))?#(\d+)`)
+
+// checkForRevert looks for either shape of GitHub's revert-PR body and, if it
+// references the merge commit of an active monitor, finalizes that monitor as
+// REGRESSION — a human reverting a Kiwi PR is the highest-confidence,
+// zero-telemetry-cost regression signal there is.
 //
 // Requires the reverting PR to be MERGED, not merely opened. An opened PR
 // needs no authorization at all — on a public repository, anyone can open one
@@ -320,12 +328,6 @@ var revertCommitPattern = regexp.MustCompile(`This reverts commit ([0-9a-f]{40})
 // requires real write access or passing branch protection, enforced by
 // GitHub, not by Kiwi.
 func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayload) {
-	m := revertCommitPattern.FindStringSubmatch(payload.PullRequest.Body)
-	if m == nil {
-		return
-	}
-	revertedSHA := m[1]
-
 	// The org isn't known from this payload alone (unlike the merge path,
 	// which resolves org via the QueuedTask.result_url lookup) — resolved
 	// instead via the webhook's own "installation" field, which GitHub sends
@@ -339,12 +341,82 @@ func (s *Server) checkForRevert(ctx context.Context, payload githubWebhookPayloa
 		return // no installation on file for this delivery — nothing to resolve against
 	}
 
+	revertedSHA, ok := s.resolveRevertedSHA(ctx, payload, inst, githubAPIDefault)
+	if !ok {
+		return
+	}
+
 	mon, err := s.storage.GetMonitorByMergeCommit(ctx, inst.OrgID, revertedSHA)
 	if err != nil {
 		return // no active monitor for this commit — nothing to do
 	}
 	evidence := "reverted by " + payload.Repository.Owner.Login + "/" + payload.Repository.Name + "#" + strconv.Itoa(payload.PullRequest.Number)
 	s.finalizeMonitor(ctx, mon, store.MonitorStatusRegression, evidence)
+}
+
+// resolveRevertedSHA extracts the merge commit SHA a revert-authorized PR is
+// reverting. Two body shapes carry this signal: a manually authored `git
+// revert` commit message embeds the SHA directly, no lookup needed; GitHub's
+// own Revert button instead writes "Reverts #N" (see revertsPRPattern),
+// which names the reverted PR rather than its SHA and must be resolved via
+// the API — so it costs an installation token mint and one GitHub call the
+// first shape avoids entirely.
+//
+// A qualified "owner/repo#N" body is required to match payload.Repository —
+// the button only ever references the same repo, so an owner/repo pair that
+// doesn't is either a stale/hand-edited body or a forged one, and either way
+// resolving it against a different repository would be unverified behavior,
+// not a signal to act on.
+//
+// Every failure past a body match is logged. A revert going undetected is
+// exactly the kind of quiet failure this system exists to catch, and this
+// path was designed once already (checkForRevert's original SHA-only form)
+// without production verification — see the doc comment on revertsPRPattern.
+//
+// api is threaded through explicitly (rather than read from a package
+// constant) so this can be exercised against an httptest server the same way
+// the other GitHub-calling functions in this file are, without a live
+// network call in every test run.
+func (s *Server) resolveRevertedSHA(ctx context.Context, payload githubWebhookPayload, inst *store.GitHubInstallation, api string) (string, bool) {
+	if m := revertCommitPattern.FindStringSubmatch(payload.PullRequest.Body); m != nil {
+		return m[1], true
+	}
+
+	m := revertsPRPattern.FindStringSubmatch(payload.PullRequest.Body)
+	if m == nil {
+		return "", false
+	}
+	owner, repo, numStr := m[1], m[2], m[3]
+	if owner != "" && (owner != payload.Repository.Owner.Login || repo != payload.Repository.Name) {
+		log.Printf("[webhook] revert body references %s/%s, not the reverting PR's own repo %s/%s — ignoring",
+			owner, repo, payload.Repository.Owner.Login, payload.Repository.Name)
+		return "", false
+	}
+	owner, repo = payload.Repository.Owner.Login, payload.Repository.Name
+	number, err := strconv.Atoi(numStr)
+	if err != nil {
+		return "", false
+	}
+
+	if s.githubApp == nil {
+		log.Printf("[webhook] revert body references %s/%s#%d but no GitHub App is configured to resolve it", owner, repo, number)
+		return "", false
+	}
+	tok, err := s.githubApp.InstallationToken(ctx, inst.InstallationID)
+	if err != nil {
+		log.Printf("[webhook] mint installation token to resolve revert of %s/%s#%d: %v", owner, repo, number, err)
+		return "", false
+	}
+	sha, merged, err := getPullRequest(ctx, api, tok.Value, owner, repo, number)
+	if err != nil {
+		log.Printf("[webhook] resolve revert of %s/%s#%d: %v", owner, repo, number, err)
+		return "", false
+	}
+	if !merged || sha == "" {
+		log.Printf("[webhook] revert body references %s/%s#%d, which is not merged — ignoring", owner, repo, number)
+		return "", false
+	}
+	return sha, true
 }
 
 type checkRunWebhookPayload struct {

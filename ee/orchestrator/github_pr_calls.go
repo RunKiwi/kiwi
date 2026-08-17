@@ -124,3 +124,31 @@ func createIssueComment(ctx context.Context, api, token, owner, repo string, num
 	}
 	return nil
 }
+
+// getPullRequest resolves a pull request to its merge commit SHA and whether
+// it was actually merged. Needed for GitHub's own Revert-button PR body
+// ("Reverts owner/repo#N"), which names the reverted PR by number rather than
+// by SHA — unlike a manually authored `git revert` commit message, which
+// embeds the SHA directly and needs no lookup.
+func getPullRequest(ctx context.Context, api, token, owner, repo string, number int) (mergeCommitSHA string, merged bool, err error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", api, owner, repo, number)
+	resp, err := githubRequest(ctx, http.MethodGet, url, token, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("get pull request %s/%s#%d: %w", owner, repo, number, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
+		return "", false, fmt.Errorf("get pull request %s/%s#%d returned %d: %s", owner, repo, number, resp.StatusCode, string(b))
+	}
+
+	var out struct {
+		Merged         bool   `json:"merged"`
+		MergeCommitSHA string `json:"merge_commit_sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", false, fmt.Errorf("decode pull request %s/%s#%d: %w", owner, repo, number, err)
+	}
+	return out.MergeCommitSHA, out.Merged, nil
+}

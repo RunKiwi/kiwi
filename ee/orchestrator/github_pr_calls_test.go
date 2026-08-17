@@ -118,3 +118,55 @@ func TestCreateIssueCommentPostsToThePullRequestThread(t *testing.T) {
 		t.Errorf("body = %s", gotBody)
 	}
 }
+
+func TestGetPullRequestReadsMergeOutcome(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"merged":true,"merge_commit_sha":"` + strings.Repeat("a", 40) + `"}`))
+	}))
+	defer srv.Close()
+
+	sha, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/repos/acme/widgets/pulls/43" {
+		t.Errorf("path = %s", gotPath)
+	}
+	if !merged {
+		t.Error("merged = false, want true")
+	}
+	if sha != strings.Repeat("a", 40) {
+		t.Errorf("sha = %q", sha)
+	}
+}
+
+func TestGetPullRequestReportsUnmerged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"merged":false,"merge_commit_sha":null}`))
+	}))
+	defer srv.Close()
+
+	sha, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged {
+		t.Error("merged = true, want false")
+	}
+	if sha != "" {
+		t.Errorf("sha = %q, want empty", sha)
+	}
+}
+
+func TestGetPullRequestReportsFailures(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	if _, _, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43); err == nil {
+		t.Error("expected an error for a 404")
+	}
+}
