@@ -36,7 +36,7 @@ func newSeamTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	if err := db.AutoMigrate(
 		&store.Organization{}, &store.OrgLimits{}, &store.QueuedTask{},
 		&store.Credential{}, &store.Daemon{}, &store.DaemonJoinToken{}, &store.Job{},
-		&store.PostMergeTelemetryPoll{},
+		&store.PostMergeTelemetryPoll{}, &store.PostMergeMonitor{}, &store.TelemetryMetric{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -601,12 +601,168 @@ func TestDaemonSeam_TelemetryDueOmitsCredsWhenNothingDue(t *testing.T) {
 	}
 }
 
-// TestHandleDaemonTelemetryReportFinalizesOnRegression is a placeholder.
-// This test's exact shape depends on Task 10's significance-check function
-// existing — write it once Task 10 lands. Assert: given a poll result whose
-// current mean is >20% worse than baseline in the configured direction, the
-// monitor's status becomes REGRESSION and RecordPollResult was called with
-// reschedule=false.
+// TestHandleDaemonTelemetryReportFinalizesOnRegression drives a real
+// telemetry report through handleDaemonTelemetryReport -> Task 10's
+// handleTelemetryPollResult -> evaluateSignificance, end to end. The
+// reported result is 25% worse than baseline (lower-is-better, the default
+// direction when no TelemetryMetric row matches the poll's query) — above
+// evaluateSignificance's 20% relative-worsening bar, and both sides carry
+// the 30-sample floor — so this must read as a confident REGRESSION.
+//
+// Asserts two things: the monitor's status actually flips to REGRESSION
+// (finalizeMonitor's single-fire UPDATE won), and the poll was recorded
+// with reschedule=false — checked via RecordPollResult's own documented
+// behavior for that branch (pkg/store/telemetry_poll.go): next_poll_at is
+// pushed ~365 days out rather than the normal ~15-minute tick, because a
+// finalized monitor has no next poll to run.
 func TestHandleDaemonTelemetryReportFinalizesOnRegression(t *testing.T) {
-	t.Skip("completed alongside Task 10's significance check")
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	mon := &store.PostMergeMonitor{
+		ID: "mon_1", OrgID: "o1", JobID: "job_1", Repo: "acme/widgets", PRNumber: 42,
+		MergeCommitSHA: "deadbeef", Status: store.MonitorStatusMonitoring,
+		DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := st.CreateMonitor(ctx, mon); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_1", OrgID: "o1", MonitorID: mon.ID, Provider: "datadog", Query: "q1",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(15 * time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+
+	baselineMean, currentMean := 100.0, 125.0 // 25% worse, above the 20% bar
+	err = d.client.TelemetryReport(ctx, daemon.TelemetryReportReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		Results: []daemon.TelemetryPollResult{{
+			PollID:   poll.ID,
+			Baseline: &daemon.TelemetryResultDTO{SampleCount: 40, Mean: baselineMean},
+			Current:  &daemon.TelemetryResultDTO{SampleCount: 40, Mean: currentMean},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("telemetry report: %v", err)
+	}
+
+	gotMon, err := st.GetMonitorByID(ctx, mon.ID)
+	if err != nil {
+		t.Fatalf("re-fetch monitor: %v", err)
+	}
+	if gotMon.Status != store.MonitorStatusRegression {
+		t.Errorf("monitor status = %q, want %q", gotMon.Status, store.MonitorStatusRegression)
+	}
+
+	gotPoll, err := st.GetTelemetryPoll(ctx, poll.ID)
+	if err != nil {
+		t.Fatalf("re-fetch poll: %v", err)
+	}
+	if !gotPoll.NextPollAt.After(time.Now().Add(300 * 24 * time.Hour)) {
+		t.Errorf("poll NextPollAt = %v, want pushed far out (reschedule=false), i.e. RecordPollResult(..., reschedule=false)", gotPoll.NextPollAt)
+	}
+	if gotPoll.LastResult == "" {
+		t.Error("expected LastResult to be recorded on the poll")
+	}
+}
+
+// TestHandleDaemonTelemetryReportUsesMetricComparisonDirection proves
+// GetTelemetryMetricByQuery's success path, not just its "no match" fallback.
+// The other regression test above deliberately seeds no TelemetryMetric row,
+// so direction always falls back to ComparisonLowerIsBetter there — a bug in
+// the lookup's WHERE clause or column mapping would stay invisible. Here a
+// higher_is_better metric is seeded and a throughput-style drop (current
+// mean lower than baseline, worse for higher_is_better) is reported: if the
+// direction lookup silently failed and fell back to lower_is_better, this
+// drop would read as "not worse" (a lower current mean is improvement under
+// lower_is_better), the poll would reschedule, and the monitor would stay
+// MONITORING — so this test is non-vacuous in both directions.
+func TestHandleDaemonTelemetryReportUsesMetricComparisonDirection(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	mon := &store.PostMergeMonitor{
+		ID: "mon_2", OrgID: "o1", JobID: "job_2", Repo: "acme/widgets", PRNumber: 43,
+		MergeCommitSHA: "cafebabe", Status: store.MonitorStatusMonitoring,
+		DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := st.CreateMonitor(ctx, mon); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	metric := &store.TelemetryMetric{
+		ID: "metric_1", OrgID: "o1", Repo: "acme/widgets", Name: "throughput",
+		Provider: "datadog", Query: "q2", ComparisonDirection: store.ComparisonHigherIsBetter,
+	}
+	if err := st.CreateTelemetryMetric(ctx, metric); err != nil {
+		t.Fatalf("create telemetry metric: %v", err)
+	}
+
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_2", OrgID: "o1", MonitorID: mon.ID, Provider: "datadog", Query: "q2",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(15 * time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+
+	// 25% throughput drop — worse under higher_is_better, above the 20% bar.
+	err = d.client.TelemetryReport(ctx, daemon.TelemetryReportReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		Results: []daemon.TelemetryPollResult{{
+			PollID:   poll.ID,
+			Baseline: &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 1000},
+			Current:  &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 750},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("telemetry report: %v", err)
+	}
+
+	gotMon, err := st.GetMonitorByID(ctx, mon.ID)
+	if err != nil {
+		t.Fatalf("re-fetch monitor: %v", err)
+	}
+	if gotMon.Status != store.MonitorStatusRegression {
+		t.Errorf("monitor status = %q, want %q — GetTelemetryMetricByQuery must have resolved higher_is_better for this to finalize", gotMon.Status, store.MonitorStatusRegression)
+	}
 }

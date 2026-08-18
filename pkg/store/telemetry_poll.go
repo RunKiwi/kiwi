@@ -9,6 +9,17 @@ func (s *PostgresStore) CreateTelemetryPoll(ctx context.Context, p *PostMergeTel
 	return s.db.WithContext(ctx).Create(p).Error
 }
 
+// GetTelemetryPoll fetches a poll by its primary key. Used by the telemetry
+// report path (Task 10) to resolve a reported PollID back to the poll's
+// parent monitor and query before evaluating significance.
+func (s *PostgresStore) GetTelemetryPoll(ctx context.Context, id string) (*PostMergeTelemetryPoll, error) {
+	var p PostMergeTelemetryPoll
+	if err := s.db.WithContext(ctx).First(&p, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // ClaimDuePolls follows the same conditional-UPDATE-then-check-RowsAffected
 // idiom FinalizeMonitor uses for its single-fire guard — GORM has no native
 // batch UPDATE...RETURNING in this codebase, so candidates are selected

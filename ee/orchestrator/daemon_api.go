@@ -648,15 +648,6 @@ func (s *Server) handleDaemonTelemetryReport(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleTelemetryPollResult is a temporary stub. Task 10 replaces this with
-// the real significance check (baseline vs. current, finalize the monitor on
-// regression or call RecordPollResult to reschedule) in a different file;
-// this placeholder exists only so handleDaemonTelemetryReport compiles ahead
-// of that task landing.
-func (s *Server) handleTelemetryPollResult(ctx context.Context, orgID string, result daemon.TelemetryPollResult) {
-	// Task 10.
-}
-
 // executionMode reports whether this Control Plane operates the data plane
 // ("managed") or the customer does ("byoc"). It is recorded per job because it
 // is exactly the distinction that decides whether zero-knowledge holds.

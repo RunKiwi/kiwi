@@ -208,6 +208,7 @@ type Store interface {
 	// auto-spawning that continuation.
 	CreateMonitor(ctx context.Context, m *PostMergeMonitor) error
 	GetMonitorByMergeCommit(ctx context.Context, orgID, sha string) (*PostMergeMonitor, error)
+	GetMonitorByID(ctx context.Context, id string) (*PostMergeMonitor, error)
 	FinalizeMonitor(ctx context.Context, id, newStatus, evidence string) (bool, error)
 	SetMonitorRemediationTaskID(ctx context.Context, id, taskID string) error
 	ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error)
@@ -218,10 +219,12 @@ type Store interface {
 	// originating task's Intent. See pkg/store/telemetry_metric.go.
 	CreateTelemetryMetric(ctx context.Context, m *TelemetryMetric) error
 	ListTelemetryMetrics(ctx context.Context, orgID, repo string) ([]TelemetryMetric, error)
+	GetTelemetryMetricByQuery(ctx context.Context, orgID, query string) (*TelemetryMetric, error)
 
 	// PostMergeTelemetryPoll — recurring (monitor, metric) poll schedule with
 	// atomic single-claim mechanism (see pkg/store/telemetry_poll.go).
 	CreateTelemetryPoll(ctx context.Context, p *PostMergeTelemetryPoll) error
+	GetTelemetryPoll(ctx context.Context, id string) (*PostMergeTelemetryPoll, error)
 	ClaimDuePolls(ctx context.Context, orgID string, now time.Time, limit int) ([]PostMergeTelemetryPoll, error)
 	RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool) error
 	ReleaseStalePolls(ctx context.Context, olderThan time.Time) (int64, error)
