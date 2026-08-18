@@ -6,6 +6,10 @@ package orchestrator
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,4 +297,33 @@ func TestFinalizePastWindowMonitorsLeavesFutureOnesAlone(t *testing.T) {
 	if got.Status != store.MonitorStatusMonitoring {
 		t.Errorf("status = %q, want unchanged MONITORING", got.Status)
 	}
+}
+
+func TestFinalizeMonitorPostsToSlackWhenConfigured(t *testing.T) {
+	var gotBody string
+	slackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slackSrv.Close()
+
+	srv, s := setupWebhookTest(t)
+	mon := seedMonitorWithRecord(t, s, "org1", "job1", false)
+	if err := s.SaveCredential(context.Background(), "org1", "SLACK_WEBHOOK_URL", store.CredentialWebhook, slackSrv.URL); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.finalizeMonitor(context.Background(), mon, store.MonitorStatusRegression, "test evidence")
+
+	if !strings.Contains(gotBody, "REGRESSION") {
+		t.Errorf("slack body = %s, want it to mention REGRESSION", gotBody)
+	}
+}
+
+func TestFinalizeMonitorSkipsSlackWhenNotConfigured(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	mon := seedMonitorWithRecord(t, s, "org1", "job1", false)
+	// No SLACK_WEBHOOK_URL credential saved — must not panic or error.
+	srv.finalizeMonitor(context.Background(), mon, store.MonitorStatusRegression, "test evidence")
 }

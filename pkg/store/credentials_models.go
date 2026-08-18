@@ -7,6 +7,10 @@ const (
 	CredentialLLM       = "llm"
 	CredentialGit       = "git"
 	CredentialTelemetry = "telemetry"
+	// CredentialWebhook marks a notification-target credential (e.g. a Slack
+	// incoming webhook URL) — distinct from CredentialTelemetry, which is a
+	// query credential for a metrics backend like Datadog or Prometheus.
+	CredentialWebhook = "webhook"
 )
 
 // Credential is an org-scoped secret (an LLM API key, a Git token, etc.) stored
