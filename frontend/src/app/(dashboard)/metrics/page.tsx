@@ -29,12 +29,10 @@ export default function MetricsPage() {
   const [testedQueryKey, setTestedQueryKey] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [reposLoading, setReposLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = async () => {
-    setLoading(true);
     try {
       const [metricsRes, reposRes] = await Promise.all([
         client.listTelemetryMetrics(),
@@ -45,10 +43,9 @@ export default function MetricsPage() {
       setReposLoading(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load data");
-    } finally {
-      setLoading(false);
     }
   };
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   // The test result is keyed to the exact provider+query it was run
@@ -100,7 +97,6 @@ export default function MetricsPage() {
     } finally {
       setSaving(false);
     }
-    // Refresh the list after save completes (keep loading state active)
     await load();
   };
 
