@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -23,6 +24,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
@@ -70,6 +72,9 @@ type Config struct {
 	ProgressInterval time.Duration
 	// SandboxRuntime configures the OCI runtime for docker sandboxes (e.g. "runsc").
 	SandboxRuntime string
+	// TelemetryPollInterval governs how often the daemon asks the Control
+	// Plane what telemetry polls are due. Zero uses defaultTelemetryPollInterval.
+	TelemetryPollInterval time.Duration
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -89,6 +94,64 @@ type Daemon struct {
 	// instead of calling a real provider. A nil provider return means "no usable
 	// key for the selected provider" — the daemon then cannot run a real loop.
 	newProvider func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic)
+
+	// telemetryClient is the narrow subset of the Control Plane client that
+	// pollTelemetry calls through. It exists as a separate field/interface —
+	// rather than widening client above, or typing client itself as an
+	// interface — because client is a concrete *Client used throughout this
+	// file (Heartbeat, RenewLease, ReportResult, ...) with no existing
+	// mocking seam; every daemon test that exercises it does so against a
+	// real *Client pointed at an httptest server. Adding one narrow interface
+	// for the one new call path is additive and leaves that working pattern
+	// untouched. Defaults to the same *Client instance as client in New;
+	// swappable in tests via a fake that implements just these two methods.
+	telemetryClient telemetryClient
+
+	// credMu guards cachedCreds/credsCachedOnce. pollCP (the 5s heartbeat
+	// ticker) writes the freshly decrypted bundle after every successful
+	// heartbeat; pollTelemetry (the ~1min telemetry ticker) reads the most
+	// recent one. Both tickers fire from the same top-level select in Run, so
+	// in the common case there is only ever one goroutine calling either
+	// side. The lock is kept anyway — not for that goroutine, but because
+	// pollCP launches per-task goroutines that call back into d (renewal,
+	// progress, GitToken, ...) and nothing pins those to have exited before
+	// the next heartbeat tick sets the cache again; a Read/Write without
+	// synchronization here is a data race under `go test -race` even when it
+	// never manifests as an observable bug, and this package has no other
+	// case where "it happened to work" was treated as good enough.
+	credMu          sync.RWMutex
+	cachedCreds     map[string]string
+	credsCachedOnce bool
+}
+
+// telemetryClient is the Control Plane surface pollTelemetry needs: asking
+// what's due and reporting what was found. Satisfied by *Client (see
+// client.go's TelemetryDue/TelemetryReport, Task 7) and by a test double in
+// daemon_test.go.
+type telemetryClient interface {
+	TelemetryDue(ctx context.Context, req TelemetryDueReq) (*TelemetryDueRes, error)
+	TelemetryReport(ctx context.Context, req TelemetryReportReq) error
+}
+
+// cachedCredentials returns the most recently decrypted credential bundle
+// from a successful heartbeat, and whether one has ever been cached. Before
+// the daemon's first successful heartbeat this is (nil, false) — there is
+// nothing yet for the telemetry poller to authenticate a provider connector
+// with.
+func (d *Daemon) cachedCredentials() (map[string]string, bool) {
+	d.credMu.RLock()
+	defer d.credMu.RUnlock()
+	return d.cachedCreds, d.credsCachedOnce
+}
+
+// setCachedCredentials records the credential bundle decrypted by the most
+// recent successful heartbeat, so the independently-ticking telemetry poll
+// (which has no local variable to read, unlike pollCP's callers) can use it.
+func (d *Daemon) setCachedCredentials(creds map[string]string) {
+	d.credMu.Lock()
+	defer d.credMu.Unlock()
+	d.cachedCreds = creds
+	d.credsCachedOnce = true
 }
 
 // New creates a new Daemon instance.
@@ -103,11 +166,16 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to initialize git cache: %w", err)
 	}
 
+	c := NewClient(cfg.APIURL)
 	return &Daemon{
-		config:      cfg,
-		client:      NewClient(cfg.APIURL),
-		gitCache:    cache,
-		newProvider: defaultProvider,
+		config: cfg,
+		client: c,
+		// Same underlying *Client, narrowed to the telemetry interface. See
+		// the telemetryClient field's doc comment for why this is a separate
+		// field rather than widening client's type.
+		telemetryClient: c,
+		gitCache:        cache,
+		newProvider:     defaultProvider,
 	}, nil
 }
 
@@ -224,6 +292,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	timer := time.NewTimer(withJitter(currentInterval))
 	defer timer.Stop()
 
+	// The telemetry poll is daemon-lifetime-scoped like the heartbeat itself
+	// — not task-scoped — so it lives in this same top-level select rather
+	// than a per-task goroutine. See defaultTelemetryPollInterval's doc
+	// comment for why it runs on its own, much longer, interval.
+	telemetryInterval := d.config.TelemetryPollInterval
+	if telemetryInterval <= 0 {
+		telemetryInterval = defaultTelemetryPollInterval
+	}
+	telemetryTimer := time.NewTimer(telemetryInterval)
+	defer telemetryTimer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,6 +315,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 				currentInterval = backoff(currentInterval, maxInterval)
 			}
 			timer.Reset(withJitter(currentInterval))
+		case <-telemetryTimer.C:
+			d.pollTelemetry(ctx)
+			telemetryTimer.Reset(telemetryInterval)
 		}
 	}
 }
@@ -291,6 +373,13 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		}
 		return true
 	}
+
+	// Cache the bundle this heartbeat just decrypted so the independently
+	// ticking telemetry poll (pollTelemetry, on its own ~1min timer in Run)
+	// has something to authenticate a provider connector with. pollTelemetry
+	// has no local variable to read — it is not a callee of pollCP — which is
+	// exactly the problem this cache exists to solve.
+	d.setCachedCredentials(creds)
 
 	for _, spec := range res.Specs {
 		// taskCtx governs the run itself. The renewal goroutine cancels it when
@@ -405,6 +494,83 @@ const (
 // worth having: five renewal attempts per lease instead of two, so a transient
 // failure no longer needs to be a near-miss.
 const defaultRenewInterval = 2 * time.Minute
+
+// defaultTelemetryPollInterval governs how often this daemon asks the
+// Control Plane what telemetry polls are due. Independent of the 5s
+// heartbeat and the per-task 2min renewal — this is daemon-lifetime-scoped
+// like the heartbeat itself, not task-scoped, so it lives in Run's top-level
+// select rather than a per-task goroutine. Telemetry queries look at
+// baseline vs. current windows measured in minutes to hours, so polling much
+// faster than this would not surface anything new, and 1 minute keeps the
+// Control Plane's due-check cheap and infrequent relative to the 5s
+// heartbeat it shares a client identity with.
+const defaultTelemetryPollInterval = 1 * time.Minute
+
+// pollTelemetry asks the Control Plane what's due, executes each query
+// against the org's configured telemetry provider using the most recently
+// cached credential bundle, and reports results back in one batch. Every
+// failure is logged, never silently swallowed — a telemetry poll going
+// quiet with no trace is exactly the failure mode this project's earlier
+// security review and revert-detection fix both exist to avoid repeating.
+func (d *Daemon) pollTelemetry(ctx context.Context) {
+	creds, ok := d.cachedCredentials()
+	if !ok {
+		// No heartbeat has succeeded yet — nothing to authenticate a
+		// provider connector with. Not an error: this is the normal state
+		// for the brief window right after boot.
+		return
+	}
+
+	req := TelemetryDueReq{
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		Timestamp:  time.Now().Unix(),
+	}
+	res, err := d.telemetryClient.TelemetryDue(ctx, req)
+	if err != nil {
+		log.Printf("[telemetry] due check failed: %v", err)
+		return
+	}
+	if res == nil || len(res.Due) == 0 {
+		return
+	}
+
+	results := make([]TelemetryPollResult, 0, len(res.Due))
+	for _, spec := range res.Due {
+		prov, err := telemetry.ProviderFor(spec.Provider, creds)
+		if err != nil {
+			log.Printf("[telemetry] poll %s: %v", spec.PollID, err)
+			results = append(results, TelemetryPollResult{PollID: spec.PollID, Error: err.Error()})
+			continue
+		}
+
+		baseline, baseErr := prov.Query(ctx, spec.Query, spec.BaselineStart, spec.BaselineEnd)
+		current, curErr := prov.Query(ctx, spec.Query, spec.CurrentStart, spec.CurrentEnd)
+		result := TelemetryPollResult{PollID: spec.PollID}
+		if baseErr != nil || curErr != nil {
+			msg := ""
+			if baseErr != nil {
+				msg += "baseline: " + baseErr.Error() + "; "
+			}
+			if curErr != nil {
+				msg += "current: " + curErr.Error()
+			}
+			log.Printf("[telemetry] poll %s query failed: %s", spec.PollID, msg)
+			result.Error = msg
+		} else {
+			result.Baseline = &TelemetryResultDTO{SampleCount: baseline.SampleCount, Mean: baseline.Mean}
+			result.Current = &TelemetryResultDTO{SampleCount: current.SampleCount, Mean: current.Mean}
+		}
+		results = append(results, result)
+	}
+
+	if err := d.telemetryClient.TelemetryReport(ctx, TelemetryReportReq{
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		Timestamp:  time.Now().Unix(),
+		Results:    results,
+	}); err != nil {
+		log.Printf("[telemetry] report failed: %v", err)
+	}
+}
 
 // isLLMKey reports whether a credential is a model API key that must be kept out
 // of the sandbox environment.
