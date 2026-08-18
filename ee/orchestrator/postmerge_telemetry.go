@@ -218,7 +218,15 @@ func (s *Server) enqueueTelemetryPolls(ctx context.Context, mon *store.PostMerge
 	for _, m := range selectable {
 		options = append(options, provider.MetricOption{Name: m.Name})
 	}
-	chosen, err := s.metricSelector.SelectMetric(ctx, intent, options)
+	// Bounded so a slow or hung provider cannot stall the GitHub webhook
+	// response indefinitely — this call runs synchronously inline in
+	// createPostMergeMonitor, on the webhook request's own context. A
+	// timeout here surfaces as the same "select metric" error path as any
+	// other selector failure: logged, no poll, the monitor still runs on
+	// GitHub-native signals alone.
+	selectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	chosen, err := s.metricSelector.SelectMetric(selectCtx, intent, options)
 	if err != nil {
 		log.Printf("[telemetry] select metric for monitor %s: %v", mon.ID, err)
 		return

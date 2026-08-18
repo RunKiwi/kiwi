@@ -134,11 +134,17 @@ func TestEnqueueTelemetryPollsSkipsWhenNoMetricSelected(t *testing.T) {
 // telemetry.SpecFor(provider).CredNames in full before ever offering a
 // metric as an option — not rely on any single row's existence.
 //
-// The MockMetricSelector here is configured to "choose" the excluded
-// metric's exact name. If filtering happened only after selection (or not
-// at all), this would still produce a poll — the assertion of zero polls
-// only holds if the metric was excluded from the options list before the
-// selector was ever consulted.
+// A second, fully-configured prometheus metric is seeded alongside the
+// incomplete datadog one so `selectable` is non-empty and the selector is
+// genuinely consulted — otherwise enqueueTelemetryPolls would return at its
+// `len(selectable) == 0` early-out before ever reaching the chosen-metric
+// resolution loop, and the test would prove nothing about that loop scanning
+// `selectable` rather than the unfiltered `metrics`. The MockMetricSelector
+// is configured to "choose" the excluded datadog metric's exact name (not
+// the prometheus one it was actually offered) — proving the zero-poll
+// result comes from the resolution loop failing to find that name in
+// `selectable`, not from the selector declining or from nothing being
+// offered at all.
 func TestEnqueueTelemetryPollsSkipsMetricWithIncompleteCredentials(t *testing.T) {
 	srv, s := setupWebhookTest(t)
 	ctx := context.Background()
@@ -156,10 +162,25 @@ func TestEnqueueTelemetryPollsSkipsMetricWithIncompleteCredentials(t *testing.T)
 	if err := s.SaveCredential(ctx, orgID, "DATADOG_API_KEY", store.CredentialTelemetry, "dd-api-key"); err != nil {
 		t.Fatal(err)
 	}
+	// A second, fully-configured metric on a different provider, so
+	// `selectable` is non-empty and SelectMetric is actually called.
+	if err := s.CreateTelemetryMetric(ctx, &store.TelemetryMetric{
+		ID: "tm_2", OrgID: orgID, Repo: "acme/widgets", Name: "request_rate",
+		Provider: "prometheus", Query: "rate(http_requests_total[5m])", ComparisonDirection: store.ComparisonHigherIsBetter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCredential(ctx, orgID, "PROMETHEUS_BASE_URL", store.CredentialTelemetry, "https://prom.acme.internal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCredential(ctx, orgID, "PROMETHEUS_BEARER_TOKEN", store.CredentialTelemetry, "prom-token"); err != nil {
+		t.Fatal(err)
+	}
 
-	// A selector that would happily "choose" the excluded metric if it were
-	// ever offered as an option — proving the zero-poll result comes from
-	// filtering, not from the selector declining.
+	// A selector that would happily "choose" the excluded datadog metric by
+	// name even though only the prometheus metric was actually offered —
+	// proving the zero-poll result comes from the resolution loop's scan of
+	// `selectable`, not from the selector declining.
 	srv.metricSelector = &provider.MockMetricSelector{Choice: "checkout_p95_latency"}
 
 	mon := &store.PostMergeMonitor{
