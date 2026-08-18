@@ -234,3 +234,88 @@ func TestSetMonitorRemediationTaskID(t *testing.T) {
 		t.Errorf("remediation_task_id = %v, want \"task_1\"", got.RemediationTaskID)
 	}
 }
+
+func TestCreateMonitorWithoutJobIDIsAnExternalPRMonitor(t *testing.T) {
+	s := newTestStore(t)
+	m := &PostMergeMonitor{
+		ID: "mon_ext_1", OrgID: "org1", JobID: "", Origin: MonitorOriginExternalPR,
+		Repo: "acme/widgets", PRNumber: 99, MergeCommitSHA: "deadbeef",
+		Status: MonitorStatusMonitoring, DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := s.CreateMonitor(context.Background(), m); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A second external_pr monitor with an equally-empty JobID for the same
+	// org must NOT collide with the first on the (org_id, job_id) uniqueness
+	// that protects Kiwi-authored monitors — that's the whole point of the
+	// partial unique index in Step 3.
+	m2 := &PostMergeMonitor{
+		ID: "mon_ext_2", OrgID: "org1", JobID: "", Origin: MonitorOriginExternalPR,
+		Repo: "acme/widgets", PRNumber: 100, MergeCommitSHA: "cafef00d",
+		Status: MonitorStatusMonitoring, DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := s.CreateMonitor(context.Background(), m2); err != nil {
+		t.Fatalf("create second external monitor: %v", err)
+	}
+}
+
+func TestCancelMonitorIsSingleFire(t *testing.T) {
+	s := newTestStore(t)
+	m := &PostMergeMonitor{
+		ID: "mon_1", OrgID: "org1", JobID: "job1", Origin: MonitorOriginKiwiPR,
+		Repo: "acme/widgets", PRNumber: 1, MergeCommitSHA: "abc",
+		Status: MonitorStatusMonitoring, DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := s.CreateMonitor(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := s.CancelMonitor(context.Background(), "mon_1")
+	if err != nil || !ok {
+		t.Fatalf("first cancel: ok=%v err=%v, want ok=true", ok, err)
+	}
+
+	var got PostMergeMonitor
+	if err := s.DB().First(&got, "id = ?", "mon_1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != MonitorStatusCancelled {
+		t.Errorf("status = %q, want CANCELLED", got.Status)
+	}
+	if got.VerdictEvidence != "" {
+		t.Errorf("verdict_evidence = %q, want empty — cancellation is not a verdict", got.VerdictEvidence)
+	}
+
+	ok, err = s.CancelMonitor(context.Background(), "mon_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("second cancel returned ok=true, want false — already CANCELLED")
+	}
+}
+
+func TestOriginDefaultsToKiwiPR(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	m := &PostMergeMonitor{
+		ID: "mon_1", OrgID: "org1", JobID: "job1",
+		Repo: "acme/widgets", PRNumber: 42, MergeCommitSHA: "abc123",
+		Status:       MonitorStatusMonitoring,
+		DeployedAt:   mustParseTime(t, "2026-08-15T00:00:00Z"),
+		WindowEndsAt: mustParseTime(t, "2026-08-16T00:00:00Z"),
+		// Origin is intentionally unset — it should default to kiwi_pr
+	}
+	if err := s.CreateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetMonitorByID(ctx, "mon_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Origin != MonitorOriginKiwiPR {
+		t.Errorf("origin = %q, want %q", got.Origin, MonitorOriginKiwiPR)
+	}
+}

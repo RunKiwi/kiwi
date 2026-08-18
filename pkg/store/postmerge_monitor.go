@@ -79,6 +79,26 @@ func (s *PostgresStore) FinalizeMonitor(ctx context.Context, id, newStatus, evid
 	return res.RowsAffected > 0, nil
 }
 
+// CancelMonitor is the single-fire atomic transition out of MONITORING for
+// a user-initiated cancel — the same guard shape as FinalizeMonitor, but
+// deliberately not routed through it: cancellation is not a verdict (no
+// VerdictEvidence, no signed kiwi.ver/postmerge/v1 record, no notification),
+// just a stop.
+func (s *PostgresStore) CancelMonitor(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	res := s.db.WithContext(ctx).Model(&PostMergeMonitor{}).
+		Where("id = ? AND status = ?", id, MonitorStatusMonitoring).
+		Updates(map[string]interface{}{
+			"status":       MonitorStatusCancelled,
+			"finalized_at": now,
+			"updated_at":   now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // SetMonitorRemediationTaskID records which continuation task a REGRESSION
 // verdict spawned, for dashboard display. Called after FinalizeMonitor has
 // already won the single-fire race, so this is a second, non-racing update.

@@ -12,6 +12,13 @@ const (
 	MonitorStatusMonitoring = "MONITORING"
 	MonitorStatusVerified   = "VERIFIED"
 	MonitorStatusRegression = "REGRESSION"
+	MonitorStatusCancelled  = "CANCELLED"
+)
+
+// Monitor origin distinguishes Kiwi-authored monitors from external-PR monitors.
+const (
+	MonitorOriginKiwiPR     = "kiwi_pr"
+	MonitorOriginExternalPR = "external_pr"
 )
 
 // PostMergeMonitor tracks one merged, Kiwi-authored PR from merge through a
@@ -27,6 +34,7 @@ type PostMergeMonitor struct {
 	Status            string     `gorm:"index:idx_postmerge_monitors_status_window,priority:1;not null;default:MONITORING" json:"status"`
 	VerdictEvidence   string     `gorm:"not null;default:''" json:"verdict_evidence"`
 	RemediationTaskID *string    `json:"remediation_task_id"`
+	Origin            string     `gorm:"not null;default:kiwi_pr" json:"origin"`
 	DeployedAt        time.Time  `gorm:"not null" json:"deployed_at"`
 	WindowEndsAt      time.Time  `gorm:"index:idx_postmerge_monitors_status_window,priority:2;not null" json:"window_ends_at"`
 	FinalizedAt       *time.Time `json:"finalized_at"`

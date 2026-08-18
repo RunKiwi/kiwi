@@ -205,11 +205,12 @@ type Store interface {
 	// why the bool return matters); SetMonitorRemediationTaskID records the
 	// continuation task a REGRESSION verdict spawned; ListMonitorsPastWindow
 	// feeds the periodic sweep. AutoRemediate reports an org's opt-in to
-	// auto-spawning that continuation.
+	// auto-spawning that continuation. CancelMonitor is a user-initiated cancel.
 	CreateMonitor(ctx context.Context, m *PostMergeMonitor) error
 	GetMonitorByMergeCommit(ctx context.Context, orgID, sha string) (*PostMergeMonitor, error)
 	GetMonitorByID(ctx context.Context, id string) (*PostMergeMonitor, error)
 	FinalizeMonitor(ctx context.Context, id, newStatus, evidence string) (bool, error)
+	CancelMonitor(ctx context.Context, id string) (bool, error)
 	SetMonitorRemediationTaskID(ctx context.Context, id, taskID string) error
 	ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error)
 	AutoRemediate(ctx context.Context, orgID string) (bool, error)
