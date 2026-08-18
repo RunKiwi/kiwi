@@ -228,3 +228,85 @@ func TestGithubWebhook(t *testing.T) {
 		}
 	})
 }
+
+func TestCreatePostMergeMonitorSetsKiwiPROrigin(t *testing.T) {
+	os.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret")
+	defer os.Unsetenv("GITHUB_WEBHOOK_SECRET")
+
+	srv, dbStore := setupWebhookTest(t)
+
+	// Setup database with an initial execution record so we can append to it
+	orgID := "org-123"
+	jobID := "job-456"
+	prURL := "https://github.com/foo/bar/pull/42"
+
+	// Create QueuedTask with result_url
+	dbStore.DB().Create(&store.Job{
+		ID:     jobID,
+		OrgID:  orgID,
+		Status: "SUCCEEDED",
+	})
+	dbStore.DB().Create(&store.QueuedTask{
+		ID:        "qt-1",
+		JobID:     jobID,
+		OrgID:     orgID,
+		ResultURL: &prURL,
+		Status:    "SUCCEEDED",
+	})
+
+	// Create original record
+	origRec := &ver.Record{
+		Ver:      ver.SchemaVersion,
+		RecordID: "rec-1",
+		OrgID:    orgID,
+		JobID:    jobID,
+	}
+	bodyBytes, _ := ver.Canonicalize(origRec)
+	hash, _ := ver.Hash(origRec)
+
+	dbStore.DB().Create(&store.ExecutionRecord{
+		RecordID:        "rec-1",
+		OrgID:           orgID,
+		JobID:           jobID,
+		Ver:             ver.SchemaVersion,
+		PrevRecordHash:  "",
+		RecordHash:      hash,
+		Body:            bodyBytes,
+		SigningKeyID:    "cp_2026_07",
+		RecordSignature: "sig1",
+	})
+	dbStore.DB().Create(&store.ExecutionRecordHead{
+		OrgID:    orgID,
+		HeadHash: hash,
+	})
+
+	validPayload := githubWebhookPayload{
+		Action: "closed",
+	}
+	validPayload.PullRequest.HTMLURL = prURL
+	validPayload.PullRequest.Merged = true
+	validPayload.PullRequest.MergedAt = time.Now().Format(time.RFC3339)
+	validPayload.PullRequest.MergeCommitSHA = "abcdef123"
+	validPayload.PullRequest.MergedBy.Login = "someuser"
+
+	bodyBytes, _ = json.Marshal(validPayload)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/github", bytes.NewReader(bodyBytes))
+	req.Header.Set("X-Hub-Signature-256", generateSignature([]byte("test-secret"), bodyBytes))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	rr := httptest.NewRecorder()
+
+	srv.handleGithubWebhook(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rr.Code)
+	}
+
+	var mon store.PostMergeMonitor
+	if err := dbStore.DB().First(&mon, "job_id = ?", jobID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if mon.Origin != store.MonitorOriginKiwiPR {
+		t.Errorf("origin = %q, want %q", mon.Origin, store.MonitorOriginKiwiPR)
+	}
+}

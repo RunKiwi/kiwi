@@ -293,6 +293,7 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 		Status:         store.MonitorStatusMonitoring,
 		DeployedAt:     mergedAt,
 		WindowEndsAt:   mergedAt.Add(24 * time.Hour),
+		Origin:         store.MonitorOriginKiwiPR,
 	}
 	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
 		log.Printf("[webhook] create monitor for job %s: %v", jobID, err)
