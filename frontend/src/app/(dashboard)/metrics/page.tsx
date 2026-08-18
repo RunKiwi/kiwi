@@ -29,11 +29,25 @@ export default function MetricsPage() {
   const [testedQueryKey, setTestedQueryKey] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [reposLoading, setReposLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = () => {
-    client.listTelemetryMetrics().then(r => setMetrics(r.metrics)).catch(() => {});
-    client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [metricsRes, reposRes] = await Promise.all([
+        client.listTelemetryMetrics(),
+        client.listGithubRepos(),
+      ]);
+      setMetrics(metricsRes.metrics);
+      setRepos(reposRes.repos);
+      setReposLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); }, []);
 
@@ -81,17 +95,24 @@ export default function MetricsPage() {
       await client.createTelemetryMetric(repo, name.trim(), provider, query.trim(), direction);
       setRepo(""); setName(""); setQuery(""); setProvider("prometheus"); setDirection("lower_is_better");
       setTestResult(null); setTestedQueryKey(null);
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save metric");
     } finally {
       setSaving(false);
     }
+    // Refresh the list after save completes (keep loading state active)
+    await load();
   };
 
   const remove = async (id: string) => {
     if (!confirm("Remove this metric? Post-merge verification will stop watching it.")) return;
-    try { await client.deleteTelemetryMetric(id); await load(); } catch { /* ignore */ }
+    setError("");
+    try {
+      await client.deleteTelemetryMetric(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete metric");
+    }
   };
 
   return (
@@ -108,7 +129,11 @@ export default function MetricsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Repository</label>
-            {repos.length > 0 ? (
+            {reposLoading ? (
+              <div className="flex items-center gap-2 text-sm text-zinc-500">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading repositories...
+              </div>
+            ) : repos.length > 0 ? (
               <Select
                 ariaLabel="Repository" value={repo} onChange={setRepo} placeholder="Select…" searchable
                 options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
@@ -184,7 +209,11 @@ export default function MetricsPage() {
                   <div className="text-[11px] text-zinc-600 font-mono truncate">{m.query}</div>
                 </div>
               </div>
-              <button onClick={() => remove(m.id)} className="text-zinc-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+              <button
+                onClick={() => remove(m.id)}
+                aria-label={`Delete metric ${m.name}`}
+                className="text-zinc-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 shrink-0"
+              >
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>

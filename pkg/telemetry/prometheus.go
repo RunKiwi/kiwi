@@ -25,7 +25,23 @@ type prometheusProvider struct {
 // existing sealed-credential-bundle delivery already solves "get this to
 // the daemon safely" for free.
 func NewPrometheusProvider(baseURL, token string) Provider {
-	return &prometheusProvider{baseURL: baseURL, token: token, client: &http.Client{Timeout: 15 * time.Second}}
+	return &prometheusProvider{
+		baseURL: baseURL,
+		token:   token,
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+			// Reject redirects entirely to prevent SSRF via redirect to an
+			// internal/metadata address. The Control Plane's test-query
+			// endpoint validates the initial PROMETHEUS_BASE_URL against
+			// non-routable ranges (validatePrometheusTestDestination), but
+			// a malicious endpoint could return a 302 to 169.254.169.254 or
+			// another blocked destination. Legitimate Prometheus endpoints
+			// serve query_range at a stable path and do not redirect.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}
 }
 
 type prometheusRangeResponse struct {

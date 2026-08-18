@@ -83,7 +83,15 @@ func (s *Server) handleTelemetryMetrics(w http.ResponseWriter, r *http.Request) 
 		// CreateTelemetryMetric validates Provider and ComparisonDirection
 		// (Phase 1b's final review fix) — surface that as a 400, not a 500.
 		if err := s.storage.CreateTelemetryMetric(r.Context(), m); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			// Only the two known validation errors are client-addressable and
+			// safe to surface; all other errors (DB constraint violations,
+			// storage failures) are internal and must not leak raw text.
+			if strings.Contains(err.Error(), "unknown telemetry provider") ||
+				strings.Contains(err.Error(), "invalid comparison_direction") {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			} else {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
 			return
 		}
 		writeJSON(w, http.StatusCreated, m)
