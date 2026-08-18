@@ -513,8 +513,10 @@ const telemetryDueLimit = 20
 // follows handleDaemonHeartbeat's exact auth pattern (signature over the raw
 // body, timestamp-skew check, GetDaemonBySignPubKey resolution) but claims
 // due telemetry polls instead of leasing a task, and returns them with no
-// LeaseID and no sealed credentials — a daemon polling telemetry needs
-// neither.
+// LeaseID. When polls are due, the response also carries the org's
+// credentials sealed to the daemon's registered key — this is the only
+// delivery path for them, since a heartbeat that leases no task never seals
+// credentials at all, and idle is the routine state between telemetry polls.
 func (s *Server) handleDaemonTelemetryDue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -571,6 +573,26 @@ func (s *Server) handleDaemonTelemetryDue(w http.ResponseWriter, r *http.Request
 			CurrentStart: p.CurrentStart, CurrentEnd: p.CurrentEnd,
 		})
 	}
+
+	// Seal to the REGISTERED key, not derived from this request, for the same
+	// reason handleDaemonHeartbeat does: binding delivery to the registered row
+	// keeps key rotation an explicit, join-token-gated act. No extra platform
+	// credentials here — telemetry polling queries a metrics backend, not an
+	// LLM provider, so there is no model-scoped credential to bundle in.
+	encPub, err := decodeX25519(d.EncPubKey)
+	if err != nil {
+		log.Printf("[telemetry] daemon %s has a malformed enc_pub_key: %v", d.ID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	sealed, err := s.storage.SealCredentialsForDaemon(r.Context(), d.OrgID, encPub, nil)
+	if err != nil {
+		log.Printf("[telemetry] sealing credentials for org %s: %v", d.OrgID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	res.EncryptedCreds = sealed
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(res)

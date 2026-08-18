@@ -221,9 +221,17 @@ type TelemetryPollSpec struct {
 	CurrentEnd    time.Time `json:"current_end"`
 }
 
-// TelemetryDueRes is the Control Plane's answer to TelemetryDueReq.
+// TelemetryDueRes is the Control Plane's answer to TelemetryDueReq. When Due
+// is non-empty, EncryptedCreds carries the org's credential bundle sealed to
+// this daemon's X25519 public key (same mechanism as HeartbeatRes.EncryptedCreds,
+// opened via the daemon's existing openCredentials helper) — delivered here,
+// not on the heartbeat, because a heartbeat that leased no task never reaches
+// the code path that seals credentials, and an idle daemon between polls is
+// the routine state for telemetry, not an edge case. Empty when Due is empty:
+// there is nothing to authenticate a provider connector with if no poll is due.
 type TelemetryDueRes struct {
-	Due []TelemetryPollSpec `json:"due,omitempty"`
+	Due            []TelemetryPollSpec `json:"due,omitempty"`
+	EncryptedCreds string              `json:"encrypted_creds,omitempty"`
 }
 
 // TelemetryResultDTO mirrors telemetry.Result — a separate type in this

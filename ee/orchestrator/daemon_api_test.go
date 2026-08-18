@@ -487,6 +487,115 @@ func TestHandleDaemonTelemetryDueReturnsClaimedPolls(t *testing.T) {
 	}
 }
 
+// TestDaemonSeam_TelemetryDueIncludesSealedCredsWhenPollsAreDue proves the
+// fix this task exists for: handleDaemonTelemetryDue, not handleDaemonHeartbeat,
+// is now the delivery path for credentials a telemetry poll needs, because an
+// idle daemon (the routine state between polls) never reaches the heartbeat
+// code path that seals them.
+func TestDaemonSeam_TelemetryDueIncludesSealedCredsWhenPollsAreDue(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := st.SaveCredential(ctx, "o1", "DATADOG_API_KEY", store.CredentialTelemetry, "dd-secret"); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_1", OrgID: "o1", MonitorID: "mon_1", Provider: "datadog", Query: "q",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(-time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+
+	res, err := d.client.TelemetryDue(ctx, daemon.TelemetryDueReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("telemetry due: %v", err)
+	}
+	if len(res.Due) != 1 {
+		t.Fatalf("got %+v", res.Due)
+	}
+	if res.EncryptedCreds == "" {
+		t.Fatal("expected EncryptedCreds to be set when polls are due")
+	}
+
+	plaintext, err := crypto.OpenSealed(d.encPriv, res.EncryptedCreds)
+	if err != nil {
+		t.Fatalf("open sealed credentials: %v", err)
+	}
+	if want := `"dd-secret"`; !strings.Contains(string(plaintext), want) {
+		t.Errorf("decrypted creds = %s, want to contain %s", plaintext, want)
+	}
+	if want := `"DATADOG_API_KEY"`; !strings.Contains(string(plaintext), want) {
+		t.Errorf("decrypted creds = %s, want to contain key %s", plaintext, want)
+	}
+}
+
+// TestDaemonSeam_TelemetryDueOmitsCredsWhenNothingDue proves the 204 branch
+// (nothing due) never attempts to seal or send credentials — there is
+// nothing to authenticate a query with when no query is due.
+func TestDaemonSeam_TelemetryDueOmitsCredsWhenNothingDue(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	if err := st.SaveCredential(ctx, "o1", "DATADOG_API_KEY", store.CredentialTelemetry, "dd-secret"); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// No polls seeded: ClaimDuePolls returns nothing, so the handler must
+	// take the existing 204 branch before it ever reaches the sealing code.
+	// daemon.Client.TelemetryDue turns a 204 into an empty (not nil)
+	// TelemetryDueRes{}, so the meaningful assertion is that both Due and
+	// EncryptedCreds are empty — no attempt was made to claim or seal
+	// anything.
+	res, err := d.client.TelemetryDue(ctx, daemon.TelemetryDueReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("telemetry due: %v", err)
+	}
+	if len(res.Due) != 0 {
+		t.Errorf("expected no due polls, got %+v", res.Due)
+	}
+	if res.EncryptedCreds != "" {
+		t.Errorf("expected no EncryptedCreds when nothing is due, got %q", res.EncryptedCreds)
+	}
+}
+
 // TestHandleDaemonTelemetryReportFinalizesOnRegression is a placeholder.
 // This test's exact shape depends on Task 10's significance-check function
 // existing — write it once Task 10 lands. Assert: given a poll result whose

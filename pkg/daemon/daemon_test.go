@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
+	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 )
 
 func TestDaemon_pollCP(t *testing.T) {
@@ -65,21 +67,21 @@ func TestDaemon_pollCP(t *testing.T) {
 	os.RemoveAll(fallbackPath)
 }
 
-func TestDaemonCachesCredentialsAcrossHeartbeats(t *testing.T) {
-	d := &Daemon{}
-	if _, ok := d.cachedCredentials(); ok {
-		t.Error("cachedCredentials() returned ok=true before any heartbeat")
+// sealCredsForTest seals a credential map to pub the same way
+// store.PostgresStore.SealCredentialsForDaemon does (json.Marshal then
+// crypto.SealToPublicKey), so tests can produce a TelemetryDueRes.EncryptedCreds
+// value that d.openCredentials can actually open with the matching private key.
+func sealCredsForTest(t *testing.T, pub *ecdh.PublicKey, creds map[string]string) string {
+	t.Helper()
+	payload, err := json.Marshal(creds)
+	if err != nil {
+		t.Fatalf("marshal creds: %v", err)
 	}
-
-	d.setCachedCredentials(map[string]string{"DATADOG_API_KEY": "secret"})
-
-	got, ok := d.cachedCredentials()
-	if !ok {
-		t.Fatal("cachedCredentials() returned ok=false after set")
+	sealed, err := crypto.SealToPublicKey(pub, payload)
+	if err != nil {
+		t.Fatalf("SealToPublicKey: %v", err)
 	}
-	if got["DATADOG_API_KEY"] != "secret" {
-		t.Errorf("got %+v", got)
-	}
+	return sealed
 }
 
 // fakeTelemetryClient is a test double for the telemetryClient interface
@@ -113,33 +115,24 @@ func (f *fakeTelemetryClient) TelemetryReport(ctx context.Context, req Telemetry
 	return f.reportErr
 }
 
-func TestPollTelemetrySkipsWhenNoCredentialsCachedYet(t *testing.T) {
-	// Before the first successful heartbeat, pollTelemetry must not panic or
-	// call the telemetry client at all — it has nothing to authenticate a
-	// provider connector with.
-	calls := 0
-	fakeClient := &fakeTelemetryClient{onDue: func() { calls++ }}
-	d := &Daemon{telemetryClient: fakeClient}
-
-	d.pollTelemetry(context.Background())
-
-	if calls != 0 {
-		t.Errorf("pollTelemetry called the client %d times with no cached credentials, want 0", calls)
-	}
-}
-
 func TestPollTelemetryCallsDueThenReportWhenCredentialsCached(t *testing.T) {
-	// Once credentials are cached, pollTelemetry must ask what's due and,
-	// when nothing is due, must not call TelemetryReport at all — an empty
-	// batch report is pure noise on the Control Plane side.
+	// pollTelemetry must ask what's due and, when nothing is due, must not
+	// call TelemetryReport at all — an empty batch report is pure noise on
+	// the Control Plane side. EncryptedCreds is a real sealed blob (as the
+	// live TelemetryDue response now always carries when polls are due) so
+	// this exercises the same decrypt path a non-empty Due list would use.
 	dueCalls, reportCalls := 0, 0
+	pub, priv, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	sealed := sealCredsForTest(t, pub, map[string]string{"DATADOG_API_KEY": "secret"})
 	fakeClient := &fakeTelemetryClient{
 		onDue:    func() { dueCalls++ },
 		onReport: func() { reportCalls++ },
-		dueRes:   &TelemetryDueRes{},
+		dueRes:   &TelemetryDueRes{EncryptedCreds: sealed},
 	}
-	d := &Daemon{telemetryClient: fakeClient}
-	d.setCachedCredentials(map[string]string{"DATADOG_API_KEY": "secret"})
+	d := &Daemon{telemetryClient: fakeClient, priKey: priv}
 
 	d.pollTelemetry(context.Background())
 
@@ -153,19 +146,27 @@ func TestPollTelemetryCallsDueThenReportWhenCredentialsCached(t *testing.T) {
 
 func TestPollTelemetryReportsProviderErrorForOneDueSpec(t *testing.T) {
 	// Exercises the per-spec loop: a due poll naming a provider whose
-	// required credential is missing from the cached bundle must still
-	// produce a batch report — one result with Error set and both DTO
-	// pointers nil, matching TelemetryPollResult's documented contract
-	// (nil, not zero-valued, when that half of the query failed).
-	fakeClient := &fakeTelemetryClient{
-		dueRes: &TelemetryDueRes{Due: []TelemetryPollSpec{
-			{PollID: "p1", Provider: "prometheus", Query: "up"},
-		}},
+	// required credential is missing from the bundle sealed on the
+	// TelemetryDue response must still produce a batch report — one result
+	// with Error set and both DTO pointers nil, matching TelemetryPollResult's
+	// documented contract (nil, not zero-valued, when that half of the query
+	// failed).
+	pub, priv, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
 	}
-	d := &Daemon{telemetryClient: fakeClient}
-	// Cached bundle has no PROMETHEUS_BASE_URL/PROMETHEUS_BEARER_TOKEN, so
+	// Sealed bundle has no PROMETHEUS_BASE_URL/PROMETHEUS_BEARER_TOKEN, so
 	// telemetry.ProviderFor must fail to construct a connector for p1.
-	d.setCachedCredentials(map[string]string{})
+	sealed := sealCredsForTest(t, pub, map[string]string{})
+	fakeClient := &fakeTelemetryClient{
+		dueRes: &TelemetryDueRes{
+			Due: []TelemetryPollSpec{
+				{PollID: "p1", Provider: "prometheus", Query: "up"},
+			},
+			EncryptedCreds: sealed,
+		},
+	}
+	d := &Daemon{telemetryClient: fakeClient, priKey: priv}
 
 	d.pollTelemetry(context.Background())
 
@@ -184,5 +185,23 @@ func TestPollTelemetryReportsProviderErrorForOneDueSpec(t *testing.T) {
 	}
 	if got.Baseline != nil || got.Current != nil {
 		t.Errorf("Baseline/Current = %+v/%+v, want both nil on a provider-resolution error", got.Baseline, got.Current)
+	}
+}
+
+func TestPollTelemetrySkipsQueryingWhenNothingDue(t *testing.T) {
+	// TelemetryDue returning an empty Due list (204-equivalent) must not call
+	// openCredentials or TelemetryReport — there is nothing to authenticate or
+	// report.
+	calls := 0
+	fakeClient := &fakeTelemetryClient{
+		dueRes:   &TelemetryDueRes{},
+		onReport: func() { calls++ },
+	}
+	d := &Daemon{telemetryClient: fakeClient}
+
+	d.pollTelemetry(context.Background())
+
+	if calls != 0 {
+		t.Errorf("TelemetryReport called %d times with nothing due, want 0", calls)
 	}
 }

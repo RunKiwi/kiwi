@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -106,22 +105,6 @@ type Daemon struct {
 	// untouched. Defaults to the same *Client instance as client in New;
 	// swappable in tests via a fake that implements just these two methods.
 	telemetryClient telemetryClient
-
-	// credMu guards cachedCreds/credsCachedOnce. pollCP (the 5s heartbeat
-	// ticker) writes the freshly decrypted bundle after every successful
-	// heartbeat; pollTelemetry (the ~1min telemetry ticker) reads the most
-	// recent one. Both tickers fire from the same top-level select in Run, so
-	// in the common case there is only ever one goroutine calling either
-	// side. The lock is kept anyway — not for that goroutine, but because
-	// pollCP launches per-task goroutines that call back into d (renewal,
-	// progress, GitToken, ...) and nothing pins those to have exited before
-	// the next heartbeat tick sets the cache again; a Read/Write without
-	// synchronization here is a data race under `go test -race` even when it
-	// never manifests as an observable bug, and this package has no other
-	// case where "it happened to work" was treated as good enough.
-	credMu          sync.RWMutex
-	cachedCreds     map[string]string
-	credsCachedOnce bool
 }
 
 // telemetryClient is the Control Plane surface pollTelemetry needs: asking
@@ -131,27 +114,6 @@ type Daemon struct {
 type telemetryClient interface {
 	TelemetryDue(ctx context.Context, req TelemetryDueReq) (*TelemetryDueRes, error)
 	TelemetryReport(ctx context.Context, req TelemetryReportReq) error
-}
-
-// cachedCredentials returns the most recently decrypted credential bundle
-// from a successful heartbeat, and whether one has ever been cached. Before
-// the daemon's first successful heartbeat this is (nil, false) — there is
-// nothing yet for the telemetry poller to authenticate a provider connector
-// with.
-func (d *Daemon) cachedCredentials() (map[string]string, bool) {
-	d.credMu.RLock()
-	defer d.credMu.RUnlock()
-	return d.cachedCreds, d.credsCachedOnce
-}
-
-// setCachedCredentials records the credential bundle decrypted by the most
-// recent successful heartbeat, so the independently-ticking telemetry poll
-// (which has no local variable to read, unlike pollCP's callers) can use it.
-func (d *Daemon) setCachedCredentials(creds map[string]string) {
-	d.credMu.Lock()
-	defer d.credMu.Unlock()
-	d.cachedCreds = creds
-	d.credsCachedOnce = true
 }
 
 // New creates a new Daemon instance.
@@ -374,13 +336,6 @@ func (d *Daemon) pollCP(ctx context.Context) bool {
 		return true
 	}
 
-	// Cache the bundle this heartbeat just decrypted so the independently
-	// ticking telemetry poll (pollTelemetry, on its own ~1min timer in Run)
-	// has something to authenticate a provider connector with. pollTelemetry
-	// has no local variable to read — it is not a callee of pollCP — which is
-	// exactly the problem this cache exists to solve.
-	d.setCachedCredentials(creds)
-
 	for _, spec := range res.Specs {
 		// taskCtx governs the run itself. The renewal goroutine cancels it when
 		// the Control Plane says the lease is gone, which is how a user-requested
@@ -506,21 +461,17 @@ const defaultRenewInterval = 2 * time.Minute
 // heartbeat it shares a client identity with.
 const defaultTelemetryPollInterval = 1 * time.Minute
 
-// pollTelemetry asks the Control Plane what's due, executes each query
-// against the org's configured telemetry provider using the most recently
-// cached credential bundle, and reports results back in one batch. Every
-// failure is logged, never silently swallowed — a telemetry poll going
-// quiet with no trace is exactly the failure mode this project's earlier
-// security review and revert-detection fix both exist to avoid repeating.
+// pollTelemetry asks the Control Plane what's due and, if anything is,
+// decrypts the credential bundle carried on that same response — sealed
+// fresh by the Control Plane for this call, not reused from a heartbeat,
+// because an idle daemon between polls (the routine state for post-merge
+// telemetry) may never see a heartbeat that carries credentials at all. It
+// then executes each query against the org's configured telemetry provider
+// and reports results back in one batch. Every failure is logged, never
+// silently swallowed — a telemetry poll going quiet with no trace is exactly
+// the failure mode this project's earlier security review and
+// revert-detection fix both exist to avoid repeating.
 func (d *Daemon) pollTelemetry(ctx context.Context) {
-	creds, ok := d.cachedCredentials()
-	if !ok {
-		// No heartbeat has succeeded yet — nothing to authenticate a
-		// provider connector with. Not an error: this is the normal state
-		// for the brief window right after boot.
-		return
-	}
-
 	req := TelemetryDueReq{
 		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
 		Timestamp:  time.Now().Unix(),
@@ -531,6 +482,12 @@ func (d *Daemon) pollTelemetry(ctx context.Context) {
 		return
 	}
 	if res == nil || len(res.Due) == 0 {
+		return
+	}
+
+	creds, err := d.openCredentials(res.EncryptedCreds)
+	if err != nil {
+		log.Printf("[telemetry] failed to open sealed credentials: %v", err)
 		return
 	}
 
