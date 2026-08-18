@@ -9,6 +9,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -542,11 +543,15 @@ func TestDaemonSeam_TelemetryDueIncludesSealedCredsWhenPollsAreDue(t *testing.T)
 	if err != nil {
 		t.Fatalf("open sealed credentials: %v", err)
 	}
-	if want := `"dd-secret"`; !strings.Contains(string(plaintext), want) {
-		t.Errorf("decrypted creds = %s, want to contain %s", plaintext, want)
+	// Unmarshal and compare the key/value directly rather than substring-matching
+	// the raw JSON — a substring match would tolerate "dd-secret" landing under
+	// the wrong key (or as part of some other value) without failing.
+	var creds map[string]string
+	if err := json.Unmarshal(plaintext, &creds); err != nil {
+		t.Fatalf("decode decrypted creds: %v", err)
 	}
-	if want := `"DATADOG_API_KEY"`; !strings.Contains(string(plaintext), want) {
-		t.Errorf("decrypted creds = %s, want to contain key %s", plaintext, want)
+	if got, want := creds["DATADOG_API_KEY"], "dd-secret"; got != want {
+		t.Errorf("creds[%q] = %q, want %q (full bundle: %+v)", "DATADOG_API_KEY", got, want, creds)
 	}
 }
 

@@ -115,23 +115,58 @@ func (f *fakeTelemetryClient) TelemetryReport(ctx context.Context, req Telemetry
 	return f.reportErr
 }
 
-func TestPollTelemetryCallsDueThenReportWhenCredentialsCached(t *testing.T) {
-	// pollTelemetry must ask what's due and, when nothing is due, must not
-	// call TelemetryReport at all — an empty batch report is pure noise on
-	// the Control Plane side. EncryptedCreds is a real sealed blob (as the
-	// live TelemetryDue response now always carries when polls are due) so
-	// this exercises the same decrypt path a non-empty Due list would use.
-	dueCalls, reportCalls := 0, 0
+// TestPollTelemetryDecryptsSealedCredsAndExecutesReportedQuery is the one
+// assertion this whole fix exists to prove: given a non-empty Due list,
+// pollTelemetry decrypts the credential bundle sealed on that same
+// TelemetryDue response (via the real openCredentials -> crypto.OpenSealed
+// path, not a mock standing in for it), uses the recovered credentials to
+// construct a real provider, and the query that provider runs actually
+// executes and reports back — not just that TelemetryDue got called.
+func TestPollTelemetryDecryptsSealedCredsAndExecutesReportedQuery(t *testing.T) {
+	// A real Prometheus-shaped HTTP endpoint so the provider construction
+	// isn't a mock either: ProviderFor("prometheus", creds) builds an actual
+	// prometheusProvider that makes a real HTTP round trip to this server,
+	// using the base URL/token recovered from the sealed bundle.
+	promSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status": "success",
+			"data": {
+				"resultType": "matrix",
+				"result": [
+					{"metric": {}, "values": [[1000, "10"], [1015, "20"], [1030, "30"]]}
+				]
+			}
+		}`))
+	}))
+	defer promSrv.Close()
+
 	pub, priv, err := crypto.GenerateKeyPair()
 	if err != nil {
 		t.Fatalf("GenerateKeyPair: %v", err)
 	}
-	sealed := sealCredsForTest(t, pub, map[string]string{"DATADOG_API_KEY": "secret"})
+	sealed := sealCredsForTest(t, pub, map[string]string{
+		"PROMETHEUS_BASE_URL":     promSrv.URL,
+		"PROMETHEUS_BEARER_TOKEN": "test-token",
+	})
+
+	dueCalls, reportCalls := 0, 0
 	fakeClient := &fakeTelemetryClient{
 		onDue:    func() { dueCalls++ },
 		onReport: func() { reportCalls++ },
-		dueRes:   &TelemetryDueRes{EncryptedCreds: sealed},
+		dueRes: &TelemetryDueRes{
+			Due: []TelemetryPollSpec{
+				{
+					PollID: "p1", Provider: "prometheus", Query: "up",
+					BaselineStart: time.Unix(1000, 0), BaselineEnd: time.Unix(1030, 0),
+					CurrentStart: time.Unix(1000, 0), CurrentEnd: time.Unix(1030, 0),
+				},
+			},
+			EncryptedCreds: sealed,
+		},
 	}
+	// priKey is the only thing that lets openCredentials open `sealed` —
+	// without it (or with the wrong key) this test would fail at the
+	// decrypt step rather than proceed on an empty/zero credential map.
 	d := &Daemon{telemetryClient: fakeClient, priKey: priv}
 
 	d.pollTelemetry(context.Background())
@@ -139,8 +174,24 @@ func TestPollTelemetryCallsDueThenReportWhenCredentialsCached(t *testing.T) {
 	if dueCalls != 1 {
 		t.Errorf("TelemetryDue called %d times, want 1", dueCalls)
 	}
-	if reportCalls != 0 {
-		t.Errorf("TelemetryReport called %d times with nothing due, want 0", reportCalls)
+	if reportCalls != 1 {
+		t.Fatalf("TelemetryReport called %d times, want 1", reportCalls)
+	}
+	if fakeClient.gotReport == nil || len(fakeClient.gotReport.Results) != 1 {
+		t.Fatalf("got report %+v", fakeClient.gotReport)
+	}
+	got := fakeClient.gotReport.Results[0]
+	if got.PollID != "p1" {
+		t.Errorf("PollID = %q, want %q", got.PollID, "p1")
+	}
+	if got.Error != "" {
+		t.Errorf("Error = %q, want empty — the query should have succeeded against the fake Prometheus endpoint", got.Error)
+	}
+	if got.Baseline == nil || got.Baseline.SampleCount != 3 || got.Baseline.Mean != 20 {
+		t.Errorf("Baseline = %+v, want SampleCount=3 Mean=20", got.Baseline)
+	}
+	if got.Current == nil || got.Current.SampleCount != 3 || got.Current.Mean != 20 {
+		t.Errorf("Current = %+v, want SampleCount=3 Mean=20", got.Current)
 	}
 }
 
