@@ -219,6 +219,8 @@ type Store interface {
 	// originating task's Intent. See pkg/store/telemetry_metric.go.
 	CreateTelemetryMetric(ctx context.Context, m *TelemetryMetric) error
 	ListTelemetryMetrics(ctx context.Context, orgID, repo string) ([]TelemetryMetric, error)
+	ListTelemetryMetricsForOrg(ctx context.Context, orgID string) ([]TelemetryMetric, error)
+	DeleteTelemetryMetric(ctx context.Context, orgID, id string) error
 	GetTelemetryMetricByQuery(ctx context.Context, orgID, repo, query string) (*TelemetryMetric, error)
 
 	// PostMergeTelemetryPoll — recurring (monitor, metric) poll schedule with
