@@ -139,3 +139,80 @@ func TestGetTelemetryMetricByQueryScopesByRepo(t *testing.T) {
 		t.Error("expected no match for a repo with no metric row, got nil error")
 	}
 }
+
+func TestListTelemetryMetricsForOrgReturnsAllReposForThatOrg(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.CreateTelemetryMetric(ctx, &TelemetryMetric{
+		ID: "tm_a", OrgID: "org1", Repo: "acme/widgets", Name: "latency",
+		Provider: "datadog", Query: "p95:trace.checkout{env:prod}", ComparisonDirection: ComparisonLowerIsBetter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTelemetryMetric(ctx, &TelemetryMetric{
+		ID: "tm_b", OrgID: "org1", Repo: "acme/gadgets", Name: "throughput",
+		Provider: "prometheus", Query: "rate(http_requests_total[5m])", ComparisonDirection: ComparisonHigherIsBetter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A different org's metric must never appear in org1's list.
+	if err := s.CreateTelemetryMetric(ctx, &TelemetryMetric{
+		ID: "tm_other_org", OrgID: "org2", Repo: "acme/widgets", Name: "latency",
+		Provider: "datadog", Query: "p95:trace.checkout{env:prod}", ComparisonDirection: ComparisonLowerIsBetter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.ListTelemetryMetricsForOrg(ctx, "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d metrics, want 2 (across both repos, excluding org2's)", len(got))
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids["tm_a"] || !ids["tm_b"] {
+		t.Errorf("got ids %v, want tm_a and tm_b", ids)
+	}
+}
+
+func TestDeleteTelemetryMetricIsOrgScoped(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.CreateTelemetryMetric(ctx, &TelemetryMetric{
+		ID: "tm_target", OrgID: "org1", Repo: "acme/widgets", Name: "latency",
+		Provider: "datadog", Query: "p95:trace.checkout{env:prod}", ComparisonDirection: ComparisonLowerIsBetter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// org2 attempting to delete org1's metric must be a no-op — the row
+	// must still exist afterward.
+	if err := s.DeleteTelemetryMetric(ctx, "org2", "tm_target"); err != nil {
+		t.Fatal(err)
+	}
+	still, err := s.ListTelemetryMetricsForOrg(ctx, "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(still) != 1 {
+		t.Fatalf("org2's delete call removed org1's row — got %d rows, want 1", len(still))
+	}
+
+	// The real owner can delete it.
+	if err := s.DeleteTelemetryMetric(ctx, "org1", "tm_target"); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := s.ListTelemetryMetricsForOrg(ctx, "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gone) != 0 {
+		t.Fatalf("got %d rows after the real owner's delete, want 0", len(gone))
+	}
+}

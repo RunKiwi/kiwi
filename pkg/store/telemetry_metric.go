@@ -55,3 +55,25 @@ func (s *PostgresStore) GetTelemetryMetricByQuery(ctx context.Context, orgID, re
 	}
 	return &m, nil
 }
+
+// ListTelemetryMetricsForOrg lists every metric configured for orgID across
+// all repos — the dashboard's list view needs this; ListTelemetryMetrics
+// (repo-scoped) exists for enqueueTelemetryPolls, which always knows the
+// specific repo it's enqueueing for.
+func (s *PostgresStore) ListTelemetryMetricsForOrg(ctx context.Context, orgID string) ([]TelemetryMetric, error) {
+	var out []TelemetryMetric
+	err := s.db.WithContext(ctx).
+		Where("org_id = ?", orgID).
+		Order("repo, name").
+		Find(&out).Error
+	return out, err
+}
+
+// DeleteTelemetryMetric is org-scoped: a caller cannot delete another org's
+// metric, mirroring DeleteModel's pattern exactly. Deleting a metric does
+// not affect any poll already in flight — a PostMergeTelemetryPoll copies
+// the query text at creation time (see Task 11 of the telemetry-engine
+// plan), so an in-progress poll finishes on the query it started with.
+func (s *PostgresStore) DeleteTelemetryMetric(ctx context.Context, orgID, id string) error {
+	return s.db.WithContext(ctx).Where("org_id = ? AND id = ?", orgID, id).Delete(&TelemetryMetric{}).Error
+}
