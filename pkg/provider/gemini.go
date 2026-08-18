@@ -187,6 +187,42 @@ func (p *GeminiProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	return parseVerdict(text), nil
 }
 
+// SelectMetric is the metric selector: pick at most one of an org's
+// configured telemetry metrics as relevant to a merged task's intent.
+// Mirrors ReviewEdit's call shape (same p.generate helper, low token
+// ceiling, safety-filter handling) rather than the agentic Complete path,
+// since this is a short-list classification, not task decomposition.
+func (p *GeminiProvider) SelectMetric(ctx context.Context, intent string, options []MetricOption) (string, error) {
+	if len(options) == 0 {
+		return "", nil
+	}
+	system := "You are picking which configured telemetry metric (if any) is relevant to verify a code change. " +
+		"Only choose a metric that plausibly measures the effect of the described change. " +
+		`Respond ONLY with a JSON object: {"metric_name": string, "reason": string}. Use an empty metric_name if none of the options are relevant.`
+	optionsText := ""
+	for _, o := range options {
+		optionsText += "- " + o.Name
+		if o.Description != "" {
+			optionsText += ": " + o.Description
+		}
+		optionsText += "\n"
+	}
+	user := fmt.Sprintf("Task: %s\n\nConfigured metrics:\n%s", intent, optionsText)
+
+	text, finish, err := p.generate(ctx, p.criticModel, system, user, 500)
+	if err != nil {
+		return "", fmt.Errorf("gemini select metric request failed: %w", err)
+	}
+	if finish == "SAFETY" || finish == "PROHIBITED_CONTENT" {
+		return "", nil
+	}
+	sel, err := parseMetricSelection(text)
+	if err != nil {
+		return "", err
+	}
+	return sel.MetricName, nil
+}
+
 // Complete is a general single-shot completion: given a system and user
 // prompt, return the model's text response. Used for repo exploration and
 // multi-file edits, which are not shaped like GetCodeEdit's single-file fix.

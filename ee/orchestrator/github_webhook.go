@@ -296,7 +296,31 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 	}
 	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
 		log.Printf("[webhook] create monitor for job %s: %v", jobID, err)
+		return
 	}
+	s.enqueueTelemetryPolls(ctx, mon, postMergeMonitorIntent(ctx, s.storage, jobID, payload))
+}
+
+// postMergeMonitorIntent resolves the text metric selection should judge
+// relevance against. payload.PullRequest.Title is available unconditionally
+// but is a materially weaker signal than the task's actual stated Intent — a
+// PR title is often generic ("Fix bug", "Update widgets.go") where the
+// submitted task description says what the change is actually meant to do.
+// ee/planner/service.go (and the two other Job-creation call sites,
+// ee/orchestrator/webhook.go and the legacy submit path in server.go) all
+// write the original task text into Job.Inputs["task"] at admission time, so
+// GetJob(ctx, jobID) recovers it cheaply — jobID is already threaded through
+// this whole call path, and store.Store.GetJob requires no new plumbing.
+// Falls back to the PR title when no Job row is found (an unexpected state)
+// or its Inputs carries no "task" key (e.g. a nil Inputs map on an older or
+// hand-inserted row) so a monitor is never left with no intent at all.
+func postMergeMonitorIntent(ctx context.Context, storage store.Store, jobID string, payload githubWebhookPayload) string {
+	if job, err := storage.GetJob(ctx, jobID); err == nil && job != nil {
+		if task, ok := job.Inputs["task"].(string); ok && task != "" {
+			return task
+		}
+	}
+	return payload.PullRequest.Title
 }
 
 // GetMonitorByMergeCommit does exact equality against a stored 40-character

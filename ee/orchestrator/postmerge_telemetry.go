@@ -10,8 +10,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
+	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 )
 
 const (
@@ -143,5 +147,113 @@ func (s *Server) ReleaseStaleTelemetryPolls(ctx context.Context) {
 	}
 	if n > 0 {
 		log.Printf("[telemetry] released %d stale telemetry poll claim(s)", n)
+	}
+}
+
+const telemetryPollWindow = 4 * time.Hour
+const telemetryBaselineLookback = time.Hour
+
+// enqueueTelemetryPolls runs once per monitor, right after Phase 1a's
+// createPostMergeMonitor creates it. If the org has no telemetry_metrics
+// configured for this repo — the common case until an org opts in — this
+// is a no-op and the monitor runs on GitHub-native signals alone, exactly
+// as it does today.
+//
+// A metric is only offered to the selector once every credential name its
+// provider requires (telemetry.SpecFor(provider).CredNames) is present in
+// the org's saved credentials. The dashboard's "connected" flag is
+// per-credential-row (see integrationSpec in dashboard_api.go — a
+// "datadog" row and a "datadog-app-key" row are independent), so a saved
+// DATADOG_API_KEY alone does not mean the datadog provider is usable; an
+// org that saved only one of the two required credentials must not have
+// that metric offered as a choice, and this is an expected, common
+// mid-setup state, not a bug worth logging.
+func (s *Server) enqueueTelemetryPolls(ctx context.Context, mon *store.PostMergeMonitor, intent string) {
+	metrics, err := s.storage.ListTelemetryMetrics(ctx, mon.OrgID, mon.Repo)
+	if err != nil {
+		log.Printf("[telemetry] list metrics for %s: %v", mon.Repo, err)
+		return
+	}
+	if len(metrics) == 0 || s.metricSelector == nil {
+		return
+	}
+
+	creds, err := s.storage.ListCredentials(ctx, mon.OrgID)
+	if err != nil {
+		log.Printf("[telemetry] list credentials for monitor %s: %v", mon.ID, err)
+		return
+	}
+	credNames := make(map[string]bool, len(creds))
+	for _, c := range creds {
+		credNames[c.Name] = true
+	}
+
+	// selectable holds only the metrics whose provider is fully configured
+	// for this org — options and the later chosen-metric lookup are both
+	// built from this, never from the unfiltered metrics slice, so an
+	// excluded metric can never be selected even if a selector "chooses" it
+	// by name.
+	selectable := make([]store.TelemetryMetric, 0, len(metrics))
+	for _, m := range metrics {
+		spec, ok := telemetry.SpecFor(m.Provider)
+		if !ok {
+			continue
+		}
+		configured := true
+		for _, name := range spec.CredNames {
+			if !credNames[name] {
+				configured = false
+				break
+			}
+		}
+		if configured {
+			selectable = append(selectable, m)
+		}
+	}
+	if len(selectable) == 0 {
+		return
+	}
+
+	options := make([]provider.MetricOption, 0, len(selectable))
+	for _, m := range selectable {
+		options = append(options, provider.MetricOption{Name: m.Name})
+	}
+	chosen, err := s.metricSelector.SelectMetric(ctx, intent, options)
+	if err != nil {
+		log.Printf("[telemetry] select metric for monitor %s: %v", mon.ID, err)
+		return
+	}
+	if chosen == "" {
+		return
+	}
+
+	var metric *store.TelemetryMetric
+	for i := range selectable {
+		if selectable[i].Name == chosen {
+			metric = &selectable[i]
+			break
+		}
+	}
+	if metric == nil {
+		log.Printf("[telemetry] selector chose unknown metric %q for monitor %s", chosen, mon.ID)
+		return
+	}
+
+	now := time.Now()
+	poll := &store.PostMergeTelemetryPoll{
+		ID:            "poll_" + uuid.New().String(),
+		OrgID:         mon.OrgID,
+		MonitorID:     mon.ID,
+		Provider:      metric.Provider,
+		Query:         metric.Query,
+		BaselineStart: mon.DeployedAt.Add(-telemetryBaselineLookback),
+		BaselineEnd:   mon.DeployedAt,
+		CurrentStart:  mon.DeployedAt,
+		CurrentEnd:    now,
+		NextPollAt:    now,
+		WindowEndsAt:  mon.DeployedAt.Add(telemetryPollWindow),
+	}
+	if err := s.storage.CreateTelemetryPoll(ctx, poll); err != nil {
+		log.Printf("[telemetry] create poll for monitor %s: %v", mon.ID, err)
 	}
 }
