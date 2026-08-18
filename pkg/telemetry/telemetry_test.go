@@ -1,6 +1,9 @@
 package telemetry
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsTelemetryCredentialMatchesRegisteredNames(t *testing.T) {
 	if !IsTelemetryCredential("DATADOG_API_KEY") {
@@ -22,7 +25,7 @@ func TestSpecForUnknownProviderReturnsFalse(t *testing.T) {
 
 func TestStubProviderReturnsConfiguredResult(t *testing.T) {
 	stub := &StubProvider{Result: Result{SampleCount: 42, Mean: 3.14}}
-	got, err := stub.Query(nil, "any query", timeZero, timeZero)
+	got, err := stub.Query(nil, "any query", time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

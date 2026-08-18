@@ -65,6 +65,17 @@ func (p *prometheusProvider) Query(ctx context.Context, query string, start, end
 	if out.Status != "success" || len(out.Data.Result) == 0 {
 		return Result{}, fmt.Errorf("prometheus returned no series for query %q over [%s, %s]", query, start, end)
 	}
+	// A range query over a multi-series metric returns one series per label
+	// combination, and the baseline and current calls are two separate
+	// requests over two different ranges — the series sets can differ between
+	// them (a pod that did not exist pre-merge, a label that churned).
+	// Silently taking Result[0] from each can compare two *different* series'
+	// means and report the delta as a regression. Erroring instead forces an
+	// aggregating query, whose worst case is "no verdict" rather than "wrong
+	// verdict".
+	if len(out.Data.Result) > 1 {
+		return Result{}, fmt.Errorf("prometheus query %q returned %d series, want exactly 1 — use an aggregating query (e.g. sum(), avg())", query, len(out.Data.Result))
+	}
 
 	values := out.Data.Result[0].Values
 	if len(values) == 0 {

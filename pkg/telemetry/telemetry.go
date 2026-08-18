@@ -71,9 +71,10 @@ func IsTelemetryCredential(name string) bool {
 	return false
 }
 
-// ProviderFor constructs the connector for id using creds (the daemon's
-// already-decrypted credential bundle — see pkg/daemon's cached-credentials
-// field, Task 9). Returns an error naming which required credential is
+// ProviderFor constructs the connector for id using creds — the credentials
+// the daemon just decrypted from the sealed bundle carried on the
+// TelemetryDue response itself, opened per poll pass rather than held in any
+// cache. Returns an error naming which required credential is
 // missing rather than a generic failure, since a misconfigured org is the
 // expected failure mode here, not a bug.
 func ProviderFor(id string, creds map[string]string) (Provider, error) {
