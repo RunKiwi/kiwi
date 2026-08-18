@@ -121,6 +121,33 @@ function CommandCenterContent() {
   const [referenceJobIds, setReferenceJobIds] = useState<string[]>([]);
   const [inlineData, setInlineData] = useState<Partial<PlanRequest>>({});
 
+  const [greeting, setGreeting] = useState("What should the swarm build?");
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    let timeGreeting = "";
+    if (hour < 12) timeGreeting = "Good morning";
+    else if (hour < 18) timeGreeting = "Good afternoon";
+    else timeGreeting = "Good evening";
+
+    const prompts = [
+      "what are we building today?",
+      "what should Kiwi do today?",
+      "ready to write some code?",
+      "what's the master plan?",
+      "let's build something awesome.",
+      "what bugs are we squashing today?",
+      "time to ship something great.",
+      "what's on the roadmap?",
+      "what is in your mind?",
+      "what is 'bug'ging you?"
+    ];
+    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGreeting(`${timeGreeting}, ${randomPrompt}`);
+  }, []);
+
   // Options loaded from the control plane.
   const [fleets, setFleets] = useState<Fleet[]>([]);
   const [customModels, setCustomModels] = useState<ModelEntry[]>([]);
@@ -622,7 +649,7 @@ function CommandCenterContent() {
     <div className="p-3 md:p-8 max-w-6xl mx-auto h-full flex flex-col">
       <div className="mb-8">
         <p className="eyebrow mb-3"><span className="dot"></span> Tasks</p>
-        <h1 className="text-[32px] font-semibold tracking-tight text-white mb-2">What should the swarm build?</h1>
+        <h1 className="text-[32px] font-semibold tracking-tight text-white mb-2">{greeting}</h1>
         <p className="text-zinc-400 max-w-2xl">Describe the goal in plain English. Kiwi plans it, runs a swarm of agents, and opens one verified pull request — everything else is optional.</p>
       </div>
 
