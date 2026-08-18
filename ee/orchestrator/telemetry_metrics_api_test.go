@@ -15,6 +15,20 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
+// withTelemetryTestLookupHost overrides telemetryTestLookupHost for the
+// duration of a test and restores it on cleanup. Tests that need the
+// SSRF-destination check to pass against a local httptest.Server (which
+// necessarily binds 127.0.0.1, itself a loopback address the real check
+// rejects) use this to fake DNS resolution to a public IP — the
+// classification logic (isBlockedTelemetryDestIP) itself is never
+// overridden, so it still runs for real.
+func withTelemetryTestLookupHost(t *testing.T, fn func(host string) ([]string, error)) {
+	t.Helper()
+	orig := telemetryTestLookupHost
+	telemetryTestLookupHost = fn
+	t.Cleanup(func() { telemetryTestLookupHost = orig })
+}
+
 func TestHandleTelemetryMetricsCreateListDelete(t *testing.T) {
 	srv, s := setupWebhookTest(t)
 	ctx := context.Background()
@@ -113,6 +127,14 @@ func TestHandleTestTelemetryQuerySucceedsAgainstConfiguredCredential(t *testing.
 	if err := s.SaveCredential(ctx, "org1", "PROMETHEUS_BEARER_TOKEN", store.CredentialTelemetry, "tok"); err != nil {
 		t.Fatal(err)
 	}
+	// promSrv.URL is a local httptest.Server, which binds 127.0.0.1 — a
+	// loopback address the SSRF destination check correctly rejects in
+	// production. Fake DNS resolution to a public IP so this test exercises
+	// the rest of the flow without weakening the real check (which still
+	// dials promSrv.URL for real — only the resolver is faked).
+	withTelemetryTestLookupHost(t, func(host string) ([]string, error) {
+		return []string{"93.184.216.34"}, nil
+	})
 
 	bodyBytes, _ := json.Marshal(map[string]string{"provider": "prometheus", "query": "rate(http_requests_total[5m])"})
 	w := httptest.NewRecorder()
@@ -133,6 +155,33 @@ func TestHandleTestTelemetryQuerySucceedsAgainstConfiguredCredential(t *testing.
 	// Never leak the credential value into the response.
 	if strings.Contains(w.Body.String(), "tok") {
 		t.Error("response body contains the raw credential value")
+	}
+}
+
+func TestHandleTestTelemetryQueryRejectsInternalPrometheusDestination(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	ctx := context.Background()
+	if err := s.DB().Create(&store.Organization{ID: "org1", Name: "acme"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A URL pointing at the cloud metadata address — this must be rejected
+	// before prov.Query (and hence any dial) ever runs, regardless of
+	// whether anything is listening there.
+	if err := s.SaveCredential(ctx, "org1", "PROMETHEUS_BASE_URL", store.CredentialTelemetry, "http://169.254.169.254/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCredential(ctx, "org1", "PROMETHEUS_BEARER_TOKEN", store.CredentialTelemetry, "tok"); err != nil {
+		t.Fatal(err)
+	}
+
+	bodyBytes, _ := json.Marshal(map[string]string{"provider": "prometheus", "query": "rate(http_requests_total[5m])"})
+	w := httptest.NewRecorder()
+	srv.handleTestTelemetryQuery(w, authed(http.MethodPost, "/api/v1/telemetry-metrics/test", string(bodyBytes), "org1"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an internal-address PROMETHEUS_BASE_URL", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "non-routable or internal address") {
+		t.Errorf("error body = %q, want the internal-address rejection message", w.Body.String())
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { client, type TelemetryMetric, type GithubRepo } from "@/lib/api";
 import { LineChart, Plus, Trash2, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Select } from "@/components/Select";
@@ -45,14 +45,28 @@ export default function MetricsPage() {
   const isTested = testedQueryKey === currentQueryKey;
   const canSave = !!repo && !!name.trim() && !!query.trim() && isTested && testResult?.ok === true;
 
+  // Tracks the live provider+query key so an in-flight runTest call can
+  // notice, at resolution time, that the query was edited after it started
+  // — otherwise a stale "Queried OK" banner can clobber the current
+  // (already-edited, already-disabled-Save) state. currentQueryKey alone
+  // can't be used for this: it's read from the closure captured when
+  // runTest was invoked, which is frozen at the pre-edit value.
+  const liveQueryKeyRef = useRef(currentQueryKey);
+  useEffect(() => {
+    liveQueryKeyRef.current = currentQueryKey;
+  }, [currentQueryKey]);
+
   const runTest = async () => {
     if (!query.trim()) { setError("Enter a query first."); return; }
+    const keyAtCallTime = currentQueryKey;
     setError(""); setTesting(true); setTestResult(null);
     try {
       const res = await client.testTelemetryQuery(provider, query.trim());
+      if (keyAtCallTime !== liveQueryKeyRef.current) return;
       setTestResult({ ok: true, message: `Queried OK — ${res.sample_count} sample(s) in the last 15 minutes (mean ${res.mean.toFixed(2)}).` });
-      setTestedQueryKey(currentQueryKey);
+      setTestedQueryKey(keyAtCallTime);
     } catch (e) {
+      if (keyAtCallTime !== liveQueryKeyRef.current) return;
       setTestResult({ ok: false, message: e instanceof Error ? e.message : "Query failed" });
       setTestedQueryKey(null);
     } finally {
@@ -94,10 +108,16 @@ export default function MetricsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Repository</label>
-            <Select
-              ariaLabel="Repository" value={repo} onChange={setRepo} placeholder="Select…" searchable
-              options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
-            />
+            {repos.length > 0 ? (
+              <Select
+                ariaLabel="Repository" value={repo} onChange={setRepo} placeholder="Select…" searchable
+                options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
+              />
+            ) : (
+              <p className="text-xs text-amber-400/90">
+                No repositories yet. Connect GitHub under Integrations, then pick one here.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Name</label>
