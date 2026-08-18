@@ -43,6 +43,23 @@ export interface ModelEntry {
   created_at: string;
 }
 
+export interface TelemetryMetric {
+  id: string;
+  org_id: string;
+  repo: string;
+  name: string;
+  provider: string;
+  query: string;
+  comparison_direction: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TelemetryQueryTestResult {
+  sample_count: number;
+  mean: number;
+}
+
 export interface Integration {
   key: string;
   kind: string;
@@ -707,6 +724,24 @@ export const client = {
 
   deleteModel: (id: string) =>
     fetchApi<void>(`/api/v1/models/${id}`, { method: "DELETE" }),
+
+  listTelemetryMetrics: () =>
+    fetchApi<{ metrics: TelemetryMetric[] }>("/api/v1/telemetry-metrics"),
+
+  createTelemetryMetric: (repo: string, name: string, provider: string, query: string, comparisonDirection: string) =>
+    fetchApi<TelemetryMetric>("/api/v1/telemetry-metrics", {
+      method: "POST",
+      body: JSON.stringify({ repo, name, provider, query, comparison_direction: comparisonDirection }),
+    }),
+
+  deleteTelemetryMetric: (id: string) =>
+    fetchApi<void>(`/api/v1/telemetry-metrics/${id}`, { method: "DELETE" }),
+
+  testTelemetryQuery: (provider: string, query: string) =>
+    fetchApi<TelemetryQueryTestResult>("/api/v1/telemetry-metrics/test", {
+      method: "POST",
+      body: JSON.stringify({ provider, query }),
+    }),
 
   listIntegrations: () =>
     fetchApi<{ integrations: Integration[] }>("/api/v1/integrations"),
