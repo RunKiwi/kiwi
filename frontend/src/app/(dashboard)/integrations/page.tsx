@@ -15,7 +15,7 @@ const CATALOG: Record<string, {
   placeholder: string; icon: React.ComponentType<{ className?: string }>;
 }> = {
   github: { title: "GitHub token (fallback)", blurb: "Only needed if you have not installed the GitHub App above.", credName: "GITHUB_TOKEN", kind: "github", placeholder: "github_pat_… (repo scope)", icon: Boxes },
-  slack:  { title: "Slack",  blurb: "Notify a channel when jobs finish.", credName: "SLACK_TOKEN", kind: "slack", placeholder: "xoxb-… or a webhook URL", icon: MessageSquare },
+  slack:  { title: "Slack",  blurb: "Notify a channel when jobs finish.", credName: "SLACK_WEBHOOK_URL", kind: "webhook", placeholder: "https://hooks.slack.com/services/…", icon: MessageSquare },
   git:    { title: "Git push token", blurb: "Token the daemon uses to push branches.", credName: "GIT_TOKEN", kind: "git", placeholder: "github_pat_…", icon: GitBranch },
   anthropic: { title: "Anthropic", blurb: "API key for Claude models.", credName: "ANTHROPIC_API_KEY", kind: "llm", placeholder: "sk-ant-…", icon: Sparkles },
   gemini: { title: "Gemini", blurb: "API key for Google Gemini models.", credName: "GEMINI_API_KEY", kind: "llm", placeholder: "AIza…", icon: KeyRound },

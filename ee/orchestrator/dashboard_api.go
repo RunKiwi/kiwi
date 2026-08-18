@@ -135,7 +135,7 @@ type integrationEntry struct {
 func buildIntegrationSpec() []integrationEntry {
 	out := []integrationEntry{
 		{"github", "GITHUB_TOKEN", "github"},
-		{"slack", "SLACK_TOKEN", "slack"},
+		{"slack", "SLACK_WEBHOOK_URL", "webhook"},
 	}
 	for _, p := range provider.Registry() {
 		out = append(out, integrationEntry{p.ID, p.CredName, "llm"})
