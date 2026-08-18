@@ -44,6 +44,19 @@ func setupWebhookTest(t *testing.T) (*Server, *store.PostgresStore) {
 		&store.Credential{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// AutoMigrate creates a total unique index on (org_id, job_id), but we need
+	// a partial one that only applies when job_id != '' (to allow multiple
+	// external_pr monitors with empty job_id for the same org). Drop the total
+	// unique index and recreate it with the WHERE clause — identical fixup to
+	// newTestStore (pkg/store/store_test.go), which needed the same thing for
+	// the same reason.
+	if err := db.Exec("DROP INDEX IF EXISTS idx_postmerge_monitors_org_job").Error; err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX idx_postmerge_monitors_org_job ON postmerge_monitors (org_id, job_id) WHERE job_id != ''").Error; err != nil {
+		t.Fatalf("create partial index: %v", err)
+	}
+
 	s := store.NewPostgresStore(db)
 	srv := NewServer(s, &Config{})
 	// Injected rather than set through the environment: CPSigningKey memoizes

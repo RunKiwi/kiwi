@@ -77,23 +77,19 @@ func TestCreateExternalMonitorRejectsUnmergedPR(t *testing.T) {
 // for an org collide with the first. Migration 0042 replaces it with a
 // partial index (WHERE job_id != ”), which exempts empty-JobID rows.
 //
-// Skipped rather than asserted: this package's tests build their schema via
-// db.AutoMigrate(&store.PostMergeMonitor{}, ...) against SQLite
-// (setupWebhookTest, github_webhook_test.go), and GORM's index struct tags
-// have no way to express a partial/WHERE condition (confirmed against
-// gorm.io/gorm@v1.31.2's schema/index.go) — so AutoMigrate always produces
-// the old, non-partial unique index regardless of what the tag says, and
-// this test fails here no matter how correct createExternalMonitor is.
-// Production is unaffected: ee/orchestrator/db.go's AutoMigrate call never
-// includes PostMergeMonitor, so the live schema comes solely from
-// migrations/0037 + migrations/0042, which do carry the WHERE clause. Verified
-// directly: applying both .up.sql files to a real Postgres 16 database and
-// inserting two rows with org_id="org1", job_id="" (matching what this
-// function writes) succeeds — see the task's completion report for the
-// commands. Un-skip this once setupWebhookTest (or a Postgres-backed test
-// variant) exercises the real migration files instead of AutoMigrate.
+// setupWebhookTest (github_webhook_test.go) builds its schema via
+// db.AutoMigrate(&store.PostMergeMonitor{}, ...) against SQLite, and GORM's
+// index struct tags have no way to express a partial/WHERE condition — so
+// AutoMigrate alone produces the old, non-partial unique index regardless of
+// what the tag says. setupWebhookTest drops and recreates that index with
+// the WHERE clause by raw SQL immediately after migrating, exactly like
+// newTestStore does in pkg/store/store_test.go, which is what lets this test
+// run for real instead of needing a skip. pkg/store/postmerge_monitor_test.go's
+// TestCreateMonitorWithoutJobIDIsAnExternalPRMonitor already proves the same
+// property at the store layer; this one additionally exercises it through
+// createExternalMonitor's full path (PR resolution, merge check, duplicate
+// lookup, row creation).
 func TestCreateExternalMonitorAllowsMultiplePerOrg(t *testing.T) {
-	t.Skip("AutoMigrate/SQLite can't express migration 0042's partial unique index; verified against real Postgres migrations instead — see task-3-report.md")
 	srv, s := setupWebhookTest(t)
 	orgID := "org1"
 	if err := s.DB().Create(&store.Organization{ID: orgID, Name: "acme"}).Error; err != nil {
