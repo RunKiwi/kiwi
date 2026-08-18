@@ -135,3 +135,39 @@ func TestTaskTestEnvExcludesTelemetryCredentials(t *testing.T) {
 		}
 	})
 }
+
+// The Slack webhook URL (Task 12's notifySlackVerdict credential) is a
+// Control-Plane-only notification target, never read by the daemon or the
+// sandbox. But SealCredentialsForDaemon bundles every org credential
+// regardless of Kind, so without an explicit exclusion here it would ride
+// along in the daemon's decrypted credential map and leak into the sandbox
+// test-command environment exactly like an unexcluded telemetry key would.
+func TestTaskTestEnvExcludesSlackWebhookCredential(t *testing.T) {
+	creds := map[string]string{
+		anthropicKeyName:    "llm-secret",
+		"GIT_TOKEN":         "git-secret",
+		"SLACK_WEBHOOK_URL": "https://hooks.slack.example/secret",
+		"SOME_APP_CONFIG":   "not-a-secret-should-pass-through",
+	}
+
+	t.Run("credentials opt-in (sessionMode=false)", func(t *testing.T) {
+		env := taskTestEnv("do the thing", creds, false)
+		if envHas(env, "SLACK_WEBHOOK_URL") {
+			t.Error("taskTestEnv leaked SLACK_WEBHOOK_URL into the sandbox test environment")
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+
+	t.Run("session opt-in (sessionMode=true, KIWI_SESSION_ALLOW_TEST_CREDS=true)", func(t *testing.T) {
+		t.Setenv("KIWI_SESSION_ALLOW_TEST_CREDS", "true")
+		env := taskTestEnv("do the thing", creds, true)
+		if envHas(env, "SLACK_WEBHOOK_URL") {
+			t.Error("taskTestEnv leaked SLACK_WEBHOOK_URL into a session sandbox test environment")
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+}
