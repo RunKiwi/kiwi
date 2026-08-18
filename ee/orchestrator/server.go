@@ -86,6 +86,16 @@ type Server struct {
 	// App is configured, which is the pre-rollout state: every org then
 	// authenticates with GIT_TOKEN exactly as before.
 	githubApp *githubapp.Client
+	// metricSelector picks which of an org's configured telemetry metrics
+	// (if any) is relevant to a merged task, at monitor-creation time. Like
+	// the embedder, it runs on a Kiwi-operated key, not a customer's — this
+	// call happens in the Control Plane (createPostMergeMonitor), which
+	// never holds an org's decrypted LLM credential (see the CLAUDE.md note
+	// on the file_loop planner's removed BYOC containment gap). nil when no
+	// operator key is configured, which enqueueTelemetryPolls treats the
+	// same as "no metric selected" — a monitor still runs on GitHub-native
+	// signals alone.
+	metricSelector provider.MetricSelector
 }
 
 // cpSigningKey resolves the record-signing identity for this server.
@@ -111,6 +121,17 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		embedder = provider.NewOpenAIProviderWithModels(cfg.EmbedOpenAIKey, "", "")
 	}
 
+	// metricSelector reuses the same operator keys as the embedder above —
+	// both are Kiwi-owned-key, Control-Plane-side classification calls, and
+	// introducing a dedicated env var nobody sets in prod would just leave
+	// this feature permanently inert. No org credential is ever read here.
+	var metricSelector provider.MetricSelector
+	if cfg.EmbedGoogleKey != "" {
+		metricSelector = provider.NewGeminiProviderWithModels(cfg.EmbedGoogleKey, "", "")
+	} else if cfg.EmbedOpenAIKey != "" {
+		metricSelector = provider.NewOpenAIProviderWithModels(cfg.EmbedOpenAIKey, "", "")
+	}
+
 	s := &Server{
 		db:           storage.DB(),
 		storage:      storage,
@@ -123,9 +144,10 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		// registry and the environment — not by a hand-kept map here, which is
 		// how a provider ends up advertised with no lister or listed with a key
 		// Kiwi does not hold.
-		refresher:     catalog.NewRefresher(storage),
-		credValidator: defaultCredValidator,
-		githubApp:     newGitHubAppClient(),
+		refresher:      catalog.NewRefresher(storage),
+		credValidator:  defaultCredValidator,
+		githubApp:      newGitHubAppClient(),
+		metricSelector: metricSelector,
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
 	// controller, so the submit path needs no special-casing. The api role wakes
@@ -493,6 +515,8 @@ func (s *Server) Start(addr string) error {
 	root.HandleFunc("/api/v1/daemon/git-token", s.handleDaemonGitToken)
 	root.HandleFunc("/api/v1/daemon/session", s.handleDaemonSession)
 	root.HandleFunc("/api/v1/daemon/session/load", s.handleDaemonSessionLoad)
+	root.HandleFunc("/api/v1/daemon/telemetry/due", s.handleDaemonTelemetryDue)
+	root.HandleFunc("/api/v1/daemon/telemetry/report", s.handleDaemonTelemetryReport)
 
 	root.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

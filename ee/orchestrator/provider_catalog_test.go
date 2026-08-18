@@ -86,7 +86,7 @@ func TestIntegrationSpecKeepsNonLLMEntries(t *testing.T) {
 	for _, spec := range integrationSpec {
 		byKey[spec.Key] = spec.Kind
 	}
-	for key, kind := range map[string]string{"github": "github", "slack": "slack", "git": "git"} {
+	for key, kind := range map[string]string{"github": "github", "slack": "webhook", "git": "git"} {
 		if byKey[key] != kind {
 			t.Errorf("integrationSpec[%q].Kind = %q, want %q", key, byKey[key], kind)
 		}

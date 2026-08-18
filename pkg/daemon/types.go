@@ -199,3 +199,72 @@ type GitTokenResp struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
+
+// TelemetryDueReq asks the Control Plane what telemetry polls are due for
+// this daemon's org right now. Lease-free by design — see Task 8's handler
+// doc comment for why this follows heartbeat's auth pattern, not GitToken's.
+type TelemetryDueReq struct {
+	SignPubKey string `json:"sign_pub_key"`
+	Timestamp  int64  `json:"timestamp,omitempty"`
+}
+
+// TelemetryPollSpec is exactly what to query — provider, query string, and
+// both time ranges — computed Control-Plane-side. The daemon does no
+// scheduling or range-computation logic of its own; it only executes.
+type TelemetryPollSpec struct {
+	PollID        string    `json:"poll_id"`
+	Provider      string    `json:"provider"`
+	Query         string    `json:"query"`
+	BaselineStart time.Time `json:"baseline_start"`
+	BaselineEnd   time.Time `json:"baseline_end"`
+	CurrentStart  time.Time `json:"current_start"`
+	CurrentEnd    time.Time `json:"current_end"`
+}
+
+// TelemetryDueRes is the Control Plane's answer to TelemetryDueReq. When Due
+// is non-empty, EncryptedCreds carries the org's credential bundle sealed to
+// this daemon's X25519 public key (same mechanism as HeartbeatRes.EncryptedCreds,
+// opened via the daemon's existing openCredentials helper) — delivered here,
+// not on the heartbeat, because a heartbeat that leased no task never reaches
+// the code path that seals credentials, and an idle daemon between polls is
+// the routine state for telemetry, not an edge case. Empty when Due is empty:
+// there is nothing to authenticate a provider connector with if no poll is due.
+type TelemetryDueRes struct {
+	Due            []TelemetryPollSpec `json:"due,omitempty"`
+	EncryptedCreds string              `json:"encrypted_creds,omitempty"`
+}
+
+// TelemetryResultDTO mirrors telemetry.Result — a separate type in this
+// package (not an import of pkg/telemetry into the wire-protocol layer)
+// because types.go's job is JSON shape, not query execution; keeping them
+// separate means pkg/telemetry's internal Result shape can change without
+// touching the wire protocol.
+type TelemetryResultDTO struct {
+	SampleCount int     `json:"sample_count"`
+	Mean        float64 `json:"mean"`
+}
+
+// TelemetryPollResult reports one poll's outcome. Baseline/Current are nil
+// (not zero-valued) when that half of the query failed — Error carries why,
+// distinguishing "queried and got zero samples" (a real, informative Result)
+// from "the query itself errored" (nil + Error).
+type TelemetryPollResult struct {
+	PollID   string              `json:"poll_id"`
+	Baseline *TelemetryResultDTO `json:"baseline,omitempty"`
+	Current  *TelemetryResultDTO `json:"current,omitempty"`
+	Error    string              `json:"error,omitempty"`
+}
+
+// TelemetryReportReq reports the results of the polls this daemon executed
+// back to the Control Plane. Like TelemetryDueReq, it carries no LeaseID —
+// telemetry polling is not tied to the task lease queue.
+type TelemetryReportReq struct {
+	SignPubKey string                `json:"sign_pub_key"`
+	Timestamp  int64                 `json:"timestamp,omitempty"`
+	Results    []TelemetryPollResult `json:"results"`
+}
+
+// TelemetryReportRes is the Control Plane's acknowledgement of a telemetry
+// report. It carries no fields today; naming it keeps the wire types
+// symmetric and leaves room to add one later.
+type TelemetryReportRes struct{}

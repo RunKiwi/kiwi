@@ -21,6 +21,7 @@ var (
 	geminiValidateURL    = "https://generativelanguage.googleapis.com/v1beta/models"
 	openaiValidateURL    = "https://api.openai.com/v1/models"
 	githubValidateURL    = "https://api.github.com/user"
+	datadogValidateURL   = "https://api.datadoghq.com/api/v1/validate"
 )
 
 // credValidateClient bounds how long a save waits on the provider.
@@ -57,8 +58,19 @@ func defaultCredValidator(ctx context.Context, name, value string) error {
 		req.Header.Set("Authorization", "Bearer "+value)
 		req.Header.Set("Accept", "application/vnd.github+json")
 		return checkCredential(req, "GitHub")
+	case "DATADOG_API_KEY":
+		// Datadog's /v1/validate only requires the API key, so this one credential
+		// validates standalone the same way the LLM keys above do.
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, datadogValidateURL, nil)
+		req.Header.Set("DD-API-KEY", value)
+		return checkCredential(req, "Datadog")
 	default:
-		// SLACK_TOKEN and anything else: we do not have a cheap check, so allow it.
+		// SLACK_TOKEN, DATADOG_APP_KEY, PROMETHEUS_BASE_URL, PROMETHEUS_BEARER_TOKEN,
+		// and anything else: each of these only makes sense paired with a sibling
+		// credential we do not have here (an app key needs an API key; a base URL
+		// and bearer token need each other, and probing the base URL alone risks
+		// rejecting a correct value that sits behind its own auth), so there is no
+		// safe standalone check — allow it, same as SLACK_TOKEN.
 		return nil
 	}
 }

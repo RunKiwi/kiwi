@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { client, type Integration } from "@/lib/api";
-import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, Bot, CheckCircle2 } from "lucide-react";
+import { Boxes, MessageSquare, KeyRound, GitBranch, Sparkles, Bot, CheckCircle2, Activity, LineChart, Globe } from "lucide-react";
 import { CredentialField } from "@/components/CredentialField";
 import { parseActionableError } from "@/lib/errors";
 import { capture } from "@/lib/analytics";
@@ -15,13 +15,17 @@ const CATALOG: Record<string, {
   placeholder: string; icon: React.ComponentType<{ className?: string }>;
 }> = {
   github: { title: "GitHub token (fallback)", blurb: "Only needed if you have not installed the GitHub App above.", credName: "GITHUB_TOKEN", kind: "github", placeholder: "github_pat_… (repo scope)", icon: Boxes },
-  slack:  { title: "Slack",  blurb: "Notify a channel when jobs finish.", credName: "SLACK_TOKEN", kind: "slack", placeholder: "xoxb-… or a webhook URL", icon: MessageSquare },
+  slack:  { title: "Slack",  blurb: "Notify a channel when jobs finish.", credName: "SLACK_WEBHOOK_URL", kind: "webhook", placeholder: "https://hooks.slack.com/services/…", icon: MessageSquare },
   git:    { title: "Git push token", blurb: "Token the daemon uses to push branches.", credName: "GIT_TOKEN", kind: "git", placeholder: "github_pat_…", icon: GitBranch },
   anthropic: { title: "Anthropic", blurb: "API key for Claude models.", credName: "ANTHROPIC_API_KEY", kind: "llm", placeholder: "sk-ant-…", icon: Sparkles },
   gemini: { title: "Gemini", blurb: "API key for Google Gemini models.", credName: "GEMINI_API_KEY", kind: "llm", placeholder: "AIza…", icon: KeyRound },
   openai: { title: "OpenAI", blurb: "API key for GPT models.", credName: "OPENAI_API_KEY", kind: "llm", placeholder: "sk-…", icon: Bot },
+  datadog: { title: "Datadog API key", blurb: "Lets post-merge verification pull metrics from Datadog.", credName: "DATADOG_API_KEY", kind: "telemetry", placeholder: "dd_api_key…", icon: Activity },
+  "datadog-app-key": { title: "Datadog application key", blurb: "Paired with the Datadog API key above — Datadog requires both.", credName: "DATADOG_APP_KEY", kind: "telemetry", placeholder: "dd_app_key…", icon: KeyRound },
+  prometheus: { title: "Prometheus bearer token", blurb: "Lets post-merge verification query your Prometheus instance.", credName: "PROMETHEUS_BEARER_TOKEN", kind: "telemetry", placeholder: "Bearer token", icon: LineChart },
+  "prometheus-base-url": { title: "Prometheus base URL", blurb: "Paired with the bearer token above — the endpoint to query.", credName: "PROMETHEUS_BASE_URL", kind: "telemetry", placeholder: "https://prometheus.example.com", icon: Globe },
 };
-const ORDER = ["github", "slack", "anthropic", "gemini", "openai", "git"];
+const ORDER = ["github", "slack", "anthropic", "gemini", "openai", "git", "datadog", "datadog-app-key", "prometheus", "prometheus-base-url"];
 
 export default function IntegrationsPage() {
   const [status, setStatus] = useState<Record<string, boolean>>({});

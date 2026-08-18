@@ -23,6 +23,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
@@ -70,6 +71,9 @@ type Config struct {
 	ProgressInterval time.Duration
 	// SandboxRuntime configures the OCI runtime for docker sandboxes (e.g. "runsc").
 	SandboxRuntime string
+	// TelemetryPollInterval governs how often the daemon asks the Control
+	// Plane what telemetry polls are due. Zero uses defaultTelemetryPollInterval.
+	TelemetryPollInterval time.Duration
 }
 
 // Daemon represents the core kiwidaemon orchestrator.
@@ -89,6 +93,27 @@ type Daemon struct {
 	// instead of calling a real provider. A nil provider return means "no usable
 	// key for the selected provider" — the daemon then cannot run a real loop.
 	newProvider func(creds map[string]string, model, providerID string) (provider.Provider, provider.Critic)
+
+	// telemetryClient is the narrow subset of the Control Plane client that
+	// pollTelemetry calls through. It exists as a separate field/interface —
+	// rather than widening client above, or typing client itself as an
+	// interface — because client is a concrete *Client used throughout this
+	// file (Heartbeat, RenewLease, ReportResult, ...) with no existing
+	// mocking seam; every daemon test that exercises it does so against a
+	// real *Client pointed at an httptest server. Adding one narrow interface
+	// for the one new call path is additive and leaves that working pattern
+	// untouched. Defaults to the same *Client instance as client in New;
+	// swappable in tests via a fake that implements just these two methods.
+	telemetryClient telemetryClient
+}
+
+// telemetryClient is the Control Plane surface pollTelemetry needs: asking
+// what's due and reporting what was found. Satisfied by *Client (see
+// client.go's TelemetryDue/TelemetryReport, Task 7) and by a test double in
+// daemon_test.go.
+type telemetryClient interface {
+	TelemetryDue(ctx context.Context, req TelemetryDueReq) (*TelemetryDueRes, error)
+	TelemetryReport(ctx context.Context, req TelemetryReportReq) error
 }
 
 // New creates a new Daemon instance.
@@ -103,11 +128,16 @@ func New(cfg Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to initialize git cache: %w", err)
 	}
 
+	c := NewClient(cfg.APIURL)
 	return &Daemon{
-		config:      cfg,
-		client:      NewClient(cfg.APIURL),
-		gitCache:    cache,
-		newProvider: defaultProvider,
+		config: cfg,
+		client: c,
+		// Same underlying *Client, narrowed to the telemetry interface. See
+		// the telemetryClient field's doc comment for why this is a separate
+		// field rather than widening client's type.
+		telemetryClient: c,
+		gitCache:        cache,
+		newProvider:     defaultProvider,
 	}, nil
 }
 
@@ -224,6 +254,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	timer := time.NewTimer(withJitter(currentInterval))
 	defer timer.Stop()
 
+	// The telemetry poll is daemon-lifetime-scoped like the heartbeat itself
+	// — not task-scoped — so it lives in this same top-level select rather
+	// than a per-task goroutine. See defaultTelemetryPollInterval's doc
+	// comment for why it runs on its own, much longer, interval.
+	telemetryInterval := d.config.TelemetryPollInterval
+	if telemetryInterval <= 0 {
+		telemetryInterval = defaultTelemetryPollInterval
+	}
+	telemetryTimer := time.NewTimer(telemetryInterval)
+	defer telemetryTimer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,6 +277,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 				currentInterval = backoff(currentInterval, maxInterval)
 			}
 			timer.Reset(withJitter(currentInterval))
+		case <-telemetryTimer.C:
+			pollCtx, cancel := context.WithTimeout(ctx, telemetryPollBudget)
+			d.pollTelemetry(pollCtx)
+			cancel()
+			telemetryTimer.Reset(telemetryInterval)
 		}
 	}
 }
@@ -405,6 +451,98 @@ const (
 // worth having: five renewal attempts per lease instead of two, so a transient
 // failure no longer needs to be a near-miss.
 const defaultRenewInterval = 2 * time.Minute
+
+// defaultTelemetryPollInterval governs how often this daemon asks the
+// Control Plane what telemetry polls are due. Independent of the 5s
+// heartbeat and the per-task 2min renewal — this is daemon-lifetime-scoped
+// like the heartbeat itself, not task-scoped, so it lives in Run's top-level
+// select rather than a per-task goroutine. Telemetry queries look at
+// baseline vs. current windows measured in minutes to hours, so polling much
+// faster than this would not surface anything new, and 1 minute keeps the
+// Control Plane's due-check cheap and infrequent relative to the 5s
+// heartbeat it shares a client identity with.
+const defaultTelemetryPollInterval = 1 * time.Minute
+
+// telemetryPollBudget bounds one whole pollTelemetry pass. It runs inline in
+// Run's single top-level select, so an unbounded pass freezes the 5s
+// heartbeat for its whole duration: a full batch (the Control Plane's
+// telemetryDueLimit of 20 specs, two serial queries each at the connectors'
+// 15s client timeout) is ~10 minutes of stall in the worst case. The bound
+// also keeps a pass comfortably shorter than the Control Plane's
+// pollStaleClaimAfter, so the orchestrator's stale-claim sweep cannot
+// release a claim out from under a pass that is still running and have the
+// same poll queried and reported twice. Both telemetry connectors build
+// their requests with http.NewRequestWithContext, so expiry here actually
+// aborts an in-flight query rather than being ignored.
+const telemetryPollBudget = 2 * time.Minute
+
+// pollTelemetry asks the Control Plane what's due and, if anything is,
+// decrypts the credential bundle carried on that same response — sealed
+// fresh by the Control Plane for this call, not reused from a heartbeat,
+// because an idle daemon between polls (the routine state for post-merge
+// telemetry) may never see a heartbeat that carries credentials at all. It
+// then executes each query against the org's configured telemetry provider
+// and reports results back in one batch. Every failure is logged, never
+// silently swallowed — a telemetry poll going quiet with no trace is exactly
+// the failure mode this project's earlier security review and
+// revert-detection fix both exist to avoid repeating.
+func (d *Daemon) pollTelemetry(ctx context.Context) {
+	req := TelemetryDueReq{
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		Timestamp:  time.Now().Unix(),
+	}
+	res, err := d.telemetryClient.TelemetryDue(ctx, req)
+	if err != nil {
+		log.Printf("[telemetry] due check failed: %v", err)
+		return
+	}
+	if res == nil || len(res.Due) == 0 {
+		return
+	}
+
+	creds, err := d.openCredentials(res.EncryptedCreds)
+	if err != nil {
+		log.Printf("[telemetry] failed to open sealed credentials: %v", err)
+		return
+	}
+
+	results := make([]TelemetryPollResult, 0, len(res.Due))
+	for _, spec := range res.Due {
+		prov, err := telemetry.ProviderFor(spec.Provider, creds)
+		if err != nil {
+			log.Printf("[telemetry] poll %s: %v", spec.PollID, err)
+			results = append(results, TelemetryPollResult{PollID: spec.PollID, Error: err.Error()})
+			continue
+		}
+
+		baseline, baseErr := prov.Query(ctx, spec.Query, spec.BaselineStart, spec.BaselineEnd)
+		current, curErr := prov.Query(ctx, spec.Query, spec.CurrentStart, spec.CurrentEnd)
+		result := TelemetryPollResult{PollID: spec.PollID}
+		if baseErr != nil || curErr != nil {
+			msg := ""
+			if baseErr != nil {
+				msg += "baseline: " + baseErr.Error() + "; "
+			}
+			if curErr != nil {
+				msg += "current: " + curErr.Error()
+			}
+			log.Printf("[telemetry] poll %s query failed: %s", spec.PollID, msg)
+			result.Error = msg
+		} else {
+			result.Baseline = &TelemetryResultDTO{SampleCount: baseline.SampleCount, Mean: baseline.Mean}
+			result.Current = &TelemetryResultDTO{SampleCount: current.SampleCount, Mean: current.Mean}
+		}
+		results = append(results, result)
+	}
+
+	if err := d.telemetryClient.TelemetryReport(ctx, TelemetryReportReq{
+		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		Timestamp:  time.Now().Unix(),
+		Results:    results,
+	}); err != nil {
+		log.Printf("[telemetry] report failed: %v", err)
+	}
+}
 
 // isLLMKey reports whether a credential is a model API key that must be kept out
 // of the sandbox environment.

@@ -119,6 +119,48 @@ func (p *AnthropicProvider) ReviewEdit(ctx context.Context, task, fileName, oldC
 	return parseVerdict(collectText(resp)), nil
 }
 
+// SelectMetric is the metric selector: pick at most one of an org's
+// configured telemetry metrics as relevant to a merged task's intent.
+// Mirrors ReviewEdit's call shape — bounded system+user prompt,
+// respond-only-JSON, defensive parsing — rather than the agentic
+// Completer.Complete path, since this is a short-list classification.
+func (p *AnthropicProvider) SelectMetric(ctx context.Context, intent string, options []MetricOption) (string, error) {
+	if len(options) == 0 {
+		return "", nil
+	}
+	system := "You are picking which configured telemetry metric (if any) is relevant to verify a code change. " +
+		"Only choose a metric that plausibly measures the effect of the described change. " +
+		`Respond ONLY with a JSON object: {"metric_name": string, "reason": string}. Use an empty metric_name if none of the options are relevant.`
+	optionsText := ""
+	for _, o := range options {
+		optionsText += "- " + o.Name
+		if o.Description != "" {
+			optionsText += ": " + o.Description
+		}
+		optionsText += "\n"
+	}
+	user := fmt.Sprintf("Task: %s\n\nConfigured metrics:\n%s", intent, optionsText)
+
+	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     anthropic.Model(p.criticModel),
+		MaxTokens: 500,
+		System:    []anthropic.TextBlockParam{{Text: system}},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},
+	})
+	if err != nil {
+		return "", fmt.Errorf("select metric: %w", err)
+	}
+	p.recordCost(resp.Usage, p.criticModel)
+	if resp.StopReason == anthropic.StopReasonRefusal {
+		return "", nil
+	}
+	sel, err := parseMetricSelection(collectText(resp))
+	if err != nil {
+		return "", err
+	}
+	return sel.MetricName, nil
+}
+
 // Complete runs a single-turn (system + user) completion and returns the raw
 // response text. Unlike GetCodeEdit it does not extract a fenced code block —
 // callers such as the planner parse their own structured output. This satisfies

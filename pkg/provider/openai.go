@@ -267,6 +267,46 @@ func (p *OpenAIProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	return parseVerdict(text), nil
 }
 
+// SelectMetric is the metric selector: pick at most one of an org's
+// configured telemetry metrics as relevant to a merged task's intent.
+// Mirrors ReviewEdit's call shape (same p.chat helper) rather than the
+// agentic Complete path, since this is a short-list classification, not
+// task decomposition. The token ceiling matches ReviewEdit's (not the
+// other providers' 500) for the same reason documented there: a reasoning
+// model spends this budget on thinking before it writes the verdict, and
+// running out mid-thought returns nothing, which parseMetricSelection
+// would read as an error rather than "no metric relevant."
+func (p *OpenAIProvider) SelectMetric(ctx context.Context, intent string, options []MetricOption) (string, error) {
+	if len(options) == 0 {
+		return "", nil
+	}
+	system := "You are picking which configured telemetry metric (if any) is relevant to verify a code change. " +
+		"Only choose a metric that plausibly measures the effect of the described change. " +
+		`Respond ONLY with a JSON object: {"metric_name": string, "reason": string}. Use an empty metric_name if none of the options are relevant.`
+	optionsText := ""
+	for _, o := range options {
+		optionsText += "- " + o.Name
+		if o.Description != "" {
+			optionsText += ": " + o.Description
+		}
+		optionsText += "\n"
+	}
+	user := fmt.Sprintf("Task: %s\n\nConfigured metrics:\n%s", intent, optionsText)
+
+	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000)
+	if err != nil {
+		return "", fmt.Errorf("%s select metric request failed: %w", p.name, err)
+	}
+	if finish == "refusal" || finish == "content_filter" {
+		return "", nil
+	}
+	sel, err := parseMetricSelection(text)
+	if err != nil {
+		return "", err
+	}
+	return sel.MetricName, nil
+}
+
 // Complete runs a single-turn (system + user) completion and returns the raw
 // response text, satisfying the planner's Completer interface. Unlike
 // GetCodeEdit it does not extract a fenced code block — callers parse their own
