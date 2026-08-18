@@ -22,7 +22,12 @@ const (
 	minSignificantSamples  = 30
 	regressionRelativeBar  = 0.20 // 20% relative worsening
 	pollRescheduleInterval = 15 * time.Minute
-	pollStaleClaimAfter    = 10 * time.Minute
+	// pollStaleClaimAfter deliberately sits well above pkg/daemon's
+	// telemetryPollBudget (2 minutes): a claim is stamped before the daemon
+	// starts querying, so a threshold that merely matches the daemon's worst
+	// case can release a claim mid-flight and have the poll re-claimed on the
+	// next tick, producing duplicate queries and duplicate reports.
+	pollStaleClaimAfter = 5 * time.Minute // headroom above pollTelemetry's 2-minute budget
 )
 
 // evaluateSignificance is Phase 1b's fixed v1 significance bar — not
@@ -31,6 +36,14 @@ const (
 // ever returns store.MonitorStatusRegression as a confident verdict; a
 // clean or improved read is never confident enough to finalize VERIFIED —
 // that remains Phase 1a's window-elapsed sweep's job alone.
+//
+// The minSignificantSamples floor is implicitly calibrated to Prometheus's
+// fixed step=60 range query (pkg/telemetry/prometheus.go), where sample
+// count tracks the window's width in minutes — so a poll's growing
+// comparison window only clears the floor from roughly 30 minutes
+// post-merge onward, and the first poll cycles legitimately read
+// inconclusive. Datadog's /api/v1/query picks its own rollup by range and
+// may not map to minutes the same way.
 func evaluateSignificance(baseline, current daemon.TelemetryResultDTO, direction string) (verdict string, confident bool) {
 	if baseline.SampleCount < minSignificantSamples || current.SampleCount < minSignificantSamples {
 		return "", false
@@ -101,7 +114,7 @@ func (s *Server) handleTelemetryPollResult(ctx context.Context, orgID string, re
 	if confident {
 		evidence := "telemetry regression: current mean " + jsonNum(result.Current.Mean) + " vs baseline " + jsonNum(result.Baseline.Mean)
 		s.finalizeMonitor(ctx, mon, verdict, evidence)
-		if err := s.storage.RecordPollResult(ctx, poll.ID, time.Now(), string(resultJSON), false); err != nil {
+		if err := s.storage.RecordPollResult(ctx, poll.ID, time.Now(), string(resultJSON), false, time.Now()); err != nil {
 			log.Printf("[telemetry] record final result for poll %s: %v", poll.ID, err)
 		}
 		return
@@ -115,16 +128,24 @@ func (s *Server) handleTelemetryPollResult(ctx context.Context, orgID string, re
 // (reschedule=false). The parent monitor is untouched either way; Phase 1a's
 // unchanged 24h GitHub-native signals and window-elapsed sweep remain the
 // backstop that eventually finalizes VERIFIED.
+//
+// The reschedule branch is also where the poll's comparison window grows:
+// CurrentEnd advances to `now` (never to `next`, which is 15 minutes in the
+// future — the daemon must never be asked to query a future range), while
+// CurrentStart stays anchored at the merge for the poll's whole life. Without
+// this advance the window stays frozen at its ~1-second creation width and
+// can never reach evaluateSignificance's sample floor, which makes the whole
+// telemetry path inert.
 func (s *Server) rescheduleOrExpirePoll(ctx context.Context, poll *store.PostMergeTelemetryPoll, resultJSON string) {
 	now := time.Now()
 	if now.After(poll.WindowEndsAt) {
-		if err := s.storage.RecordPollResult(ctx, poll.ID, now, resultJSON, false); err != nil {
+		if err := s.storage.RecordPollResult(ctx, poll.ID, now, resultJSON, false, now); err != nil {
 			log.Printf("[telemetry] expire poll %s: %v", poll.ID, err)
 		}
 		return
 	}
 	next := now.Add(pollRescheduleInterval)
-	if err := s.storage.RecordPollResult(ctx, poll.ID, next, resultJSON, true); err != nil {
+	if err := s.storage.RecordPollResult(ctx, poll.ID, next, resultJSON, true, now); err != nil {
 		log.Printf("[telemetry] reschedule poll %s: %v", poll.ID, err)
 	}
 }
@@ -139,14 +160,27 @@ func jsonNum(f float64) string {
 // would otherwise stay claimed forever, invisible to the next due-check's
 // "claimed_at IS NULL" filter. Wired into ee/cmd/kiwid/main.go's existing
 // ticker block (Task 12) alongside FinalizePastWindowMonitors.
+//
+// It carries a second sweep for the mirror-image leak: a poll that was
+// never claimed at all (the org's daemon scaled to zero and never came back
+// before the 4h window closed) never reaches rescheduleOrExpirePoll's
+// expiry check, because that only runs on a report. Both sweeps live under
+// this one periodic call so the existing ticker wiring needs no change.
 func (s *Server) ReleaseStaleTelemetryPolls(ctx context.Context) {
 	n, err := s.storage.ReleaseStalePolls(ctx, time.Now().Add(-pollStaleClaimAfter))
 	if err != nil {
 		log.Printf("[telemetry] release stale polls: %v", err)
+	} else if n > 0 {
+		log.Printf("[telemetry] released %d stale telemetry poll claim(s)", n)
+	}
+
+	retired, err := s.storage.RetirePastWindowPolls(ctx, time.Now())
+	if err != nil {
+		log.Printf("[telemetry] retire past-window polls: %v", err)
 		return
 	}
-	if n > 0 {
-		log.Printf("[telemetry] released %d stale telemetry poll claim(s)", n)
+	if retired > 0 {
+		log.Printf("[telemetry] retired %d past-window telemetry poll(s) that were never claimed", retired)
 	}
 }
 
@@ -197,6 +231,12 @@ func (s *Server) enqueueTelemetryPolls(ctx context.Context, mon *store.PostMerge
 	for _, m := range metrics {
 		spec, ok := telemetry.SpecFor(m.Provider)
 		if !ok {
+			// CreateTelemetryMetric validates the provider name (and a DB
+			// CHECK constraint backstops it), so reaching this branch means a
+			// pre-validation row or a genuine bug — either deserves a trace
+			// rather than a silent skip that leaves the operator seeing a
+			// configured metric that never does anything.
+			log.Printf("[telemetry] metric %s has unknown provider %q, skipping", m.Name, m.Provider)
 			continue
 		}
 		configured := true
@@ -224,7 +264,14 @@ func (s *Server) enqueueTelemetryPolls(ctx context.Context, mon *store.PostMerge
 	// timeout here surfaces as the same "select metric" error path as any
 	// other selector failure: logged, no poll, the monitor still runs on
 	// GitHub-native signals alone.
-	selectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	//
+	// The timeout derives from context.WithoutCancel(ctx) rather than ctx
+	// itself: the 5-second bound is the property worth keeping, while
+	// inheriting the webhook request's cancellation means a GitHub-side
+	// disconnect kills the selector call instantly and the poll is silently
+	// lost. The call stays synchronous and inline — it still completes (or
+	// times out) before the handler returns.
+	selectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	chosen, err := s.metricSelector.SelectMetric(selectCtx, intent, options)
 	if err != nil {

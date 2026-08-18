@@ -57,10 +57,23 @@ func (s *PostgresStore) ClaimDuePolls(ctx context.Context, orgID string, now tim
 // clear claimed_at so the next due-check can pick it up) or leaves it
 // unclaimed-but-never-due-again (reschedule=false — the monitor finalized
 // from this result, e.g. a REGRESSION, and there is no next poll to run).
-func (s *PostgresStore) RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool) error {
+//
+// currentEnd advances the poll's comparison window. It is deliberately the
+// last parameter, well away from `next`, because the two are different
+// clocks and mixing them is silent and severe: `next` is when the poll runs
+// again (~15 minutes in the future), while currentEnd is how far the
+// comparison window now extends (the present moment). Passing `next` here
+// would make the daemon query Prometheus for a range ending in the future.
+// The window is a *growing* one — current_start stays anchored at the
+// merge, current_end advances on every report — which is what lets the
+// sample count climb past the significance floor. It is written
+// unconditionally; on the terminal (reschedule=false) branches the poll is
+// never queried again, so the write is harmless there.
+func (s *PostgresStore) RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool, currentEnd time.Time) error {
 	updates := map[string]interface{}{
 		"last_result": resultJSON,
 		"updated_at":  time.Now(),
+		"current_end": currentEnd,
 	}
 	if reschedule {
 		updates["claimed_at"] = nil
@@ -82,5 +95,23 @@ func (s *PostgresStore) ReleaseStalePolls(ctx context.Context, olderThan time.Ti
 	res := s.db.WithContext(ctx).Model(&PostMergeTelemetryPoll{}).
 		Where("claimed_at IS NOT NULL AND claimed_at < ?", olderThan).
 		Update("claimed_at", nil)
+	return res.RowsAffected, res.Error
+}
+
+// RetirePastWindowPolls retires (pushes next_poll_at to a terminal-future
+// timestamp) any unclaimed poll whose 4h telemetry window has already
+// elapsed without ever being claimed — e.g. an org whose daemon scaled to
+// zero and never came back online before the window closed. Without this,
+// such a poll matches ClaimDuePolls' filter (next_poll_at <= now, claimed_at
+// IS NULL) forever, since expiry is otherwise only checked on a report
+// (rescheduleOrExpirePoll), which a never-claimed poll never reaches.
+//
+// The next_poll_at <= window_ends_at clause makes the sweep idempotent: a
+// row retired by a previous sweep has a next_poll_at far past its
+// window_ends_at, so it no longer matches and is not re-touched.
+func (s *PostgresStore) RetirePastWindowPolls(ctx context.Context, now time.Time) (int64, error) {
+	res := s.db.WithContext(ctx).Model(&PostMergeTelemetryPoll{}).
+		Where("claimed_at IS NULL AND window_ends_at < ? AND next_poll_at <= window_ends_at", now).
+		Update("next_poll_at", now.Add(24*365*time.Hour))
 	return res.RowsAffected, res.Error
 }

@@ -226,6 +226,7 @@ type Store interface {
 	CreateTelemetryPoll(ctx context.Context, p *PostMergeTelemetryPoll) error
 	GetTelemetryPoll(ctx context.Context, id string) (*PostMergeTelemetryPoll, error)
 	ClaimDuePolls(ctx context.Context, orgID string, now time.Time, limit int) ([]PostMergeTelemetryPoll, error)
-	RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool) error
+	RecordPollResult(ctx context.Context, pollID string, next time.Time, resultJSON string, reschedule bool, currentEnd time.Time) error
 	ReleaseStalePolls(ctx context.Context, olderThan time.Time) (int64, error)
+	RetirePastWindowPolls(ctx context.Context, now time.Time) (int64, error)
 }

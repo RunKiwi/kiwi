@@ -70,7 +70,7 @@ func TestRecordPollResultReschedulesAndClearsClaim(t *testing.T) {
 	}
 
 	next := now.Add(15 * time.Minute)
-	if err := s.RecordPollResult(ctx, "poll_1", next, `{"baseline":{"sample_count":40,"mean":100},"current":{"sample_count":40,"mean":105}}`, true); err != nil {
+	if err := s.RecordPollResult(ctx, "poll_1", next, `{"baseline":{"sample_count":40,"mean":100},"current":{"sample_count":40,"mean":105}}`, true, now); err != nil {
 		t.Fatalf("record result: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestRecordPollResultWithoutRescheduleLeavesItUnclaimed(t *testing.T) {
 
 	// reschedule=false is what a REGRESSION verdict (Task 11) uses — the
 	// monitor is finalizing, so there is no next poll to schedule.
-	if err := s.RecordPollResult(ctx, "poll_1", now, `{}`, false); err != nil {
+	if err := s.RecordPollResult(ctx, "poll_1", now, `{}`, false, now); err != nil {
 		t.Fatalf("record result: %v", err)
 	}
 
@@ -114,6 +114,116 @@ func TestRecordPollResultWithoutRescheduleLeavesItUnclaimed(t *testing.T) {
 	}
 	if len(claimed) != 0 {
 		t.Errorf("claimed %d rows an hour later, want 0 — a non-rescheduled poll must never become due again", len(claimed))
+	}
+}
+
+func TestRecordPollResultAdvancesTheComparisonWindow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	p := newTestPoll("poll_1", "org1", now.Add(-1*time.Minute))
+	mergedAt := now.Add(-30 * time.Minute)
+	p.CurrentStart = mergedAt
+	p.CurrentEnd = mergedAt.Add(time.Second) // as created: ~1 second wide
+	if err := s.CreateTelemetryPoll(ctx, p); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// The scheduling clock (next, ~15 minutes out) and the window clock
+	// (currentEnd, now) are deliberately different values here — passing the
+	// former as the latter would ask the daemon to query a future range.
+	next := now.Add(15 * time.Minute)
+	if err := s.RecordPollResult(ctx, "poll_1", next, `{}`, true, now); err != nil {
+		t.Fatalf("record result: %v", err)
+	}
+
+	var got PostMergeTelemetryPoll
+	if err := s.DB().First(&got, "id = ?", "poll_1").Error; err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !got.CurrentEnd.After(p.CurrentEnd) {
+		t.Errorf("current_end = %v, want advanced past %v", got.CurrentEnd, p.CurrentEnd)
+	}
+	if got.CurrentEnd.After(next.Add(-time.Minute)) {
+		t.Errorf("current_end = %v, want ~now, not the future next_poll_at %v", got.CurrentEnd, next)
+	}
+	if drift := got.CurrentStart.Sub(mergedAt); drift > time.Second || drift < -time.Second {
+		t.Errorf("current_start = %v, want unchanged at %v", got.CurrentStart, mergedAt)
+	}
+}
+
+// TestRetirePastWindowPollsRetiresNeverClaimedPollsIdempotently covers the
+// leak where an org's daemon scaled to zero and never came back before a
+// poll's 4h window closed: expiry is otherwise only checked on a report, so
+// a never-claimed poll matched the due filter forever and would be claimed
+// in bulk whenever the daemon eventually cold-started. The second sweep
+// asserting zero is what actually covers the next_poll_at <= window_ends_at
+// clause — without it this would pass as a plain unconditional UPDATE.
+func TestRetirePastWindowPollsRetiresNeverClaimedPollsIdempotently(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	expired := newTestPoll("poll_expired", "org1", now.Add(-3*time.Hour))
+	expired.WindowEndsAt = now.Add(-1 * time.Hour) // window closed, never claimed
+	live := newTestPoll("poll_live", "org1", now.Add(-1*time.Minute))
+	live.WindowEndsAt = now.Add(2 * time.Hour) // still inside its window
+	for _, p := range []*PostMergeTelemetryPoll{expired, live} {
+		if err := s.CreateTelemetryPoll(ctx, p); err != nil {
+			t.Fatalf("create %s: %v", p.ID, err)
+		}
+	}
+
+	retired, err := s.RetirePastWindowPolls(ctx, now)
+	if err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if retired != 1 {
+		t.Fatalf("retired = %d, want 1", retired)
+	}
+
+	// A second sweep must be a no-op — an already-retired row's next_poll_at
+	// is far past its window_ends_at, so it no longer matches.
+	again, err := s.RetirePastWindowPolls(ctx, time.Now())
+	if err != nil {
+		t.Fatalf("second retire: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second sweep retired = %d, want 0 — the sweep must be idempotent", again)
+	}
+
+	claimed, err := s.ClaimDuePolls(ctx, "org1", now, 10)
+	if err != nil {
+		t.Fatalf("claim after retire: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != "poll_live" {
+		t.Errorf("claimed = %+v, want only poll_live — a retired poll must never become due again", claimed)
+	}
+}
+
+func TestRetirePastWindowPollsLeavesClaimedPollsAlone(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Claimed but past its window: the daemon is (or was) working on it, so
+	// it drains through the report path or the stale-claim sweep, not here.
+	p := newTestPoll("poll_1", "org1", now.Add(-3*time.Hour))
+	p.WindowEndsAt = now.Add(-1 * time.Hour)
+	if err := s.CreateTelemetryPoll(ctx, p); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := s.ClaimDuePolls(ctx, "org1", now, 10); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	retired, err := s.RetirePastWindowPolls(ctx, now)
+	if err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if retired != 0 {
+		t.Errorf("retired = %d, want 0 — a claimed poll is not this sweep's business", retired)
 	}
 }
 
