@@ -1,8 +1,29 @@
 package store
 
-import "context"
+import (
+	"context"
+	"fmt"
 
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
+)
+
+// CreateTelemetryMetric validates before writing because hand-inserted rows
+// are the only provisioning path this table has (there is no dashboard CRUD
+// for it yet), and both fields fail silently and invisibly when typo'd. An
+// unknown provider is dropped by enqueueTelemetryPolls' SpecFor lookup, so
+// the operator sees a metric configured and nothing ever happens; an unknown
+// comparison_direction is worse, since the verdict computation only
+// special-cases the literal higher-is-better string and anything else falls
+// through to lower-is-better semantics — which can invert the verdict. The
+// DB CHECK constraint (migrations/0041) is the backstop; this is the error
+// message a human actually reads.
 func (s *PostgresStore) CreateTelemetryMetric(ctx context.Context, m *TelemetryMetric) error {
+	if _, ok := telemetry.SpecFor(m.Provider); !ok {
+		return fmt.Errorf("unknown telemetry provider %q", m.Provider)
+	}
+	if m.ComparisonDirection != ComparisonHigherIsBetter && m.ComparisonDirection != ComparisonLowerIsBetter {
+		return fmt.Errorf("invalid comparison_direction %q", m.ComparisonDirection)
+	}
 	return s.db.WithContext(ctx).Create(m).Error
 }
 

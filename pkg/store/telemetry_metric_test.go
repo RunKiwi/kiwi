@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+// TestCreateTelemetryMetricRejectsInvalidConfig covers the only
+// provisioning path this table has — hand-inserted rows. Both fields fail
+// silently when typo'd: an unknown provider makes the metric invisible to
+// the poll-enqueue path, and an unknown direction falls through to
+// lower-is-better semantics, which can invert a verdict outright.
+func TestCreateTelemetryMetricRejectsInvalidConfig(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name   string
+		metric *TelemetryMetric
+	}{
+		{"typo'd provider", &TelemetryMetric{
+			ID: "tm_bad_provider", OrgID: "org1", Repo: "acme/widgets", Name: "m1",
+			Provider: "promethues", Query: "up", ComparisonDirection: ComparisonLowerIsBetter,
+		}},
+		{"empty provider", &TelemetryMetric{
+			ID: "tm_no_provider", OrgID: "org1", Repo: "acme/widgets", Name: "m2",
+			Provider: "", Query: "up", ComparisonDirection: ComparisonLowerIsBetter,
+		}},
+		{"typo'd direction", &TelemetryMetric{
+			ID: "tm_bad_direction", OrgID: "org1", Repo: "acme/widgets", Name: "m3",
+			Provider: "prometheus", Query: "up", ComparisonDirection: "higher_is_better ",
+		}},
+		{"empty direction", &TelemetryMetric{
+			ID: "tm_no_direction", OrgID: "org1", Repo: "acme/widgets", Name: "m4",
+			Provider: "prometheus", Query: "up", ComparisonDirection: "",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := s.CreateTelemetryMetric(ctx, tc.metric); err == nil {
+				t.Fatal("expected a validation error, got nil")
+			}
+			var count int64
+			if err := s.DB().Model(&TelemetryMetric{}).Where("id = ?", tc.metric.ID).Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Errorf("row was written despite failing validation")
+			}
+		})
+	}
+}
+
 func TestTelemetryMetricRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	m := &TelemetryMetric{
