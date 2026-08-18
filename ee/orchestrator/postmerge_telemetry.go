@@ -75,11 +75,19 @@ func (s *Server) handleTelemetryPollResult(ctx context.Context, orgID string, re
 
 	mon, err := s.storage.GetMonitorByID(ctx, poll.MonitorID)
 	if err != nil {
+		// The monitor is gone (or never existed) but the poll itself is
+		// still real — without this, a poll pointing at a missing monitor
+		// would get re-claimed and fail here forever (ReleaseStaleTelemetryPolls
+		// only clears claimed_at; it never checks WindowEndsAt or advances
+		// NextPollAt), so it could never reach its own window-expiry check.
+		// Rescheduling/expiring here lets it drain the same way any other
+		// unusable result does.
 		log.Printf("[telemetry] poll %s: monitor %s not found: %v", result.PollID, poll.MonitorID, err)
+		s.rescheduleOrExpirePoll(ctx, poll, string(resultJSON))
 		return
 	}
 
-	metric, err := s.storage.GetTelemetryMetricByQuery(ctx, orgID, poll.Query)
+	metric, err := s.storage.GetTelemetryMetricByQuery(ctx, orgID, mon.Repo, poll.Query)
 	direction := store.ComparisonLowerIsBetter
 	if err == nil {
 		direction = metric.ComparisonDirection

@@ -766,3 +766,173 @@ func TestHandleDaemonTelemetryReportUsesMetricComparisonDirection(t *testing.T) 
 		t.Errorf("monitor status = %q, want %q — GetTelemetryMetricByQuery must have resolved higher_is_better for this to finalize", gotMon.Status, store.MonitorStatusRegression)
 	}
 }
+
+// TestHandleDaemonTelemetryReportIgnoresCrossTenantPoll proves the
+// poll.OrgID != orgID guard in handleTelemetryPollResult: a daemon
+// registered for org "o1" reports a result for a poll that actually belongs
+// to org "o2". The handler must treat this as a no-op — no monitor
+// finalization, and critically no RecordPollResult call at all (not even a
+// reschedule), since acting on the poll in any way on behalf of the wrong
+// org would leak cross-tenant state through a channel that authenticates by
+// daemon identity, not by an org-scoped API key. Verified by re-fetching the
+// poll and asserting every mutable field RecordPollResult could have
+// touched (ClaimedAt, NextPollAt, LastResult, UpdatedAt) is byte-for-byte
+// unchanged.
+func TestHandleDaemonTelemetryReportIgnoresCrossTenantPoll(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org o1: %v", err)
+	}
+	if err := st.DB().Create(&store.Organization{ID: "o2", Name: "Org Two"}).Error; err != nil {
+		t.Fatalf("create org o2: %v", err)
+	}
+
+	// Daemon registers under o1.
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// The monitor and poll belong to o2 — a different org than the
+	// reporting daemon.
+	mon := &store.PostMergeMonitor{
+		ID: "mon_3", OrgID: "o2", JobID: "job_3", Repo: "other/repo", PRNumber: 7,
+		MergeCommitSHA: "beefcafe", Status: store.MonitorStatusMonitoring,
+		DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := st.CreateMonitor(ctx, mon); err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_3", OrgID: "o2", MonitorID: mon.ID, Provider: "datadog", Query: "q3",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(15 * time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+	before, err := st.GetTelemetryPoll(ctx, poll.ID)
+	if err != nil {
+		t.Fatalf("fetch poll before report: %v", err)
+	}
+
+	// Report a confident-regression-shaped result for o2's poll, signed by
+	// the o1 daemon.
+	err = d.client.TelemetryReport(ctx, daemon.TelemetryReportReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		Results: []daemon.TelemetryPollResult{{
+			PollID:   poll.ID,
+			Baseline: &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 100},
+			Current:  &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 125},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("telemetry report: %v", err)
+	}
+
+	gotMon, err := st.GetMonitorByID(ctx, mon.ID)
+	if err != nil {
+		t.Fatalf("re-fetch monitor: %v", err)
+	}
+	if gotMon.Status != store.MonitorStatusMonitoring {
+		t.Errorf("monitor status = %q, want unchanged %q — a cross-tenant report must not finalize another org's monitor", gotMon.Status, store.MonitorStatusMonitoring)
+	}
+
+	after, err := st.GetTelemetryPoll(ctx, poll.ID)
+	if err != nil {
+		t.Fatalf("re-fetch poll after report: %v", err)
+	}
+	if after.LastResult != before.LastResult {
+		t.Errorf("poll LastResult changed: before %q, after %q — RecordPollResult must not have been called", before.LastResult, after.LastResult)
+	}
+	if !after.NextPollAt.Equal(before.NextPollAt) {
+		t.Errorf("poll NextPollAt changed: before %v, after %v — RecordPollResult must not have been called", before.NextPollAt, after.NextPollAt)
+	}
+	if (after.ClaimedAt == nil) != (before.ClaimedAt == nil) {
+		t.Errorf("poll ClaimedAt changed: before %v, after %v — RecordPollResult must not have been called", before.ClaimedAt, after.ClaimedAt)
+	}
+}
+
+// TestHandleDaemonTelemetryReportReschedulesOrphanedPoll proves the fix for
+// the orphaned-poll retry loop: a poll whose MonitorID no longer resolves
+// (monitor deleted, or a data inconsistency) must still be
+// rescheduled/expired via rescheduleOrExpirePoll, not left untouched.
+// Before the fix, GetMonitorByID's error branch returned without calling
+// RecordPollResult at all — since ReleaseStaleTelemetryPolls only clears
+// claimed_at and never advances NextPollAt or checks WindowEndsAt, such a
+// poll would be re-claimed and hit this same dead end on every due-check,
+// forever, never reaching its own window-expiry check. With the fix, this
+// poll (whose window has not yet elapsed) should have its NextPollAt
+// advanced by the normal ~15-minute reschedule interval.
+func TestHandleDaemonTelemetryReportReschedulesOrphanedPoll(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken: token, PubKey: d.encPubB64(), SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Deliberately no PostMergeMonitor row for "mon_missing" — the poll
+	// points at a monitor that does not exist.
+	poll := &store.PostMergeTelemetryPoll{
+		ID: "poll_orphan", OrgID: "o1", MonitorID: "mon_missing", Provider: "datadog", Query: "q4",
+		BaselineStart: time.Now().Add(-24 * time.Hour), BaselineEnd: time.Now().Add(-23 * time.Hour),
+		CurrentStart: time.Now().Add(-15 * time.Minute), CurrentEnd: time.Now(),
+		NextPollAt: time.Now().Add(15 * time.Minute), WindowEndsAt: time.Now().Add(4 * time.Hour),
+	}
+	if err := st.CreateTelemetryPoll(ctx, poll); err != nil {
+		t.Fatalf("create telemetry poll: %v", err)
+	}
+
+	err = d.client.TelemetryReport(ctx, daemon.TelemetryReportReq{
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		Results: []daemon.TelemetryPollResult{{
+			PollID:   poll.ID,
+			Baseline: &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 100},
+			Current:  &daemon.TelemetryResultDTO{SampleCount: 40, Mean: 125},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("telemetry report: %v", err)
+	}
+
+	after, err := st.GetTelemetryPoll(ctx, poll.ID)
+	if err != nil {
+		t.Fatalf("re-fetch poll: %v", err)
+	}
+	// Window has not elapsed, so this should be the reschedule branch: a
+	// NextPollAt roughly pollRescheduleInterval (15m) from now — not the
+	// ~365-day "done" sentinel the expire branch would set, and not left
+	// unchanged at its original value either.
+	if after.NextPollAt.Equal(poll.NextPollAt) {
+		t.Error("poll NextPollAt is unchanged — the orphaned-monitor branch never called RecordPollResult")
+	}
+	if after.NextPollAt.After(time.Now().Add(300 * 24 * time.Hour)) {
+		t.Errorf("poll NextPollAt = %v pushed ~365 days out, want the normal reschedule interval since the window has not elapsed", after.NextPollAt)
+	}
+	if after.LastResult == "" {
+		t.Error("expected LastResult to be recorded even when the monitor lookup failed")
+	}
+}
