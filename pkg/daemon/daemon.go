@@ -278,7 +278,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}
 			timer.Reset(withJitter(currentInterval))
 		case <-telemetryTimer.C:
-			d.pollTelemetry(ctx)
+			pollCtx, cancel := context.WithTimeout(ctx, telemetryPollBudget)
+			d.pollTelemetry(pollCtx)
+			cancel()
 			telemetryTimer.Reset(telemetryInterval)
 		}
 	}
@@ -460,6 +462,19 @@ const defaultRenewInterval = 2 * time.Minute
 // Control Plane's due-check cheap and infrequent relative to the 5s
 // heartbeat it shares a client identity with.
 const defaultTelemetryPollInterval = 1 * time.Minute
+
+// telemetryPollBudget bounds one whole pollTelemetry pass. It runs inline in
+// Run's single top-level select, so an unbounded pass freezes the 5s
+// heartbeat for its whole duration: a full batch (the Control Plane's
+// telemetryDueLimit of 20 specs, two serial queries each at the connectors'
+// 15s client timeout) is ~10 minutes of stall in the worst case. The bound
+// also keeps a pass comfortably shorter than the Control Plane's
+// pollStaleClaimAfter, so the orchestrator's stale-claim sweep cannot
+// release a claim out from under a pass that is still running and have the
+// same poll queried and reported twice. Both telemetry connectors build
+// their requests with http.NewRequestWithContext, so expiry here actually
+// aborts an in-flight query rather than being ignored.
+const telemetryPollBudget = 2 * time.Minute
 
 // pollTelemetry asks the Control Plane what's due and, if anything is,
 // decrypts the credential bundle carried on that same response — sealed
