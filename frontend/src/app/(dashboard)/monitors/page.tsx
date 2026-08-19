@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { client, type PostMergeMonitor } from "@/lib/api";
-import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest } from "lucide-react";
+import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest, Plus } from "lucide-react";
 
 // Monitor statuses are a distinct state machine from job statuses (statusColors.ts
 // is keyed to QUEUED/RUNNING/... and has no MONITORING/VERIFIED/REGRESSION), so
@@ -20,6 +20,9 @@ export default function MonitorsPage() {
   const [error, setError] = useState("");
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
     try {
@@ -70,6 +73,21 @@ export default function MonitorsPage() {
     }
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError(null);
+    setCreating(true);
+    try {
+      await client.createMonitor(prUrl);
+      setPrUrl("");
+      await load();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create monitor");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="p-8 max-w-5xl mx-auto h-full flex flex-col text-white">
       <div className="mb-8">
@@ -81,6 +99,24 @@ export default function MonitorsPage() {
       </div>
 
       {error && <div className="flex items-center gap-2 text-red-400 text-sm mb-4"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}
+
+      <div className="glass-panel border border-white/10 rounded-2xl p-5 mb-8">
+        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Watch a merged PR</label>
+        <form onSubmit={handleCreate} className="flex gap-3">
+          <input
+            value={prUrl}
+            onChange={e => setPrUrl(e.target.value)}
+            placeholder="https://github.com/org/repo/pull/123"
+            aria-label="Pull request URL"
+            className="w-full field text-sm"
+          />
+          <button type="submit" disabled={creating || !prUrl.trim()}
+            className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50 h-[38px] shrink-0">
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Add
+          </button>
+        </form>
+        {createError && <div className="flex items-center gap-2 text-red-400 text-sm mt-3"><AlertCircle className="w-4 h-4 shrink-0" />{createError}</div>}
+      </div>
 
       <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Monitors</h2>
       {loading ? (
