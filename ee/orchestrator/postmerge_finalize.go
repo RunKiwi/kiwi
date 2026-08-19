@@ -179,6 +179,9 @@ func (s *Server) notifySlackVerdict(ctx context.Context, mon *store.PostMergeMon
 // PR-comment fixes use, guarded exactly like handleCommentTrigger's "one
 // continuation at a time" rule so a REGRESSION verdict never opens two.
 func (s *Server) submitRemediation(ctx context.Context, mon *store.PostMergeMonitor, evidence string) {
+	if mon.JobID == "" {
+		return // external_pr monitor: no originating session to resume a fix from
+	}
 	var parent store.QueuedTask
 	if err := s.db.WithContext(ctx).
 		Where("org_id = ? AND job_id = ?", mon.OrgID, mon.JobID).

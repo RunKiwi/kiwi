@@ -123,11 +123,11 @@ func TestGetPullRequestReadsMergeOutcome(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"merged":true,"merge_commit_sha":"` + strings.Repeat("a", 40) + `"}`))
+		_, _ = w.Write([]byte(`{"merged":true,"merge_commit_sha":"` + strings.Repeat("a", 40) + `","title":"speed up checkout"}`))
 	}))
 	defer srv.Close()
 
-	sha, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
+	sha, title, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +140,9 @@ func TestGetPullRequestReadsMergeOutcome(t *testing.T) {
 	if sha != strings.Repeat("a", 40) {
 		t.Errorf("sha = %q", sha)
 	}
+	if title != "speed up checkout" {
+		t.Errorf("title = %q, want %q", title, "speed up checkout")
+	}
 }
 
 func TestGetPullRequestReportsUnmerged(t *testing.T) {
@@ -148,7 +151,7 @@ func TestGetPullRequestReportsUnmerged(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sha, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
+	sha, _, merged, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +169,7 @@ func TestGetPullRequestReportsFailures(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, _, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43); err == nil {
+	if _, _, _, err := getPullRequest(context.Background(), srv.URL, "t", "acme", "widgets", 43); err == nil {
 		t.Error("expected an error for a 404")
 	}
 }

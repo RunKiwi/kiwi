@@ -36,7 +36,7 @@ func (s *Server) createExternalMonitor(ctx context.Context, orgID, owner, repo s
 		return nil, fmt.Errorf("no GitHub installation token available for org %s", orgID)
 	}
 
-	sha, merged, err := getPullRequest(ctx, api, token, owner, repo, number)
+	sha, title, merged, err := getPullRequest(ctx, api, token, owner, repo, number)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -64,5 +64,12 @@ func (s *Server) createExternalMonitor(ctx context.Context, orgID, owner, repo s
 	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
 		return nil, fmt.Errorf("create monitor: %w", err)
 	}
+	// An external_pr monitor has no Job row to recover a task description
+	// from (postMergeMonitorIntent's primary source), so the PR title —
+	// its own fallback when that lookup fails — is the only intent signal
+	// available here. enqueueTelemetryPolls is a no-op when the org has no
+	// telemetry_metrics configured for this repo, matching Phase 1a's own
+	// unconditional call site (github_webhook.go).
+	s.enqueueTelemetryPolls(ctx, mon, title)
 	return mon, nil
 }

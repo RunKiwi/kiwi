@@ -432,7 +432,7 @@ func (s *Server) resolveRevertedSHA(ctx context.Context, payload githubWebhookPa
 		log.Printf("[webhook] mint installation token to resolve revert of %s/%s#%d: %v", owner, repo, number, err)
 		return "", false
 	}
-	sha, merged, err := getPullRequest(ctx, api, tok.Value, owner, repo, number)
+	sha, _, merged, err := getPullRequest(ctx, api, tok.Value, owner, repo, number)
 	if err != nil {
 		log.Printf("[webhook] resolve revert of %s/%s#%d: %v", owner, repo, number, err)
 		return "", false
