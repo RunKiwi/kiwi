@@ -79,6 +79,40 @@ func (s *PostgresStore) FinalizeMonitor(ctx context.Context, id, newStatus, evid
 	return res.RowsAffected > 0, nil
 }
 
+// CancelMonitor is the single-fire atomic transition out of MONITORING for
+// a user-initiated cancel — the same guard shape as FinalizeMonitor, but
+// deliberately not routed through it: cancellation is not a verdict (no
+// VerdictEvidence, no signed kiwi.ver/postmerge/v1 record, no notification),
+// just a stop.
+func (s *PostgresStore) CancelMonitor(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	res := s.db.WithContext(ctx).Model(&PostMergeMonitor{}).
+		Where("id = ? AND status = ?", id, MonitorStatusMonitoring).
+		Updates(map[string]interface{}{
+			"status":       MonitorStatusCancelled,
+			"finalized_at": now,
+			"updated_at":   now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// ListMonitors returns an org's monitors, newest first, for the dashboard's
+// monitor list — capped at 200 rows for the same reason
+// ListMonitorsPastWindow is: an unbounded query has no natural limit as an
+// org's history grows.
+func (s *PostgresStore) ListMonitors(ctx context.Context, orgID string) ([]PostMergeMonitor, error) {
+	var out []PostMergeMonitor
+	err := s.db.WithContext(ctx).
+		Where("org_id = ?", orgID).
+		Order("created_at DESC").
+		Limit(200).
+		Find(&out).Error
+	return out, err
+}
+
 // SetMonitorRemediationTaskID records which continuation task a REGRESSION
 // verdict spawned, for dashboard display. Called after FinalizeMonitor has
 // already won the single-fire race, so this is a second, non-racing update.

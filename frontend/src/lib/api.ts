@@ -66,6 +66,28 @@ export interface Integration {
   connected: boolean;
 }
 
+// Mirrors store.PostMergeMonitor. origin distinguishes a monitor Kiwi opened
+// itself (kiwi_pr) from one attached to a PR someone else opened and asked
+// Kiwi to watch (external_pr) — see the "Watching" badge on the Monitors page.
+export interface PostMergeMonitor {
+  id: string;
+  org_id: string;
+  job_id: string;
+  origin: "kiwi_pr" | "external_pr";
+  repo: string;
+  pr_number: number;
+  merge_commit_sha: string;
+  status: "MONITORING" | "VERIFIED" | "REGRESSION" | "CANCELLED";
+  verdict_evidence: string;
+  deployed_at: string;
+  window_ends_at: string;
+  finalized_at: string | null;
+}
+
+export interface MonitorsListResponse {
+  monitors: PostMergeMonitor[];
+}
+
 export interface GithubInstallation {
   installation_id: number;
   org_id: string;
@@ -745,6 +767,17 @@ export const client = {
 
   listIntegrations: () =>
     fetchApi<{ integrations: Integration[] }>("/api/v1/integrations"),
+
+  listMonitors: () => fetchApi<MonitorsListResponse>("/api/v1/monitors"),
+
+  createMonitor: (prUrl: string) =>
+    fetchApi<PostMergeMonitor>("/api/v1/monitors", {
+      method: "POST",
+      body: JSON.stringify({ pr_url: prUrl }),
+    }),
+
+  cancelMonitor: (id: string) =>
+    fetchApi<void>(`/api/v1/monitors/${id}/cancel`, { method: "POST" }),
 
   // GitHub App. listGithubInstallations reports which GitHub accounts this org
   // has connected; githubInstallUrl asks the Control Plane for a signed install

@@ -293,6 +293,7 @@ func (s *Server) createPostMergeMonitor(ctx context.Context, orgID, jobID string
 		Status:         store.MonitorStatusMonitoring,
 		DeployedAt:     mergedAt,
 		WindowEndsAt:   mergedAt.Add(24 * time.Hour),
+		Origin:         store.MonitorOriginKiwiPR,
 	}
 	if err := s.storage.CreateMonitor(ctx, mon); err != nil {
 		log.Printf("[webhook] create monitor for job %s: %v", jobID, err)
@@ -431,7 +432,7 @@ func (s *Server) resolveRevertedSHA(ctx context.Context, payload githubWebhookPa
 		log.Printf("[webhook] mint installation token to resolve revert of %s/%s#%d: %v", owner, repo, number, err)
 		return "", false
 	}
-	sha, merged, err := getPullRequest(ctx, api, tok.Value, owner, repo, number)
+	sha, _, merged, err := getPullRequest(ctx, api, tok.Value, owner, repo, number)
 	if err != nil {
 		log.Printf("[webhook] resolve revert of %s/%s#%d: %v", owner, repo, number, err)
 		return "", false

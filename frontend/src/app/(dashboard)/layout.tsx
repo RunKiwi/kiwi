@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, Activity, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt, Users, LineChart } from "lucide-react";
+import { LayoutDashboard, Activity, Settings, Server, Cpu, Link2, LogOut, Shield, Receipt, Users, LineChart, Radar } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronLeft, Menu, X as CloseIcon } from "lucide-react";
@@ -89,6 +89,7 @@ export default function DashboardLayout({
     { name: "Models", href: "/models", icon: Cpu },
     { name: "Integrations", href: "/integrations", icon: Link2 },
     { name: "Metrics", href: "/metrics", icon: LineChart },
+    { name: "Monitors", href: "/monitors", icon: Radar },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 

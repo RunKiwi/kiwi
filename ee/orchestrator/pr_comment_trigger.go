@@ -7,6 +7,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -34,6 +35,20 @@ func (s *Server) handleCommentTrigger(r *http.Request, event string, t *commentT
 	// round whose reply starts a round, billed to the customer until something
 	// breaks.
 	if t.SenderIsBot {
+		return
+	}
+
+	// 1b. "@runkiwi monitor this" branches out here, before the task lookup:
+	// requiring an existing Kiwi task would defeat the entire point of "any
+	// merged PR, not just Kiwi's own." orgID is resolved via the repo's
+	// GitHub installation instead of a task lookup, since an external PR has
+	// no queued_tasks row to resolve org through.
+	if wantsMonitorCreation(instructionFrom(t.Body)) {
+		inst, err := s.storage.FindGitHubInstallationByLogin(ctx, t.Owner)
+		if err != nil {
+			return // no installation covers this repo owner; nothing we can do
+		}
+		s.handleMonitorTrigger(ctx, inst.OrgID, event, t)
 		return
 	}
 
@@ -124,6 +139,71 @@ func (s *Server) handleCommentTrigger(r *http.Request, event string, t *commentT
 	// Acknowledge last, once the work is really queued: an eye on a comment
 	// that produced nothing is worse than no eye at all.
 	s.acknowledge(ctx, parent.OrgID, event, t)
+}
+
+// handleMonitorTrigger is handleCommentTrigger's counterpart for "@runkiwi
+// monitor this" — reachable for ANY merged PR, not only ones with a Kiwi
+// task, which is why it resolves orgID via the repo's GitHub installation
+// rather than via a task lookup. Still respects PRCommentMode (an org that
+// disabled comment-driven behavior gets none of it, monitor creation
+// included) and the same write-access guard as a continuation.
+//
+// event is threaded through (rather than hardcoded to "issue_comment") so
+// acknowledge reacts on the right id space when the trigger arrives as a
+// pull_request_review_comment instead — addReaction's own comment warns that
+// getting this wrong reacts to a different comment entirely.
+//
+// commentAlreadyHandled (keyed on queued_tasks) is not called here: a
+// monitor request writes no queued_tasks row, so that dedupe would never
+// fire — it would always report "not seen," making the check dead weight,
+// not a safeguard.
+//
+// ErrMonitorAlreadyExists always gets a reply (matching handleCreateMonitor's
+// 409 on the dashboard path) rather than being logged and swallowed. That
+// does mean a true GitHub webhook redelivery of the exact same comment can
+// produce a second "a monitor already exists" reply, since nothing here is
+// keyed on CommentID: PostMergeMonitor has no comment-id column, and adding
+// one (plus a migration) purely to silence a low-stakes duplicate reply on
+// a rare redelivery is out of proportion to what it buys. A genuinely new,
+// different comment asking about an already-monitored PR — a different
+// person, or the same person asking again later — needs this reply; a true
+// redelivery tolerating an occasional duplicate low-stakes comment is the
+// accepted tradeoff.
+func (s *Server) handleMonitorTrigger(ctx context.Context, orgID, event string, t *commentTrigger) {
+	mode, err := s.storage.PRCommentMode(ctx, orgID)
+	if err != nil {
+		log.Printf("[pr-comment] reading the mode for org %s: %v", orgID, err)
+		return
+	}
+	switch mode {
+	case store.PRCommentModeOff:
+		return
+	case store.PRCommentModeMention:
+		if !mentionsKiwi(t.Body) {
+			return
+		}
+	}
+
+	if !s.commenterMayInstruct(ctx, orgID, t) {
+		return
+	}
+
+	mon, err := s.createExternalMonitor(ctx, orgID, t.Owner, t.Repo, t.PRNumber, githubAPIDefault)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPRNotMerged):
+			s.replyInPR(ctx, orgID, t, "This PR isn't merged yet — comment `@runkiwi monitor this` again once it's merged.")
+		case errors.Is(err, ErrMonitorAlreadyExists):
+			s.replyInPR(ctx, orgID, t, "A monitor already exists for this PR.")
+		default:
+			log.Printf("[pr-comment] create monitor from comment %d: %v", t.CommentID, err)
+			s.replyInPR(ctx, orgID, t, "Couldn't create a monitor for this PR — please try again.")
+		}
+		return
+	}
+
+	s.replyInPR(ctx, orgID, t, fmt.Sprintf("Watching this PR for regressions for the next 24h (monitor `%s`).", mon.ID))
+	s.acknowledge(ctx, orgID, event, t)
 }
 
 // taskForPR resolves a pull request URL to the task that opened it, using the

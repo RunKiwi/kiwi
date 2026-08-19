@@ -247,6 +247,80 @@ func TestFinalizeMonitorIsNoOpIfAlreadyFinalized(t *testing.T) {
 	}
 }
 
+// TestSubmitRemediationIsANoOpForAnExternalPRMonitor proves Finding 2's fix:
+// submitRemediation must not treat an empty JobID as "no filter" against
+// QueuedTask. Before this fix, an external_pr monitor (JobID: "" by
+// construction — it has no originating Kiwi session) would query
+// `WHERE org_id = ? AND job_id = ?` with mon.JobID == "", i.e. literally
+// `job_id = ”` — which today correctly finds nothing only because no
+// queued_tasks row happens to have an empty job_id, a fact about current
+// data, not a guarantee. The fix adds an explicit early return so the
+// no-remediation behavior is structural rather than incidental.
+//
+// To make that failure mode reachable, this test seeds a fully-formed
+// QueuedTask with JobID: "" in the same org — the exact row shape the
+// finding says "if one ever did [exist]" — so that without the guard, the
+// pre-existing query matches it and proceeds through SubmitContinuation,
+// which this test's setupWebhookTest server (via NewServer) wires with a
+// real, non-nil planner.Service. Verified by temporarily removing the guard
+// during development: the test fails (a remediation task is created) without
+// it, and passes with it.
+func TestSubmitRemediationIsANoOpForAnExternalPRMonitor(t *testing.T) {
+	srv, s := setupWebhookTest(t)
+	ctx := context.Background()
+	orgID := "org1"
+	if err := s.DB().Create(&store.Organization{ID: orgID, Name: "acme", AutoRemediate: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A fully-formed task with an empty job_id — the row that must never
+	// exist for today's "no filter matches" behavior to hold, and the exact
+	// row this test constructs to prove the guard, not that absence, is what
+	// keeps submitRemediation a no-op.
+	emptyJobIDTask := &store.QueuedTask{
+		ID: "task-no-job", OrgID: orgID, JobID: "", RootTaskID: "task-no-job",
+		Status: store.TaskSucceeded,
+		Spec:   map[string]interface{}{"task": "unrelated work", "repo_url": "https://github.com/acme/widgets"},
+	}
+	if err := s.EnqueueTask(ctx, emptyJobIDTask); err != nil {
+		t.Fatal(err)
+	}
+	// So that, without the guard, the query above's match would actually
+	// reach SubmitContinuation's repo-auth check and succeed rather than
+	// being turned away for an unrelated reason (no GitHub access) — which
+	// would let this test pass for the wrong cause.
+	if err := s.SaveCredential(ctx, orgID, "GIT_TOKEN", store.CredentialGit, "ghp-test"); err != nil {
+		t.Fatal(err)
+	}
+
+	mon := &store.PostMergeMonitor{
+		ID: "mon_ext", OrgID: orgID, JobID: "", Origin: store.MonitorOriginExternalPR,
+		Repo: "acme/widgets", PRNumber: 99, MergeCommitSHA: strings.Repeat("e", 40),
+		Status: store.MonitorStatusMonitoring, DeployedAt: time.Now(), WindowEndsAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := s.CreateMonitor(ctx, mon); err != nil {
+		t.Fatal(err)
+	}
+
+	// Must not panic and must not submit anything.
+	srv.submitRemediation(ctx, mon, "check run failed")
+
+	var remediations []store.QueuedTask
+	if err := s.DB().Where("org_id = ? AND origin = ?", orgID, store.OriginPostMergeRemediation).Find(&remediations).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remediations) != 0 {
+		t.Errorf("got %d remediation continuations for an external_pr monitor with empty JobID, want 0", len(remediations))
+	}
+
+	var monRow store.PostMergeMonitor
+	if err := s.DB().First(&monRow, "id = ?", "mon_ext").Error; err != nil {
+		t.Fatal(err)
+	}
+	if monRow.RemediationTaskID != nil {
+		t.Errorf("monitor.remediation_task_id = %v, want nil", monRow.RemediationTaskID)
+	}
+}
+
 func TestFinalizePastWindowMonitorsMarksCleanOnesVerified(t *testing.T) {
 	srv, s := setupWebhookTest(t)
 	if err := s.DB().Create(&store.Organization{ID: "org1", Name: "acme"}).Error; err != nil {

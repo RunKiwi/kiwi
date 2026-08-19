@@ -174,6 +174,33 @@ func (s *PostgresStore) GetGitHubInstallationByID(ctx context.Context, installat
 	return &inst, nil
 }
 
+// FindGitHubInstallationByLogin resolves the org that owns accountLogin's
+// GitHub App installation, with no org_id filter — the second deliberate
+// exception to this file's "every query is org-scoped" rule (the first is
+// the uninstall path). This one is safe for the same reason: its only
+// caller is the GitHub webhook handler, which HMAC-verifies the payload
+// (constant-time compare, fail-closed if unset — see handleGithubWebhook)
+// before any of this runs, so accountLogin here is GitHub-authenticated,
+// not a value a malicious commenter could spoof to read another org's
+// installation.
+func (s *PostgresStore) FindGitHubInstallationByLogin(ctx context.Context, accountLogin string) (*GitHubInstallation, error) {
+	login := NormalizeAccountLogin(accountLogin)
+	if login == "" {
+		return nil, ErrInstallationNotFound
+	}
+	var inst GitHubInstallation
+	err := s.db.WithContext(ctx).
+		Where("account_login = ?", login).
+		First(&inst).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInstallationNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find github installation by login: %w", err)
+	}
+	return &inst, nil
+}
+
 // DeleteGitHubInstallation removes a link, for the `installation.deleted`
 // webhook.
 //
