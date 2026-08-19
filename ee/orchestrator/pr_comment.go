@@ -163,6 +163,14 @@ func instructionFrom(body string) string {
 	return strings.TrimSpace(strings.Join(strings.Fields(stripped), " "))
 }
 
+// wantsMonitorCreation reports whether a stripped instruction ("monitor
+// this", "monitor", etc.) asks for a monitor rather than a code fix —
+// checked before falling through to SubmitContinuation.
+func wantsMonitorCreation(instruction string) bool {
+	lower := strings.ToLower(strings.TrimSpace(instruction))
+	return lower == "monitor" || strings.HasPrefix(lower, "monitor this") || strings.HasPrefix(lower, "monitor it")
+}
+
 // associationGrantsWrite reports whether GitHub's author_association alone
 // proves write access, saving an API call for the common cases.
 //

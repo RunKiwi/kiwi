@@ -197,6 +197,7 @@ type Store interface {
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]GitHubInstallation, error)
 	DeleteGitHubInstallation(ctx context.Context, installationID int64) error
 	GetGitHubInstallationByID(ctx context.Context, installationID int64) (*GitHubInstallation, error)
+	FindGitHubInstallationByLogin(ctx context.Context, accountLogin string) (*GitHubInstallation, error)
 
 	// Post-Merge Verification (Phase 1a). CreateMonitor opens a monitor at
 	// merge time; GetMonitorByMergeCommit resolves a webhook event back to
