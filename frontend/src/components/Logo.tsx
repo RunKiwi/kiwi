@@ -1,25 +1,36 @@
-import { useId } from "react";
-
 /**
- * Kiwi bird mark. Colored via `currentColor`, so set the color with a Tailwind
- * `text-*` class or inline style. The eye is a mask hole, so the mark reads in a
- * single color on any ground. Refined elegant silhouette.
+ * Kiwi 8-bit chunky chibi mark. Colored via `currentColor`, so set the color
+ * with a Tailwind `text-*` class or inline style.
+ * Source: https://github.com/RunKiwi/kiwi-brand (svg/logos/kiwi-logo-monochrome.svg)
  */
 export function Logo({ className }: { className?: string }) {
-  // Unique per instance so multiple logos on a page don't share a mask id.
-  const maskId = `kiwi-eye-${useId().replace(/:/g, "")}`;
   return (
-    <svg viewBox="0 0 128 128" className={className} fill="currentColor" aria-hidden="true">
-      <mask id={maskId}>
-        <rect width="128" height="128" fill="#fff" />
-        <circle cx="54" cy="52" r="4.2" fill="#000" />
-      </mask>
-      <g mask={`url(#${maskId})`}>
-        <path d="M46,40 C58,28 82,26 96,42 C112,52 110,66 104,74 C98,90 80,100 60,98 C46,96 36,86 34,74 C31,64 34,50 46,40 Z" />
-        <path d="M36,60 C25,68 16,80 8,94 C19,85 30,79 40,72 Z" />
-        <path d="M60,96 L60,112" stroke="currentColor" strokeWidth="6" strokeLinecap="round" fill="none" />
-        <path d="M76,98 L76,112" stroke="currentColor" strokeWidth="6" strokeLinecap="round" fill="none" />
-      </g>
+    <svg
+      viewBox="0 0 16 16"
+      className={className}
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+      aria-hidden="true"
+    >
+      <rect x="5" y="2" width="5" height="1" opacity={0.8} />
+      <rect x="3" y="3" width="8" height="1" opacity={0.9} />
+      <rect x="2" y="4" width="5" height="1" opacity={1.0} />
+      <rect x="9" y="4" width="2" height="1" opacity={1.0} />
+      <rect x="2" y="5" width="9" height="1" opacity={1.0} />
+      <rect x="1" y="6" width="10" height="1" opacity={0.95} />
+      <rect x="1" y="7" width="10" height="1" opacity={0.95} />
+      <rect x="2" y="8" width="9" height="1" opacity={0.85} />
+      <rect x="2" y="9" width="9" height="1" opacity={0.8} />
+      <rect x="3" y="10" width="7" height="1" opacity={0.7} />
+      <rect x="4" y="11" width="5" height="1" opacity={0.6} />
+      <rect x="11" y="5" width="3" height="2" opacity={0.95} />
+      <rect x="14" y="6" width="1" height="1" opacity={0.8} />
+      <rect x="4" y="12" width="2" height="2" opacity={0.9} />
+      <rect x="3" y="13" width="3" height="1" opacity={0.9} />
+      <rect x="8" y="12" width="2" height="2" opacity={0.9} />
+      <rect x="7" y="13" width="3" height="1" opacity={0.9} />
+      <rect x="7" y="4" width="1" height="1" fill="#FFFFFF" opacity={0.95} />
     </svg>
   );
 }
