@@ -3,7 +3,28 @@ name: Deploy to Production
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: {}
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'migrations/**'
+      - 'Dockerfile'
+      - 'deploy/**'
+      - 'scripts/**'
+      - 'cmd/**'
+      - 'ee/**'
+      - 'pkg/**'
+      - 'frontend/**'
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: 'Deploy Backend (kiwid, kiwidaemon, migrations, api, orchestrator, fleet)'
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: 'Deploy Frontend (Next.js)'
+        type: boolean
+        default: true
 
 concurrency:
   group: deploy-prod
@@ -20,8 +41,49 @@ env:
   FLEET_VM_ZONE: us-central1-a
 
 jobs:
-  verify:
-    name: Verify (test + lint)
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.check.outputs.backend }}
+      frontend: ${{ steps.check.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            backend:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'migrations/**'
+              - 'Dockerfile'
+              - 'deploy/**'
+              - 'scripts/**'
+              - 'cmd/**'
+              - 'ee/**'
+              - 'pkg/**'
+            frontend:
+              - 'frontend/**'
+
+      - name: Resolve change flags
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "backend=${{ inputs.deploy_backend }}" >> "$GITHUB_OUTPUT"
+            echo "frontend=${{ inputs.deploy_frontend }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify-backend:
+    name: Verify Backend (test + lint)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +111,14 @@ jobs:
       - name: Go build (all packages)
         run: CGO_ENABLED=0 go build ./...
 
+  verify-frontend:
+    name: Verify Frontend (lint + build)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -70,9 +140,10 @@ jobs:
         env:
           NEXT_PUBLIC_KIWI_API_URL: https://api.runkiwi.dev
 
-  build-and-push:
-    name: Build and push images
-    needs: verify
+  build-backend:
+    name: Build and push backend images
+    needs: [detect-changes, verify-backend]
+    if: needs.detect-changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -87,13 +158,6 @@ jobs:
       - name: Short SHA
         id: sha
         run: echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - name: Require POSTHOG_KEY secret
-        run: |
-          if [ -z "${{ secrets.POSTHOG_KEY }}" ]; then
-            echo "::error::secrets.POSTHOG_KEY is empty; the frontend build would silently ship without analytics. Set it in repo settings before deploying."
-            exit 1
-          fi
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -136,6 +200,46 @@ jobs:
             ${{ env.ARTIFACT_REPO }}/kiwidaemon:${{ steps.sha.outputs.short }}
             ${{ env.ARTIFACT_REPO }}/kiwidaemon:latest
 
+  build-frontend:
+    name: Build and push frontend image
+    needs: [detect-changes, verify-frontend]
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      sha: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Require POSTHOG_KEY secret
+        run: |
+          if [ -z "${{ secrets.POSTHOG_KEY }}" ]; then
+            echo "::error::secrets.POSTHOG_KEY is empty; the frontend build would silently ship without analytics. Set it in repo settings before deploying."
+            exit 1
+          fi
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
@@ -153,7 +257,7 @@ jobs:
 
   migrate:
     name: Run database migrations
-    needs: build-and-push
+    needs: build-backend
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -177,7 +281,7 @@ jobs:
 
       - name: Update and execute kiwi-migrate job
         env:
-          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-backend.outputs.sha }}
         run: |
           set -euo pipefail
           gcloud beta run jobs update kiwi-migrate \
@@ -195,7 +299,7 @@ jobs:
 
   deploy-api:
     name: Deploy kiwi-api
-    needs: [migrate, build-and-push]
+    needs: [migrate, build-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -213,7 +317,7 @@ jobs:
 
       - name: Deploy kiwi-api directly (no canary — confirmed 2026-08-10 that direct per-revision *.run.app URLs 404 at Google's edge for this service, so a curl-based canary health check can never pass)
         env:
-          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-backend.outputs.sha }}
         run: |
           set -euo pipefail
           echo "deploying kiwi-api directly: gcloud run deploy blocks until the new revision is Ready before routing traffic to it, and leaves the prior revision serving if the new one never becomes ready"
@@ -225,7 +329,7 @@ jobs:
 
   deploy-orchestrator:
     name: Deploy kiwi-orchestrator
-    needs: [deploy-api, build-and-push]
+    needs: [deploy-api, build-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -243,7 +347,7 @@ jobs:
 
       - name: Deploy kiwi-orchestrator directly (no public HTTP surface, singleton — a held-open canary instance is unsafe here too)
         env:
-          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-and-push.outputs.sha }}
+          IMAGE: ${{ env.ARTIFACT_REPO }}/kiwid:${{ needs.build-backend.outputs.sha }}
         run: |
           set -euo pipefail
           echo "deploying kiwi-orchestrator directly: gcloud run deploy blocks until the new revision is Ready before routing any traffic to it, and leaves the prior revision serving if the new one never becomes ready"
@@ -255,7 +359,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy kiwi-frontend
-    needs: [deploy-orchestrator, build-and-push]
+    needs: build-frontend
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -273,7 +377,7 @@ jobs:
 
       - name: Deploy kiwi-frontend directly (same ingress restriction as kiwi-api — see deploy-api above)
         env:
-          IMAGE: ${{ env.ARTIFACT_REPO }}/frontend:${{ needs.build-and-push.outputs.sha }}
+          IMAGE: ${{ env.ARTIFACT_REPO }}/frontend:${{ needs.build-frontend.outputs.sha }}
         run: |
           set -euo pipefail
           echo "deploying kiwi-frontend directly: gcloud run deploy blocks until the new revision is Ready before routing traffic to it, and leaves the prior revision serving if the new one never becomes ready"
@@ -285,7 +389,7 @@ jobs:
 
   refresh-fleet:
     name: Refresh free-fleet daemon image
-    needs: [deploy-frontend, build-and-push]
+    needs: [deploy-orchestrator, build-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -332,18 +436,18 @@ jobs:
 
       - name: Restart fleet daemon-image + provisioner services, verify digest
         env:
-          # Read directly from build-and-push's own docker/build-push-action
+          # Read directly from build-backend's own docker/build-push-action
           # output rather than re-querying Artifact Registry — avoids both
           # an extra live API call and the containeranalysis.occurrences.list
           # permission `gcloud artifacts docker images describe` turned out
           # to require (confirmed live 2026-08-10; not granted, and not
           # actually needed for this).
-          EXPECTED_DIGEST: ${{ needs.build-and-push.outputs.kiwidaemon_digest }}
+          EXPECTED_DIGEST: ${{ needs.build-backend.outputs.kiwidaemon_digest }}
         run: |
           set -euo pipefail
 
           if [ -z "$EXPECTED_DIGEST" ]; then
-            echo "::error::build-and-push did not produce a kiwidaemon digest; refusing to compare against an empty value"
+            echo "::error::build-backend did not produce a kiwidaemon digest; refusing to compare against an empty value"
             exit 1
           fi
           echo "expecting fleet host to be running digest: ${EXPECTED_DIGEST}"
