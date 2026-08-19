@@ -155,10 +155,20 @@ func (s *Server) handleCommentTrigger(r *http.Request, event string, t *commentT
 //
 // commentAlreadyHandled (keyed on queued_tasks) is not called here: a
 // monitor request writes no queued_tasks row, so that dedupe would never
-// fire. Redelivery-quietness instead falls out of createExternalMonitor's
-// own dedupe on merge-commit SHA — ErrMonitorAlreadyExists is treated as
-// "already handled" and logged rather than replied to, so a GitHub redelivery
-// does not post a second "already exists" comment into the PR.
+// fire — it would always report "not seen," making the check dead weight,
+// not a safeguard.
+//
+// ErrMonitorAlreadyExists always gets a reply (matching handleCreateMonitor's
+// 409 on the dashboard path) rather than being logged and swallowed. That
+// does mean a true GitHub webhook redelivery of the exact same comment can
+// produce a second "a monitor already exists" reply, since nothing here is
+// keyed on CommentID: PostMergeMonitor has no comment-id column, and adding
+// one (plus a migration) purely to silence a low-stakes duplicate reply on
+// a rare redelivery is out of proportion to what it buys. A genuinely new,
+// different comment asking about an already-monitored PR — a different
+// person, or the same person asking again later — needs this reply; a true
+// redelivery tolerating an occasional duplicate low-stakes comment is the
+// accepted tradeoff.
 func (s *Server) handleMonitorTrigger(ctx context.Context, orgID, event string, t *commentTrigger) {
 	mode, err := s.storage.PRCommentMode(ctx, orgID)
 	if err != nil {
@@ -184,7 +194,7 @@ func (s *Server) handleMonitorTrigger(ctx context.Context, orgID, event string, 
 		case errors.Is(err, ErrPRNotMerged):
 			s.replyInPR(ctx, orgID, t, "This PR isn't merged yet — comment `@runkiwi monitor this` again once it's merged.")
 		case errors.Is(err, ErrMonitorAlreadyExists):
-			log.Printf("[pr-comment] monitor already exists for comment %d on %s/%s#%d", t.CommentID, t.Owner, t.Repo, t.PRNumber)
+			s.replyInPR(ctx, orgID, t, "A monitor already exists for this PR.")
 		default:
 			log.Printf("[pr-comment] create monitor from comment %d: %v", t.CommentID, err)
 			s.replyInPR(ctx, orgID, t, "Couldn't create a monitor for this PR — please try again.")

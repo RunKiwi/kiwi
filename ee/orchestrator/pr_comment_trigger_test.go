@@ -105,11 +105,14 @@ func TestMonitorCommentTriggerCreatesAnExternalMonitor(t *testing.T) {
 	}
 }
 
-// GitHub redelivers. The second delivery must not post a second "already
-// exists" comment into the PR — createExternalMonitor's own dedupe on
-// merge-commit SHA is what stops the second monitor, and handleMonitorTrigger
-// must treat that as quiet, not as something to reply about.
-func TestMonitorCommentTriggerRedeliveryIsQuiet(t *testing.T) {
+// GitHub redelivers the identical webhook (same CommentID) after the first
+// delivery already created the monitor. createExternalMonitor's own dedupe
+// on merge-commit SHA is what stops a second monitor from being created;
+// handleMonitorTrigger does reply again on the redelivery ("a monitor
+// already exists"), an accepted tradeoff documented on handleMonitorTrigger
+// itself — the alternative is a schema change to track handled comment ids
+// purely to silence a rare, low-stakes duplicate comment.
+func TestMonitorCommentTriggerRedeliveryDoesNotDuplicateTheMonitor(t *testing.T) {
 	withCommentSecret(t)
 	srv, s := setupWebhookTest(t)
 	seedMonitorInstallation(t, s, store.PRCommentModeMention)
@@ -131,10 +134,53 @@ func TestMonitorCommentTriggerRedeliveryIsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(monitors) != 1 {
-		t.Fatalf("got %d monitors after a redelivery, want 1", len(monitors))
+		t.Fatalf("got %d monitors after a redelivery, want 1 — no duplicate monitor", len(monitors))
 	}
-	if got := atomic.LoadInt32(commentsPosted); got != 1 {
-		t.Errorf("comments posted = %d, want 1 — the redelivery must not post a second reply", got)
+	// One confirmation reply from the first delivery, one "already exists"
+	// reply from the second — see handleMonitorTrigger's doc comment for why
+	// this duplicate reply is the accepted tradeoff rather than a bug.
+	if got := atomic.LoadInt32(commentsPosted); got != 2 {
+		t.Errorf("comments posted = %d, want 2 (confirmation + already-exists)", got)
+	}
+}
+
+// A genuinely different comment (different CommentID — a different
+// commenter, or the same one asking again later) on a PR that already has a
+// monitor must get a reply saying so, exactly like the dashboard's POST
+// /api/v1/monitors returns 409 for the same situation. This is the case
+// commentAlreadyHandled could never distinguish from a true redelivery (it's
+// keyed on queued_tasks, which this path never writes to), so it must not be
+// silently swallowed the way a true redelivery's duplicate is tolerated.
+func TestMonitorCommentTriggerOnAnAlreadyMonitoredPRGetsAConflictReply(t *testing.T) {
+	withCommentSecret(t)
+	srv, s := setupWebhookTest(t)
+	seedMonitorInstallation(t, s, store.PRCommentModeMention)
+
+	api, commentsPosted := monitorTriggerAPI(t, true, false)
+	defer api.Close()
+	withGithubAPIRedirect(t, api.URL)
+	srv.githubApp = githubAppFixture(t).githubApp
+
+	// First comment (id 906) creates the monitor.
+	if rec := postComment(t, srv, "issue_comment",
+		commentDelivery("@runkiwi monitor this", "OWNER", "User", 906)); rec.Code != http.StatusOK {
+		t.Fatalf("first delivery: status = %d, want 200", rec.Code)
+	}
+	// A different comment (different id, different sender) asks again.
+	if rec := postComment(t, srv, "issue_comment",
+		commentDelivery("@runkiwi monitor this", "COLLABORATOR", "User", 907)); rec.Code != http.StatusOK {
+		t.Fatalf("second delivery: status = %d, want 200", rec.Code)
+	}
+
+	monitors, err := s.ListMonitors(context.Background(), "org1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(monitors) != 1 {
+		t.Fatalf("got %d monitors, want 1 — the second comment must not create another", len(monitors))
+	}
+	if got := atomic.LoadInt32(commentsPosted); got != 2 {
+		t.Errorf("comments posted = %d, want 2 (confirmation + already-exists reply to the second comment)", got)
 	}
 }
 
