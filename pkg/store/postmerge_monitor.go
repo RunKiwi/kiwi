@@ -99,6 +99,20 @@ func (s *PostgresStore) CancelMonitor(ctx context.Context, id string) (bool, err
 	return res.RowsAffected > 0, nil
 }
 
+// ListMonitors returns an org's monitors, newest first, for the dashboard's
+// monitor list — capped at 200 rows for the same reason
+// ListMonitorsPastWindow is: an unbounded query has no natural limit as an
+// org's history grows.
+func (s *PostgresStore) ListMonitors(ctx context.Context, orgID string) ([]PostMergeMonitor, error) {
+	var out []PostMergeMonitor
+	err := s.db.WithContext(ctx).
+		Where("org_id = ?", orgID).
+		Order("created_at DESC").
+		Limit(200).
+		Find(&out).Error
+	return out, err
+}
+
 // SetMonitorRemediationTaskID records which continuation task a REGRESSION
 // verdict spawned, for dashboard display. Called after FinalizeMonitor has
 // already won the single-fire race, so this is a second, non-racing update.

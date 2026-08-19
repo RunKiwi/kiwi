@@ -467,6 +467,14 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/telemetry-metrics", s.handleTelemetryMetrics)
 	mux.HandleFunc("/api/v1/telemetry-metrics/", s.handleTelemetryMetrics)
 	mux.HandleFunc("/api/v1/telemetry-metrics/test", s.handleTestTelemetryQuery)
+	mux.HandleFunc("/api/v1/monitors", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.handleCreateMonitor(w, r)
+			return
+		}
+		s.handleListMonitors(w, r)
+	})
+	mux.HandleFunc("/api/v1/monitors/", s.handleCancelMonitor)
 	mux.HandleFunc("/api/v1/integrations", s.handleIntegrations)
 	mux.HandleFunc("/api/v1/usage", s.handleAccountUsage)
 	mux.HandleFunc("/api/v1/spend", s.handleSpend)

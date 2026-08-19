@@ -213,6 +213,7 @@ type Store interface {
 	CancelMonitor(ctx context.Context, id string) (bool, error)
 	SetMonitorRemediationTaskID(ctx context.Context, id, taskID string) error
 	ListMonitorsPastWindow(ctx context.Context, now time.Time) ([]PostMergeMonitor, error)
+	ListMonitors(ctx context.Context, orgID string) ([]PostMergeMonitor, error)
 	AutoRemediate(ctx context.Context, orgID string) (bool, error)
 
 	// TelemetryMetric is org-level, operator-configured metric config a
