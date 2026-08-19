@@ -1,10 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect width="128" height="128" rx="28" fill="#0E1A24"/>
-  <mask id="e"><rect width="128" height="128" fill="#fff"/><circle cx="54" cy="52" r="4.2" fill="#000"/></mask>
-  <g transform="translate(20,18) scale(0.7)" fill="#93C645" mask="url(#e)">
-    <path d="M46,40 C58,28 82,26 96,42 C112,52 110,66 104,74 C98,90 80,100 60,98 C46,96 36,86 34,74 C31,64 34,50 46,40 Z"/>
-    <path d="M36,60 C25,68 16,80 8,94 C19,85 30,79 40,72 Z"/>
-    <path d="M60,96 L60,112" stroke="#93C645" stroke-width="6" stroke-linecap="round" fill="none"/>
-    <path d="M76,98 L76,112" stroke="#93C645" stroke-width="6" stroke-linecap="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" shape-rendering="crispEdges">
+  <defs>
+    <linearGradient id="appTileGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#152433"/>
+      <stop offset="100%" stop-color="#080E14"/>
+    </linearGradient>
+    <radialGradient id="appGlow" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#93C645" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#080E14" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#appTileGrad)"/>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#appGlow)"/>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="none" stroke="#93C645" stroke-width="2" stroke-opacity="0.35"/>
+
+  <g transform="translate(96, 96) scale(20)">
+    <rect x="5" y="2" width="5" height="1" fill="#88BC38"/>
+    <rect x="3" y="3" width="8" height="1" fill="#93C645"/>
+    <rect x="2" y="4" width="9" height="1" fill="#93C645"/>
+    <rect x="2" y="5" width="9" height="1" fill="#93C645"/>
+    <rect x="1" y="6" width="10" height="1" fill="#93C645"/>
+    <rect x="1" y="7" width="10" height="1" fill="#93C645"/>
+    <rect x="2" y="8" width="9" height="1" fill="#88BC38"/>
+    <rect x="2" y="9" width="9" height="1" fill="#78A832"/>
+    <rect x="3" y="10" width="7" height="1" fill="#6A962A"/>
+    <rect x="4" y="11" width="5" height="1" fill="#5A8222"/>
+    <rect x="7" y="4" width="2" height="2" fill="#111816"/>
+    <rect x="7" y="4" width="1" height="1" fill="#FFFFFF"/>
+    <rect x="11" y="5" width="3" height="2" fill="#FFAA28"/>
+    <rect x="14" y="6" width="1" height="1" fill="#E89115"/>
+    <rect x="4" y="12" width="2" height="2" fill="#FFAA28"/>
+    <rect x="3" y="13" width="3" height="1" fill="#FFAA28"/>
+    <rect x="8" y="12" width="2" height="2" fill="#FFAA28"/>
+    <rect x="7" y="13" width="3" height="1" fill="#FFAA28"/>
   </g>
 </svg>
