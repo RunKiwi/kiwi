@@ -272,3 +272,45 @@ func (c *Client) GitToken(ctx context.Context, req GitTokenReq) (GitTokenResp, e
 	}
 	return GitTokenResp{}, fmt.Errorf("git token request failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 }
+
+// TelemetryDue asks the Control Plane what telemetry polls are due for this
+// daemon's org right now. Lease-free like Heartbeat: 204 means nothing is
+// due (not an error), 200 decodes the due list, anything else is wrapped.
+func (c *Client) TelemetryDue(ctx context.Context, req TelemetryDueReq) (*TelemetryDueRes, error) {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/telemetry/due", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return &TelemetryDueRes{}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("telemetry due failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+
+	var res TelemetryDueRes
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("decode telemetry due response: %w", err)
+	}
+	return &res, nil
+}
+
+// TelemetryReport posts the results of the polls this daemon executed back
+// to the Control Plane. Like TelemetryDue it carries no lease/fencing
+// branches — telemetry polling is not tied to the task lease queue.
+func (c *Client) TelemetryReport(ctx context.Context, req TelemetryReportReq) error {
+	resp, _, err := c.signedPost(ctx, "/api/v1/daemon/telemetry/report", req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("telemetry report failed with status %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+}

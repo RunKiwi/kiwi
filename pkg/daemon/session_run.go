@@ -14,6 +14,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
 
@@ -317,21 +318,34 @@ func noKeyDetail(model string) string {
 		providerNameForModel(model), model)
 }
 
+// slackWebhookCredentialName is the Control-Plane-only Slack notification
+// credential (ee/orchestrator's notifySlackVerdict — see pkg/store's
+// CredentialWebhook kind). SealCredentialsForDaemon bundles every org
+// credential regardless of Kind, so this name-literal exclusion is what
+// actually keeps it out of the sandbox test-command environment; nothing in
+// the daemon ever reads or forwards it otherwise.
+const slackWebhookCredentialName = "SLACK_WEBHOOK_URL"
+
 // taskTestEnv builds the environment the sandbox runs with.
 //
-// Two exclusions, for two different reasons. LLM keys are always withheld
-// because the sandbox executes model-generated code, and that has been true
-// since the Actor/Critic split. Everything else is withheld in session mode
-// because there the model also chooses the commands, and their output is
-// carried back into the event log — so a credential in the environment has a
-// read-and-echo path out that needs no network.
+// Four exclusions, for two different reasons. LLM keys, telemetry
+// credentials (Datadog/Prometheus — pkg/telemetry), and the Slack webhook
+// URL are always withheld because the sandbox executes model-generated code,
+// and that has been true for LLM keys since the Actor/Critic split;
+// telemetry and Slack credentials are org infrastructure/notification
+// secrets with the same exposure, so they get the same unconditional
+// treatment rather than being left to the opt-in below. Everything else is
+// withheld in session mode because there the model also chooses the
+// commands, and their output is carried back into the event log — so a
+// credential in the environment has a read-and-echo path out that needs no
+// network.
 func taskTestEnv(task string, creds map[string]string, sessionMode bool) []string {
 	env := []string{"TASK=" + task}
 	if sessionMode && !sessionAllowsTestCredentials() {
 		return env
 	}
 	for name, value := range creds {
-		if isLLMKey(name) {
+		if isLLMKey(name) || telemetry.IsTelemetryCredential(name) || name == slackWebhookCredentialName {
 			continue
 		}
 		env = append(env, name+"="+value)

@@ -5,10 +5,13 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"hash/fnv"
 	"log"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +43,7 @@ func (s *Server) finalizeMonitor(ctx context.Context, mon *store.PostMergeMonito
 
 	s.appendPostMergeRecord(ctx, mon, verdict, evidence)
 	s.notifyMonitorVerdict(ctx, mon, verdict, evidence)
+	s.notifySlackVerdict(ctx, mon, verdict, evidence)
 
 	if verdict != store.MonitorStatusRegression {
 		return
@@ -140,6 +144,34 @@ func (s *Server) notifyMonitorVerdict(ctx context.Context, mon *store.PostMergeM
 	body := "**Post-Merge Verification: " + verdict + "**\n\n" + evidence
 	if err := createIssueComment(ctx, githubAPIDefault, token, owner, repo, mon.PRNumber, body); err != nil {
 		log.Printf("[postmerge] post verdict comment on %s#%d: %v", mon.Repo, mon.PRNumber, err)
+	}
+}
+
+// notifySlackVerdict is best-effort, same contract as notifyMonitorVerdict:
+// a failed webhook post must never roll back the already-committed verdict,
+// so every failure is logged, not returned.
+func (s *Server) notifySlackVerdict(ctx context.Context, mon *store.PostMergeMonitor, verdict, evidence string) {
+	url, err := s.storage.GetCredentialPlaintext(ctx, mon.OrgID, "SLACK_WEBHOOK_URL")
+	if err != nil || url == "" {
+		return // not configured — most orgs, no error
+	}
+	body, _ := json.Marshal(map[string]string{
+		"text": "*Post-Merge Verification: " + verdict + "*\n" + mon.Repo + "#" + strconv.Itoa(mon.PRNumber) + "\n" + evidence,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[postmerge] build slack request for monitor %s: %v", mon.ID, err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := githubCallClient.Do(req) // reuse the existing shared HTTP client rather than allocate a new one
+	if err != nil {
+		log.Printf("[postmerge] post slack notification for monitor %s: %v", mon.ID, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[postmerge] slack notification for monitor %s returned %d", mon.ID, resp.StatusCode)
 	}
 }
 

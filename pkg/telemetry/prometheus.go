@@ -1,0 +1,122 @@
+package telemetry
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"time"
+)
+
+type prometheusProvider struct {
+	baseURL string
+	token   string
+	client  *http.Client
+}
+
+// NewPrometheusProvider connects to a Prometheus-compatible /api/v1
+// endpoint. baseURL and token come from an org's PROMETHEUS_BASE_URL and
+// PROMETHEUS_BEARER_TOKEN credentials (see Task 6) — the base URL travels
+// as a credential-shaped config value alongside the actual secret because
+// there is no other per-org config channel to the daemon today, and the
+// existing sealed-credential-bundle delivery already solves "get this to
+// the daemon safely" for free.
+func NewPrometheusProvider(baseURL, token string) Provider {
+	return &prometheusProvider{
+		baseURL: baseURL,
+		token:   token,
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+			// Reject redirects entirely to prevent SSRF via redirect to an
+			// internal/metadata address. The Control Plane's test-query
+			// endpoint validates the initial PROMETHEUS_BASE_URL against
+			// non-routable ranges (validatePrometheusTestDestination), but
+			// a malicious endpoint could return a 302 to 169.254.169.254 or
+			// another blocked destination. Legitimate Prometheus endpoints
+			// serve query_range at a stable path and do not redirect.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}
+}
+
+type prometheusRangeResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Values [][2]interface{} `json:"values"`
+		} `json:"result"`
+	} `json:"data"`
+}
+
+func (p *prometheusProvider) Query(ctx context.Context, query string, start, end time.Time) (Result, error) {
+	u := fmt.Sprintf("%s/api/v1/query_range?query=%s&start=%d&end=%d&step=60",
+		p.baseURL, url.QueryEscape(query), start.Unix(), end.Unix())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.token)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return Result{}, fmt.Errorf("prometheus query_range: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
+		return Result{}, fmt.Errorf("prometheus query_range returned %d: %s", resp.StatusCode, string(b))
+	}
+
+	var out prometheusRangeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return Result{}, fmt.Errorf("decode prometheus response: %w", err)
+	}
+	if out.Status != "success" || len(out.Data.Result) == 0 {
+		return Result{}, fmt.Errorf("prometheus returned no series for query %q over [%s, %s]", query, start, end)
+	}
+	// A range query over a multi-series metric returns one series per label
+	// combination, and the baseline and current calls are two separate
+	// requests over two different ranges — the series sets can differ between
+	// them (a pod that did not exist pre-merge, a label that churned).
+	// Silently taking Result[0] from each can compare two *different* series'
+	// means and report the delta as a regression. Erroring instead forces an
+	// aggregating query, whose worst case is "no verdict" rather than "wrong
+	// verdict".
+	if len(out.Data.Result) > 1 {
+		return Result{}, fmt.Errorf("prometheus query %q returned %d series, want exactly 1 — use an aggregating query (e.g. sum(), avg())", query, len(out.Data.Result))
+	}
+
+	values := out.Data.Result[0].Values
+	if len(values) == 0 {
+		return Result{}, fmt.Errorf("prometheus series for query %q has no data points", query)
+	}
+
+	var sum float64
+	count := 0
+	for _, v := range values {
+		if len(v) != 2 {
+			continue
+		}
+		s, ok := v[1].(string)
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			continue
+		}
+		sum += f
+		count++
+	}
+	if count == 0 {
+		return Result{}, fmt.Errorf("prometheus series for query %q had no parseable data points", query)
+	}
+	return Result{SampleCount: count, Mean: sum / float64(count)}, nil
+}

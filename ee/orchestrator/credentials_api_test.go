@@ -82,6 +82,35 @@ func TestHandleSetCredential(t *testing.T) {
 		}
 	})
 
+	// kind is passed straight through to storage with no allowlist — confirms
+	// the new "telemetry" kind (used by the Datadog/Prometheus integration rows,
+	// Task 6) saves through the real handler rather than being rejected by a
+	// kind check somewhere in this path.
+	t.Run("telemetry credential kind is accepted", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{
+			"name":  "PROMETHEUS_BEARER_TOKEN",
+			"kind":  "telemetry",
+			"value": "prom-secret",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewReader(body))
+		ctx := auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "org-123"})
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		s.handleSetCredential(rr, req)
+
+		if rr.Code != http.StatusNoContent {
+			t.Errorf("expected 204, got %d body %s", rr.Code, rr.Body.String())
+		}
+		var cred store.Credential
+		if err := db.First(&cred, "org_id = ? AND name = ?", "org-123", "PROMETHEUS_BEARER_TOKEN").Error; err != nil {
+			t.Fatalf("credential not found: %v", err)
+		}
+		if cred.Kind != "telemetry" {
+			t.Errorf("expected kind %q stored, got %q", "telemetry", cred.Kind)
+		}
+	})
+
 	t.Run("invalid name format", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{"name": "invalid-name", "value": "secret"})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewReader(body))

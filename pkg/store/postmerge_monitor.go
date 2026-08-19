@@ -31,6 +31,17 @@ func (s *PostgresStore) GetMonitorByMergeCommit(ctx context.Context, orgID, sha 
 	return &m, nil
 }
 
+// GetMonitorByID fetches a monitor by its primary key. Used by the
+// telemetry report path (Task 10) to resolve a poll's MonitorID back to the
+// monitor it should finalize.
+func (s *PostgresStore) GetMonitorByID(ctx context.Context, id string) (*PostMergeMonitor, error) {
+	var m PostMergeMonitor
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // FinalizeMonitor atomically transitions a monitor from MONITORING to a
 // terminal status, recording the evidence that justified it. The bool return
 // is the single-fire guard: true only for the caller whose UPDATE actually

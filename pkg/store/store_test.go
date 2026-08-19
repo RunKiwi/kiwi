@@ -25,6 +25,8 @@ func newTestStore(t *testing.T) *PostgresStore {
 		&OrgTokenGrant{},
 		&GitHubInstallation{},
 		&PostMergeMonitor{},
+		&TelemetryMetric{},
+		&PostMergeTelemetryPoll{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

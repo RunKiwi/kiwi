@@ -62,6 +62,16 @@ func seedCommentTask(t *testing.T, s *store.PostgresStore, mode string) *store.Q
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// requireProviderKey (ee/planner/service.go) fails a continuation closed
+	// when ListCredentials finds no matching credential row. Now that the
+	// credentials table is migrated in this test's DB (setupWebhookTest
+	// AutoMigrates it, for Task 11's credential-completeness check), a
+	// lookup here returns "no rows" rather than the "no such table" error
+	// requireProviderKey used to fail open on — so the planning model's
+	// provider key has to actually be on file for a continuation to submit.
+	if err := s.SaveCredential(ctx, "org1", "ANTHROPIC_API_KEY", store.CredentialLLM, "sk-ant-test"); err != nil {
+		t.Fatal(err)
+	}
 	prURL := "https://github.com/acme/widgets/pull/42"
 	task := &store.QueuedTask{
 		ID: "job_abc-impl", OrgID: "org1", JobID: "job_abc",

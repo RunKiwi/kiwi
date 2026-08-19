@@ -150,3 +150,39 @@ func TestHandleIntegrationsReflectsCredentials(t *testing.T) {
 		t.Error("github should report connected after saving GITHUB_TOKEN")
 	}
 }
+
+// The telemetry connectors (Datadog, Prometheus) must show up in the
+// integrations catalog as their own kind, and Datadog's second credential
+// (app key) must appear as its own row since integrationEntry holds exactly
+// one credential name per entry.
+func TestHandleIntegrationsIncludesTelemetryConnectors(t *testing.T) {
+	srv := newDashTestServer(t)
+	rr := httptest.NewRecorder()
+	srv.handleIntegrations(rr, authed(http.MethodGet, "/api/v1/integrations", "", "org-1"))
+
+	var resp struct {
+		Integrations []struct {
+			Key  string `json:"key"`
+			Kind string `json:"kind"`
+		} `json:"integrations"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+
+	wantKeys := map[string]bool{
+		"datadog": false, "datadog-app-key": false,
+		"prometheus": false, "prometheus-base-url": false,
+	}
+	for _, i := range resp.Integrations {
+		if _, want := wantKeys[i.Key]; want {
+			wantKeys[i.Key] = true
+			if i.Kind != "telemetry" {
+				t.Errorf("%s: expected kind \"telemetry\", got %q", i.Key, i.Kind)
+			}
+		}
+	}
+	for key, found := range wantKeys {
+		if !found {
+			t.Errorf("integrations catalog is missing %q", key)
+		}
+	}
+}

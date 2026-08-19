@@ -135,12 +135,24 @@ type integrationEntry struct {
 func buildIntegrationSpec() []integrationEntry {
 	out := []integrationEntry{
 		{"github", "GITHUB_TOKEN", "github"},
-		{"slack", "SLACK_TOKEN", "slack"},
+		{"slack", "SLACK_WEBHOOK_URL", "webhook"},
 	}
 	for _, p := range provider.Registry() {
 		out = append(out, integrationEntry{p.ID, p.CredName, "llm"})
 	}
-	return append(out, integrationEntry{"git", "GIT_TOKEN", "git"})
+	out = append(out, integrationEntry{"git", "GIT_TOKEN", "git"})
+	// Telemetry connectors (pkg/telemetry) each need more than one credential
+	// (Datadog: API key + app key; Prometheus: base URL + bearer token), and
+	// integrationEntry holds exactly one CredName per row, so each credential
+	// gets its own row under the shared "telemetry" kind rather than widening
+	// the struct.
+	out = append(out,
+		integrationEntry{"datadog", "DATADOG_API_KEY", "telemetry"},
+		integrationEntry{"datadog-app-key", "DATADOG_APP_KEY", "telemetry"},
+		integrationEntry{"prometheus", "PROMETHEUS_BEARER_TOKEN", "telemetry"},
+		integrationEntry{"prometheus-base-url", "PROMETHEUS_BASE_URL", "telemetry"},
+	)
+	return out
 }
 
 // handleIntegrations serves GET /api/v1/integrations — which integrations are
