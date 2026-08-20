@@ -52,9 +52,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		threadTS = "" // set below once we know the status message's ts
 	}
 
-	instruction := instructionFromSlack(text)
-	if instruction == "" {
+	rawInstruction := instructionFromSlack(text)
+	if rawInstruction == "" {
 		return
+	}
+	instruction, err := s.fetchSlackContext(ctx, token, channelID, threadTS, rawInstruction)
+	if err != nil {
+		instruction = rawInstruction
 	}
 
 	binding, err := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
