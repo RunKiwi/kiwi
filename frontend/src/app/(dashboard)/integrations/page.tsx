@@ -7,6 +7,7 @@ import { CredentialField } from "@/components/CredentialField";
 import { parseActionableError } from "@/lib/errors";
 import { capture } from "@/lib/analytics";
 import { GithubAppCard } from "@/components/GithubAppCard";
+import { SlackAppCard } from "@/components/SlackAppCard";
 
 // UI catalog: which integrations we surface and how to connect them. `credName`
 // is the credential the backend stores; `kind` classifies it.
@@ -81,6 +82,7 @@ export default function IntegrationsPage() {
 
       <div className="flex flex-col gap-4">
         <GithubAppCard />
+        <SlackAppCard />
 
         {ORDER.map(key => {
           const meta = CATALOG[key];

@@ -104,6 +104,27 @@ export interface GithubRepo {
   default_branch: string;
 }
 
+export interface SlackInstallation {
+  team_id: string;
+  org_id: string;
+  team_name: string;
+  installed_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SlackChannelBinding {
+  id: string;
+  org_id: string;
+  team_id: string;
+  channel_id: string;
+  repo_url: string;
+  default_test_cmd: string;
+  default_ref: string;
+  created_by: string;
+  created_at: string;
+}
+
 export interface PlanResponse {
   manifest_id: string;
   job_id: string;
@@ -808,7 +829,25 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ fleet_id: fleetId ?? "" }),
     }),
+
+  getSlackInstallURL: () =>
+    fetchApi<{ install_url: string }>("/api/v1/integrations/slack/install", {
+      headers: { Accept: "application/json" },
+    }),
+  listSlackInstallations: () =>
+    fetchApi<{ installations: SlackInstallation[] }>("/api/v1/integrations/slack/installations"),
+  listSlackBindings: () =>
+    fetchApi<{ bindings: SlackChannelBinding[] }>("/api/v1/integrations/slack/bindings"),
+  createSlackBinding: (input: { team_id: string; channel_id: string; repo_url: string; default_test_cmd?: string; default_ref?: string }) =>
+    fetchApi<SlackChannelBinding>("/api/v1/integrations/slack/bindings", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  deleteSlackBinding: (id: string) =>
+    fetchApi<void>(`/api/v1/integrations/slack/bindings/${id}`, { method: "DELETE" }),
 };
+
+export const api = client;
 
 // Curated models we recommend, grouped by provider. Shown on the Models page for
 // one-click add so people don't have to hand-type ids. (Automatic discovery from
