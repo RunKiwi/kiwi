@@ -211,6 +211,7 @@ type Store interface {
 	CreateSlackTriggeredTask(ctx context.Context, t *SlackTriggeredTask) error
 	LatestSlackTriggeredTask(ctx context.Context, teamID, channelID, threadTS string) (*SlackTriggeredTask, error)
 	UpdateSlackTriggeredTaskStatus(ctx context.Context, id, status, statusMessageTS string) error
+	GetSlackTriggeredTaskByQueuedTaskID(ctx context.Context, taskID string) (*SlackTriggeredTask, error)
 
 	// Post-Merge Verification (Phase 1a). CreateMonitor opens a monitor at
 	// merge time; GetMonitorByMergeCommit resolves a webhook event back to

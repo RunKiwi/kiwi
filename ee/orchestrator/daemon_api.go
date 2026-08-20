@@ -464,6 +464,7 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	var task store.QueuedTask
 	if err := s.db.WithContext(r.Context()).Where("id = ?", req.TaskID).First(&task).Error; err == nil {
 		s.meterKiwiUsage(r.Context(), &task, tokensIn, tokensOut, architectIn, architectOut)
+		s.reportSlackCompletion(r.Context(), req.TaskID, &task)
 	}
 
 	log.Printf("[daemon] task %s reported %s", req.TaskID, req.Status)

@@ -109,3 +109,15 @@ func (s *PostgresStore) UpdateSlackTriggeredTaskStatus(ctx context.Context, id, 
 	}
 	return s.db.WithContext(ctx).Model(&SlackTriggeredTask{}).Where("id = ?", id).Updates(updates).Error
 }
+
+func (s *PostgresStore) GetSlackTriggeredTaskByQueuedTaskID(ctx context.Context, taskID string) (*SlackTriggeredTask, error) {
+	var t SlackTriggeredTask
+	err := s.db.WithContext(ctx).Where("queued_task_id = ?", taskID).First(&t).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
