@@ -199,6 +199,19 @@ type Store interface {
 	GetGitHubInstallationByID(ctx context.Context, installationID int64) (*GitHubInstallation, error)
 	FindGitHubInstallationByLogin(ctx context.Context, accountLogin string) (*GitHubInstallation, error)
 
+	// Slack triggers (ee/orchestrator's slack_* files).
+	UpsertSlackInstallation(ctx context.Context, inst *SlackInstallation) error
+	GetSlackInstallationByTeamID(ctx context.Context, teamID string) (*SlackInstallation, error)
+	ListSlackInstallations(ctx context.Context, orgID string) ([]SlackInstallation, error)
+	DeleteSlackInstallation(ctx context.Context, teamID string) error
+	CreateSlackChannelBinding(ctx context.Context, b *SlackChannelBinding) error
+	GetSlackChannelBinding(ctx context.Context, teamID, channelID string) (*SlackChannelBinding, error)
+	ListSlackChannelBindings(ctx context.Context, orgID string) ([]SlackChannelBinding, error)
+	DeleteSlackChannelBinding(ctx context.Context, id, orgID string) error
+	CreateSlackTriggeredTask(ctx context.Context, t *SlackTriggeredTask) error
+	LatestSlackTriggeredTask(ctx context.Context, teamID, channelID, threadTS string) (*SlackTriggeredTask, error)
+	UpdateSlackTriggeredTaskStatus(ctx context.Context, id, status, statusMessageTS string) error
+
 	// Post-Merge Verification (Phase 1a). CreateMonitor opens a monitor at
 	// merge time; GetMonitorByMergeCommit resolves a webhook event back to
 	// its still-open monitor; FinalizeMonitor is the single-fire atomic
