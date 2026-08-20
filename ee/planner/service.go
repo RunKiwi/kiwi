@@ -757,3 +757,67 @@ func fundingLabel(funding string) string {
 	}
 	return "billed to your own key"
 }
+
+// ForkInput describes a request to start a new, independent task from an
+// existing task's current branch — a sibling line of work, not a
+// continuation of the same one. Where SubmitContinuation deliberately keeps
+// the parent's job id (so the existing pull request updates in place), a
+// fork deliberately does NOT: it gets its own job id, its own branch, and
+// its own pull request, starting from wherever the parent's branch
+// currently stands.
+type ForkInput struct {
+	OrgID       string
+	UserID      string
+	ParentTask  *store.QueuedTask
+	Instruction string
+}
+
+// SubmitFork is a thin wrapper over SubmitPlan: everything about admission,
+// entitlement, and manifest creation a fresh submit needs, a fork needs too
+// — the only difference is where Ref points. Pointing it at
+// "kiwi/"+ParentTask.JobID (the parent's own job branch, per jobBranchName
+// in pkg/daemon/delivery.go) is what makes the daemon's ordinary clone-and-
+// checkout start from the parent's work instead of from the repository's
+// default branch.
+func (s *Service) SubmitFork(ctx context.Context, in ForkInput) (*SubmitResult, error) {
+	if in.OrgID == "" {
+		return nil, fmt.Errorf("org id is required")
+	}
+	if in.ParentTask == nil {
+		return nil, fmt.Errorf("a fork needs the task it forks from")
+	}
+	if in.Instruction == "" {
+		return nil, fmt.Errorf("a fork needs an instruction")
+	}
+
+	repoURL, _ := in.ParentTask.Spec["repo_url"].(string)
+	model, _ := in.ParentTask.Spec["model"].(string)
+	testCmd, _ := in.ParentTask.Spec["test_cmd"].(string)
+
+	result, err := s.SubmitPlan(ctx, PlanRequest{
+		OrgID:   in.OrgID,
+		UserID:  in.UserID,
+		Task:    in.Instruction,
+		RepoURL: repoURL,
+		Ref:     "kiwi/" + in.ParentTask.JobID,
+		Model:   model,
+		TestCmd: testCmd,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// SubmitPlan has no notion of lineage — it always writes OriginSubmit and
+	// a fresh root. Overwrite that on the row(s) it just created, in the same
+	// spirit as buildContinuationTask setting Origin/ParentTaskID explicitly:
+	// a fork's tasks need to say where they came from without SubmitPlan's
+	// ordinary path needing to know forks exist at all.
+	parentID := in.ParentTask.ID
+	if err := s.store.DB().WithContext(ctx).Model(&store.QueuedTask{}).
+		Where("job_id = ?", result.JobID).
+		Updates(map[string]interface{}{"origin": store.OriginFork, "parent_task_id": parentID}).Error; err != nil {
+		return nil, fmt.Errorf("label fork lineage for job %s: %w", result.JobID, err)
+	}
+
+	return result, nil
+}
