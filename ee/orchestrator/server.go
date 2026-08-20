@@ -489,6 +489,8 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/github/installations", s.handleGithubInstallations)
 	mux.HandleFunc("/api/v1/integrations/slack/install", s.handleSlackInstall)
 	mux.HandleFunc("/api/v1/integrations/slack/installations", s.handleSlackInstallations)
+	mux.HandleFunc("/api/v1/integrations/slack/bindings", s.handleSlackBindings)
+	mux.HandleFunc("/api/v1/integrations/slack/bindings/", s.handleDeleteSlackBinding)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
