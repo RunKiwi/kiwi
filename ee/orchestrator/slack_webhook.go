@@ -6,10 +6,12 @@
 package orchestrator
 
 import (
+	"context"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/slackapp"
 )
@@ -71,8 +73,16 @@ func (s *Server) handleSlackWebhook(w http.ResponseWriter, r *http.Request) {
 	if ev.EventType == "app_mention" {
 		// Handled off the request goroutine, same posture as
 		// maybeAssembleRecord in daemon_api.go: Slack expects a fast 200 and
-		// retries a delivery that doesn't get one within 3 seconds.
-		go s.handleSlackTrigger(r.Context(), ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.UserID, ev.Text)
+		// retries a delivery that doesn't get one within 3 seconds. Must use a
+		// detached context, not r.Context() — net/http cancels the request's
+		// context the moment this handler returns, which happens immediately
+		// after this goroutine is spawned, so r.Context() would be canceled
+		// before the trigger pipeline's SubmitPlan/DB/Slack API calls ever run.
+		go func(teamID, channelID, threadTS, userID, text string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			s.handleSlackTrigger(ctx, teamID, channelID, threadTS, userID, text)
+		}(ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.UserID, ev.Text)
 	}
 	w.WriteHeader(http.StatusOK)
 }

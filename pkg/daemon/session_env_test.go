@@ -171,3 +171,37 @@ func TestTaskTestEnvExcludesSlackWebhookCredential(t *testing.T) {
 		}
 	})
 }
+
+// TestTaskTestEnvExcludesSlackBotTokenCredential mirrors the webhook test
+// above for SLACK_BOT_TOKEN: it can post/edit messages and read channel and
+// thread history, so it must never reach a sandbox running model-generated
+// code, same as the webhook URL.
+func TestTaskTestEnvExcludesSlackBotTokenCredential(t *testing.T) {
+	creds := map[string]string{
+		anthropicKeyName:  "llm-secret",
+		"GIT_TOKEN":       "git-secret",
+		"SLACK_BOT_TOKEN": "xoxb-secret",
+		"SOME_APP_CONFIG": "not-a-secret-should-pass-through",
+	}
+
+	t.Run("credentials opt-in (sessionMode=false)", func(t *testing.T) {
+		env := taskTestEnv("do the thing", creds, false)
+		if envHas(env, "SLACK_BOT_TOKEN") {
+			t.Error("taskTestEnv leaked SLACK_BOT_TOKEN into the sandbox test environment")
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+
+	t.Run("session opt-in (sessionMode=true, KIWI_SESSION_ALLOW_TEST_CREDS=true)", func(t *testing.T) {
+		t.Setenv("KIWI_SESSION_ALLOW_TEST_CREDS", "true")
+		env := taskTestEnv("do the thing", creds, true)
+		if envHas(env, "SLACK_BOT_TOKEN") {
+			t.Error("taskTestEnv leaked SLACK_BOT_TOKEN into a session sandbox test environment")
+		}
+		if !envHas(env, "SOME_APP_CONFIG") {
+			t.Error("taskTestEnv dropped a non-credential config value it should have passed through")
+		}
+	})
+}
