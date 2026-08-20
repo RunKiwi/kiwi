@@ -701,7 +701,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	if testCmd == "" {
+	if testCmdRequired(testCmd, spec.InvestigationOnly) {
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", events: prog.all()}
 	}
 

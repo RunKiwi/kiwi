@@ -17,6 +17,14 @@ func providerNameForModel(model string) string {
 	return provider.DisplayNameFor(provider.ProviderOf(model))
 }
 
+// testCmdRequired reports whether a task with no test command (given or
+// inferred) must be refused. False only for a task explicitly hinted
+// investigation-only — everything else keeps today's behavior exactly,
+// including a code-fixing task with no detectable convention.
+func testCmdRequired(testCmd string, investigationOnly bool) bool {
+	return testCmd == "" && !investigationOnly
+}
+
 // inferTestCmd guesses a project's test command from marker files at the repo
 // root, so a task submitted without an explicit test_cmd can still be verified.
 // It returns "" when nothing recognisable is present, leaving the caller to fail

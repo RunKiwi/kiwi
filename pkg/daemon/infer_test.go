@@ -43,3 +43,21 @@ func TestProviderNameForModel(t *testing.T) {
 		t.Errorf("claude model → %q, want Anthropic", got)
 	}
 }
+
+func TestTestCmdRequiredIsTrueWhenEmptyAndNotInvestigationOnly(t *testing.T) {
+	if !testCmdRequired("", false) {
+		t.Fatal("an ordinary task with no test command (inferred or given) must still be required to have one")
+	}
+}
+
+func TestTestCmdRequiredIsFalseWhenInvestigationOnly(t *testing.T) {
+	if testCmdRequired("", true) {
+		t.Fatal("an investigation-only task must be allowed to proceed with no test command")
+	}
+}
+
+func TestTestCmdRequiredIsFalseWhenACommandExists(t *testing.T) {
+	if testCmdRequired("go test ./...", false) {
+		t.Fatal("a task with a real test command is never blocked by this check, investigation-only or not")
+	}
+}
