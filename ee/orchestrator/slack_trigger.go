@@ -7,7 +7,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -38,6 +37,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	inst, err := s.storage.GetSlackInstallationByTeamID(ctx, teamID)
 	if err != nil || inst == nil {
 		return // unknown team: nothing this delivery can do
+	}
+
+	if threadTS != "" {
+		if existing, err := s.storage.LatestSlackTriggeredTask(ctx, teamID, channelID, threadTS); err == nil && existing != nil {
+			s.handleSlackThreadReply(ctx, teamID, channelID, threadTS, userID, text, existing)
+			return
+		}
 	}
 
 	token, err := s.storage.GetCredentialPlaintext(ctx, inst.OrgID, "SLACK_BOT_TOKEN")
@@ -129,14 +135,4 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
-}
-
-var errNotImplemented = errors.New("not implemented")
-
-// handleSlackInteractivity is a placeholder wired up for real in Task 11
-// (continue/fork/new button clicks). Left as a named no-op rather than
-// omitted so slack_webhook.go's dispatch has something to call today.
-func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) {
-	_ = ctx
-	_ = formBody
 }
