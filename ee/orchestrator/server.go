@@ -523,6 +523,7 @@ func (s *Server) Start(addr string) error {
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.HandleFunc("/api/v1/webhooks/github", s.handleGithubWebhook)
+	root.HandleFunc("/api/v1/webhooks/slack/events", s.handleSlackWebhook)
 	root.HandleFunc("/api/v1/github/callback", s.handleGithubCallback)
 	root.HandleFunc("/api/v1/integrations/slack/oauth/callback", s.handleSlackOAuthCallback)
 	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
