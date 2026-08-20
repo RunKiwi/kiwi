@@ -1,4 +1,7 @@
-// ee/orchestrator/slack_repo_test.go
+// SPDX-License-Identifier: LicenseRef-Kiwi-BSL-1.1
+// Copyright (c) 2026 RunKiwi. Licensed under the Business Source License 1.1.
+// See ee/LICENSE. This is Control Plane code and is NOT Apache-2.0.
+
 package orchestrator
 
 import (

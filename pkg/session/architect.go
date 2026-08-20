@@ -32,12 +32,16 @@ type PlanInput struct {
 	RepoMap []string
 	// TestCmd is the verification command, and BaselineOutput/BaselinePassed are
 	// what it did before anything was touched.
-	TestCmd         string
-	BaselineOutput  string
-	BaselinePassed  bool
-	RepoContext     string
-	PriorLearnings  []string
-	MaxRoundsBudget int
+	TestCmd string
+	// InvestigationOnly is the caller's hint, surfaced in the prompt so the
+	// Architect knows a no-diff-expected approval is on the table for this
+	// task specifically, rather than something it has to intuit.
+	InvestigationOnly bool
+	BaselineOutput    string
+	BaselinePassed    bool
+	RepoContext       string
+	PriorLearnings    []string
+	MaxRoundsBudget   int
 }
 
 // ReviewInput is everything the Architect sees about a completed round.
@@ -259,6 +263,12 @@ func (a *LLMArchitect) Plan(ctx context.Context, in PlanInput) (Spec, error) {
 		}
 	}
 	fmt.Fprintf(&b, "\n# Verification command\n%s\n", orNone(in.TestCmd))
+	if in.InvestigationOnly {
+		b.WriteString("\nThis task may be answerable by investigation alone, with no code change required. " +
+			"If so, set \"no_diff_expected\": true on your approving verdict and put your findings in \"summary\" — " +
+			"that becomes the final report instead of a pull request. Only do this when you are confident no fix is " +
+			"warranted; if the investigation reveals a real bug to fix, treat it as an ordinary task instead.\n")
+	}
 	state := "FAILING"
 	if in.BaselinePassed {
 		state = "PASSING"

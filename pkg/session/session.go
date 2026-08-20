@@ -69,6 +69,12 @@ type Task struct {
 	ID          string
 	Description string
 	TestCmd     string
+	// InvestigationOnly hints to the Architect that this task may not need
+	// a code change — e.g. "investigate this bug" from Slack. It is a hint,
+	// not a mandate: the Architect still decides per round via
+	// Spec.NoDiffExpected, since even an investigation-flagged task can turn
+	// out to need a real fix once the Architect has actually looked.
+	InvestigationOnly bool
 	// RepoContext is the repository's own AGENT.md, if it has one.
 	RepoContext string
 	// Learnings are summaries of prior jobs on this repository, resolved by the
@@ -256,6 +262,8 @@ type Result struct {
 	Usage   provider.ToolUsage
 	// Summary is the Architect's pull request body, set when it approved.
 	Summary string
+	// NoDiffExpected marks an approving verdict where the Architect judged no code change was needed.
+	NoDiffExpected bool
 	// Detail explains a non-success outcome in words a user can act on.
 	Detail      string
 	FinalOutput string
@@ -501,14 +509,15 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	r.activity("architect: planning the work")
 	start = time.Now()
 	spec, err := r.Architect.Plan(ctx, PlanInput{
-		Task:            task.Description,
-		RepoMap:         tree,
-		TestCmd:         task.TestCmd,
-		BaselineOutput:  baseOut,
-		BaselinePassed:  basePassed,
-		RepoContext:     task.RepoContext,
-		PriorLearnings:  task.Learnings,
-		MaxRoundsBudget: cfg.MaxRounds,
+		Task:              task.Description,
+		RepoMap:           tree,
+		TestCmd:           task.TestCmd,
+		InvestigationOnly: task.InvestigationOnly,
+		BaselineOutput:    baseOut,
+		BaselinePassed:    basePassed,
+		RepoContext:       task.RepoContext,
+		PriorLearnings:    task.Learnings,
+		MaxRoundsBudget:   cfg.MaxRounds,
 	})
 	planUsage := r.trackArchitect(st)
 	if err != nil {
@@ -650,6 +659,7 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 			if res.Summary == "" {
 				res.Summary = review.Rationale
 			}
+			res.NoDiffExpected = review.NoDiffExpected
 			return res, nil
 		case VerdictAbandon:
 			detail := "the reviewer stopped the task: " + review.Rationale

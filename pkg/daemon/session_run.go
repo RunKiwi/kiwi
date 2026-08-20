@@ -226,11 +226,12 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		spec.ID, architectModel, spec.Model, deps.testCmd)
 
 	res, err := runner.Run(ctx, session.Task{
-		ID:          spec.ID,
-		Description: description,
-		TestCmd:     deps.testCmd,
-		RepoContext: repoCtx,
-		Learnings:   spec.Learnings,
+		ID:                spec.ID,
+		Description:       description,
+		TestCmd:           deps.testCmd,
+		InvestigationOnly: spec.InvestigationOnly,
+		RepoContext:       repoCtx,
+		Learnings:         spec.Learnings,
 	})
 
 	if err != nil {
@@ -255,6 +256,11 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			}
 		}
 		return taskResult{detail: truncateDetail(detail), abuse: abuse, events: prog.all()}
+	}
+
+	if out, matched := investigationOutcome(res); matched {
+		out.events = prog.all()
+		return out
 	}
 
 	gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, deps.leaseID, creds)
@@ -351,4 +357,17 @@ func taskTestEnv(task string, creds map[string]string, sessionMode bool) []strin
 		env = append(env, name+"="+value)
 	}
 	return env
+}
+
+// investigationOutcome reports the taskResult for a successful round the
+// Architect explicitly declared needs no diff, or (matched=false) says
+// nothing — meaning the caller should fall through to the ordinary
+// PR-publish path. Kept pure and separate from runSession's imperative flow
+// so the decision itself — not the git/session plumbing around it — is what
+// a test exercises.
+func investigationOutcome(res session.Result) (taskResult, bool) {
+	if !res.Success || !res.NoDiffExpected {
+		return taskResult{}, false
+	}
+	return taskResult{ok: true, detail: truncateDetail(res.Summary)}, true
 }

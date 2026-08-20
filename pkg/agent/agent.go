@@ -75,6 +75,9 @@ type WorkerSpec struct {
 	// loop iterates until this command passes. Without it the loop has no way to
 	// verify its work, so the daemon cannot run real agentic execution.
 	TestCmd string `json:"test_cmd"`
+	// InvestigationOnly hints the Architect that this task may be answerable
+	// without a code change.
+	InvestigationOnly bool `json:"investigation_only,omitempty"`
 	// DependsOn lists the IDs of workers that must complete before this one
 	// (the plan DAG produced by the planner).
 	DependsOn      []string `json:"depends_on,omitempty"`

@@ -58,6 +58,16 @@ type Spec struct {
 	// planned the task writes its description, which is the whole reason the
 	// role is persistent.
 	Summary string `json:"summary"`
+
+	// NoDiffExpected marks an approving verdict where the Architect judges
+	// no code change is warranted — the task was answered by investigation,
+	// not by a fix. Set by the Architect's own response, never inferred
+	// after the fact from an empty diff: a code-fixing task that produces
+	// no diff must still fail, and the only thing that tells those two
+	// cases apart is whether the Architect declared this one investigation-
+	// only BEFORE the round ran. See pkg/daemon/session_run.go's use of
+	// this field for exactly where that distinction is enforced.
+	NoDiffExpected bool `json:"no_diff_expected"`
 }
 
 // Report is the Implementer's return value from a round, via the finish tool.
