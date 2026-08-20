@@ -7,6 +7,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -86,13 +87,19 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		defaultTestCmd = binding.DefaultTestCmd
 	}
 
+	var isInvestigation bool
+	if comp, err := s.slackCompleter(); err == nil {
+		isInvestigation = investigationHint(ctx, comp, instruction)
+	}
+
 	result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
-		OrgID:   inst.OrgID,
-		UserID:  userID,
-		Task:    instruction,
-		RepoURL: repoURL,
-		Ref:     defaultRef,
-		TestCmd: defaultTestCmd, // empty is fine: pkg/daemon infers it (see infer.go)
+		OrgID:             inst.OrgID,
+		UserID:            userID,
+		Task:              instruction,
+		RepoURL:           repoURL,
+		Ref:               defaultRef,
+		TestCmd:           defaultTestCmd, // empty is fine: pkg/daemon infers it (see infer.go)
+		InvestigationOnly: isInvestigation,
 	})
 	if err != nil {
 		if s.slackClient != nil {
@@ -135,4 +142,29 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// investigationHint asks whether the instruction reads like "investigate/
+// find out/explain" rather than "fix/add/change" — a cheap, non-binding
+// signal passed to the Architect as InvestigationOnly. Wrong in either
+// direction is not costly: false gives the Architect no permission to skip
+// the diff it would still be free to conclude isn't needed on the object
+// task facts anyway, and true still only hints — the Architect is the one
+// that actually decides via NoDiffExpected.
+func investigationHint(ctx context.Context, complete completeFunc, instruction string) bool {
+	system := `Respond with ONLY JSON: {"investigation_only": true|false}. ` +
+		`True if the instruction only asks to investigate, explain, or report — false if it asks for a code change.`
+	resp, err := complete(ctx, system, instruction)
+	if err != nil {
+		return false
+	}
+	start, end := strings.IndexByte(resp, '{'), strings.LastIndexByte(resp, '}')
+	if start == -1 || end == -1 {
+		return false
+	}
+	var out struct {
+		InvestigationOnly bool `json:"investigation_only"`
+	}
+	json.Unmarshal([]byte(resp[start:end+1]), &out)
+	return out.InvestigationOnly
 }
