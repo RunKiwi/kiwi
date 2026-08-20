@@ -61,11 +61,11 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		instruction = rawInstruction
 	}
 
-	binding, err := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
-	if err != nil || binding == nil {
+	binding, _ := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
+	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, binding)
+	if ambiguousReply != "" {
 		if s.slackClient != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS,
-				"This channel isn't bound to a repository yet — an admin can set one up under Integrations.")
+			s.slackClient.PostMessage(ctx, token, channelID, threadTS, ambiguousReply)
 		}
 		return
 	}
@@ -74,13 +74,19 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		s.slackClient.AddReaction(ctx, token, channelID, firstNonEmpty(threadTS, ""), "eyes")
 	}
 
+	var defaultRef, defaultTestCmd string
+	if binding != nil {
+		defaultRef = binding.DefaultRef
+		defaultTestCmd = binding.DefaultTestCmd
+	}
+
 	result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
 		OrgID:   inst.OrgID,
 		UserID:  userID,
 		Task:    instruction,
-		RepoURL: binding.RepoURL,
-		Ref:     binding.DefaultRef,
-		TestCmd: binding.DefaultTestCmd, // empty is fine: pkg/daemon infers it (see infer.go)
+		RepoURL: repoURL,
+		Ref:     defaultRef,
+		TestCmd: defaultTestCmd, // empty is fine: pkg/daemon infers it (see infer.go)
 	})
 	if err != nil {
 		if s.slackClient != nil {
