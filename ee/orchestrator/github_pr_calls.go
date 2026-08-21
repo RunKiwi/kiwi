@@ -156,3 +156,27 @@ func getPullRequest(ctx context.Context, api, token, owner, repo string, number 
 	}
 	return out.MergeCommitSHA, out.Title, out.Merged, nil
 }
+
+// createIssue files a new issue and returns its html_url. Used only by the
+// Slack investigation-only completion path (ee/orchestrator/slack_completion.go),
+// and only when the triggering instruction explicitly asked for one.
+func createIssue(ctx context.Context, api, token, owner, repo, title, body string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues", api, owner, repo)
+	resp, err := githubRequest(ctx, http.MethodPost, url, token, map[string]string{"title": title, "body": body})
+	if err != nil {
+		return "", fmt.Errorf("create issue on %s/%s: %w", owner, repo, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("create issue on %s/%s returned %d: %s", owner, repo, resp.StatusCode, string(respBody))
+	}
+	var out struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return "", fmt.Errorf("decode created issue: %w", err)
+	}
+	return out.HTMLURL, nil
+}

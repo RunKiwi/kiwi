@@ -28,6 +28,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/ee/fleethost"
 	"github.com/ibreakthecloud/kiwi/ee/githubapp"
 	"github.com/ibreakthecloud/kiwi/ee/planner"
+	"github.com/ibreakthecloud/kiwi/ee/slackapp"
 	"github.com/ibreakthecloud/kiwi/ee/tunnel"
 	"github.com/ibreakthecloud/kiwi/pkg/agentapi"
 	"github.com/ibreakthecloud/kiwi/pkg/catalog"
@@ -86,6 +87,9 @@ type Server struct {
 	// App is configured, which is the pre-rollout state: every org then
 	// authenticates with GIT_TOKEN exactly as before.
 	githubApp *githubapp.Client
+	// slackClient calls the Slack Web API on behalf of every connected
+	// workspace; nil is valid and means Slack triggering is not configured.
+	slackClient *slackapp.Client
 	// metricSelector picks which of an org's configured telemetry metrics
 	// (if any) is relevant to a merged task, at monitor-creation time. Like
 	// the embedder, it runs on a Kiwi-operated key, not a customer's — this
@@ -147,6 +151,7 @@ func NewServer(storage store.Store, cfg *Config) *Server {
 		refresher:      catalog.NewRefresher(storage),
 		credValidator:  defaultCredValidator,
 		githubApp:      newGitHubAppClient(),
+		slackClient:    slackapp.New(),
 		metricSelector: metricSelector,
 	}
 	// Fleet-host autoscaling. Unconfigured (BYOC, local dev) yields a no-op
@@ -482,6 +487,10 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/github/repos", s.handleGithubRepos)
 	mux.HandleFunc("/api/v1/github/install", s.handleGithubInstall)
 	mux.HandleFunc("/api/v1/github/installations", s.handleGithubInstallations)
+	mux.HandleFunc("/api/v1/integrations/slack/install", s.handleSlackInstall)
+	mux.HandleFunc("/api/v1/integrations/slack/installations", s.handleSlackInstallations)
+	mux.HandleFunc("/api/v1/integrations/slack/bindings", s.handleSlackBindings)
+	mux.HandleFunc("/api/v1/integrations/slack/bindings/", s.handleDeleteSlackBinding)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/tasks/", s.handleTaskStatus)
 	mux.HandleFunc("/usage", s.handleUsage)
@@ -514,7 +523,9 @@ func (s *Server) Start(addr string) error {
 	}
 	root.HandleFunc("/api/v1/webhooks/linear/", s.handleLinearWebhook)
 	root.HandleFunc("/api/v1/webhooks/github", s.handleGithubWebhook)
+	root.HandleFunc("/api/v1/webhooks/slack/events", s.handleSlackWebhook)
 	root.HandleFunc("/api/v1/github/callback", s.handleGithubCallback)
+	root.HandleFunc("/api/v1/integrations/slack/oauth/callback", s.handleSlackOAuthCallback)
 	root.HandleFunc("/api/v1/webhooks/billing", auth.BillingWebhookHandler(s.db))
 	// The daemon API authenticates by Ed25519 request signature, not an org API
 	// key, so it is mounted here alongside the webhook to bypass AuthMiddleware.

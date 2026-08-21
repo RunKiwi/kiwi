@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,5 +42,36 @@ func TestProviderNameForModel(t *testing.T) {
 	}
 	if got := providerNameForModel("claude-opus-4-8"); got != "Anthropic" {
 		t.Errorf("claude model → %q, want Anthropic", got)
+	}
+}
+
+func TestTestCmdRequiredIsTrueWhenEmptyAndNotInvestigationOnly(t *testing.T) {
+	if !testCmdRequired("", false) {
+		t.Fatal("an ordinary task with no test command (inferred or given) must still be required to have one")
+	}
+}
+
+func TestTestCmdRequiredIsFalseWhenInvestigationOnly(t *testing.T) {
+	if testCmdRequired("", true) {
+		t.Fatal("an investigation-only task must be allowed to proceed with no test command")
+	}
+}
+
+func TestTestCmdRequiredIsFalseWhenACommandExists(t *testing.T) {
+	if testCmdRequired("go test ./...", false) {
+		t.Fatal("a task with a real test command is never blocked by this check, investigation-only or not")
+	}
+}
+
+func TestNoOpVerifyReportsATrivialPassWithoutTouchingAnything(t *testing.T) {
+	out, passed, err := noOpVerify(context.Background())
+	if err != nil {
+		t.Fatalf("noOpVerify returned an error: %v", err)
+	}
+	if !passed {
+		t.Error("noOpVerify must report passed=true — there is nothing to fail")
+	}
+	if out != "" {
+		t.Errorf("noOpVerify returned output %q, want empty — it never ran anything", out)
 	}
 }

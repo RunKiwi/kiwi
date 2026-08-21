@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { client, type Integration, type GithubInstallation } from "@/lib/api";
+import { client, type Integration, type GithubInstallation, type SlackInstallation } from "@/lib/api";
 import {
   CheckCircle2,
   AlertCircle,
@@ -135,20 +135,22 @@ const CATALOG: CatalogIntegration[] = [
     name: "Slack",
     category: "notifications",
     categoryLabel: "Notifications",
-    description: "Sends notifications to your chosen Slack channel when task runs and merge workflows complete.",
+    description: "Trigger Kiwi tasks by @mentioning the bot in a channel or thread, and get status updates and notifications back.",
     icon: FaSlack,
     iconBg: "bg-[#ECB22E]/10",
     iconColor: "text-[#ECB22E]",
     brandAccent: "#ECB22E",
     docUrl: "https://api.slack.com/messaging/webhooks",
     docLabel: "Slack Webhooks Guide",
+    isSlackHybrid: true,
     fields: [
       {
         key: "slack",
-        label: "Slack Webhook URL",
+        label: "Notification Webhook URL",
         credName: "SLACK_WEBHOOK_URL",
         kind: "webhook",
         placeholder: "https://hooks.slack.com/services/…",
+        helpText: "Optional — posts monitor verdicts to a channel independent of the app install above.",
       },
     ],
   },
@@ -219,7 +221,8 @@ type StatusFilter = "all" | "connected" | "unconnected";
 function deriveIntegrationState(
   item: CatalogIntegration,
   status: Record<string, boolean>,
-  githubInstalls: GithubInstallation[]
+  githubInstalls: GithubInstallation[],
+  slackInstalls: SlackInstallation[]
 ) {
   if (item.isGithubHybrid) {
     if (githubInstalls.length > 0) {
@@ -240,6 +243,28 @@ function deriveIntegrationState(
       status: "unconnected" as const,
       label: "Not connected",
       summary: "Install GitHub App or paste PAT",
+    };
+  }
+
+  if (item.isSlackHybrid) {
+    if (slackInstalls.length > 0) {
+      return {
+        status: "connected" as const,
+        label: `${slackInstalls.length} workspace${slackInstalls.length > 1 ? "s" : ""}`,
+        summary: slackInstalls.map((s) => s.team_name || s.team_id).join(", "),
+      };
+    }
+    if (status["slack"]) {
+      return {
+        status: "connected" as const,
+        label: "Notifications only",
+        summary: "Webhook set, but no workspace installed for triggers",
+      };
+    }
+    return {
+      status: "unconnected" as const,
+      label: "Not connected",
+      summary: "Add to Slack to trigger tasks from a channel",
     };
   }
 
@@ -279,6 +304,7 @@ function deriveIntegrationState(
 export default function IntegrationsPage() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [githubInstalls, setGithubInstalls] = useState<GithubInstallation[]>([]);
+  const [slackInstalls, setSlackInstalls] = useState<SlackInstallation[]>([]);
   const [activeIntegration, setActiveIntegration] = useState<CatalogIntegration | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -288,9 +314,10 @@ export default function IntegrationsPage() {
   const load = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [integrationsRes, githubRes] = await Promise.all([
+      const [integrationsRes, githubRes, slackRes] = await Promise.all([
         client.listIntegrations().catch(() => ({ integrations: [] })),
         client.listGithubInstallations().catch(() => ({ installations: [] })),
+        client.listSlackInstallations().catch(() => ({ installations: [] })),
       ]);
       setStatus(
         Object.fromEntries(
@@ -298,6 +325,7 @@ export default function IntegrationsPage() {
         )
       );
       setGithubInstalls(githubRes.installations || []);
+      setSlackInstalls(slackRes.installations || []);
     } finally {
       setIsRefreshing(false);
     }
@@ -308,7 +336,8 @@ export default function IntegrationsPage() {
     Promise.all([
       client.listIntegrations().catch(() => ({ integrations: [] })),
       client.listGithubInstallations().catch(() => ({ installations: [] })),
-    ]).then(([integrationsRes, githubRes]) => {
+      client.listSlackInstallations().catch(() => ({ installations: [] })),
+    ]).then(([integrationsRes, githubRes, slackRes]) => {
       if (!active) return;
       setStatus(
         Object.fromEntries(
@@ -316,6 +345,7 @@ export default function IntegrationsPage() {
         )
       );
       setGithubInstalls(githubRes.installations || []);
+      setSlackInstalls(slackRes.installations || []);
     });
     return () => {
       active = false;
@@ -329,14 +359,14 @@ export default function IntegrationsPage() {
     let unconnected = 0;
 
     CATALOG.forEach((item) => {
-      const state = deriveIntegrationState(item, status, githubInstalls);
+      const state = deriveIntegrationState(item, status, githubInstalls, slackInstalls);
       if (state.status === "connected") connected++;
       else if (state.status === "incomplete") incomplete++;
       else unconnected++;
     });
 
     return { total: CATALOG.length, connected, incomplete, unconnected };
-  }, [status, githubInstalls]);
+  }, [status, githubInstalls, slackInstalls]);
 
   // Filter and search catalog
   const filteredCatalog = useMemo(() => {
@@ -347,7 +377,7 @@ export default function IntegrationsPage() {
       }
 
       // Status filter
-      const state = deriveIntegrationState(item, status, githubInstalls);
+      const state = deriveIntegrationState(item, status, githubInstalls, slackInstalls);
       if (statusFilter === "connected" && state.status !== "connected") {
         return false;
       }
@@ -370,7 +400,7 @@ export default function IntegrationsPage() {
 
       return true;
     });
-  }, [selectedCategory, statusFilter, searchQuery, status, githubInstalls]);
+  }, [selectedCategory, statusFilter, searchQuery, status, githubInstalls, slackInstalls]);
 
   const categories: { id: CategoryFilter; label: string; count: number }[] = [
     { id: "all", label: "All Integrations", count: CATALOG.length },
@@ -545,7 +575,7 @@ export default function IntegrationsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           {filteredCatalog.map((item) => {
             const Icon = item.icon;
-            const state = deriveIntegrationState(item, status, githubInstalls);
+            const state = deriveIntegrationState(item, status, githubInstalls, slackInstalls);
             const isConnected = state.status === "connected";
             const isIncomplete = state.status === "incomplete";
 
@@ -621,6 +651,26 @@ export default function IntegrationsPage() {
                       {githubInstalls.length > 3 && (
                         <span className="text-[10px] text-zinc-500 self-center">
                           +{githubInstalls.length - 3} more
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Slack Specific Connected Workspaces Pill Preview */}
+                  {item.isSlackHybrid && slackInstalls.length > 0 && (
+                    <div className="mb-4 flex flex-wrap gap-1.5">
+                      {slackInstalls.slice(0, 3).map((s) => (
+                        <span
+                          key={s.team_id}
+                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300"
+                        >
+                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                          <span className="truncate max-w-[120px]">{s.team_name || s.team_id}</span>
+                        </span>
+                      ))}
+                      {slackInstalls.length > 3 && (
+                        <span className="text-[10px] text-zinc-500 self-center">
+                          +{slackInstalls.length - 3} more
                         </span>
                       )}
                     </div>

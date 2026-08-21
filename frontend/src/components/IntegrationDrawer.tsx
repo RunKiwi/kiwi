@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useId } from "react";
-import { X, CheckCircle2, AlertCircle, Loader2, ExternalLink, Eye, EyeOff, ShieldCheck, Lock } from "lucide-react";
-import { client, type GithubInstallation } from "@/lib/api";
+import { X, CheckCircle2, AlertCircle, Loader2, ExternalLink, Eye, EyeOff, ShieldCheck, Lock, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { client, type GithubInstallation, type SlackInstallation } from "@/lib/api";
 import { parseActionableError } from "@/lib/errors";
 import { capture } from "@/lib/analytics";
 
@@ -32,6 +33,7 @@ export interface CatalogIntegration {
   docLabel?: string;
   fields: IntegrationField[];
   isGithubHybrid?: boolean;
+  isSlackHybrid?: boolean;
 }
 
 interface IntegrationDrawerProps {
@@ -120,6 +122,13 @@ function IntegrationDrawerBody({
   const [appUnavailable, setAppUnavailable] = useState(false);
   const [showFallbackToken, setShowFallbackToken] = useState(false);
 
+  // Slack App specific state
+  const [slackInstalls, setSlackInstalls] = useState<SlackInstallation[] | null>(null);
+  const [slackBusy, setSlackBusy] = useState(false);
+  const [slackError, setSlackError] = useState("");
+  const [slackAppUnavailable, setSlackAppUnavailable] = useState(false);
+  const [showNotificationWebhook, setShowNotificationWebhook] = useState(false);
+
   useEffect(() => {
     if (!integration.isGithubHybrid) return;
     let active = true;
@@ -135,6 +144,22 @@ function IntegrationDrawerBody({
       active = false;
     };
   }, [integration.isGithubHybrid]);
+
+  useEffect(() => {
+    if (!integration.isSlackHybrid) return;
+    let active = true;
+    client
+      .listSlackInstallations()
+      .then((r) => {
+        if (active) setSlackInstalls(r.installations);
+      })
+      .catch(() => {
+        if (active) setSlackInstalls([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [integration.isSlackHybrid]);
 
   const Icon = integration.icon;
   const isAllConnected =
@@ -156,6 +181,23 @@ function IntegrationDrawerBody({
         setGithubError(parsed.message);
       }
       setGithubBusy(false);
+    }
+  };
+
+  const handleConnectSlack = async () => {
+    setSlackBusy(true);
+    setSlackError("");
+    try {
+      const { install_url } = await client.getSlackInstallURL();
+      window.location.href = install_url;
+    } catch (e) {
+      const parsed = parseActionableError(e);
+      if (/501|not configured/i.test(parsed.message)) {
+        setSlackAppUnavailable(true);
+      } else {
+        setSlackError(parsed.message);
+      }
+      setSlackBusy(false);
     }
   };
 
@@ -464,6 +506,194 @@ function IntegrationDrawerBody({
                 })}
             </div>
           </div>
+        ) : integration.isSlackHybrid ? (
+          <div className="space-y-6">
+            {/* Slack App Section */}
+            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-white">Kiwi Slack App</h3>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                      Recommended
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Trigger Kiwi tasks by @mentioning the bot in a channel or thread, with status
+                    updates posted back in the thread. Revocable anytime from Slack.
+                  </p>
+                </div>
+              </div>
+
+              {slackInstalls === null ? (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 py-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading workspaces…
+                </div>
+              ) : slackAppUnavailable ? (
+                <p className="text-xs text-zinc-500">
+                  Slack App is not configured on this deployment.
+                </p>
+              ) : (
+                <>
+                  {(slackInstalls?.length ?? 0) > 0 && (
+                    <ul className="flex flex-col gap-2">
+                      {slackInstalls.map((s) => (
+                        <li
+                          key={s.team_id}
+                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span className="truncate text-white font-mono">{s.team_name || s.team_id}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleConnectSlack}
+                      disabled={slackBusy}
+                      className="rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
+                    >
+                      {slackBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      {slackBusy
+                        ? "Opening Slack…"
+                        : (slackInstalls?.length ?? 0) > 0
+                        ? "Add another workspace"
+                        : "Add to Slack"}
+                    </button>
+                    {(slackInstalls?.length ?? 0) > 0 && (
+                      <Link
+                        href="/integrations/slack"
+                        className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                      >
+                        Manage channel bindings <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    )}
+                  </div>
+
+                  {slackError && (
+                    <p className="text-xs text-red-400 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {slackError}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Optional Notification Webhook Section */}
+            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-white">Notification Webhook</h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Optional — posts monitor verdicts to a channel, independent of the app install above.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationWebhook((v) => !v)}
+                  className="text-xs text-zinc-400 hover:text-white underline transition-colors"
+                >
+                  {showNotificationWebhook ? "Hide" : status["slack"] ? "Manage webhook" : "Set webhook"}
+                </button>
+              </div>
+
+              {showNotificationWebhook &&
+                integration.fields.map((field) => {
+                  const isConnected = status[field.key];
+                  const isBusy = savingKey === field.key;
+                  const isPwd = (field.type || "password") === "password";
+                  const visible = showPassword[field.key] || false;
+                  const msg = fieldMsg[field.key];
+                  const isErr = fieldErr[field.key];
+
+                  return (
+                    <div key={field.key} className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-zinc-300">{field.label}</label>
+                        {isConnected && (
+                          <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
+                            <CheckCircle2 className="w-3 h-3" /> Webhook Active
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={isPwd && !visible ? "password" : "text"}
+                            value={fieldValues[field.key] || ""}
+                            onChange={(e) =>
+                              setFieldValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                            }
+                            placeholder={
+                              isConnected
+                                ? "•••••••• (paste new URL to replace)"
+                                : field.placeholder
+                            }
+                            className="w-full field text-xs pr-9"
+                          />
+                          {isPwd && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
+                              }
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+                              title={visible ? "Hide URL" : "Show URL"}
+                            >
+                              {visible ? (
+                                <EyeOff className="w-3.5 h-3.5" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSaveField(field)}
+                          disabled={isBusy || !(fieldValues[field.key] || "").trim()}
+                          className="btn-primary text-xs px-3.5 py-1.5 rounded-lg disabled:opacity-50 shrink-0"
+                        >
+                          {isBusy ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isConnected ? (
+                            "Update"
+                          ) : (
+                            "Save"
+                          )}
+                        </button>
+                      </div>
+
+                      {field.helpText && (
+                        <p className="text-[11px] text-zinc-500">{field.helpText}</p>
+                      )}
+
+                      {msg && (
+                        <div
+                          className={`flex items-center gap-1.5 text-xs ${
+                            isErr ? "text-red-400" : "text-emerald-400"
+                          }`}
+                        >
+                          {isErr ? (
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          )}
+                          <span>{msg}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
         ) : (
           /* Standard & Multi-Field Integrations */
           <div className="space-y-4">
@@ -564,7 +794,7 @@ function IntegrationDrawerBody({
           Close
         </button>
 
-        {!integration.isGithubHybrid && integration.fields.length > 1 && (
+        {!integration.isGithubHybrid && !integration.isSlackHybrid && integration.fields.length > 1 && (
           <button
             type="button"
             onClick={handleSaveAllFields}

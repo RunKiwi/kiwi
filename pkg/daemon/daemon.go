@@ -701,7 +701,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		}
 	}
 
-	if testCmd == "" {
+	if testCmdRequired(testCmd, spec.InvestigationOnly) {
 		return taskResult{detail: "no test command, and none could be inferred from the repo — set one under Advanced options so the fix can be verified", events: prog.all()}
 	}
 
@@ -880,6 +880,16 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		return res.Output, res.Success, nil
 	}
 
+	// testCmd == "" is reachable only when spec.InvestigationOnly is true —
+	// testCmdRequired above refuses the task otherwise. There is nothing to
+	// run, so verification reports a trivial pass instead of handing the
+	// sandbox an empty command (which runInSandbox/sandbox.RunCommand was
+	// never built to receive).
+	verify := runTest
+	if testCmd == "" {
+		verify = noOpVerify
+	}
+
 	var installFn session.InstallFunc
 	if inferInstallStep(worktreePath) != nil {
 		installFn = func(ctx context.Context) (string, bool, error) {
@@ -903,7 +913,7 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 		// reason.
 		execEnv: cacheEnv,
 		testCmd: testCmd,
-		verify:  runTest,
+		verify:  verify,
 		install: installFn,
 		useBox:  func(b *sandbox.Session) { verifyBox = b },
 	})

@@ -27,6 +27,9 @@ func newTestStore(t *testing.T) *PostgresStore {
 		&PostMergeMonitor{},
 		&TelemetryMetric{},
 		&PostMergeTelemetryPoll{},
+		&SlackInstallation{},
+		&SlackChannelBinding{},
+		&SlackTriggeredTask{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

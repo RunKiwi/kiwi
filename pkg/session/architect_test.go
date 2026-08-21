@@ -166,3 +166,64 @@ func TestArchitectToolsDefsAreReadOnly(t *testing.T) {
 		t.Errorf("expected exactly list_files, read_file, grep — got %d defs", len(at.Defs()))
 	}
 }
+
+// TestReviewAllowsEmptyDiffOnlyWhenBothInvestigationOnlyAndNoDiffExpected
+// covers the actual safeguard: an empty-diff approval must survive Review
+// only when the CALLER flagged the task InvestigationOnly and THIS round's
+// own verdict set no_diff_expected. Either alone must still be downgraded.
+func TestReviewAllowsEmptyDiffOnlyWhenBothInvestigationOnlyAndNoDiffExpected(t *testing.T) {
+	approveNoDiffExpected := `{"verdict":"approve","summary":"Found the root cause: a nil check missing in auth.go.","no_diff_expected":true}`
+	approveOrdinary := `{"verdict":"approve","summary":"Fixed it."}`
+
+	cases := []struct {
+		name              string
+		investigationOnly bool
+		response          string
+		wantVerdict       string
+	}{
+		{"both set: approval survives", true, approveNoDiffExpected, VerdictApprove},
+		{"InvestigationOnly false: still downgraded even with no_diff_expected", false, approveNoDiffExpected, VerdictRevise},
+		{"no_diff_expected false: an ordinary empty-diff approval is still downgraded", true, approveOrdinary, VerdictRevise},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mp := provider.NewMockProvider()
+			mp.CompleteFunc = func(system, user string) (string, error) { return c.response, nil }
+			arch := &LLMArchitect{Provider: mp}
+
+			spec, err := arch.Review(context.Background(), ReviewInput{
+				Task: "investigate the bug", Round: 1, Diff: "", VerifyPassed: true,
+				InvestigationOnly: c.investigationOnly,
+			})
+			if err != nil {
+				t.Fatalf("Review: %v", err)
+			}
+			if spec.Verdict != c.wantVerdict {
+				t.Errorf("verdict = %q, want %q", spec.Verdict, c.wantVerdict)
+			}
+		})
+	}
+}
+
+// A code-fixing task must still fail on an empty diff even when the
+// Architect's own response carries no_diff_expected — the regression this
+// whole safeguard exists to prevent (CLAUDE.md's "returned early when the
+// suite already passed" incident).
+func TestReviewNeverBypassesEmptyDiffForAnOrdinaryTask(t *testing.T) {
+	mp := provider.NewMockProvider()
+	mp.CompleteFunc = func(system, user string) (string, error) {
+		return `{"verdict":"approve","summary":"nothing to do","no_diff_expected":true}`, nil
+	}
+	arch := &LLMArchitect{Provider: mp}
+
+	spec, err := arch.Review(context.Background(), ReviewInput{
+		Task: "add an example", Round: 1, Diff: "", VerifyPassed: true, InvestigationOnly: false,
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if spec.Verdict != VerdictRevise {
+		t.Fatalf("verdict = %q, want %q — an ordinary task must never approve an empty diff", spec.Verdict, VerdictRevise)
+	}
+}

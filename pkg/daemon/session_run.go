@@ -226,11 +226,12 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		spec.ID, architectModel, spec.Model, deps.testCmd)
 
 	res, err := runner.Run(ctx, session.Task{
-		ID:          spec.ID,
-		Description: description,
-		TestCmd:     deps.testCmd,
-		RepoContext: repoCtx,
-		Learnings:   spec.Learnings,
+		ID:                spec.ID,
+		Description:       description,
+		TestCmd:           deps.testCmd,
+		InvestigationOnly: spec.InvestigationOnly,
+		RepoContext:       repoCtx,
+		Learnings:         spec.Learnings,
 	})
 
 	if err != nil {
@@ -255,6 +256,11 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			}
 		}
 		return taskResult{detail: truncateDetail(detail), abuse: abuse, events: prog.all()}
+	}
+
+	if out, matched := investigationOutcome(res); matched {
+		out.events = prog.all()
+		return out
 	}
 
 	gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, deps.leaseID, creds)
@@ -326,29 +332,49 @@ func noKeyDetail(model string) string {
 // the daemon ever reads or forwards it otherwise.
 const slackWebhookCredentialName = "SLACK_WEBHOOK_URL"
 
+// slackBotTokenCredentialName is the Control-Plane-only Slack trigger
+// credential (ee/orchestrator's Slack @mention pipeline — see pkg/store's
+// CredentialSlack kind). It can post/edit messages and read channel and
+// thread history, so it gets the same unconditional exclusion as
+// slackWebhookCredentialName rather than being left to the opt-in below.
+const slackBotTokenCredentialName = "SLACK_BOT_TOKEN"
+
 // taskTestEnv builds the environment the sandbox runs with.
 //
-// Four exclusions, for two different reasons. LLM keys, telemetry
-// credentials (Datadog/Prometheus — pkg/telemetry), and the Slack webhook
-// URL are always withheld because the sandbox executes model-generated code,
-// and that has been true for LLM keys since the Actor/Critic split;
-// telemetry and Slack credentials are org infrastructure/notification
-// secrets with the same exposure, so they get the same unconditional
-// treatment rather than being left to the opt-in below. Everything else is
-// withheld in session mode because there the model also chooses the
-// commands, and their output is carried back into the event log — so a
-// credential in the environment has a read-and-echo path out that needs no
-// network.
+// Five exclusions, for two different reasons. LLM keys, telemetry
+// credentials (Datadog/Prometheus — pkg/telemetry), and the two
+// Control-Plane-only Slack credentials are always withheld because the
+// sandbox executes model-generated code, and that has been true for LLM
+// keys since the Actor/Critic split; telemetry and Slack credentials are org
+// infrastructure/notification secrets with the same exposure, so they get
+// the same unconditional treatment rather than being left to the opt-in
+// below. Everything else is withheld in session mode because there the
+// model also chooses the commands, and their output is carried back into
+// the event log — so a credential in the environment has a read-and-echo
+// path out that needs no network.
 func taskTestEnv(task string, creds map[string]string, sessionMode bool) []string {
 	env := []string{"TASK=" + task}
 	if sessionMode && !sessionAllowsTestCredentials() {
 		return env
 	}
 	for name, value := range creds {
-		if isLLMKey(name) || telemetry.IsTelemetryCredential(name) || name == slackWebhookCredentialName {
+		if isLLMKey(name) || telemetry.IsTelemetryCredential(name) || name == slackWebhookCredentialName || name == slackBotTokenCredentialName {
 			continue
 		}
 		env = append(env, name+"="+value)
 	}
 	return env
+}
+
+// investigationOutcome reports the taskResult for a successful round the
+// Architect explicitly declared needs no diff, or (matched=false) says
+// nothing — meaning the caller should fall through to the ordinary
+// PR-publish path. Kept pure and separate from runSession's imperative flow
+// so the decision itself — not the git/session plumbing around it — is what
+// a test exercises.
+func investigationOutcome(res session.Result) (taskResult, bool) {
+	if !res.Success || !res.NoDiffExpected {
+		return taskResult{}, false
+	}
+	return taskResult{ok: true, detail: truncateDetail(res.Summary)}, true
 }

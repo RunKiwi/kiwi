@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
+	"github.com/ibreakthecloud/kiwi/ee/planner"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -23,12 +24,15 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("open db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&auth.Organization{}, &store.Fleet{}, &store.ModelEntry{}, &store.CatalogModel{}, &store.OrgTokenGrant{},
-		&store.Job{}, &store.QueuedTask{},
+		&auth.Organization{}, &store.OrgLimits{}, &store.Fleet{}, &store.ModelEntry{}, &store.CatalogModel{}, &store.OrgTokenGrant{},
+		&store.Job{}, &store.QueuedTask{}, &store.Credential{}, &store.GitHubInstallation{},
+		&store.Manifest{}, &store.PlanSubmission{}, &store.JobLearning{},
+		&store.SlackInstallation{}, &store.SlackChannelBinding{}, &store.SlackTriggeredTask{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return &Server{db: db, storage: store.NewPostgresStore(db)}
+	st := store.NewPostgresStore(db)
+	return &Server{db: db, storage: st, planner: planner.NewService(st, nil, nil)}
 }
 
 // The core guarantee: a daemon Kiwi does not operate never receives a Kiwi key.

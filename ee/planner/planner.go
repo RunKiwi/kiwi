@@ -48,6 +48,9 @@ type PlanRequest struct {
 	// produces. Threaded onto every worker spec so the daemon's loop can verify
 	// its work (the test is the definition of done).
 	TestCmd string `json:"test_cmd"`
+	// InvestigationOnly hints the Architect that this task may be answerable
+	// without a code change. Currently set only by the Slack trigger path.
+	InvestigationOnly bool `json:"investigation_only,omitempty"`
 	// ReferenceMode determines how prior job learnings are injected (""|"off"|"manual"|"auto").
 	ReferenceMode string `json:"reference_mode"`
 	// ReferenceJobIDs specifies the jobs to inject when ReferenceMode is "manual".
