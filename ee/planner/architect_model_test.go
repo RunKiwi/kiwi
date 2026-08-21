@@ -16,6 +16,7 @@ import (
 // split was off for every task submitted through the dashboard.
 func TestArchitectDefaultsToAFrontierModelNotTheWorker(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	res, err := s.SubmitPlan(context.Background(), PlanRequest{
@@ -41,6 +42,7 @@ func TestArchitectDefaultsToAFrontierModelNotTheWorker(t *testing.T) {
 // An explicit choice is never second-guessed.
 func TestArchitectExplicitChoiceWins(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	res, err := s.SubmitPlan(context.Background(), PlanRequest{
@@ -63,6 +65,7 @@ func TestArchitectExplicitChoiceWins(t *testing.T) {
 // without a deploy.
 func TestArchitectDefaultHonoursOperatorOverride(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 	t.Setenv("KIWI_ARCHITECT_MODEL", "claude-sonnet-5")
 

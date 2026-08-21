@@ -65,6 +65,7 @@ func TestHeuristicPlannerRequiresTask(t *testing.T) {
 func TestIdempotentPlanSubmission(t *testing.T) {
 	st := newTestStore(t)
 	s := NewService(st, NewHeuristicPlanner(), nil)
+	seedOrg(t, st, "org1")
 	// Every submit now resolves an Architect, and a BYOK org must have a key for
 	// its provider before one can be chosen.
 	seedCredential(t, st, "org1", "ANTHROPIC_API_KEY")
@@ -283,10 +284,77 @@ func TestServiceSubmitPlanSingleWorkerSpecIsExecutable(t *testing.T) {
 	}
 }
 
+// Regression test for the Slack-trigger "no runner connected" bug: every
+// caller that reaches SubmitPlan directly (SubmitFork, and every Slack
+// trigger path) used to skip the free-tier fleet pinning and cold-start that
+// only HandlePlan performed after calling it — so a free-tier org submitting
+// through anything other than the HTTP handler got a task that could never
+// be leased, since fleet_id stayed empty and no daemon was ever provisioned.
+func TestSubmitPlanColdStartsAFreeOrgRegardlessOfCaller(t *testing.T) {
+	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "o1")
+	if err := s.DB().Model(&auth.Organization{}).Where("id = ?", "o1").Update("plan", "free").Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(s, NewHeuristicPlanner(), nil)
+
+	// Called directly, the way handleSlackTrigger/SubmitFork do — not through
+	// HandlePlan.
+	if _, err := svc.SubmitPlan(context.Background(), PlanRequest{
+		OrgID: "o1", Task: "fix the login bug", RepoURL: "https://github.com/x/y", Ref: "main",
+	}); err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	var queued []store.QueuedTask
+	if err := s.DB().Where("org_id = ?", "o1").Find(&queued).Error; err != nil || len(queued) == 0 {
+		t.Fatalf("expected queued tasks, got %v err=%v", queued, err)
+	}
+	for _, q := range queued {
+		if q.FleetID != auth.SharedFreeFleet {
+			t.Errorf("task %s: expected fleet %q, got %q", q.ID, auth.SharedFreeFleet, q.FleetID)
+		}
+	}
+
+	var provCount int64
+	s.DB().Model(&auth.ProvisioningRequest{}).
+		Where("org_id = ? AND type = 'provision' AND status = 'pending'", "o1").
+		Count(&provCount)
+	if provCount != 1 {
+		t.Errorf("expected exactly 1 pending provision request from cold-start, got %d", provCount)
+	}
+}
+
+// The suspension check must catch a direct SubmitPlan caller too, not only
+// requests that went through HandlePlan's own pre-check.
+func TestSubmitPlanRefusesASuspendedOrgRegardlessOfCaller(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.DB().Create(&auth.Organization{ID: "o1", Plan: "free", ActivationState: "suspended"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(s, NewHeuristicPlanner(), nil)
+
+	_, err := svc.SubmitPlan(context.Background(), PlanRequest{OrgID: "o1", Task: "x", RepoURL: "https://github.com/x/y"})
+	if err == nil || !strings.Contains(err.Error(), "suspended") {
+		t.Fatalf("expected a suspended-org refusal, got %v", err)
+	}
+
+	var tasks, provs int64
+	s.DB().Model(&store.QueuedTask{}).Where("org_id = ?", "o1").Count(&tasks)
+	s.DB().Model(&auth.ProvisioningRequest{}).Where("org_id = ?", "o1").Count(&provs)
+	if tasks != 0 || provs != 0 {
+		t.Errorf("suspended org must enqueue nothing; got %d tasks, %d provision requests", tasks, provs)
+	}
+}
+
 func TestHandlePlan(t *testing.T) {
 	s := newTestStore(t)
 	seedAdmissibleOrg(t, s, "o1")
-	s.DB().Create(&auth.Organization{ID: "o1", Plan: "free"})
+	// This test specifically exercises the free-tier path, overriding
+	// seedAdmissibleOrg's default "pro" plan.
+	if err := s.DB().Model(&auth.Organization{}).Where("id = ?", "o1").Update("plan", "free").Error; err != nil {
+		t.Fatal(err)
+	}
 	svc := NewService(s, NewHeuristicPlanner(), nil)
 
 	body := `{"task":"add logging","repo_url":"https://github.com/x/y","ref":"main","max_workers":1}`

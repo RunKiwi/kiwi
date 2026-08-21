@@ -62,19 +62,16 @@ func (s *Service) HandlePlan(w http.ResponseWriter, r *http.Request) {
 		req.FleetID = auth.SharedFreeFleet
 	}
 
+	// SubmitPlan does its own org lookup, suspension check, free-tier
+	// FleetID assignment, and cold-start (ensureFreeDaemon/wakeFleetHost) —
+	// the suspension pre-check above stays here only because it returns the
+	// more specific 403 this endpoint has always returned for it; everything
+	// else below used to be duplicated here and is now handled once, for
+	// every caller, inside SubmitPlan itself.
 	res, err := s.SubmitPlan(r.Context(), req)
 	if err != nil {
 		http.Error(w, "planning failed: "+err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	// Free-tier cold-start: now that this org's work is queued (with fleet_id
-	// shared-free), ensure a per-org daemon is (being) provisioned to lease it.
-	// This is the daemon-fed submit path — `kiwi submit` posts here — so the
-	// cold-start belongs here, not on the CP-side /tasks path.
-	if org.Plan == "free" {
-		s.ensureFreeDaemon(r.Context(), claims.OrgID)
-		s.wakeFleetHost()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
