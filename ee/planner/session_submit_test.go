@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/ee/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
+	"gorm.io/gorm/clause"
 )
 
 // Session mode makes no LLM call at submit and reads no credential plaintext.
@@ -19,6 +21,7 @@ func TestSessionSubmitCallsNoModelAndDecryptsNothing(t *testing.T) {
 	st := newTestStore(t)
 	s := NewService(st, nil, nil)
 	t.Setenv("KIWI_PLANNER", "llm")
+	seedOrg(t, st, "org1")
 	seedCredential(t, st, "org1", "ANTHROPIC_API_KEY")
 	seedRepoAccess(t, st, "org1")
 
@@ -50,6 +53,7 @@ func TestSessionSubmitCallsNoModelAndDecryptsNothing(t *testing.T) {
 // change to stay comparable.
 func TestSessionSpecCarriesArchitectModel(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	res, err := s.SubmitPlan(context.Background(), PlanRequest{
@@ -77,7 +81,9 @@ func TestSessionSpecCarriesArchitectModel(t *testing.T) {
 // without a presence check the org would get a 202 and a failure minutes later
 // inside the daemon.
 func TestSessionSubmitStillFailsFastWithoutAProviderKey(t *testing.T) {
-	s := NewService(newTestStore(t), nil, nil)
+	st := newTestStore(t)
+	s := NewService(st, nil, nil)
+	seedOrg(t, st, "org1")
 
 	_, err := s.SubmitPlan(context.Background(), PlanRequest{
 		OrgID: "org1", Task: "add retries", Model: "claude-sonnet-5",
@@ -109,6 +115,7 @@ func TestProviderKeyCheckIsPresenceOnly(t *testing.T) {
 func TestSessionModeCanBeDisabledByTheOperator(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
 	t.Setenv("KIWI_SESSION_MODE", "off")
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 
 	_, err := s.SubmitPlan(context.Background(), PlanRequest{
@@ -116,6 +123,16 @@ func TestSessionModeCanBeDisabledByTheOperator(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("expected the kill-switch to refuse the submit, got %v", err)
+	}
+}
+
+// seedOrg is the minimal setup SubmitPlan's own org lookup demands, without
+// seedAdmissibleOrg's credential/repo-access seeding — for tests that
+// deliberately withhold one of those to exercise the resulting refusal.
+func seedOrg(t *testing.T, s *store.PostgresStore, org string) {
+	t.Helper()
+	if err := s.DB().Clauses(clause.OnConflict{DoNothing: true}).Create(&auth.Organization{ID: org, Plan: "pro"}).Error; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -154,6 +171,13 @@ func seedRepoAccess(t *testing.T, s *store.PostgresStore, org string) {
 // and let the daemon discover the problem minutes later.
 func seedAdmissibleOrg(t *testing.T, s *store.PostgresStore, org string) {
 	t.Helper()
+	// SubmitPlan looks the org up itself now (suspension check, free-tier
+	// FleetID/cold-start) — every admissible org needs a real row, not just
+	// credentials. "pro" rather than "free" so tests using this helper don't
+	// incidentally exercise the free-tier cold-start path unless they ask to.
+	if err := s.DB().Clauses(clause.OnConflict{DoNothing: true}).Create(&auth.Organization{ID: org, Plan: "pro"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	seedRepoAccess(t, s, org)
 	seedCredential(t, s, org, "ANTHROPIC_API_KEY")
 }

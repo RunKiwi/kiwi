@@ -57,6 +57,7 @@ func TestProviderNamingIsCanonical(t *testing.T) {
 func TestAdmissionResolvesTheKeyForTheArchitectsProvider(t *testing.T) {
 	s := newTestStore(t)
 	svc := NewService(s, nil, nil)
+	seedOrg(t, s, "org-1")
 
 	if err := s.SaveCredential(context.Background(), "org-1", "OPENAI_API_KEY", store.CredentialLLM, "sk-openai-x"); err != nil {
 		t.Fatal(err)
@@ -91,6 +92,7 @@ func TestAdmissionResolvesTheKeyForTheArchitectsProvider(t *testing.T) {
 func TestPlanningWithoutAKeyIsAnActionableError(t *testing.T) {
 	s := newTestStore(t)
 	svc := NewService(s, nil, nil)
+	seedOrg(t, s, "org-1")
 
 	t.Setenv("KIWI_PLANNER", "llm")
 	t.Setenv("KIWI_PLANNER_API_KEY", "")

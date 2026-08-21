@@ -63,6 +63,7 @@ func TestPlannerModelSurvivesWhenNoneWasRequested(t *testing.T) {
 func TestQueuedTaskCarriesTheRequestedWorkerModel(t *testing.T) {
 	s := newTestStore(t)
 	svc := NewService(s, nil, nil)
+	seedOrg(t, s, "org-1")
 
 	t.Setenv("KIWI_PLANNER", "llm")
 	t.Setenv("KIWI_PLANNER_API_KEY", "")

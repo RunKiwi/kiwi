@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/ee/auth"
 	"github.com/ibreakthecloud/kiwi/ee/entitlement"
 	"github.com/ibreakthecloud/kiwi/ee/fleethost"
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -72,6 +73,27 @@ type SubmitResult struct {
 func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResult, error) {
 	if req.OrgID == "" {
 		return nil, fmt.Errorf("org id is required")
+	}
+
+	// The org's own gate, before anything is enqueued or any model is called.
+	// HandlePlan (the /api/v1/planner/plan path) used to be the only caller,
+	// and did this itself before invoking SubmitPlan — but SubmitPlan has
+	// since grown other callers (SubmitFork, and every Slack-trigger path)
+	// that call it directly, and none of them re-checked suspension or set
+	// FleetID for a free-tier org. Checking here once, for every caller, is
+	// exactly the fix continuation.go already reached for the identical
+	// problem with the free-tier cold-start below — "the first one's
+	// post-steps were missed precisely by being somewhere a caller had to
+	// remember to repeat."
+	var org auth.Organization
+	if err := s.store.DB().WithContext(ctx).First(&org, "id = ?", req.OrgID).Error; err != nil {
+		return nil, fmt.Errorf("organization %s: %w", req.OrgID, err)
+	}
+	if org.ActivationState == "suspended" {
+		return nil, fmt.Errorf("organization is suspended")
+	}
+	if org.Plan == "free" {
+		req.FleetID = auth.SharedFreeFleet
 	}
 
 	if req.IdempotencyKey != "" {
@@ -469,6 +491,16 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// Free-tier cold-start: now that this org's work is queued (fleet_id was
+	// set to the shared-free fleet above), ensure a per-org daemon is (being)
+	// provisioned to lease it. Every caller of SubmitPlan gets this for free —
+	// see the comment on the org lookup at the top of this function for why
+	// it lives here rather than in each caller.
+	if org.Plan == "free" {
+		s.ensureFreeDaemon(ctx, req.OrgID)
+		s.wakeFleetHost()
 	}
 
 	// Best-effort, non-fatal indexing of this job as a learning for future

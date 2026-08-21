@@ -7,6 +7,7 @@ package orchestrator
 import (
 	"testing"
 
+	"github.com/ibreakthecloud/kiwi/ee/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -14,6 +15,9 @@ func TestHandleSlackTriggerSubmitsAPlanWhenChannelIsBound(t *testing.T) {
 	s := newTestServer(t)
 	ctx := t.Context()
 
+	if err := s.db.WithContext(ctx).Create(&auth.Organization{ID: "org_1", Plan: "pro"}).Error; err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
 	_ = s.storage.UpsertSlackInstallation(ctx, &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
 	_ = s.storage.SaveCredential(ctx, "org_1", "SLACK_BOT_TOKEN", store.CredentialSlack, "xoxb-test")
 	_ = s.storage.SaveCredential(ctx, "org_1", "ANTHROPIC_API_KEY", store.CredentialLLM, "sk-ant-test")
@@ -57,6 +61,9 @@ func TestHandleSlackTriggerReplyInTheResultingThreadIsRecognized(t *testing.T) {
 	s := newTestServer(t)
 	ctx := t.Context()
 
+	if err := s.db.WithContext(ctx).Create(&auth.Organization{ID: "org_1", Plan: "pro"}).Error; err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
 	_ = s.storage.UpsertSlackInstallation(ctx, &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
 	_ = s.storage.SaveCredential(ctx, "org_1", "SLACK_BOT_TOKEN", store.CredentialSlack, "xoxb-test")
 	_ = s.storage.SaveCredential(ctx, "org_1", "ANTHROPIC_API_KEY", store.CredentialLLM, "sk-ant-test")
