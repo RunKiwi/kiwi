@@ -619,19 +619,20 @@ func (r *Runner) rounds(ctx context.Context, task Task, st *state, cfg Config, s
 		r.activity("architect: reviewing round %d", st.round)
 		start = time.Now()
 		review, err := r.Architect.Review(ctx, ReviewInput{
-			Task:            task.Description,
-			Spec:            st.spec,
-			Round:           st.round,
-			Diff:            diff,
-			FilesChanged:    files,
-			HandoffNote:     report.Note,
-			Answers:         report.Answers,
-			NewQuestions:    report.NewQuestions,
-			Decisions:       report.Decisions,
-			VerifyOutput:    out,
-			VerifyPassed:    passed,
-			History:         st.history,
-			RoundsRemaining: cfg.MaxRounds - st.round,
+			Task:              task.Description,
+			Spec:              st.spec,
+			Round:             st.round,
+			Diff:              diff,
+			FilesChanged:      files,
+			HandoffNote:       report.Note,
+			Answers:           report.Answers,
+			NewQuestions:      report.NewQuestions,
+			Decisions:         report.Decisions,
+			VerifyOutput:      out,
+			VerifyPassed:      passed,
+			InvestigationOnly: task.InvestigationOnly,
+			History:           st.history,
+			RoundsRemaining:   cfg.MaxRounds - st.round,
 		})
 		reviewUsage := r.trackArchitect(st)
 		if err != nil {

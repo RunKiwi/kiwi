@@ -69,6 +69,12 @@ type ReviewInput struct {
 	Decisions    []string
 	VerifyOutput string
 	VerifyPassed bool
+	// InvestigationOnly mirrors Task.InvestigationOnly/PlanInput.InvestigationOnly
+	// — the same hint that told Plan an empty-diff approval was on the table for
+	// this task. Review needs it too: without it, an approval with an empty
+	// diff is unconditionally downgraded below regardless of what Plan told the
+	// Architect, and no_diff_expected can never actually take effect.
+	InvestigationOnly bool
 	// History is the compacted account of earlier rounds: what was asked, what
 	// happened. This is the Architect's memory, reconstructed by the Runner
 	// rather than held as a live provider transcript.
@@ -369,9 +375,17 @@ func (a *LLMArchitect) Review(ctx context.Context, in ReviewInput) (Spec, error)
 	// This mirrors the rule the single-file loop arrived at the hard way: a run
 	// that changes nothing must not be reported as success, or the user learns
 	// that a green tick means nothing.
+	//
+	// The one exception: a task the CALLER (not the model) flagged
+	// InvestigationOnly, where THIS round's own verdict also set
+	// no_diff_expected. Both have to agree — InvestigationOnly alone doesn't
+	// excuse a round that was supposed to produce a diff and didn't, and
+	// no_diff_expected alone (on an ordinary task) doesn't either. This is the
+	// only place an empty-diff approval can ever survive; nothing downstream
+	// re-derives it from the diff being empty after the fact.
 	if spec.Verdict == VerdictApprove {
 		switch {
-		case in.Diff == "":
+		case in.Diff == "" && !(in.InvestigationOnly && spec.NoDiffExpected):
 			spec.Verdict = VerdictRevise
 			spec.Rationale = "approval refused: the diff is empty, so there is nothing to deliver. " + spec.Rationale
 			if spec.Objective == "" {

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,5 +60,18 @@ func TestTestCmdRequiredIsFalseWhenInvestigationOnly(t *testing.T) {
 func TestTestCmdRequiredIsFalseWhenACommandExists(t *testing.T) {
 	if testCmdRequired("go test ./...", false) {
 		t.Fatal("a task with a real test command is never blocked by this check, investigation-only or not")
+	}
+}
+
+func TestNoOpVerifyReportsATrivialPassWithoutTouchingAnything(t *testing.T) {
+	out, passed, err := noOpVerify(context.Background())
+	if err != nil {
+		t.Fatalf("noOpVerify returned an error: %v", err)
+	}
+	if !passed {
+		t.Error("noOpVerify must report passed=true — there is nothing to fail")
+	}
+	if out != "" {
+		t.Errorf("noOpVerify returned output %q, want empty — it never ran anything", out)
 	}
 }

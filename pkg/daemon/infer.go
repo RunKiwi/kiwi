@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -24,6 +25,13 @@ func providerNameForModel(model string) string {
 func testCmdRequired(testCmd string, investigationOnly bool) bool {
 	return testCmd == "" && !investigationOnly
 }
+
+// noOpVerify is the verification story for a task testCmdRequired let
+// through with an empty test command — reachable only when
+// spec.InvestigationOnly is true. There is nothing to run, so it reports a
+// trivial pass rather than handing an empty command to the sandbox, which
+// runInSandbox/sandbox.RunCommand were never built to receive.
+func noOpVerify(context.Context) (string, bool, error) { return "", true, nil }
 
 // inferTestCmd guesses a project's test command from marker files at the repo
 // root, so a task submitted without an explicit test_cmd can still be verified.
