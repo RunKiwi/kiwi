@@ -39,6 +39,15 @@ func (s *Server) handleSlackBindings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "team_id, channel_id, and repo_url are required", http.StatusBadRequest)
 			return
 		}
+		// A caller-supplied team_id must actually be this org's connected
+		// workspace — otherwise any authenticated user on any org could bind
+		// a channel on a workspace they have no relationship to, and the
+		// trigger path would resolve it straight to a repo that org chose.
+		installation, err := s.storage.GetSlackInstallationByTeamID(r.Context(), body.TeamID)
+		if err != nil || installation == nil || installation.OrgID != claims.OrgID {
+			http.Error(w, "that Slack workspace is not connected to this organization", http.StatusBadRequest)
+			return
+		}
 		b := &store.SlackChannelBinding{
 			OrgID: claims.OrgID, TeamID: body.TeamID, ChannelID: body.ChannelID,
 			RepoURL: body.RepoURL, DefaultTestCmd: body.DefaultTestCmd, DefaultRef: body.DefaultRef,

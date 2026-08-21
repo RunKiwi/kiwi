@@ -69,6 +69,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	}
 
 	binding, _ := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
+	// A binding survives a workspace being re-installed under a different
+	// org — team_id isn't a stable proxy for "this org still owns it" once
+	// that happens. A stale binding must not be trusted for a repo it was
+	// never re-confirmed against under the org that owns the workspace now.
+	if binding != nil && binding.OrgID != inst.OrgID {
+		binding = nil
+	}
 	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, binding)
 	if ambiguousReply != "" {
 		if s.slackClient != nil {

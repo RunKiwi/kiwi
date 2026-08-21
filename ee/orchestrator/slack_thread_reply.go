@@ -174,6 +174,18 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 	}
 	triggeredTaskID, instruction := parts[0], parts[1]
 
+	// Resolved from the signed payload's own team_id before anything else is
+	// trusted: Slack's signature proves the request came from a real
+	// installed workspace, not which workspace triggeredTaskID belongs to.
+	// action_value is client-controlled — a crafted id can name any row in
+	// any tenant, and the checks below are what stop this handler acting on
+	// another org's task on the strength of a signature that only proves
+	// *a* workspace made the request, not *this* one.
+	inst, err := s.storage.GetSlackInstallationByTeamID(ctx, in.TeamID)
+	if err != nil || inst == nil {
+		return
+	}
+
 	var existing store.SlackTriggeredTask
 	if err := s.db.WithContext(ctx).Where("id = ?", triggeredTaskID).First(&existing).Error; err != nil {
 		return
@@ -182,11 +194,11 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 	if err := s.db.WithContext(ctx).Where("id = ?", existing.QueuedTaskID).First(&parent).Error; err != nil {
 		return
 	}
-
-	inst, err := s.storage.GetSlackInstallationByTeamID(ctx, in.TeamID)
-	if err != nil || inst == nil {
+	if existing.TeamID != in.TeamID || existing.OrgID != inst.OrgID || parent.OrgID != inst.OrgID {
+		log.Printf("[slackapp] interactivity payload for team %s referenced a task outside that team; ignoring", in.TeamID)
 		return
 	}
+
 	token, err := s.storage.GetCredentialPlaintext(ctx, inst.OrgID, "SLACK_BOT_TOKEN")
 	if err != nil || token == "" {
 		return

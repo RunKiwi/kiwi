@@ -17,6 +17,8 @@ import (
 
 func TestHandleCreateSlackBindingPersistsAndReturns201(t *testing.T) {
 	s := newTestServer(t)
+	_ = s.storage.UpsertSlackInstallation(t.Context(), &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
+
 	body, _ := json.Marshal(map[string]string{
 		"team_id": "T1", "channel_id": "C1", "repo_url": "https://github.com/acme/widget",
 	})
@@ -33,6 +35,50 @@ func TestHandleCreateSlackBindingPersistsAndReturns201(t *testing.T) {
 	list, err := s.storage.ListSlackChannelBindings(req.Context(), "org_1")
 	if err != nil || len(list) != 1 || list[0].ChannelID != "C1" {
 		t.Fatalf("list=%v err=%v", list, err)
+	}
+}
+
+// The workspace being bound must actually belong to the requesting org —
+// otherwise any authenticated user on any org could bind a channel on a
+// workspace connected to a DIFFERENT org, redirecting that workspace's
+// future triggers at a repo of the attacker's choosing.
+func TestHandleCreateSlackBindingRejectsAWorkspaceOwnedByAnotherOrg(t *testing.T) {
+	s := newTestServer(t)
+	_ = s.storage.UpsertSlackInstallation(t.Context(), &store.SlackInstallation{TeamID: "T-other-org", OrgID: "org_other"})
+
+	body, _ := json.Marshal(map[string]string{
+		"team_id": "T-other-org", "channel_id": "C1", "repo_url": "https://github.com/attacker/repo",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/integrations/slack/bindings", bytes.NewReader(body))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "org_1", UserID: "user_1"}))
+	w := httptest.NewRecorder()
+
+	s.handleSlackBindings(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a workspace owned by another org, got %d: %s", w.Code, w.Body.String())
+	}
+	list, err := s.storage.ListSlackChannelBindings(req.Context(), "org_1")
+	if err != nil || len(list) != 0 {
+		t.Fatalf("expected no binding created, got %v err=%v", list, err)
+	}
+}
+
+// A team_id with no connected installation at all must be rejected the same
+// way — there's nothing to check ownership against, so it can't be trusted.
+func TestHandleCreateSlackBindingRejectsAnUninstalledTeamID(t *testing.T) {
+	s := newTestServer(t)
+	body, _ := json.Marshal(map[string]string{
+		"team_id": "T-never-installed", "channel_id": "C1", "repo_url": "https://github.com/acme/widget",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/integrations/slack/bindings", bytes.NewReader(body))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.UserClaims{OrgID: "org_1", UserID: "user_1"}))
+	w := httptest.NewRecorder()
+
+	s.handleSlackBindings(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an uninstalled team_id, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
