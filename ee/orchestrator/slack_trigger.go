@@ -30,11 +30,21 @@ func instructionFromSlack(text string) string {
 // handleCommentTrigger's "a refusal is a log line, never a failed
 // delivery" posture.
 //
-// Scoped narrowly for now: repo resolution only checks a channel binding.
-// Task 9 layers inline-override and LLM inference in ahead of this. Context
-// is only the trigger message itself; Task 8 layers thread/channel history
-// assembly in before this reaches the planner.
-func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, threadTS, userID, text string) {
+// messageTS is the @mention event's own ts — distinct from threadTS, which
+// Slack leaves empty for a fresh top-level mention and sets to the root's ts
+// for a reply inside an existing conversation. Both are needed: the eyes
+// reaction always attaches to the specific message that was mentioned
+// (messageTS), while everything Kiwi posts back threads into
+// firstNonEmpty(threadTS, messageTS) — the existing conversation if there is
+// one, otherwise a new thread rooted at the mention itself. Getting this
+// wrong (using threadTS alone) was a real bug: for every fresh mention the
+// reaction silently failed on an empty timestamp, the status reply posted as
+// an unthreaded new message instead of a reply, and the persisted
+// SlackTriggeredTask.ThreadTS ended up pointing at that stray status
+// message's own ts rather than the mention's — so a human reply in the
+// thread under their actual @mention could never match it, and
+// continue/fork/new classification never fired.
+func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, threadTS, messageTS, userID, text string) {
 	inst, err := s.storage.GetSlackInstallationByTeamID(ctx, teamID)
 	if err != nil || inst == nil {
 		return // unknown team: nothing this delivery can do
@@ -53,16 +63,19 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		return
 	}
 
-	// A trigger with no thread yet starts its own: the trigger message's own
-	// ts is the thread root every reply (and every status edit) anchors to.
-	if threadTS == "" {
-		threadTS = "" // set below once we know the status message's ts
-	}
+	// The thread everything from here on replies into: the existing
+	// conversation if this mention landed inside one, otherwise a new thread
+	// rooted at the mention message itself.
+	replyThreadTS := firstNonEmpty(threadTS, messageTS)
 
 	rawInstruction := instructionFromSlack(text)
 	if rawInstruction == "" {
 		return
 	}
+	// Context assembly cares about the ORIGINAL threadTS, not replyThreadTS:
+	// an empty threadTS means "no thread exists yet", which is exactly what
+	// tells fetchSlackContext to pull channel history instead of trying to
+	// fetch replies for a thread that doesn't exist.
 	instruction, err := s.fetchSlackContext(ctx, token, channelID, threadTS, rawInstruction)
 	if err != nil {
 		instruction = rawInstruction
@@ -79,13 +92,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, binding)
 	if ambiguousReply != "" {
 		if s.slackClient != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS, ambiguousReply)
+			s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, ambiguousReply)
 		}
 		return
 	}
 
 	if s.slackClient != nil {
-		s.slackClient.AddReaction(ctx, token, channelID, firstNonEmpty(threadTS, ""), "eyes")
+		s.slackClient.AddReaction(ctx, token, channelID, messageTS, "eyes")
 	}
 
 	var defaultRef, defaultTestCmd string
@@ -110,26 +123,22 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	})
 	if err != nil {
 		if s.slackClient != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
+			s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 		}
 		return
 	}
 
-	rootTS := threadTS
 	statusTS := ""
 	if s.slackClient != nil {
-		statusTS, err = s.slackClient.PostMessage(ctx, token, channelID, threadTS,
+		statusTS, err = s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS,
 			fmt.Sprintf("Working on it — job `%s`.", result.JobID))
 		if err != nil {
 			log.Printf("[slackapp] posting status message for job %s: %v", result.JobID, err)
 		}
-		if rootTS == "" {
-			rootTS = statusTS // a fresh top-level trigger starts its own thread at its own status reply
-		}
 	}
 
 	row := &store.SlackTriggeredTask{
-		OrgID: inst.OrgID, TeamID: teamID, ChannelID: channelID, ThreadTS: rootTS,
+		OrgID: inst.OrgID, TeamID: teamID, ChannelID: channelID, ThreadTS: replyThreadTS,
 		QueuedTaskID: firstOf(result.TaskIDs), StatusMessageTS: statusTS, LastStatus: "running",
 	}
 	if err := s.storage.CreateSlackTriggeredTask(ctx, row); err != nil {

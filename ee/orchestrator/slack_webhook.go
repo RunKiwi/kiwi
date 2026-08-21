@@ -78,11 +78,11 @@ func (s *Server) handleSlackWebhook(w http.ResponseWriter, r *http.Request) {
 		// context the moment this handler returns, which happens immediately
 		// after this goroutine is spawned, so r.Context() would be canceled
 		// before the trigger pipeline's SubmitPlan/DB/Slack API calls ever run.
-		go func(teamID, channelID, threadTS, userID, text string) {
+		go func(teamID, channelID, threadTS, messageTS, userID, text string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			s.handleSlackTrigger(ctx, teamID, channelID, threadTS, userID, text)
-		}(ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.UserID, ev.Text)
+			s.handleSlackTrigger(ctx, teamID, channelID, threadTS, messageTS, userID, text)
+		}(ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.TS, ev.UserID, ev.Text)
 	}
 	w.WriteHeader(http.StatusOK)
 }
