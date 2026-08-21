@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, SlackChannelBinding, SlackInstallation } from "@/lib/api";
-import { MessageSquare, Trash2, Plus, Loader2, AlertCircle, ArrowLeft, Hash } from "lucide-react";
+import { Trash2, Plus, Loader2, AlertCircle, ArrowLeft, Hash } from "lucide-react";
 
 export default function SlackBindingsPage() {
   const [bindings, setBindings] = useState<SlackChannelBinding[]>([]);
@@ -19,16 +19,24 @@ export default function SlackBindingsPage() {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  async function loadData() {
+    const [bRes, iRes] = await Promise.all([
+      api.listSlackBindings(),
+      api.listSlackInstallations().catch(() => ({ installations: [] })),
+    ]);
+    return { bindings: bRes.bindings || [], installations: iRes.installations || [] };
+  }
+
+  // Used by the create/delete handlers to reload after a mutation — a plain
+  // async function is fine there since it runs from an event handler, not an
+  // effect body.
   async function refresh() {
     try {
-      const [bRes, iRes] = await Promise.all([
-        api.listSlackBindings(),
-        api.listSlackInstallations().catch(() => ({ installations: [] })),
-      ]);
-      setBindings(bRes.bindings || []);
-      setInstallations(iRes.installations || []);
-      if (iRes.installations?.length > 0 && !teamID) {
-        setTeamID(iRes.installations[0].team_id);
+      const { bindings, installations } = await loadData();
+      setBindings(bindings);
+      setInstallations(installations);
+      if (installations.length > 0 && !teamID) {
+        setTeamID(installations[0].team_id);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load bindings");
@@ -37,8 +45,31 @@ export default function SlackBindingsPage() {
     }
   }
 
+  // The initial load runs its own Promise chain (rather than calling
+  // refresh()) so state is only ever set once the fetch resolves and the
+  // effect hasn't been cleaned up — calling a state-setting function
+  // directly from an effect body trips react-hooks/set-state-in-effect.
   useEffect(() => {
-    refresh();
+    let active = true;
+    loadData()
+      .then(({ bindings, installations }) => {
+        if (!active) return;
+        setBindings(bindings);
+        setInstallations(installations);
+        if (installations.length > 0) {
+          setTeamID(installations[0].team_id);
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Failed to load bindings");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function onCreate(e: React.FormEvent) {

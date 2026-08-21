@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -77,9 +79,16 @@ func (s *PostgresStore) DeleteSlackChannelBinding(ctx context.Context, id, orgID
 	return s.db.WithContext(ctx).Delete(&SlackChannelBinding{}, "id = ? AND org_id = ?", id, orgID).Error
 }
 
+// CreateSlackTriggeredTask assigns an id that sorts by creation order even
+// when two rows land on the same wall-clock timestamp — SQLite's default
+// time column precision (used in tests) and, in principle, two Postgres
+// inserts within the same microsecond can both tie on created_at, and
+// LatestSlackTriggeredTask has to return a deterministic, actually-latest
+// row regardless: a thread's continue/fork/new classification reads whatever
+// it picks as "current context".
 func (s *PostgresStore) CreateSlackTriggeredTask(ctx context.Context, t *SlackTriggeredTask) error {
 	if t.ID == "" {
-		t.ID = "stt_" + randHex(8)
+		t.ID = fmt.Sprintf("stt_%020d_%s", time.Now().UnixNano(), randHex(4))
 	}
 	return s.db.WithContext(ctx).Create(t).Error
 }
@@ -91,7 +100,7 @@ func (s *PostgresStore) LatestSlackTriggeredTask(ctx context.Context, teamID, ch
 	var t SlackTriggeredTask
 	err := s.db.WithContext(ctx).
 		Where("team_id = ? AND channel_id = ? AND thread_ts = ?", teamID, channelID, threadTS).
-		Order("created_at desc").
+		Order("created_at desc, id desc").
 		First(&t).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
