@@ -50,6 +50,7 @@ type fakeArchitect struct {
 	usage        provider.ToolUsage
 	costPer      float64
 	plannedCalls int
+	reviewCalls  int
 }
 
 func (a *fakeArchitect) Usage() provider.ToolUsage { return a.usage }
@@ -64,6 +65,7 @@ func (a *fakeArchitect) Plan(context.Context, PlanInput) (Spec, error) {
 }
 
 func (a *fakeArchitect) Review(_ context.Context, in ReviewInput) (Spec, error) {
+	a.reviewCalls++
 	a.usage.Add(provider.ToolUsage{CostUSD: a.costPer})
 	a.seen = append(a.seen, in)
 	if len(a.reviews) == 0 {
@@ -72,6 +74,18 @@ func (a *fakeArchitect) Review(_ context.Context, in ReviewInput) (Spec, error) 
 	s := a.reviews[0]
 	a.reviews = a.reviews[1:]
 	return s, nil
+}
+
+// fakeToolRunner is a test double for provider.ToolRunner that counts conversation starts.
+type fakeToolRunner struct {
+	callCount int
+	script    func(n int, text string, results []provider.ToolResult) (provider.Turn, error)
+}
+
+func (f *fakeToolRunner) StartConversation(system string, tools []provider.ToolDef, opts provider.ConversationOpts) provider.ToolConversation {
+	f.callCount++
+	m := &provider.MockToolRunner{Script: f.script}
+	return m.StartConversation(system, tools, opts)
 }
 
 // finishingRunner is an Implementer that calls finish on its first turn, which

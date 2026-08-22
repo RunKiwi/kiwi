@@ -81,6 +81,13 @@ type Task struct {
 	// control plane. They reach the Architect here because the control plane no
 	// longer plans and so no longer consumes them itself.
 	Learnings []string
+	// RequiresPlanApproval stops the session after Round 0 planning and
+	// before any Implementer round, reporting PlanPendingReview instead of
+	// running further. A later run of the same SessionID with this task's
+	// checkpoint already at round 1 (the normal resumeFrom>0 path) proceeds
+	// straight into the round loop without re-planning, because the approved
+	// spec is already in that checkpoint.
+	RequiresPlanApproval bool
 }
 
 // Config tunes the session's rails. Zero values get defaults.
@@ -268,6 +275,13 @@ type Result struct {
 	Detail      string
 	FinalOutput string
 	HeadSHA     string
+	// PlanPendingReview is true when the session stopped after planning
+	// because Task.RequiresPlanApproval was set. Success is false in this
+	// case — the task did not finish, it paused.
+	PlanPendingReview bool
+	// Spec is the Architect's Round-0 plan, populated only when
+	// PlanPendingReview is true. The caller renders it for a human to read.
+	Spec Spec
 }
 
 // Runner executes a session.
@@ -537,6 +551,11 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	// written here records "round 1, not yet attempted".
 	st.attempts = 0
 	r.save(ctx, st, 1, 0)
+
+	if task.RequiresPlanApproval {
+		r.logf("[session] plan requires approval; stopping before round 1\n")
+		return Result{PlanPendingReview: true, Spec: spec, Usage: st.architect}, nil
+	}
 
 	return r.rounds(ctx, task, st, cfg, 1)
 }
