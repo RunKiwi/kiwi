@@ -118,6 +118,9 @@ type WorkerSpec struct {
 	// because the Architect plans in the daemon and so the Control Plane no
 	// longer consumes them itself.
 	Learnings []string `json:"learnings,omitempty"`
+	// RequiresPlanApproval, when set, makes the session stop after Round 0
+	// planning and report PLAN_REVIEW instead of running the Implementer.
+	RequiresPlanApproval bool `json:"requires_plan_approval,omitempty"`
 }
 
 // WorkerResult is the outcome of one worker.

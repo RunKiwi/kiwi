@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -161,9 +163,9 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	// commit; with it, the task resumes at its last finished round. The daemon
 	// has no database, so this travels over the same signed, lease-fenced
 	// channel as every other daemon report.
-	var store session.Store
+	var sessionStore session.Store
 	if deps.leaseID != "" {
-		store = &cpSessionStore{
+		sessionStore = &cpSessionStore{
 			client:         d.client,
 			taskID:         spec.ID,
 			leaseID:        deps.leaseID,
@@ -180,7 +182,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	rounds, budget := d.sessionLimits()
 
 	runner := &session.Runner{
-		Store:            store,
+		Store:            sessionStore,
 		SessionID:        sessionIDFor(spec.ID),
 		Architect:        &session.LLMArchitect{Provider: architectProv, Model: architectModel, Tools: session.NewArchitectTools(deps.worktreePath)},
 		Implementer:      implementer,
@@ -226,13 +228,23 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		spec.ID, architectModel, spec.Model, deps.testCmd)
 
 	res, err := runner.Run(ctx, session.Task{
-		ID:                spec.ID,
-		Description:       description,
-		TestCmd:           deps.testCmd,
-		InvestigationOnly: spec.InvestigationOnly,
-		RepoContext:       repoCtx,
-		Learnings:         spec.Learnings,
+		ID:                   spec.ID,
+		Description:          description,
+		TestCmd:              deps.testCmd,
+		InvestigationOnly:    spec.InvestigationOnly,
+		RepoContext:          repoCtx,
+		Learnings:            spec.Learnings,
+		RequiresPlanApproval: spec.RequiresPlanApproval,
 	})
+
+	if res.PlanPendingReview {
+		specJSON, merr := json.Marshal(res.Spec)
+		if merr != nil {
+			log.Printf("Task %s: failed to marshal plan spec: %v", spec.ID, merr)
+			specJSON = []byte("{}")
+		}
+		return taskResult{detail: "plan pending review", events: prog.all(), planReviewStatus: store.TaskPlanReview, planSpecJSON: string(specJSON)}
+	}
 
 	if err != nil {
 		log.Printf("Task %s session ended without success: %v (rounds=%d, cost=$%.2f)", spec.ID, err, res.Rounds, res.CostUSD)
