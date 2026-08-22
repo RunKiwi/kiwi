@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,18 @@ import (
 // the top-level org create/list and /admin/stats remain gated by
 // isAdminAuthorized directly, so only a super-admin can reach them.
 func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
+	mux.HandleFunc("/admin/users", func(w http.ResponseWriter, r *http.Request) {
+		if !isAdminAuthorized(r) {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleAdminUsersSearch(db, w, r)
+	})
+
 	mux.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
 			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
@@ -1266,4 +1279,94 @@ func handleUpdateOrgName(db *gorm.DB, w http.ResponseWriter, r *http.Request, or
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(org)
+}
+
+// AdminUserSearchRow is one row of the cross-tenant user directory search.
+// LastActiveAt is omitted, not fabricated: User carries no activity column of
+// its own (DashboardSession does, per-user, but joining it here would make
+// this a different, heavier query than "search users by name/email" — add it
+// as a follow-up if the frontend needs it, with its own test).
+type AdminUserSearchRow struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	OrgID        string    `json:"org_id"`
+	OrgName      string    `json:"org_name"`
+	Role         string    `json:"role"`
+	AuthProvider string    `json:"auth_provider,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// handleAdminUsersSearch serves GET /admin/users?search=&limit=&offset=,
+// searching by email or name substring across every org.
+func handleAdminUsersSearch(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+	q := db.Model(&User{})
+	if search != "" {
+		like := "%" + search + "%"
+		q = q.Where("LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)", like, like)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		http.Error(w, "Failed to count users", http.StatusInternalServerError)
+		return
+	}
+
+	var users []User
+	if err := q.Order("created_at desc").Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		http.Error(w, "Failed to search users", http.StatusInternalServerError)
+		return
+	}
+
+	orgIDs := make([]string, 0, len(users))
+	seen := map[string]bool{}
+	for _, u := range users {
+		if !seen[u.OrgID] {
+			seen[u.OrgID] = true
+			orgIDs = append(orgIDs, u.OrgID)
+		}
+	}
+	var orgs []Organization
+	orgName := map[string]string{}
+	if len(orgIDs) > 0 {
+		db.Where("id IN ?", orgIDs).Find(&orgs)
+		for _, o := range orgs {
+			orgName[o.ID] = o.Name
+		}
+	}
+
+	rows := make([]AdminUserSearchRow, len(users))
+	for i, u := range users {
+		provider := ""
+		if u.OAuthProvider != nil {
+			provider = *u.OAuthProvider
+		}
+		rows[i] = AdminUserSearchRow{
+			ID:           u.ID,
+			Email:        u.Email,
+			Name:         u.Name,
+			OrgID:        u.OrgID,
+			OrgName:      orgName[u.OrgID],
+			Role:         u.Role,
+			AuthProvider: provider,
+			CreatedAt:    u.CreatedAt,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"users": rows, "total": total})
 }
