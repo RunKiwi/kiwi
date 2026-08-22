@@ -117,6 +117,14 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/")
+	jobID, rest, _ := strings.Cut(trimmed, "/")
+	if rest == "plan" || strings.HasPrefix(rest, "plan/") {
+		action := strings.TrimPrefix(strings.TrimPrefix(rest, "plan"), "/")
+		s.handleJobPlan(w, r, jobID, action)
+		return
+	}
+
 	// Lifecycle sub-routes are mounted under the job path rather than as separate
 	// top-level handlers, so they inherit this handler's org scoping by
 	// construction and cannot be reached without it.
@@ -133,7 +141,7 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID := filepath.Base(r.URL.Path)
+	jobID = filepath.Base(r.URL.Path)
 	if strings.HasSuffix(r.URL.Path, "/record") {
 		jobID = filepath.Base(filepath.Dir(r.URL.Path))
 		s.handleJobRecord(w, r, claims.OrgID, jobID)
