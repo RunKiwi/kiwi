@@ -483,6 +483,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/v1/integrations", s.handleIntegrations)
 	mux.HandleFunc("/api/v1/usage", s.handleAccountUsage)
 	mux.HandleFunc("/api/v1/spend", s.handleSpend)
+	mux.HandleFunc("/api/v1/analytics/velocity", s.handleVelocityAnalytics)
 	mux.HandleFunc("/api/v1/billing/checkout", s.handleBillingCheckout)
 	mux.HandleFunc("/api/v1/github/repos", s.handleGithubRepos)
 	mux.HandleFunc("/api/v1/github/install", s.handleGithubInstall)
