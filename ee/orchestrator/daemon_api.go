@@ -225,6 +225,25 @@ func (s *Server) handleDaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[daemon] touch %s: %v", d.ID, err)
 	}
 
+	if req.CacheStats != nil || req.MemStats != nil {
+		var cache *store.CacheHeartbeatStats
+		if req.CacheStats != nil {
+			cache = &store.CacheHeartbeatStats{
+				TotalRepos:           req.CacheStats.TotalRepos,
+				TotalActiveWorktrees: req.CacheStats.TotalActiveWorktrees,
+				HitCount:             req.CacheStats.HitCount,
+				MissCount:            req.CacheStats.MissCount,
+			}
+		}
+		var mem []store.ContainerMemStats
+		for _, m := range req.MemStats {
+			mem = append(mem, store.ContainerMemStats{ContainerID: m.ContainerID, RSSMB: m.RSSMB, LimitMB: m.LimitMB})
+		}
+		if err := s.storage.UpdateDaemonTelemetry(r.Context(), d.ID, cache, mem); err != nil {
+			log.Printf("[daemon] telemetry update for %s: %v", d.ID, err)
+		}
+	}
+
 	task, err := s.storage.LeaseNextTask(r.Context(), d.OrgID, d.ID, d.FleetID, leaseTTL)
 	if err != nil {
 		log.Printf("[daemon] lease for org %s: %v", d.OrgID, err)

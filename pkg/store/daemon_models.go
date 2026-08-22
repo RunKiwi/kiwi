@@ -32,7 +32,33 @@ type Daemon struct {
 	EncPubKey string `gorm:"not null" json:"enc_pub_key"`
 	// LastSeenAt is refreshed on every authenticated heartbeat.
 	LastSeenAt *time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
+	// LastCacheStats and LastMemStats are the most recent heartbeat's
+	// telemetry, nil until the daemon binary is new enough to report them.
+	LastCacheStats *CacheHeartbeatStats `gorm:"type:jsonb;serializer:json" json:"last_cache_stats,omitempty"`
+	LastMemStats   []ContainerMemStats  `gorm:"type:jsonb;serializer:json" json:"last_mem_stats,omitempty"`
+	// ActiveContainers is len(LastMemStats), denormalized so a fleet-capacity
+	// query doesn't need to unmarshal the jsonb column just to count it.
+	ActiveContainers int       `gorm:"not null;default:0" json:"active_containers"`
+	CreatedAt        time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+}
+
+// CacheHeartbeatStats and ContainerMemStats mirror the JSON shape
+// pkg/daemon.HeartbeatReq sends — duplicated rather than imported because
+// pkg/store must not depend on pkg/daemon (see pkg/licensing_boundary_test.go
+// for the enforced direction; this isn't a licensing boundary but the same
+// "one-way dependency" discipline applies to avoid an import cycle, since
+// pkg/daemon already depends on pkg/store).
+type CacheHeartbeatStats struct {
+	TotalRepos           int   `json:"total_repos"`
+	TotalActiveWorktrees int   `json:"total_active_worktrees"`
+	HitCount             int64 `json:"hit_count"`
+	MissCount            int64 `json:"miss_count"`
+}
+
+type ContainerMemStats struct {
+	ContainerID string `json:"container_id"`
+	RSSMB       int64  `json:"rss_mb"`
+	LimitMB     int64  `json:"limit_mb"`
 }
 
 func (Daemon) TableName() string { return "daemons" }

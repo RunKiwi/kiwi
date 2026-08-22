@@ -179,6 +179,25 @@ func (s *PostgresStore) TouchDaemon(ctx context.Context, id string) error {
 		Update("last_seen_at", now).Error
 }
 
+// UpdateDaemonTelemetry records the latest heartbeat's cache and memory stats.
+func (s *PostgresStore) UpdateDaemonTelemetry(ctx context.Context, daemonID string, cache *CacheHeartbeatStats, mem []ContainerMemStats) error {
+	if cache == nil && mem == nil {
+		return nil
+	}
+	var cols []string
+	d := Daemon{ID: daemonID}
+	if cache != nil {
+		d.LastCacheStats = cache
+		cols = append(cols, "last_cache_stats")
+	}
+	if mem != nil {
+		d.LastMemStats = mem
+		d.ActiveContainers = len(mem)
+		cols = append(cols, "last_mem_stats", "active_containers")
+	}
+	return s.db.WithContext(ctx).Model(&Daemon{}).Where("id = ?", daemonID).Select(cols).Updates(&d).Error
+}
+
 // ListDaemons returns all daemons registered to an org.
 func (s *PostgresStore) ListDaemons(ctx context.Context, orgID string) ([]Daemon, error) {
 	if orgID == "" {

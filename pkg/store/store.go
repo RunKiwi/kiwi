@@ -163,6 +163,11 @@ type Store interface {
 	RegisterDaemon(ctx context.Context, joinToken, signPubKey, encPubKey string) (*Daemon, error)
 	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
 	TouchDaemon(ctx context.Context, id string) error
+	// UpdateDaemonTelemetry records the latest heartbeat's cache and memory
+	// stats. Called alongside TouchDaemon, not instead of it — liveness and
+	// telemetry are tracked separately since an older daemon updates the
+	// former without ever calling this.
+	UpdateDaemonTelemetry(ctx context.Context, daemonID string, cache *CacheHeartbeatStats, mem []ContainerMemStats) error
 	ListDaemons(ctx context.Context, orgID string) ([]Daemon, error)
 	// DeleteDaemonsByOrgAndFleet removes an org's daemon registrations for a fleet
 	// (used by idle-reclaim to deregister a stopped free daemon so it does not
