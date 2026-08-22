@@ -291,13 +291,14 @@ func TestCheapestKiwiFundedModelPicksLowestOutputCost(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	established := now.Add(-30 * 24 * time.Hour) // well past catalogMaturityWindow — irrelevant to this test's cost-ordering assertion
 	for _, m := range []*CatalogModel{
 		{OrgID: GlobalCatalogOrg, ModelID: "pricier", Provider: "openrouter",
 			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(1.80),
-			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+			Source: "discovered", FirstSeenAt: established, LastSeenAt: now},
 		{OrgID: GlobalCatalogOrg, ModelID: "cheapest", Provider: "openrouter",
 			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.40),
-			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+			Source: "discovered", FirstSeenAt: established, LastSeenAt: now},
 		// A row with TierEconomy but a nil cost — Tier is stored, not
 		// recomputed at query time, so nothing else stops a hand-built row
 		// like this reaching the table. NULL sorts first in an ASC order in
@@ -334,7 +335,10 @@ func TestCheapestKiwiFundedModelExcludesDisqualified(t *testing.T) {
 		return &CatalogModel{
 			OrgID: GlobalCatalogOrg, ModelID: id, Provider: "openrouter",
 			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.10),
-			Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+			// Well past catalogMaturityWindow, so each row here is disqualified
+			// by exactly the one condition its test case sets — not also by
+			// freshness, which would confound "each condition excludes on its own".
+			Source: "discovered", FirstSeenAt: now.Add(-30 * 24 * time.Hour), LastSeenAt: now,
 		}
 	}
 	notKiwi := base("not-kiwi-funded")
@@ -358,6 +362,78 @@ func TestCheapestKiwiFundedModelExcludesDisqualified(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected no qualifying model, every candidate fails one condition")
+	}
+}
+
+// A model that just appeared in the catalog is exactly the shape of the
+// obscure, thinly-provisioned OpenRouter listing that kept 429ing/timing out
+// in production (qwen/qwen3-coder on 2026-08-12/13, inclusionai/ling-2.6-flash
+// on 2026-08-22 — a different model each time, none of them proven, all of
+// them merely cheapest at that moment). CheapestKiwiFundedModel must not hand
+// out a model until it has been in the catalog long enough to trust.
+func TestCheapestKiwiFundedModelExcludesRecentlyDiscovered(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	tooNew := &CatalogModel{
+		OrgID: GlobalCatalogOrg, ModelID: "just-listed", Provider: "openrouter",
+		Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.05),
+		Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+	}
+	established := &CatalogModel{
+		OrgID: GlobalCatalogOrg, ModelID: "proven", Provider: "openrouter",
+		Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.90),
+		Source: "discovered", FirstSeenAt: now.Add(-30 * 24 * time.Hour), LastSeenAt: now,
+	}
+	for _, m := range []*CatalogModel{tooNew, established} {
+		if err := s.UpsertCatalogModel(ctx, m); err != nil {
+			t.Fatalf("upsert %s: %v", m.ModelID, err)
+		}
+	}
+
+	got, ok, err := s.CheapestKiwiFundedModel(ctx, GlobalCatalogOrg, "openrouter", TierEconomy)
+	if err != nil {
+		t.Fatalf("CheapestKiwiFundedModel: %v", err)
+	}
+	if !ok || got != "proven" {
+		t.Fatalf("got %q, ok=%v, want %q (the cheaper \"just-listed\" model is too new to trust)", got, ok, "proven")
+	}
+}
+
+// A full catalog reseed stamps every row with the same FirstSeenAt (this is
+// exactly what happened in production on 2026-08-08 — see
+// catalogMaturityWindow's doc comment). For catalogMaturityWindow after a
+// reseed, every candidate fails the maturity filter at once. Returning
+// ok=false here doesn't protect anyone — defaultWorkerModelFor's only
+// fallback (DefaultWorkerModel) requires the org's own Anthropic key, which a
+// free-tier org by definition does not have. Excluding an unproven model must
+// never turn into excluding every model when nothing better exists.
+func TestCheapestKiwiFundedModelFallsBackWhenMaturityExcludesEverything(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Every row freshly (re)seeded together — nothing clears the maturity bar.
+	for _, m := range []*CatalogModel{
+		{OrgID: GlobalCatalogOrg, ModelID: "pricier-but-new", Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(1.50),
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+		{OrgID: GlobalCatalogOrg, ModelID: "cheapest-but-new", Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.20),
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+	} {
+		if err := s.UpsertCatalogModel(ctx, m); err != nil {
+			t.Fatalf("upsert %s: %v", m.ModelID, err)
+		}
+	}
+
+	got, ok, err := s.CheapestKiwiFundedModel(ctx, GlobalCatalogOrg, "openrouter", TierEconomy)
+	if err != nil {
+		t.Fatalf("CheapestKiwiFundedModel: %v", err)
+	}
+	if !ok || got != "cheapest-but-new" {
+		t.Fatalf("got %q, ok=%v, want %q (falls back to cost-only ranking when maturity excludes every candidate)", got, ok, "cheapest-but-new")
 	}
 }
 
