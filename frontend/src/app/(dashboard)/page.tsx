@@ -17,6 +17,12 @@ import { statusOf, CARD_BASE } from "@/lib/statusColors";
 import { capture } from "@/lib/analytics";
 import { LoadingState } from "@/components/LoadingState";
 import { shortTime, exactTime } from "@/lib/datetime";
+import { AllowancePopover } from "@/components/AllowancePopover";
+import {
+  getModelAllowanceStatus,
+  getOverallAllowanceHealth,
+  findFallbackNoCostModel,
+} from "@/lib/allowanceUtils";
 
 // How many jobs render before "Show more". Sized so a normal week fits in one
 // screenful of scrolling rather than to any rendering limit.
@@ -168,12 +174,27 @@ function CommandCenterContent() {
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
+  const [isAllowancePopoverOpen, setIsAllowancePopoverOpen] = useState(false);
+
   // Two different ceilings with two different meanings. Running out of
   // agent-minutes stops work until the month rolls over or the plan changes;
   // hitting the concurrency limit only means the next task waits its turn.
   const outOfMinutes = !!u && u.agent_minutes_limit > 0 && u.agent_minutes_used >= u.agent_minutes_limit;
   const atConcurrencyLimit =
     !!u && u.max_concurrent_jobs > 0 && u.concurrent_jobs_running >= u.max_concurrent_jobs;
+
+  const workerAllowanceStatus = useMemo(
+    () => getModelAllowanceStatus(workerModel, catalogModels, allowance),
+    [workerModel, catalogModels, allowance],
+  );
+
+  const overallHealth = useMemo(
+    () => getOverallAllowanceHealth(allowance, u),
+    [allowance, u],
+  );
+
+  const isWorkerExhausted = workerAllowanceStatus.isExhausted;
+  const isWorkerWarning = workerAllowanceStatus.isWarning;
 
   // Idle means nothing can change without a user action, so the board can back
   // off. An empty board counts as idle: there is nothing to watch.
@@ -379,13 +400,11 @@ function CommandCenterContent() {
   }, [allowance]);
 
   const modelOption = (id: string) => {
-    const c = catalogById.get(id);
+    const status = getModelAllowanceStatus(id, catalogModels, allowance);
     return {
       value: id,
       label: id,
-      // BYOK models draw on no Kiwi allowance, so they are marked as running on
-      // the org's own key rather than given a class they do not belong to.
-      hint: c ? (c.kiwi_provided ? modelClassLabel(c.tier) : "your key") : undefined,
+      hint: status.isBYOK ? "your key" : status.hint,
     };
   };
 
@@ -689,7 +708,8 @@ function CommandCenterContent() {
           {/* Worker */}
           <Select
             variant="chip" searchable label="Work" ariaLabel="Worker model"
-            icon={<span className="pdot" style={{ background: "#E8A153" }} />}
+            className={isWorkerExhausted ? "!border-red-500/50 !bg-red-950/30 !text-red-200" : isWorkerWarning ? "!border-amber-500/40 !bg-amber-950/20" : ""}
+            icon={<span className="pdot" style={{ background: isWorkerExhausted ? "#F87171" : isWorkerWarning ? "#F59E0B" : "#E8A153" }} />}
             value={workerModel} onChange={setWorkerModel}
             options={workerOptions.map(modelOption)}
             renderDetail={renderModelDetail}
@@ -710,40 +730,49 @@ function CommandCenterContent() {
 
           <div className="flex-1" />
 
-          {/* Usage Meter next to Launch button */}
-          {u && u.agent_minutes_limit > 0 && (() => {
-            const isOverCap = u.agent_minutes_used >= u.agent_minutes_limit;
-            const usagePct = Math.min(100, Math.round((u.agent_minutes_used / u.agent_minutes_limit) * 100));
-            return (
-              <div
-                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl bg-black/40 border text-xs font-mono shrink-0 ${
-                  isOverCap
-                    ? "border-red-500/40 text-red-300 bg-red-950/20"
-                    : usagePct > 80
-                    ? "border-amber-500/40 text-amber-300"
-                    : "border-white/10 text-zinc-300"
-                }`}
-                title={`${u.agent_minutes_used.toFixed(1)} of ${u.agent_minutes_limit} agent-minutes used this month (${usagePct}%)`}
-              >
-                <Gauge className={`w-3.5 h-3.5 ${isOverCap ? "text-red-400" : usagePct > 80 ? "text-amber-400" : "text-green-400"}`} />
-                {/* Metered as a float; unrounded it renders as 12.333333333. */}
-                <span>{u.agent_minutes_used.toFixed(1)}/{u.agent_minutes_limit}m</span>
-                <div className="w-10 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className={`h-full transition-all ${isOverCap ? "bg-red-500" : usagePct > 80 ? "bg-amber-500" : "bg-green-500"}`}
-                    style={{ width: `${usagePct}%` }}
-                  />
-                </div>
+          {/* Unified Allowance Health Pill with Popover */}
+          <div className="relative">
+            <button
+              type="button"
+              data-allowance-trigger
+              onClick={() => setIsAllowancePopoverOpen(v => !v)}
+              aria-expanded={isAllowancePopoverOpen}
+              aria-label="View monthly allowance status"
+              className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border text-xs font-mono shrink-0 cursor-pointer transition-all hover:border-white/20 ${overallHealth.badgeClass}`}
+              title={`${overallHealth.summaryText} (Click for breakdown)`}
+            >
+              <span className={`w-2 h-2 rounded-full shrink-0 ${overallHealth.dotColorClass}`} />
+              <Gauge className="w-3.5 h-3.5 shrink-0 opacity-80" />
+              <span>{overallHealth.summaryText}</span>
+              <div className="w-8 h-1.5 rounded-full bg-white/10 overflow-hidden shrink-0">
+                <div
+                  className={`h-full transition-all duration-300 ${overallHealth.barColorClass}`}
+                  style={{ width: `${overallHealth.worstPercentage}%` }}
+                />
               </div>
-            );
-          })()}
+            </button>
+
+            <AllowancePopover
+              allowance={allowance}
+              usage={u}
+              health={overallHealth}
+              isOpen={isAllowancePopoverOpen}
+              onClose={() => setIsAllowancePopoverOpen(false)}
+            />
+          </div>
 
           <button
             onClick={handleSubmit}
-            disabled={isSubmitting || outOfMinutes}
+            disabled={isSubmitting || outOfMinutes || isWorkerExhausted}
             // A control that refuses to work has to say so. Without this the
             // button just goes dim and the reason lives only in a colour.
-            title={outOfMinutes ? "Out of agent-minutes for this month" : undefined}
+            title={
+              outOfMinutes
+                ? "Out of agent-minutes for this month"
+                : isWorkerExhausted
+                ? `${workerAllowanceStatus.tierLabel} allowance exhausted for this month`
+                : undefined
+            }
             className="btn-primary px-5 py-2 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Launching…</> : <>Launch <ArrowRight className="w-4 h-4" /></>}
@@ -849,9 +878,37 @@ function CommandCenterContent() {
         )}
 
         {/* Why Launch will not do what you expect, stated before you press it. */}
-        {(outOfMinutes || atConcurrencyLimit) && (
-          <div className="pt-3 mt-1">
-            {outOfMinutes ? (
+        {(outOfMinutes || atConcurrencyLimit || isWorkerExhausted) && (
+          <div className="pt-3 mt-1 space-y-2">
+            {isWorkerExhausted && (
+              <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-red-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>
+                    <strong>{workerAllowanceStatus.tierLabel} token allowance is exhausted</strong> until the 1st of next month.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fallback = findFallbackNoCostModel(catalogModels);
+                      setWorkerModel(fallback);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-[#93C645] text-[#0B141D] font-semibold hover:bg-[#a4d656] transition-colors"
+                  >
+                    ⚡ Switch to {findFallbackNoCostModel(catalogModels)} (No-Cost)
+                  </button>
+                  <Link
+                    href="/integrations"
+                    className="px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors"
+                  >
+                    Connect API Key →
+                  </Link>
+                </div>
+              </div>
+            )}
+            {outOfMinutes && !isWorkerExhausted && (
               <div className="flex items-center gap-2 text-sm text-red-400">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>
@@ -861,7 +918,8 @@ function CommandCenterContent() {
                   </Link>
                 </span>
               </div>
-            ) : (
+            )}
+            {atConcurrencyLimit && !outOfMinutes && !isWorkerExhausted && (
               <div className="flex items-center gap-2 text-sm text-amber-400/90">
                 <Clock className="w-4 h-4 shrink-0" />
                 <span>
