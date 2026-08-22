@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { Gauge, ExternalLink, Zap, Key } from "lucide-react";
+import { Gauge, ExternalLink, Key } from "lucide-react";
 import {
   CLASS_ORDER,
   modelClassLabel,

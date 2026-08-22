@@ -77,6 +77,26 @@ describe("allowanceUtils", () => {
     assert.strictEqual(status.isUnlimited, true);
   });
 
+  it("treats missing allowance data for Kiwi models as unresolved/unavailable", () => {
+    const allowances: AllowanceBucket[] = [];
+    const status = getModelAllowanceStatus("claude-3-5-haiku", catalogModels, allowances);
+    assert.strictEqual(status.isBYOK, false);
+    assert.strictEqual(status.isExhausted, true);
+    assert.strictEqual(status.isUnlimited, false);
+    assert.strictEqual(status.hint?.includes("Checking allowance"), true);
+  });
+
+  it("handles explicit unlimited grants (granted: -1)", () => {
+    const allowances: AllowanceBucket[] = [
+      { tier: "economy", period: "2026-08", granted: -1, used: 500000, remaining: -1 },
+    ];
+    const status = getModelAllowanceStatus("claude-3-5-haiku", catalogModels, allowances);
+    assert.strictEqual(status.isBYOK, false);
+    assert.strictEqual(status.isExhausted, false);
+    assert.strictEqual(status.isUnlimited, true);
+    assert.strictEqual(status.hint?.includes("Unlimited"), true);
+  });
+
   it("correctly flags an exhausted Kiwi-provided model", () => {
     const allowances: AllowanceBucket[] = [
       { tier: "economy", period: "2026-08", granted: 1000000, used: 1000000, remaining: 0 },
@@ -120,8 +140,41 @@ describe("allowanceUtils", () => {
     assert.strictEqual(health.summaryText.includes("Economy & Frontier"), true);
   });
 
-  it("finds the fallback no-cost model", () => {
-    const fallback = findFallbackNoCostModel(catalogModels);
-    assert.strictEqual(fallback, "gemini-2.0-flash");
+  describe("findFallbackNoCostModel", () => {
+    it("returns the free model when free tier is available", () => {
+      const allowances: AllowanceBucket[] = [
+        { tier: "free", period: "2026-08", granted: 10000000, used: 100000, remaining: 9900000 },
+      ];
+      const fallback = findFallbackNoCostModel(catalogModels, allowances);
+      assert.strictEqual(fallback, "gemini-2.0-flash");
+    });
+
+    it("returns null when free tier allowance is exhausted", () => {
+      const allowances: AllowanceBucket[] = [
+        { tier: "free", period: "2026-08", granted: 10000000, used: 10000000, remaining: 0 },
+      ];
+      const fallback = findFallbackNoCostModel(catalogModels, allowances);
+      assert.strictEqual(fallback, null);
+    });
+
+    it("returns null when free model is unselectable", () => {
+      const unselectableModels: CatalogModel[] = [
+        { ...catalogModels[0], selectable: false },
+      ];
+      const allowances: AllowanceBucket[] = [
+        { tier: "free", period: "2026-08", granted: 10000000, used: 100000, remaining: 9900000 },
+      ];
+      const fallback = findFallbackNoCostModel(unselectableModels, allowances);
+      assert.strictEqual(fallback, null);
+    });
+
+    it("returns null when no free model exists in catalog", () => {
+      const noFreeModels: CatalogModel[] = catalogModels.filter((m) => m.tier !== "free");
+      const allowances: AllowanceBucket[] = [
+        { tier: "free", period: "2026-08", granted: 10000000, used: 100000, remaining: 9900000 },
+      ];
+      const fallback = findFallbackNoCostModel(noFreeModels, allowances);
+      assert.strictEqual(fallback, null);
+    });
   });
 });

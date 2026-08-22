@@ -183,9 +183,11 @@ function CommandCenterContent() {
   const atConcurrencyLimit =
     !!u && u.max_concurrent_jobs > 0 && u.concurrent_jobs_running >= u.max_concurrent_jobs;
 
+  const effectiveWorkerModel = inlineData.model || workerModel;
+
   const workerAllowanceStatus = useMemo(
-    () => getModelAllowanceStatus(workerModel, catalogModels, allowance),
-    [workerModel, catalogModels, allowance],
+    () => getModelAllowanceStatus(effectiveWorkerModel, catalogModels, allowance),
+    [effectiveWorkerModel, catalogModels, allowance],
   );
 
   const overallHealth = useMemo(
@@ -511,6 +513,13 @@ function CommandCenterContent() {
       // The launch just spent budget; refresh so the meter beside this button
       // reflects it rather than the figure from page load.
       client.getUsage().then(setU).catch(() => {});
+      {
+        const to = new Date();
+        const from = new Date(to.getTime() - 30 * 864e5);
+        client.getSpend(from.toISOString(), to.toISOString())
+          .then(r => setAllowance(r.allowance ?? []))
+          .catch(() => {});
+      }
       setTask("");
       setInlineData({});
       loadJobs();
@@ -710,7 +719,7 @@ function CommandCenterContent() {
             variant="chip" searchable label="Work" ariaLabel="Worker model"
             className={isWorkerExhausted ? "!border-red-500/50 !bg-red-950/30 !text-red-200" : isWorkerWarning ? "!border-amber-500/40 !bg-amber-950/20" : ""}
             icon={<span className="pdot" style={{ background: isWorkerExhausted ? "#F87171" : isWorkerWarning ? "#F59E0B" : "#E8A153" }} />}
-            value={workerModel} onChange={setWorkerModel}
+            value={effectiveWorkerModel} onChange={setWorkerModel}
             options={workerOptions.map(modelOption)}
             renderDetail={renderModelDetail}
           />
@@ -878,58 +887,65 @@ function CommandCenterContent() {
         )}
 
         {/* Why Launch will not do what you expect, stated before you press it. */}
-        {(outOfMinutes || atConcurrencyLimit || isWorkerExhausted) && (
-          <div className="pt-3 mt-1 space-y-2">
-            {isWorkerExhausted && (
-              <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2 text-red-300">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+        {(outOfMinutes || atConcurrencyLimit || isWorkerExhausted) && (() => {
+          const fallbackModel = findFallbackNoCostModel(catalogModels, allowance);
+          return (
+            <div className="pt-3 mt-1 space-y-2">
+              {isWorkerExhausted && (
+                <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-red-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                    <span>
+                      <strong>{workerAllowanceStatus.tierLabel} token allowance is exhausted</strong> until the 1st of next month.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {fallbackModel && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWorkerModel(fallbackModel);
+                          if (inlineData.model) {
+                            setInlineData((prev) => ({ ...prev, model: fallbackModel }));
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#93C645] text-[#0B141D] font-semibold hover:bg-[#a4d656] transition-colors"
+                      >
+                        ⚡ Switch to {fallbackModel} (No-Cost)
+                      </button>
+                    )}
+                    <Link
+                      href="/integrations"
+                      className="px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors"
+                    >
+                      Connect API Key →
+                    </Link>
+                  </div>
+                </div>
+              )}
+              {outOfMinutes && (
+                <div className="flex items-center gap-2 text-sm text-red-400">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>
-                    <strong>{workerAllowanceStatus.tierLabel} token allowance is exhausted</strong> until the 1st of next month.
+                    Out of agent-minutes for this month, so new tasks will not start.
+                    <Link href="/settings#plan" className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
+                      Review plan and usage →
+                    </Link>
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const fallback = findFallbackNoCostModel(catalogModels);
-                      setWorkerModel(fallback);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-[#93C645] text-[#0B141D] font-semibold hover:bg-[#a4d656] transition-colors"
-                  >
-                    ⚡ Switch to {findFallbackNoCostModel(catalogModels)} (No-Cost)
-                  </button>
-                  <Link
-                    href="/integrations"
-                    className="px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors"
-                  >
-                    Connect API Key →
-                  </Link>
+              )}
+              {atConcurrencyLimit && !outOfMinutes && (
+                <div className="flex items-center gap-2 text-sm text-amber-400/90">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span>
+                    {u?.concurrent_jobs_running} of {u?.max_concurrent_jobs} concurrent
+                    {" "}job{u?.max_concurrent_jobs === 1 ? "" : "s"} running — this task will queue until one finishes.
+                  </span>
                 </div>
-              </div>
-            )}
-            {outOfMinutes && !isWorkerExhausted && (
-              <div className="flex items-center gap-2 text-sm text-red-400">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>
-                  Out of agent-minutes for this month, so new tasks will not start.
-                  <Link href="/settings#plan" className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
-                    Review plan and usage →
-                  </Link>
-                </span>
-              </div>
-            )}
-            {atConcurrencyLimit && !outOfMinutes && !isWorkerExhausted && (
-              <div className="flex items-center gap-2 text-sm text-amber-400/90">
-                <Clock className="w-4 h-4 shrink-0" />
-                <span>
-                  {u?.concurrent_jobs_running} of {u?.max_concurrent_jobs} concurrent
-                  {" "}job{u?.max_concurrent_jobs === 1 ? "" : "s"} running — this task will queue until one finishes.
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          );
+        })()}
 
         {/* Status line */}
         {(submitError || submitSuccess) && (

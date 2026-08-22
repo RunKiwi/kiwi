@@ -53,12 +53,28 @@ export function getModelAllowanceStatus(
       hint: "Your key · Unlimited",
     };
   }
-
   const bucket = allowance.find((a) => a.tier === catalog.tier);
-  const isUnlimited = bucket ? bucket.granted < 0 : false;
   const tierLabel = modelClassLabel(catalog.tier);
 
-  if (!bucket || isUnlimited) {
+  // If allowance data is not loaded yet or missing for this tier, treat as unresolved/unavailable
+  if (!bucket) {
+    return {
+      isBYOK: false,
+      tier: catalog.tier,
+      tierLabel,
+      isUnlimited: false,
+      isExhausted: true,
+      isWarning: false,
+      used: 0,
+      granted: 0,
+      remaining: 0,
+      percentage: 0,
+      hint: `${tierLabel} · Checking allowance...`,
+    };
+  }
+
+  const isUnlimited = bucket.granted < 0;
+  if (isUnlimited) {
     return {
       isBYOK: false,
       tier: catalog.tier,
@@ -66,7 +82,7 @@ export function getModelAllowanceStatus(
       isUnlimited: true,
       isExhausted: false,
       isWarning: false,
-      used: bucket ? bucket.used : 0,
+      used: bucket.used,
       granted: -1,
       remaining: -1,
       percentage: 0,
@@ -197,16 +213,28 @@ export function getOverallAllowanceHealth(
     worstPercentage,
     outOfMinutes: false,
     exhaustedTiers: [],
-    warningTiers: [],
+    warningTiers,
   };
 }
 
 /**
- * Finds the best No-cost fallback model available in the catalog.
+ * Finds the best No-cost fallback model available in the catalog whose Free allowance is available.
+ * Returns null if no selectable free model is available or the Free tier allowance is exhausted.
  */
-export function findFallbackNoCostModel(catalogModels: CatalogModel[]): string {
+export function findFallbackNoCostModel(
+  catalogModels: CatalogModel[],
+  allowance: AllowanceBucket[]
+): string | null {
+  const freeBucket = allowance.find((a) => a.tier === "free");
+  if (
+    freeBucket &&
+    freeBucket.granted >= 0 &&
+    (freeBucket.remaining <= 0 || freeBucket.used >= freeBucket.granted)
+  ) {
+    return null;
+  }
   const freeModel = catalogModels.find(
     (c) => c.kiwi_provided && c.tier === "free" && c.selectable !== false
   );
-  return freeModel ? freeModel.model_id : "gemini-2.0-flash";
+  return freeModel ? freeModel.model_id : null;
 }
