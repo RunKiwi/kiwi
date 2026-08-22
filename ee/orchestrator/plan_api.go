@@ -134,3 +134,26 @@ func (s *Server) handleRejectJobPlan(w http.ResponseWriter, r *http.Request, job
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected", "planner_notified": true})
 }
+
+func (s *Server) handleJobSpendCap(w http.ResponseWriter, r *http.Request, orgID, jobID string) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		SpendCapUSD float64 `json:"spend_cap_usd"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SpendCapUSD < 0 {
+		http.Error(w, "Bad request: 'spend_cap_usd' must be a non-negative number", http.StatusBadRequest)
+		return
+	}
+	if err := s.storage.SetJobSpendCap(r.Context(), orgID, jobID, body.SpendCapUSD); err != nil {
+		if err == store.ErrJobNotFound {
+			http.Error(w, "Job not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "failed to set spend cap", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"job_id": jobID, "spend_cap_usd": body.SpendCapUSD})
+}

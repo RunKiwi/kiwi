@@ -124,6 +124,10 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		s.handleJobPlan(w, r, jobID, action)
 		return
 	}
+	if rest == "spend-cap" {
+		s.handleJobSpendCap(w, r, claims.OrgID, jobID)
+		return
+	}
 
 	// Lifecycle sub-routes are mounted under the job path rather than as separate
 	// top-level handlers, so they inherit this handler's org scoping by

@@ -240,3 +240,92 @@ func TestHandlePlanMethodNotAllowed(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
+
+func seedPlainJob(t *testing.T, s *Server, orgID, jobID string) *store.Job {
+	t.Helper()
+	job := &store.Job{
+		ID:     jobID,
+		OrgID:  orgID,
+		UserID: "usr-1",
+		Status: "QUEUED",
+		Inputs: map[string]interface{}{"task": "test"},
+	}
+	require.NoError(t, s.storage.CreateJobWithOutbox(context.Background(), job, &store.Outbox{
+		JobID: jobID, Topic: "job.created", Payload: map[string]interface{}{},
+	}))
+	return job
+}
+
+func TestHandleJobSpendCap(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedPlainJob(t, s, "org-1", "job-5")
+
+	body, _ := json.Marshal(map[string]float64{"spend_cap_usd": 1.5})
+	req := authedRequest(t, http.MethodPut, "/api/v1/jobs/job-5/spend-cap", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, "job-5", resp["job_id"])
+	require.Equal(t, 1.5, resp["spend_cap_usd"])
+
+	j, err := s.storage.GetJob(req.Context(), "job-5")
+	require.NoError(t, err)
+	require.Equal(t, 1.5, j.SpendCapUSD)
+}
+
+func TestHandleJobSpendCapValidation(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedPlainJob(t, s, "org-1", "job-val")
+
+	// Negative spend cap
+	body, _ := json.Marshal(map[string]float64{"spend_cap_usd": -1.0})
+	req := authedRequest(t, http.MethodPut, "/api/v1/jobs/job-val/spend-cap", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	// Malformed JSON
+	req = authedRequest(t, http.MethodPut, "/api/v1/jobs/job-val/spend-cap", bytes.NewReader([]byte("not json")), "org-1")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandleJobSpendCapNotFoundOrOtherOrg(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedPlainJob(t, s, "org-1", "job-org1")
+
+	// Non-existent job
+	body, _ := json.Marshal(map[string]float64{"spend_cap_usd": 2.0})
+	req := authedRequest(t, http.MethodPut, "/api/v1/jobs/nonexistent/spend-cap", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+
+	// Job belonging to other org
+	req = authedRequest(t, http.MethodPut, "/api/v1/jobs/job-org1/spend-cap", bytes.NewReader(body), "org-2")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandleJobSpendCapMethodNotAllowed(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedPlainJob(t, s, "org-1", "job-meth")
+
+	// GET
+	req := authedRequest(t, http.MethodGet, "/api/v1/jobs/job-meth/spend-cap", nil, "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+
+	// POST
+	body, _ := json.Marshal(map[string]float64{"spend_cap_usd": 1.0})
+	req = authedRequest(t, http.MethodPost, "/api/v1/jobs/job-meth/spend-cap", bytes.NewReader(body), "org-1")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
