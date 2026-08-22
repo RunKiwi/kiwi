@@ -13,9 +13,9 @@ import (
 
 // ContainerMemStats records the memory consumption and limit for a single sandbox container.
 type ContainerMemStats struct {
-	ContainerID string
-	RSSMB       int64
-	LimitMB     int64
+	ContainerID string `json:"container_id"`
+	RSSMB       int64  `json:"rss_mb"`
+	LimitMB     int64  `json:"limit_mb"`
 }
 
 // currentSandboxMemStats queries docker for memory usage of all running containers.
