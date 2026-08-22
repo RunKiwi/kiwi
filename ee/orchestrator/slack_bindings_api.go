@@ -25,11 +25,13 @@ func (s *Server) handleSlackBindings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var body struct {
-			TeamID         string `json:"team_id"`
-			ChannelID      string `json:"channel_id"`
-			RepoURL        string `json:"repo_url"`
-			DefaultTestCmd string `json:"default_test_cmd"`
-			DefaultRef     string `json:"default_ref"`
+			TeamID                string `json:"team_id"`
+			ChannelID             string `json:"channel_id"`
+			RepoURL               string `json:"repo_url"`
+			DefaultTestCmd        string `json:"default_test_cmd"`
+			DefaultRef            string `json:"default_ref"`
+			DefaultModel          string `json:"default_model"`
+			DefaultArchitectModel string `json:"default_architect_model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -51,6 +53,7 @@ func (s *Server) handleSlackBindings(w http.ResponseWriter, r *http.Request) {
 		b := &store.SlackChannelBinding{
 			OrgID: claims.OrgID, TeamID: body.TeamID, ChannelID: body.ChannelID,
 			RepoURL: body.RepoURL, DefaultTestCmd: body.DefaultTestCmd, DefaultRef: body.DefaultRef,
+			DefaultModel: body.DefaultModel, DefaultArchitectModel: body.DefaultArchitectModel,
 			CreatedBy: claims.UserID,
 		}
 		if err := s.storage.CreateSlackChannelBinding(r.Context(), b); err != nil {

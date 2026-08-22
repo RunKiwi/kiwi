@@ -141,6 +141,7 @@ type Store interface {
 	ListCatalogModels(ctx context.Context, orgID string) ([]CatalogModel, error)
 	GetCatalogModel(ctx context.Context, orgID, modelID string) (*CatalogModel, error)
 	ResolveModel(ctx context.Context, orgID, modelID string) (Resolution, error)
+	CheapestKiwiFundedModel(ctx context.Context, orgID, providerID, tier string) (string, bool, error)
 	MarkCatalogMissing(ctx context.Context, orgID, providerID string, seen []string, at time.Time) error
 
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its
@@ -201,6 +202,7 @@ type Store interface {
 
 	// Slack triggers (ee/orchestrator's slack_* files).
 	UpsertSlackInstallation(ctx context.Context, inst *SlackInstallation) error
+	SetSlackBotToken(ctx context.Context, teamID, plaintext string) error
 	GetSlackInstallationByTeamID(ctx context.Context, teamID string) (*SlackInstallation, error)
 	ListSlackInstallations(ctx context.Context, orgID string) ([]SlackInstallation, error)
 	DeleteSlackInstallation(ctx context.Context, teamID string) error
@@ -212,6 +214,7 @@ type Store interface {
 	LatestSlackTriggeredTask(ctx context.Context, teamID, channelID, threadTS string) (*SlackTriggeredTask, error)
 	UpdateSlackTriggeredTaskStatus(ctx context.Context, id, status, statusMessageTS string) error
 	GetSlackTriggeredTaskByQueuedTaskID(ctx context.Context, taskID string) (*SlackTriggeredTask, error)
+	RecordSlackEvent(ctx context.Context, eventID string) (fresh bool, err error)
 
 	// Post-Merge Verification (Phase 1a). CreateMonitor opens a monitor at
 	// merge time; GetMonitorByMergeCommit resolves a webhook event back to

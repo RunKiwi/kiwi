@@ -17,6 +17,7 @@ func TestParseEventHandlesURLVerification(t *testing.T) {
 func TestParseEventExtractsAppMention(t *testing.T) {
 	body := []byte(`{
 		"type": "event_callback",
+		"event_id": "Ev0PV52K21",
 		"team_id": "T123",
 		"event": {
 			"type": "app_mention",
@@ -31,7 +32,7 @@ func TestParseEventExtractsAppMention(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
-	if ev.TeamID != "T123" || ev.EventType != "app_mention" || ev.ChannelID != "C1" || ev.TS != "100.001" || ev.ThreadTS != "99.000" || ev.UserID != "U1" {
+	if ev.TeamID != "T123" || ev.EventType != "app_mention" || ev.ChannelID != "C1" || ev.TS != "100.001" || ev.ThreadTS != "99.000" || ev.UserID != "U1" || ev.EventID != "Ev0PV52K21" {
 		t.Fatalf("got %+v", ev)
 	}
 }

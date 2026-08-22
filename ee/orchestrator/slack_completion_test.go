@@ -54,7 +54,7 @@ func TestReportSlackCompletionEditsStatusMessageOnSuccess(t *testing.T) {
 	ctx := t.Context()
 
 	_ = s.storage.UpsertSlackInstallation(ctx, &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
-	_ = s.storage.SaveCredential(ctx, "org_1", "SLACK_BOT_TOKEN", store.CredentialSlack, "xoxb-test")
+	_ = s.storage.SetSlackBotToken(ctx, "T1", "xoxb-test")
 	_ = s.storage.CreateSlackTriggeredTask(ctx, &store.SlackTriggeredTask{
 		OrgID: "org_1", TeamID: "T1", ChannelID: "C1", ThreadTS: "100.001",
 		QueuedTaskID: "task_1", StatusMessageTS: "100.002", LastStatus: "running",

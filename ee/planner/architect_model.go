@@ -26,6 +26,52 @@ import (
 // bought, and nothing said so.
 const DefaultArchitectModel = "claude-opus-4-8"
 
+// DefaultWorkerModel is the last-resort Implementer model a submit runs when
+// it names none and no Kiwi-funded model could be found — kept in lockstep
+// with the dashboard's own DEFAULT_WORKER_MODEL (frontend/src/lib/api.ts) so
+// every entry point defaults to the same run. It requires the org's own
+// Anthropic key, so defaultWorkerModelFor below only reaches it when the
+// runtime catalog lookup comes up empty (no OpenRouter platform key
+// configured on this deployment, or nothing in that catalog is currently
+// affordable for the org) — see defaultWorkerModelFor.
+//
+// Before either existed, an empty req.Model reached SubmitPlan unchanged: the
+// per-worker entitlement/funding check at service.go's admission loop skips
+// anything named "" (nothing to check), architectModelFor's own early-out
+// treats req.Model == "" as "nothing to buy an Architect split for" and
+// leaves ArchitectModel empty too, and the daemon's defaultProvider ends up
+// calling a provider with model id "". Every one of those exists precisely
+// through Slack, which never set Model, and would keep existing through any
+// future caller that also doesn't — an unset model is not a valid submit,
+// so it must never reach any of that code as one.
+const DefaultWorkerModel = "claude-haiku-4-5-20251001"
+
+// defaultWorkerModelFor is what SubmitPlan calls for an unset req.Model.
+//
+// A Kiwi-funded model is tried first, not as a fallback: it needs no key
+// from the org at all (Kiwi's own platform key pays), which is the only kind
+// of default that works for an org that has connected nothing of its own —
+// the common case for a Slack trigger nobody has pointed at a specific model.
+// requireEntitlement is the same check used everywhere else in this file, so
+// a model that would immediately fail on an exhausted allowance is never
+// handed back — this is a live check against the org's remaining budget, not
+// a cached "Kiwi funds this" flag that could be stale by the time the task
+// runs.
+//
+// DefaultWorkerModel — BYOK, requires the org's own Anthropic key — is the
+// fallback for everything the catalog lookup does not cover: no OpenRouter
+// platform key on this deployment, no economy-tier OpenRouter model
+// discovered yet, or the org's Kiwi-token allowance is exhausted.
+func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID string) string {
+	candidate, ok, err := s.store.CheapestKiwiFundedModel(ctx, orgID, provider.ProviderOpenRouter, store.TierEconomy)
+	if err == nil && ok {
+		if s.requireEntitlement(ctx, orgID, fleetID, candidate) == nil {
+			return candidate
+		}
+	}
+	return DefaultWorkerModel
+}
+
 // architectModelFor decides which model plans and reviews this request.
 //
 // The rule that matters is the one about NOT applying the default. A value the

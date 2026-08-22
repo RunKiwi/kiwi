@@ -121,6 +121,8 @@ export interface SlackChannelBinding {
   repo_url: string;
   default_test_cmd: string;
   default_ref: string;
+  default_model: string;
+  default_architect_model: string;
   created_by: string;
   created_at: string;
 }
@@ -838,7 +840,7 @@ export const client = {
     fetchApi<{ installations: SlackInstallation[] }>("/api/v1/integrations/slack/installations"),
   listSlackBindings: () =>
     fetchApi<{ bindings: SlackChannelBinding[] }>("/api/v1/integrations/slack/bindings"),
-  createSlackBinding: (input: { team_id: string; channel_id: string; repo_url: string; default_test_cmd?: string; default_ref?: string }) =>
+  createSlackBinding: (input: { team_id: string; channel_id: string; repo_url: string; default_test_cmd?: string; default_ref?: string; default_model?: string; default_architect_model?: string }) =>
     fetchApi<SlackChannelBinding>("/api/v1/integrations/slack/bindings", {
       method: "POST",
       body: JSON.stringify(input),

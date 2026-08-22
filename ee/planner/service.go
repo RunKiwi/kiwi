@@ -163,6 +163,13 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		return nil, fmt.Errorf("task execution is disabled on this deployment")
 	}
 
+	// An unset Model must never reach admission, entitlement, or the daemon —
+	// see defaultWorkerModelFor. Applied before architectModelFor, which needs
+	// a real Model to decide whether an Architect split is worth buying at all.
+	if req.Model == "" {
+		req.Model = s.defaultWorkerModelFor(ctx, req.OrgID, req.FleetID)
+	}
+
 	// Choose the Architect before anything reads it. An unset field used to mean
 	// "run the Implementer's model", which silently collapsed the two-model
 	// split — see architectModelFor.
@@ -455,7 +462,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 			if len(resolved) > 0 {
 				spec["learnings"] = learningSummaries(resolved)
 			}
-			if err := tx.Create(&store.QueuedTask{
+			task := &store.QueuedTask{
 				ID:      taskID,
 				OrgID:   req.OrgID,
 				JobID:   jobID,
@@ -463,7 +470,15 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				Status:  store.TaskQueued,
 				Funding: taskFunding,
 				Spec:    spec,
-			}).Error; err != nil {
+				// Empty Origin/ParentTaskID (every caller but SubmitFork)
+				// leaves QueuedTask.BeforeCreate's own default (OriginSubmit,
+				// root = own id) exactly as before this field existed.
+				Origin: req.Origin,
+			}
+			if req.ParentTaskID != "" {
+				task.ParentTaskID = &req.ParentTaskID
+			}
+			if err := tx.Create(task).Error; err != nil {
 				return fmt.Errorf("enqueue task %s: %w", taskID, err)
 			}
 			taskIDs = append(taskIDs, taskID)
@@ -826,6 +841,11 @@ func (s *Service) SubmitFork(ctx context.Context, in ForkInput) (*SubmitResult, 
 	repoURL, _ := in.ParentTask.Spec["repo_url"].(string)
 	model, _ := in.ParentTask.Spec["model"].(string)
 	testCmd, _ := in.ParentTask.Spec["test_cmd"].(string)
+	// architect_model is only ever written onto a task's spec when it is
+	// non-empty (see the spec-building loop above), so a parent that ran
+	// with no Architect split correctly leaves this "" here too — nothing
+	// to carry forward, same as an ordinary submit that named none.
+	architectModel, _ := in.ParentTask.Spec["architect_model"].(string)
 
 	result, err := s.SubmitPlan(ctx, PlanRequest{
 		OrgID:   in.OrgID,
@@ -835,21 +855,33 @@ func (s *Service) SubmitFork(ctx context.Context, in ForkInput) (*SubmitResult, 
 		Ref:     "kiwi/" + in.ParentTask.JobID,
 		Model:   model,
 		TestCmd: testCmd,
+		// FleetID and ArchitectModel are the parent's exactly, not re-derived:
+		// a fork is a sibling attempt at the SAME work the parent already ran,
+		// so it must land on the fleet that can actually reach the parent's
+		// repo/credentials and keep whatever Architect split the parent was
+		// admitted with, rather than SubmitPlan silently picking a fresh
+		// (possibly different, possibly wrong-fleet) default for it. This is
+		// treated as the caller's explicit choice, same as any other
+		// submit that names a model — architectModelFor's own funding/
+		// entitlement/key checks still run for it via the per-worker
+		// admission loop below, so a parent's Architect that is no longer
+		// valid (a platform key removed, an allowance now exhausted) is
+		// still refused with a clear error rather than silently admitted.
+		FleetID:        in.ParentTask.FleetID,
+		ArchitectModel: architectModel,
+		// Origin/ParentTaskID land in the SAME transaction SubmitPlan uses to
+		// create the task, via QueuedTask.BeforeCreate honoring a non-empty
+		// Origin. The previous approach — SubmitPlan creates the row (writing
+		// OriginSubmit and a fresh root, its ordinary default), then a
+		// separate UPDATE afterward relabels it — left a window where a task
+		// could already be leased and running as a bare, unparented "submit"
+		// before the label ever landed, and an UPDATE failure after a
+		// successful create left it mislabeled permanently with no retry.
+		Origin:       store.OriginFork,
+		ParentTaskID: in.ParentTask.ID,
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// SubmitPlan has no notion of lineage — it always writes OriginSubmit and
-	// a fresh root. Overwrite that on the row(s) it just created, in the same
-	// spirit as buildContinuationTask setting Origin/ParentTaskID explicitly:
-	// a fork's tasks need to say where they came from without SubmitPlan's
-	// ordinary path needing to know forks exist at all.
-	parentID := in.ParentTask.ID
-	if err := s.store.DB().WithContext(ctx).Model(&store.QueuedTask{}).
-		Where("job_id = ?", result.JobID).
-		Updates(map[string]interface{}{"origin": store.OriginFork, "parent_task_id": parentID}).Error; err != nil {
-		return nil, fmt.Errorf("label fork lineage for job %s: %w", result.JobID, err)
 	}
 
 	return result, nil

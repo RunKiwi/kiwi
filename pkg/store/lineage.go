@@ -24,6 +24,13 @@ const (
 	OriginSubmit    = "submit"
 	OriginPRComment = "pr_comment"
 	OriginFork      = "fork"
+	// OriginSlack marks a continuation that came from a Slack thread reply —
+	// distinct from OriginPRComment (a GitHub PR review comment), which a
+	// Slack-triggered continuation is not, even though buildContinuationTask
+	// treats both the same way otherwise. The dashboard badges the two
+	// differently (see page.tsx's latest_origin check), so the label is not
+	// merely cosmetic there.
+	OriginSlack = "slack"
 	// OriginPostMergeRemediation marks a continuation task auto-spawned by a
 	// Post-Merge Verification REGRESSION verdict, not a real PR comment — it
 	// has no GitHub comment behind it, so it must not be labeled

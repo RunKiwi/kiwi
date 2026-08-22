@@ -52,7 +52,17 @@ func (s *Server) handleSlackWebhook(w http.ResponseWriter, r *http.Request) {
 	// rather than trying to parse both shapes against every body.
 	if ct := r.Header.Get("Content-Type"); len(ct) >= len("application/x-www-form-urlencoded") &&
 		ct[:len("application/x-www-form-urlencoded")] == "application/x-www-form-urlencoded" {
-		s.handleSlackInteractivity(r.Context(), body)
+		// Handled off the request goroutine, same posture as the app_mention
+		// branch below: this used to run synchronously, which meant a button
+		// click's SubmitContinuation/SubmitFork/SubmitPlan call (DB writes,
+		// possibly a cold-start) had to finish inside Slack's 3-second
+		// response window or the delivery would look like a timeout and
+		// retry — exactly the risk already fixed for triggers, just not here.
+		go func(body []byte) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			s.handleSlackInteractivity(ctx, body)
+		}(body)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -71,18 +81,33 @@ func (s *Server) handleSlackWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ev.EventType == "app_mention" {
-		// Handled off the request goroutine, same posture as
-		// maybeAssembleRecord in daemon_api.go: Slack expects a fast 200 and
-		// retries a delivery that doesn't get one within 3 seconds. Must use a
-		// detached context, not r.Context() — net/http cancels the request's
-		// context the moment this handler returns, which happens immediately
-		// after this goroutine is spawned, so r.Context() would be canceled
-		// before the trigger pipeline's SubmitPlan/DB/Slack API calls ever run.
-		go func(teamID, channelID, threadTS, messageTS, userID, text string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			s.handleSlackTrigger(ctx, teamID, channelID, threadTS, messageTS, userID, text)
-		}(ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.TS, ev.UserID, ev.Text)
+		// Claim the delivery's event_id before doing anything else. Slack
+		// retries a delivery that didn't get a 200 within 3 seconds, and
+		// again later if that retry also fails, so the same event_id
+		// reaching this handler twice is routine, not a sign anything broke
+		// — without this, each retry became a second SubmitPlan for the
+		// same mention. A lookup failure is not evidence of a duplicate:
+		// fresh defaults true so a transient DB error degrades to "handle
+		// it" rather than silently dropping a real, first-time mention.
+		fresh, err := s.storage.RecordSlackEvent(r.Context(), ev.EventID)
+		if err != nil {
+			log.Printf("[slackapp] recording event %s: %v", ev.EventID, err)
+			fresh = true
+		}
+		if fresh {
+			// Handled off the request goroutine, same posture as
+			// maybeAssembleRecord in daemon_api.go: Slack expects a fast 200 and
+			// retries a delivery that doesn't get one within 3 seconds. Must use a
+			// detached context, not r.Context() — net/http cancels the request's
+			// context the moment this handler returns, which happens immediately
+			// after this goroutine is spawned, so r.Context() would be canceled
+			// before the trigger pipeline's SubmitPlan/DB/Slack API calls ever run.
+			go func(teamID, channelID, threadTS, messageTS, userID, text string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				s.handleSlackTrigger(ctx, teamID, channelID, threadTS, messageTS, userID, text)
+			}(ev.TeamID, ev.ChannelID, ev.ThreadTS, ev.TS, ev.UserID, ev.Text)
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 }

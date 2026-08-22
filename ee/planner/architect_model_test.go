@@ -39,6 +39,111 @@ func TestArchitectDefaultsToAFrontierModelNotTheWorker(t *testing.T) {
 	}
 }
 
+// The regression this covers: every Slack-triggered submit (and the CLI's
+// "-model" flag left at its documented empty default) sent Model == "" all
+// the way through SubmitPlan. That skipped the per-worker entitlement check
+// (which only checks non-empty model names), left architectModelFor's own
+// early-out treating "no Model" as "nothing to buy an Architect split for",
+// and ultimately handed the daemon's provider call an empty model id. See
+// DefaultWorkerModel.
+func TestSubmitPlanDefaultsAnUnsetWorkerModel(t *testing.T) {
+	s := NewService(newTestStore(t), nil, nil)
+	seedOrg(t, s.store.(*store.PostgresStore), "org1")
+	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
+
+	res, err := s.SubmitPlan(context.Background(), PlanRequest{
+		OrgID: "org1", Task: "add retries",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := s.store.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["model"] != DefaultWorkerModel {
+		t.Errorf("model = %v, want the default %q", task.Spec["model"], DefaultWorkerModel)
+	}
+	if task.Spec["architect_model"] != DefaultArchitectModel {
+		t.Errorf("architect_model = %v, want %q — an unset Model must still get the Architect split", task.Spec["architect_model"], DefaultArchitectModel)
+	}
+}
+
+// Nothing enforces the two languages staying equal — this is a manual pin.
+// If this fails, either DefaultWorkerModel or frontend/src/lib/api.ts's
+// DEFAULT_WORKER_MODEL changed without the other; update both together.
+func TestDefaultWorkerModelMatchesFrontendConstant(t *testing.T) {
+	if DefaultWorkerModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("DefaultWorkerModel = %q, want the literal frontend/src/lib/api.ts's DEFAULT_WORKER_MODEL is set to", DefaultWorkerModel)
+	}
+}
+
+// A Kiwi-funded catalog model is tried before the BYOK DefaultWorkerModel:
+// it needs no key from the org at all, which is what makes it a working
+// default for an org that connected nothing of its own — the common case
+// for a Slack trigger nobody pointed at a specific model.
+func TestSubmitPlanPrefersACatalogKiwiFundedModelOverTheByokDefault(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	// newPlannerWithKiwiModel's own "kimi-k2" row carries no OutputCostPerM,
+	// so CheapestKiwiFundedModel's "IS NOT NULL" filter correctly excludes
+	// it as unpriced — give it a real price so it qualifies here.
+	if err := svc.store.(*store.PostgresStore).DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := svc.store.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["model"] != "kimi-k2" {
+		t.Errorf("model = %v, want the catalog's Kiwi-funded model (kimi-k2), not the BYOK default", task.Spec["model"])
+	}
+}
+
+// The catalog lookup must not hand back a model the org's own allowance
+// cannot actually cover — that would trade one silent failure (empty Model
+// reaching the daemon) for another (a submit admitted against a budget
+// that immediately refuses it). Falls back to the BYOK DefaultWorkerModel
+// instead, same as when the catalog has nothing at all.
+func TestSubmitPlanFallsBackWhenTheCatalogModelIsOverBudget(t *testing.T) {
+	svc, ctx := newPlannerWithExhaustedAllowance(t)
+	st := svc.store.(*store.PostgresStore)
+	seedCredential(t, st, "o1", "ANTHROPIC_API_KEY")
+	// Give kimi-k2 a real price so it qualifies as a candidate at all — this
+	// test's whole point is that the exhausted allowance is what excludes
+	// it, not an incidental "no price" exclusion that would pass for the
+	// wrong reason.
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["model"] != DefaultWorkerModel {
+		t.Errorf("model = %v, want the BYOK default %q since the Kiwi-funded model's allowance is exhausted", task.Spec["model"], DefaultWorkerModel)
+	}
+}
+
 // An explicit choice is never second-guessed.
 func TestArchitectExplicitChoiceWins(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)

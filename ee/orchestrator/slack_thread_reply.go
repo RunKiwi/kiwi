@@ -81,7 +81,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 	if err != nil || inst == nil {
 		return
 	}
-	token, err := s.storage.GetCredentialPlaintext(ctx, inst.OrgID, "SLACK_BOT_TOKEN")
+	token, err := inst.DecryptBotToken()
 	if err != nil || token == "" || s.slackClient == nil {
 		return
 	}
@@ -96,13 +96,18 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 		return
 	}
 
-	complete, cerr := s.slackCompleter()
-	if cerr != nil {
-		return
-	}
-	verdict, err := classifyThreadReply(ctx, complete, summaryForClassification(&parent), instruction)
-	if err != nil {
-		verdict = verdictAmbiguous
+	// A completer that can't be built and a classification call that fails
+	// both degrade to the ambiguous branch below rather than returning
+	// silently — matching resolveSlackRepo and fetchSlackContext, the other
+	// two callers of slackCompleter(), which both degrade instead of dying.
+	// A bare return here left thread replies with zero feedback whenever the
+	// completer was unavailable, while a fresh mention (which only uses the
+	// completer for optional context and already falls back) looked fine.
+	verdict := verdictAmbiguous
+	if complete, cerr := s.slackCompleter(ctx); cerr == nil {
+		if v, err := classifyThreadReply(ctx, complete, summaryForClassification(&parent), instruction); err == nil {
+			verdict = v
+		}
 	}
 
 	switch verdict {
@@ -112,7 +117,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 			sessionID = sess.ID
 		}
 		task, err := s.planner.SubmitContinuation(ctx, planner.ContinuationInput{
-			OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction, SessionID: sessionID, Origin: store.OriginPRComment,
+			OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction, SessionID: sessionID, Origin: store.OriginSlack,
 		})
 		if err != nil {
 			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
@@ -130,7 +135,13 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 
 	case verdictNew:
 		repoURL, _ := parent.Spec["repo_url"].(string)
-		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{OrgID: inst.OrgID, UserID: userID, Task: instruction, RepoURL: repoURL})
+		testCmd, _ := inlineTestCmdOverride(text)
+		binding, _ := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
+		defaults := slackBindingDefaults(binding, inst.OrgID, testCmd)
+		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
+			OrgID: inst.OrgID, UserID: userID, Task: instruction, RepoURL: repoURL, TestCmd: defaults.testCmd,
+			Model: defaults.model, ArchitectModel: defaults.architectModel,
+		})
 		if err != nil {
 			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 			return
@@ -138,14 +149,45 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 		s.recordSlackThreadTask(ctx, inst.OrgID, teamID, channelID, threadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Starting a new, unrelated task — job `%s`.", result.JobID))
 
 	default: // ambiguous
-		s.slackClient.PostInteractiveButtons(ctx, token, channelID, threadTS,
+		if _, err := s.slackClient.PostInteractiveButtons(ctx, token, channelID, threadTS,
 			"Not sure whether that's a continuation, a different approach, or something new — which did you mean?",
 			[]slackapp.Button{
 				{Label: "Continue", ActionID: "slack_thread_continue", Value: existing.ID + "|" + instruction},
 				{Label: "Fork", ActionID: "slack_thread_fork", Value: existing.ID + "|" + instruction},
 				{Label: "New task", ActionID: "slack_thread_new", Value: existing.ID + "|" + instruction},
-			})
+			}); err != nil {
+			log.Printf("[slackapp] posting ambiguous-verdict buttons: %v", err)
+		}
 	}
+}
+
+// slackFreshTaskDefaults is what a "new" (unrelated) submit inside an
+// already-actioned thread inherits from the channel binding — the same
+// worker/architect model and test-command defaults a fresh @mention gets
+// from handleSlackTrigger, so a channel that pinned a model doesn't lose
+// that pin just because the request arrived as a thread reply or a button
+// click instead of a top-level mention.
+type slackFreshTaskDefaults struct {
+	testCmd, model, architectModel string
+}
+
+// slackBindingDefaults resolves those defaults with no I/O of its own, so the
+// "binding missing" / "binding belongs to a different org" / "explicit
+// override wins" rules are testable without a database. A binding whose
+// OrgID doesn't match is treated as absent — the same stale-binding guard
+// handleSlackTrigger applies for a workspace re-installed under a different
+// org since the binding was created.
+func slackBindingDefaults(binding *store.SlackChannelBinding, orgID, testCmdOverride string) slackFreshTaskDefaults {
+	d := slackFreshTaskDefaults{testCmd: testCmdOverride}
+	if binding == nil || binding.OrgID != orgID {
+		return d
+	}
+	if d.testCmd == "" {
+		d.testCmd = binding.DefaultTestCmd
+	}
+	d.model = binding.DefaultModel
+	d.architectModel = binding.DefaultArchitectModel
+	return d
 }
 
 func (s *Server) recordSlackThreadTask(ctx context.Context, orgID, teamID, channelID, threadTS, taskID, token, statusText string) {
@@ -199,27 +241,41 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 		return
 	}
 
-	token, err := s.storage.GetCredentialPlaintext(ctx, inst.OrgID, "SLACK_BOT_TOKEN")
+	token, err := inst.DecryptBotToken()
 	if err != nil || token == "" {
 		return
 	}
 
+	// Every branch posts on failure too — a button click that hits a submit
+	// error is the same silent-failure shape the thread-reply path above was
+	// fixed for, one step downstream.
 	switch in.ActionID {
 	case "slack_thread_continue":
-		task, err := s.planner.SubmitContinuation(ctx, planner.ContinuationInput{OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction})
-		if err == nil {
-			s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, task.ID, token, "Continuing…")
+		task, err := s.planner.SubmitContinuation(ctx, planner.ContinuationInput{OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction, Origin: store.OriginSlack})
+		if err != nil {
+			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
+			return
 		}
+		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, task.ID, token, "Continuing…")
 	case "slack_thread_fork":
 		result, err := s.planner.SubmitFork(ctx, planner.ForkInput{OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction})
-		if err == nil {
-			s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Forking — job `%s`.", result.JobID))
+		if err != nil {
+			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't fork that task: %s", err.Error()))
+			return
 		}
+		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Forking — job `%s`.", result.JobID))
 	case "slack_thread_new":
 		repoURL, _ := parent.Spec["repo_url"].(string)
-		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{OrgID: inst.OrgID, Task: instruction, RepoURL: repoURL})
-		if err == nil {
-			s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Starting a new task — job `%s`.", result.JobID))
+		binding, _ := s.storage.GetSlackChannelBinding(ctx, in.TeamID, in.ChannelID)
+		defaults := slackBindingDefaults(binding, inst.OrgID, "")
+		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
+			OrgID: inst.OrgID, Task: instruction, RepoURL: repoURL, TestCmd: defaults.testCmd,
+			Model: defaults.model, ArchitectModel: defaults.architectModel,
+		})
+		if err != nil {
+			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
+			return
 		}
+		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Starting a new task — job `%s`.", result.JobID))
 	}
 }

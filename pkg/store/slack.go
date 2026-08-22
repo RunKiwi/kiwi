@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -27,6 +28,21 @@ func (s *PostgresStore) UpsertSlackInstallation(ctx context.Context, inst *Slack
 		Columns:   []clause.Column{{Name: "team_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"org_id", "team_name", "installed_by_user_id", "updated_at"}),
 	}).Create(inst).Error
+}
+
+// SetSlackBotToken encrypts and stores a workspace's bot token directly on
+// its own SlackInstallation row, keyed by team_id — not the generic
+// Credential table, unique on (org_id, name), which a second workspace
+// connected by the same org would silently overwrite the first's token in.
+// The installation row must already exist (UpsertSlackInstallation first).
+func (s *PostgresStore) SetSlackBotToken(ctx context.Context, teamID, plaintext string) error {
+	enc, err := crypto.EncryptAtRest(plaintext)
+	if err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Model(&SlackInstallation{}).
+		Where("team_id = ?", teamID).
+		Update("encrypted_bot_token", enc).Error
 }
 
 func (s *PostgresStore) GetSlackInstallationByTeamID(ctx context.Context, teamID string) (*SlackInstallation, error) {
@@ -117,6 +133,30 @@ func (s *PostgresStore) UpdateSlackTriggeredTaskStatus(ctx context.Context, id, 
 		updates["status_message_ts"] = statusMessageTS
 	}
 	return s.db.WithContext(ctx).Model(&SlackTriggeredTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// RecordSlackEvent claims a Slack Events API delivery's event_id, reporting
+// fresh=false when it has already been claimed — Slack retries a delivery
+// that did not get a 200 within 3 seconds, and again later if that retry
+// also fails, so the same event_id can arrive more than once for reasons
+// that have nothing to do with anything actually going wrong. The unique
+// index on event_id is what makes this atomic under concurrent deliveries
+// of the same retry: a conflict here IS the answer "already claimed", the
+// same shape QueuedTask.TriggerCommentID gives GitHub PR-comment redelivery.
+func (s *PostgresStore) RecordSlackEvent(ctx context.Context, eventID string) (fresh bool, err error) {
+	if eventID == "" {
+		// Not every delivery carries one worth deduping on (Slack's own
+		// docs don't guarantee event_id on every payload shape) — treat a
+		// missing id as "cannot dedup this one", not as a claim that blocks
+		// every other id-less delivery behind it.
+		return true, nil
+	}
+	res := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&SlackProcessedEvent{EventID: eventID})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (s *PostgresStore) GetSlackTriggeredTaskByQueuedTaskID(ctx context.Context, taskID string) (*SlackTriggeredTask, error) {

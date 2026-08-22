@@ -56,6 +56,7 @@ func InitDB(dsn string) (*gorm.DB, error) {
 			&store.SlackInstallation{},
 			&store.SlackChannelBinding{},
 			&store.SlackTriggeredTask{},
+			&store.SlackProcessedEvent{},
 		); err != nil {
 			return nil, fmt.Errorf("failed to migrate v2 store schema: %w", err)
 		}
