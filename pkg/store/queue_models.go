@@ -109,6 +109,13 @@ type QueuedTask struct {
 	Funding            string     `gorm:"not null;default:'byok'" json:"funding"`
 	TokensIn           int64      `gorm:"not null;default:0" json:"tokens_in"`
 	TokensOut          int64      `gorm:"not null;default:0" json:"tokens_out"`
+	// CachedPromptTokens and RawPromptTokens split TokensIn by whether the
+	// provider served it from prompt cache. TokensIn itself stays the sum
+	// (InputTokens + CacheReadTokens + CacheWriteTokens, per
+	// pkg/daemon/session_store.go) so every existing reader of TokensIn is
+	// unaffected; these two are additive detail for cache-discount reporting.
+	CachedPromptTokens int64      `gorm:"not null;default:0" json:"cached_prompt_tokens"`
+	RawPromptTokens    int64      `gorm:"not null;default:0" json:"raw_prompt_tokens"`
 	MeteredAt          *time.Time `json:"metered_at"`
 	CreatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
 	UpdatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`
