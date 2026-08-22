@@ -563,16 +563,21 @@ func TestSpendAllowanceReflectsAGrantRaisedAboveThePlanDefault(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	found := false
 	for _, a := range got.Allowance {
 		if a.Tier != store.TierEconomy {
 			continue
 		}
+		found = true
 		if a.Granted != 5_000_000 {
 			t.Errorf("granted = %d, want the row's own 5,000,000, not the plan's static 1,000,000 default", a.Granted)
 		}
 		if a.Remaining != 5_000_000-1_259_665 {
 			t.Errorf("remaining = %d, want %d (the raised grant minus usage, not clamped to 0)", a.Remaining, 5_000_000-1_259_665)
 		}
+	}
+	if !found {
+		t.Fatal("economy allowance bucket missing from the response")
 	}
 }
 
