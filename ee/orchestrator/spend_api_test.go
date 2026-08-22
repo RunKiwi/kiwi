@@ -527,6 +527,55 @@ func TestSpendReportsFullAllowanceBeforeAnyUsage(t *testing.T) {
 	}
 }
 
+// Regression test: once a grant row exists, its own TokensGranted is what
+// the page must report — not the plan's static default. A grant raised
+// above the plan default (an operator top-up, applied directly against the
+// row the same way entitlement.Checker.Allow reads it) used to be invisible
+// here: this handler recomputed Granted from entitlement.PlanGrants(plan)
+// every time, so a top-up that made real admission succeed again still
+// showed as permanently exhausted on the dashboard.
+func TestSpendAllowanceReflectsAGrantRaisedAboveThePlanDefault(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+	seedFreeOrg(t, s, "o1")
+
+	period := store.CurrentPeriod(timeNow())
+	// The free plan's economy default is 1,000,000 (see entitlement.PlanGrants).
+	// Seed usage past that default, then top the grant up past usage — mirrors
+	// an operator raising tokens_granted directly against an exhausted row.
+	if _, err := s.storage.EnsureGrant(ctx, "o1", store.TierEconomy, period, 1_000_000); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	if err := s.storage.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 1_259_665); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if err := s.db.WithContext(ctx).Model(&store.OrgTokenGrant{}).
+		Where("org_id = ? AND tier = ? AND period = ?", "o1", store.TierEconomy, period).
+		Update("tokens_granted", 5_000_000).Error; err != nil {
+		t.Fatalf("top up grant: %v", err)
+	}
+
+	req := authed(http.MethodGet, "/api/v1/spend", "", "o1")
+	rec := httptest.NewRecorder()
+	s.handleSpend(rec, req)
+
+	var got SpendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, a := range got.Allowance {
+		if a.Tier != store.TierEconomy {
+			continue
+		}
+		if a.Granted != 5_000_000 {
+			t.Errorf("granted = %d, want the row's own 5,000,000, not the plan's static 1,000,000 default", a.Granted)
+		}
+		if a.Remaining != 5_000_000-1_259_665 {
+			t.Errorf("remaining = %d, want %d (the raised grant minus usage, not clamped to 0)", a.Remaining, 5_000_000-1_259_665)
+		}
+	}
+}
+
 // Once usage exists it must be reflected, and remaining must never go negative.
 func TestSpendAllowanceReflectsUsage(t *testing.T) {
 	s := newTestServer(t)

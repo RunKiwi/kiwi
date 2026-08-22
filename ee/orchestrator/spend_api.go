@@ -150,9 +150,17 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 	// Grants are created lazily on first use, so an org that has not yet run a
 	// Kiwi-funded task has no rows at all — and the page answered "you have no
 	// allowance" when the truth was "you have your full allowance and have used
-	// none of it". The plan is the source of truth for what was granted; the
-	// rows only ever contribute usage.
-	used := map[string]int64{}
+	// none of it". The plan default is the source of truth for what a tier
+	// grants ONLY when no row exists yet; once EnsureGrant has created one,
+	// that row's own TokensGranted is authoritative, not the plan default —
+	// EnsureGrant's ON CONFLICT DO NOTHING means the row's TokensGranted is
+	// whatever it was first seeded with (or later adjusted to), and the actual
+	// admission check (entitlement.Checker.Allow) reads that same row, not the
+	// plan default. Reading the plan default here instead made this page
+	// permanently blind to any grant that had been adjusted after creation —
+	// it would keep reporting exhausted forever even after headroom was added,
+	// while real submissions were correctly being allowed through.
+	rowByTier := map[string]store.OrgTokenGrant{}
 	if grants, gerr := s.storage.ListGrants(r.Context(), claims.OrgID, period); gerr != nil {
 		// Usage is unknown, but the entitlement still is not. Showing the grant
 		// with zero usage overstates what is left, so say nothing rather than
@@ -161,22 +169,26 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 		resp.AllowanceStale = true
 	} else {
 		for _, g := range grants {
-			used[g.Tier] = g.TokensUsed
+			rowByTier[g.Tier] = g
 		}
 	}
 	if !resp.AllowanceStale {
 		for _, g := range entitlement.PlanGrants(plan) {
+			granted, used := g.Tokens, int64(0)
+			if row, ok := rowByTier[g.Tier]; ok {
+				granted, used = row.TokensGranted, row.TokensUsed
+			}
 			b := AllowanceBucket{
 				Tier: g.Tier, Period: period,
-				Granted: g.Tokens, Used: used[g.Tier],
+				Granted: granted, Used: used,
 			}
 			switch {
-			case g.Tokens == store.Unlimited:
+			case granted == store.Unlimited:
 				b.Remaining = store.Unlimited
-			case b.Used >= g.Tokens:
+			case b.Used >= granted:
 				b.Remaining = 0
 			default:
-				b.Remaining = g.Tokens - b.Used
+				b.Remaining = granted - b.Used
 			}
 			resp.Allowance = append(resp.Allowance, b)
 		}
