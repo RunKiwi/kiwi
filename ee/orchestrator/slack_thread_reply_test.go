@@ -46,11 +46,11 @@ func TestClassifyThreadReplyRejectsUnknownVerdict(t *testing.T) {
 // mirroring buildContinuationTask's "no I/O" testability.
 func TestSlackBindingDefaultsAppliesTheBoundChannelsConfiguredModels(t *testing.T) {
 	binding := &store.SlackChannelBinding{
-		OrgID: "org_1", DefaultTestCmd: "go test ./...",
+		OrgID: "org_1", DefaultTestCmd: "go test ./...", DefaultRef: "main",
 		DefaultModel: "claude-haiku-4-5-20251001", DefaultArchitectModel: "claude-opus-4-8",
 	}
 	got := slackBindingDefaults(binding, "org_1", "")
-	if got.testCmd != "go test ./..." || got.model != "claude-haiku-4-5-20251001" || got.architectModel != "claude-opus-4-8" {
+	if got.testCmd != "go test ./..." || got.ref != "main" || got.model != "claude-haiku-4-5-20251001" || got.architectModel != "claude-opus-4-8" {
 		t.Fatalf("got %+v, want the binding's own defaults", got)
 	}
 }
@@ -72,9 +72,9 @@ func TestSlackBindingDefaultsExplicitTestCmdOverridesTheBinding(t *testing.T) {
 // re-install under a different org) must be treated as absent — the same
 // stale-binding guard handleSlackTrigger applies before this helper runs.
 func TestSlackBindingDefaultsIgnoresABindingFromAnotherOrg(t *testing.T) {
-	binding := &store.SlackChannelBinding{OrgID: "org_victim", DefaultModel: "claude-haiku-4-5-20251001"}
+	binding := &store.SlackChannelBinding{OrgID: "org_victim", DefaultRef: "main", DefaultModel: "claude-haiku-4-5-20251001"}
 	got := slackBindingDefaults(binding, "org_1", "")
-	if got.model != "" || got.testCmd != "" || got.architectModel != "" {
+	if got.model != "" || got.testCmd != "" || got.ref != "" || got.architectModel != "" {
 		t.Fatalf("got %+v, want all-empty defaults for a binding belonging to a different org", got)
 	}
 }
@@ -83,7 +83,7 @@ func TestSlackBindingDefaultsIgnoresABindingFromAnotherOrg(t *testing.T) {
 // is what lets SubmitPlan's own runtime auto-pick take over.
 func TestSlackBindingDefaultsHandlesANilBinding(t *testing.T) {
 	got := slackBindingDefaults(nil, "org_1", "")
-	if got.model != "" || got.testCmd != "" || got.architectModel != "" {
+	if got.model != "" || got.testCmd != "" || got.ref != "" || got.architectModel != "" {
 		t.Fatalf("got %+v, want all-empty defaults for no binding", got)
 	}
 }
@@ -147,6 +147,48 @@ func TestHandleSlackInteractivityRejectsATaskFromAnotherTeam(t *testing.T) {
 	s.db.WithContext(ctx).Where("team_id = ?", "T-attacker").Find(&rows)
 	if len(rows) != 0 {
 		t.Fatalf("expected no SlackTriggeredTask row created for the attacker's team, got %d", len(rows))
+	}
+}
+
+// Regression test: handleSlackInteractivity must not panic when the server
+// has no Slack client configured (s.slackClient == nil) — every other Slack
+// entry point (handleSlackThreadReply, handleSlackTrigger) already guards
+// this, but the interactivity handler's failure-path PostMessage calls and
+// recordSlackThreadTask had no such guard, so a real deployment running
+// without a configured client would nil-pointer-panic the first time a
+// button click reached this handler. Mirrors the "no client means do
+// nothing at all, not just skip posting" convention handleSlackThreadReply
+// already applies (see its own s.slackClient == nil check).
+func TestHandleSlackInteractivityDoesNotPanicWithNoSlackClient(t *testing.T) {
+	s := newTestServer(t)
+	ctx := t.Context()
+
+	if err := s.db.WithContext(ctx).Create(&auth.Organization{ID: "org_1", Plan: "pro"}).Error; err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	_ = s.storage.UpsertSlackInstallation(ctx, &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
+	_ = s.storage.SetSlackBotToken(ctx, "T1", "xoxb-test")
+
+	var parent store.QueuedTask
+	parent.ID = "task_parent"
+	parent.OrgID = "org_1"
+	parent.JobID = "job_parent"
+	parent.Spec = map[string]interface{}{"repo_url": "https://github.com/acme/widget"}
+	if err := s.db.WithContext(ctx).Create(&parent).Error; err != nil {
+		t.Fatalf("seed parent task: %v", err)
+	}
+	_ = s.storage.CreateSlackTriggeredTask(ctx, &store.SlackTriggeredTask{
+		ID: "stt_1", OrgID: "org_1", TeamID: "T1", ChannelID: "C1", ThreadTS: "100.001", QueuedTaskID: "task_parent",
+	})
+
+	// s.slackClient is left nil — the default in newTestServer.
+	form := interactivityFormBody(t, "T1", "C1", "slack_thread_new", "stt_1|do something unrelated")
+	s.handleSlackInteractivity(ctx, form) // must not panic
+
+	var tasks []store.QueuedTask
+	s.db.WithContext(ctx).Where("org_id = ? AND id != ?", "org_1", "task_parent").Find(&tasks)
+	if len(tasks) != 0 {
+		t.Fatalf("expected no task submitted with no Slack client to report back through, got %d", len(tasks))
 	}
 }
 

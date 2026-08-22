@@ -138,7 +138,7 @@ func (c *Client) historyPage(ctx context.Context, token, method, channel string,
 	if err != nil {
 		return nil, "", fmt.Errorf("slackapp: %s: %w", method, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	var out struct {

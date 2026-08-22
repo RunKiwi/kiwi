@@ -63,6 +63,17 @@ const DefaultWorkerModel = "claude-haiku-4-5-20251001"
 // platform key on this deployment, no economy-tier OpenRouter model
 // discovered yet, or the org's Kiwi-token allowance is exhausted.
 func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID string) string {
+	// requireEntitlement returns nil for two different reasons: the pick is
+	// genuinely fine, OR Kiwi holds no platform key for the provider at all
+	// (service.go's "nothing to fund, the org can run this on their own
+	// key" case) — which is nil for a caller passing in an explicit model
+	// the org chose, but wrong here: this candidate came from
+	// CheapestKiwiFundedModel specifically because the org has connected
+	// nothing of its own, so a missing platform key must fall through to
+	// DefaultWorkerModel, not be accepted as an unusable pick.
+	if _, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); !ok {
+		return DefaultWorkerModel
+	}
 	candidate, ok, err := s.store.CheapestKiwiFundedModel(ctx, orgID, provider.ProviderOpenRouter, store.TierEconomy)
 	if err == nil && ok {
 		if s.requireEntitlement(ctx, orgID, fleetID, candidate) == nil {

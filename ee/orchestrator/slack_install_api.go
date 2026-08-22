@@ -114,20 +114,16 @@ func (s *Server) handleSlackOAuthCallback(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The installation row must exist before SetSlackBotToken can write to
-	// it (it updates by team_id). Token stored on that row, not the
-	// org-scoped Credential table — see SlackInstallation.EncryptedBotToken:
-	// a second workspace connected by the same org must not overwrite the
-	// first's token, which the old org-keyed Credential row could not avoid.
-	if err := s.storage.UpsertSlackInstallation(r.Context(), &store.SlackInstallation{
+	// One upsert, not two: separate installation-then-token writes let a
+	// concurrent OAuth callback for the same TeamID interleave between
+	// them. Token stored on this row, not the org-scoped Credential table —
+	// see SlackInstallation.EncryptedBotToken: a second workspace connected
+	// by the same org must not overwrite the first's token, which the old
+	// org-keyed Credential row could not avoid.
+	if err := s.storage.UpsertSlackInstallationWithToken(r.Context(), &store.SlackInstallation{
 		TeamID: result.TeamID, OrgID: st.OrgID, TeamName: result.TeamName, InstalledByUserID: st.UserID,
-	}); err != nil {
+	}, result.AccessToken); err != nil {
 		log.Printf("[slackapp] persist installation for %s: %v", st.OrgID, err)
-		http.Error(w, "could not save the installation", http.StatusInternalServerError)
-		return
-	}
-	if err := s.storage.SetSlackBotToken(r.Context(), result.TeamID, result.AccessToken); err != nil {
-		log.Printf("[slackapp] persist bot token for %s: %v", st.OrgID, err)
 		http.Error(w, "could not save the installation", http.StatusInternalServerError)
 		return
 	}

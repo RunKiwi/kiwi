@@ -82,15 +82,30 @@ func TestHandleSlackWebhookIgnoresARedeliveredEventID(t *testing.T) {
 	postSlackEvent(t, s, secret, body)
 	postSlackEvent(t, s, secret, body)
 
-	// The trigger runs off the request goroutine (see handleSlackWebhook),
-	// so give it a moment to land rather than racing its DB write.
-	deadline := time.Now().Add(2 * time.Second)
+	// RecordSlackEvent runs synchronously in the request handler, before
+	// the trigger's goroutine is ever spawned (see handleSlackWebhook) — so
+	// asserting on it directly is deterministic, unlike polling for the
+	// queued task the goroutine writes: a poll loop that breaks as soon as
+	// one task appears could in principle observe the first delivery's task
+	// before a second, undeduplicated delivery's goroutine had written its
+	// own, and pass while the guard was broken. Claiming the same event_id
+	// a third time here proves the guard actually fired for both prior
+	// deliveries, not just happens to agree with a task count.
+	if fresh, err := s.storage.RecordSlackEvent(ctx, "Ev_REDELIVERED"); err != nil || fresh {
+		t.Fatalf("RecordSlackEvent after two deliveries: fresh=%v err=%v, want fresh=false", fresh, err)
+	}
+
+	// End-to-end confirmation that the dedup guard actually stopped a
+	// second SubmitPlan, not just that RecordSlackEvent's own ledger is
+	// correct. The trigger runs off the request goroutine, so wait out the
+	// full deadline rather than breaking on the first task seen — the
+	// direct RecordSlackEvent assertion above is what proves determinism;
+	// this window just gives a real second submission time to land if the
+	// guard were broken.
+	deadline := time.Now().Add(300 * time.Millisecond)
 	var tasks []store.QueuedTask
 	for time.Now().Before(deadline) {
 		s.db.WithContext(ctx).Where("org_id = ?", "org_1").Find(&tasks)
-		if len(tasks) > 0 {
-			break
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if len(tasks) != 1 {

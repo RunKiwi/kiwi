@@ -202,6 +202,7 @@ type Store interface {
 
 	// Slack triggers (ee/orchestrator's slack_* files).
 	UpsertSlackInstallation(ctx context.Context, inst *SlackInstallation) error
+	UpsertSlackInstallationWithToken(ctx context.Context, inst *SlackInstallation, tokenPlaintext string) error
 	SetSlackBotToken(ctx context.Context, teamID, plaintext string) error
 	GetSlackInstallationByTeamID(ctx context.Context, teamID string) (*SlackInstallation, error)
 	ListSlackInstallations(ctx context.Context, orgID string) ([]SlackInstallation, error)

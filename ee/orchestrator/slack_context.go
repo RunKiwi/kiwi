@@ -145,7 +145,15 @@ func (s *Server) fetchSlackContext(ctx context.Context, token, channelID, thread
 				return nil, err
 			}
 			for _, m := range hist {
-				msgs = append(msgs, m.UserID+": "+m.Text)
+				// Sanitized the same way the triggering message is
+				// (instructionFromSlack): an old test:"..."/repo:owner/name
+				// token sitting in channel or thread history must not reach
+				// the Architect as literal task text just because it happened
+				// to be quoted while assembling context — those tokens are
+				// only ever meant to be read off the CURRENT trigger message,
+				// which handleSlackTrigger/handleSlackThreadReply already do
+				// directly against the raw text, not through this history.
+				msgs = append(msgs, m.UserID+": "+instructionFromSlack(m.Text))
 			}
 			return msgs, nil
 		}
@@ -154,7 +162,15 @@ func (s *Server) fetchSlackContext(ctx context.Context, token, channelID, thread
 			return nil, err
 		}
 		for _, m := range hist {
-			msgs = append(msgs, m.UserID+": "+m.Text)
+			// Sanitized the same way the triggering message is
+			// (instructionFromSlack): an old test:"..."/repo:owner/name
+			// token sitting in channel or thread history must not reach
+			// the Architect as literal task text just because it happened
+			// to be quoted while assembling context — those tokens are
+			// only ever meant to be read off the CURRENT trigger message,
+			// which handleSlackTrigger/handleSlackThreadReply already do
+			// directly against the raw text, not through this history.
+			msgs = append(msgs, m.UserID+": "+instructionFromSlack(m.Text))
 		}
 		return msgs, nil
 	}

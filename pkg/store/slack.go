@@ -30,11 +30,39 @@ func (s *PostgresStore) UpsertSlackInstallation(ctx context.Context, inst *Slack
 	}).Create(inst).Error
 }
 
+// UpsertSlackInstallationWithToken is UpsertSlackInstallation and
+// SetSlackBotToken folded into the single upsert statement the OAuth
+// callback needs: two separate writes let a second, concurrent OAuth
+// callback for the same TeamID interleave between them, leaving the row
+// with one callback's metadata and the other's token (or a token-write
+// failure stranding the org mapping with none at all). inst.EncryptedBotToken
+// is set here, not by the caller — the plaintext never needs to leave this
+// function.
+func (s *PostgresStore) UpsertSlackInstallationWithToken(ctx context.Context, inst *SlackInstallation, tokenPlaintext string) error {
+	if inst == nil || inst.TeamID == "" {
+		return errors.New("slack installation needs a team id")
+	}
+	enc, err := crypto.EncryptAtRest(tokenPlaintext)
+	if err != nil {
+		return err
+	}
+	inst.EncryptedBotToken = enc
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "team_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"org_id", "team_name", "installed_by_user_id", "encrypted_bot_token", "updated_at"}),
+	}).Create(inst).Error
+}
+
 // SetSlackBotToken encrypts and stores a workspace's bot token directly on
 // its own SlackInstallation row, keyed by team_id — not the generic
 // Credential table, unique on (org_id, name), which a second workspace
 // connected by the same org would silently overwrite the first's token in.
 // The installation row must already exist (UpsertSlackInstallation first).
+// Kept for callers (tests, and any future path) that legitimately update a
+// token without also touching installation metadata — the OAuth callback
+// itself uses UpsertSlackInstallationWithToken instead, to avoid the
+// interleaving race between the two separate writes this function and
+// UpsertSlackInstallation each perform.
 func (s *PostgresStore) SetSlackBotToken(ctx context.Context, teamID, plaintext string) error {
 	enc, err := crypto.EncryptAtRest(plaintext)
 	if err != nil {
@@ -69,7 +97,7 @@ func (s *PostgresStore) CreateSlackChannelBinding(ctx context.Context, b *SlackC
 	}
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "team_id"}, {Name: "channel_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"repo_url", "default_test_cmd", "default_ref"}),
+		DoUpdates: clause.AssignmentColumns([]string{"repo_url", "default_test_cmd", "default_ref", "default_model", "default_architect_model"}),
 	}).Create(b).Error
 }
 

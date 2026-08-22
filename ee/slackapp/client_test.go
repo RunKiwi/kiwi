@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestPostMessageReturnsTS(t *testing.T) {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "100.001"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "100.001"})
 	}))
 	defer srv.Close()
 
@@ -34,7 +35,7 @@ func TestPostMessageReturnsTS(t *testing.T) {
 func TestPostMessageReturnsErrorOnSlackNotOK(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "channel_not_found"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "channel_not_found"})
 	}))
 	defer srv.Close()
 
@@ -48,29 +49,41 @@ func TestPostMessageReturnsErrorOnSlackNotOK(t *testing.T) {
 // fetched only the first page, so a thread longer than one page silently
 // truncated with no error and no sign anything was cut off.
 func TestConversationRepliesFollowsCursorAcrossPages(t *testing.T) {
+	// httptest.Server runs the handler on its own goroutine, so a t.Fatalf
+	// in there calls runtime.Goexit on that goroutine, not the test's —
+	// it stops the handler (the client observes a broken response) instead
+	// of failing the test. A mutex-guarded slice plus a post-hoc assertion
+	// avoids both that and the unsynchronized access to gotCursors itself.
+	var mu sync.Mutex
 	var gotCursors []string
+	var badPath, badCursor string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		if r.URL.Path != "/conversations.replies" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
+			badPath = r.URL.Path
+			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 		cursor := r.URL.Query().Get("cursor")
 		gotCursors = append(gotCursors, cursor)
 		w.Header().Set("Content-Type", "application/json")
 		switch cursor {
 		case "":
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":                true,
 				"messages":          []map[string]any{{"user": "U1", "text": "first page", "ts": "1"}},
 				"response_metadata": map[string]any{"next_cursor": "page2"},
 			})
 		case "page2":
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":                true,
 				"messages":          []map[string]any{{"user": "U1", "text": "second page", "ts": "2"}},
 				"response_metadata": map[string]any{"next_cursor": ""},
 			})
 		default:
-			t.Fatalf("unexpected cursor %q", cursor)
+			badCursor = cursor
+			w.WriteHeader(http.StatusBadRequest)
 		}
 	}))
 	defer srv.Close()
@@ -79,6 +92,14 @@ func TestConversationRepliesFollowsCursorAcrossPages(t *testing.T) {
 	msgs, err := c.ConversationReplies(t.Context(), "xoxb-test", "C1", "100.001")
 	if err != nil {
 		t.Fatalf("ConversationReplies: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if badPath != "" {
+		t.Fatalf("unexpected path %s", badPath)
+	}
+	if badCursor != "" {
+		t.Fatalf("unexpected cursor %q", badCursor)
 	}
 	if len(gotCursors) != 2 {
 		t.Fatalf("expected exactly 2 page requests, got %d: %v", len(gotCursors), gotCursors)
@@ -91,11 +112,14 @@ func TestConversationRepliesFollowsCursorAcrossPages(t *testing.T) {
 // The page cap must actually stop the loop, not just exist as a constant —
 // a thread that never runs out of next_cursor must not fetch forever.
 func TestConversationRepliesStopsAtThePageCap(t *testing.T) {
+	var mu sync.Mutex
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		requests++
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":                true,
 			"messages":          []map[string]any{{"user": "U1", "text": "msg", "ts": "1"}},
 			"response_metadata": map[string]any{"next_cursor": "always-more"},
@@ -108,8 +132,11 @@ func TestConversationRepliesStopsAtThePageCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConversationReplies: %v", err)
 	}
-	if requests != maxReplyPages {
-		t.Fatalf("expected exactly maxReplyPages (%d) requests against a never-ending cursor, got %d", maxReplyPages, requests)
+	mu.Lock()
+	got := requests
+	mu.Unlock()
+	if got != maxReplyPages {
+		t.Fatalf("expected exactly maxReplyPages (%d) requests against a never-ending cursor, got %d", maxReplyPages, got)
 	}
 	if len(msgs) != maxReplyPages {
 		t.Fatalf("expected %d messages (one per page), got %d", maxReplyPages, len(msgs))
@@ -119,9 +146,9 @@ func TestConversationRepliesStopsAtThePageCap(t *testing.T) {
 func TestAddReactionPostsExpectedFields(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer srv.Close()
 

@@ -126,10 +126,6 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		s.slackClient.AddReaction(ctx, token, channelID, messageTS, "eyes")
 	}
 
-	var defaultRef string
-	if binding != nil {
-		defaultRef = binding.DefaultRef
-	}
 	// An inline test:"..." token outranks the channel's default, the same
 	// priority repo: takes over a bound repo.
 	testCmdOverride, _ := inlineTestCmdOverride(text)
@@ -145,7 +141,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		UserID:            userID,
 		Task:              instruction,
 		RepoURL:           repoURL,
-		Ref:               defaultRef,
+		Ref:               defaults.ref,
 		TestCmd:           defaults.testCmd, // empty is fine: pkg/daemon infers it (see infer.go)
 		InvestigationOnly: isInvestigation,
 		// Empty leaves both up to SubmitPlan's own default resolution — the

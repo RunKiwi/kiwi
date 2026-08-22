@@ -109,6 +109,43 @@ func TestSubmitPlanPrefersACatalogKiwiFundedModelOverTheByokDefault(t *testing.T
 	}
 }
 
+// Regression test: a catalog row can say KiwiProvided while Kiwi holds no
+// actual OpenRouter platform key for this deployment (the key was never
+// configured, or was removed after the catalog was seeded). requireEntitlement
+// returns nil for that case too — "nothing to fund, the org can run this on
+// its own key" — which reads as "the pick is fine" unless the caller checks
+// for a platform key itself. Before the fix this handed back the unusable
+// OpenRouter candidate instead of falling through to the Anthropic
+// DefaultWorkerModel the org actually has a key for.
+func TestSubmitPlanFallsBackWhenKiwiHoldsNoOpenRouterPlatformKey(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	seedCredential(t, st, "o1", "ANTHROPIC_API_KEY")
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+	// newPlannerWithKiwiModel sets this to make kimi-k2 a real candidate;
+	// un-set it here to simulate the deployment having no OpenRouter key.
+	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "")
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["model"] != DefaultWorkerModel {
+		t.Errorf("model = %v, want the BYOK default %q since Kiwi holds no OpenRouter platform key", task.Spec["model"], DefaultWorkerModel)
+	}
+}
+
 // The catalog lookup must not hand back a model the org's own allowance
 // cannot actually cover — that would trade one silent failure (empty Model
 // reaching the daemon) for another (a submit admitted against a budget

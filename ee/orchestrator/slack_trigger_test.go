@@ -11,6 +11,26 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
+// instructionFromSlack is the sanitizer fetchSlackContext now reuses on
+// every history message (see slack_context.go) so an old test:"..."/
+// repo:owner/name token sitting in channel or thread history can't reach
+// the Architect as literal task text. Exercised directly here since that's
+// the load-bearing unit — the wiring in fetchSlackContext is then a single
+// obviously-correct call to it.
+func TestInstructionFromSlackStripsMentionAndInlineOverrides(t *testing.T) {
+	got := instructionFromSlack(`<@U0BOT> fix the bug repo:acme/widget test:"go test ./..."`)
+	if got != "fix the bug" {
+		t.Fatalf("got %q, want the mention and both inline overrides stripped", got)
+	}
+}
+
+func TestInstructionFromSlackLeavesPlainTextUntouched(t *testing.T) {
+	got := instructionFromSlack("investigate the flaky login test")
+	if got != "investigate the flaky login test" {
+		t.Fatalf("got %q, want plain text unchanged", got)
+	}
+}
+
 func TestHandleSlackTriggerSubmitsAPlanWhenChannelIsBound(t *testing.T) {
 	s := newTestServer(t)
 	ctx := t.Context()

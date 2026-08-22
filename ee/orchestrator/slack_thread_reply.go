@@ -139,7 +139,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 		binding, _ := s.storage.GetSlackChannelBinding(ctx, teamID, channelID)
 		defaults := slackBindingDefaults(binding, inst.OrgID, testCmd)
 		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
-			OrgID: inst.OrgID, UserID: userID, Task: instruction, RepoURL: repoURL, TestCmd: defaults.testCmd,
+			OrgID: inst.OrgID, UserID: userID, Task: instruction, RepoURL: repoURL, Ref: defaults.ref, TestCmd: defaults.testCmd,
 			Model: defaults.model, ArchitectModel: defaults.architectModel,
 		})
 		if err != nil {
@@ -168,7 +168,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 // that pin just because the request arrived as a thread reply or a button
 // click instead of a top-level mention.
 type slackFreshTaskDefaults struct {
-	testCmd, model, architectModel string
+	testCmd, ref, model, architectModel string
 }
 
 // slackBindingDefaults resolves those defaults with no I/O of its own, so the
@@ -185,6 +185,7 @@ func slackBindingDefaults(binding *store.SlackChannelBinding, orgID, testCmdOver
 	if d.testCmd == "" {
 		d.testCmd = binding.DefaultTestCmd
 	}
+	d.ref = binding.DefaultRef
 	d.model = binding.DefaultModel
 	d.architectModel = binding.DefaultArchitectModel
 	return d
@@ -242,7 +243,7 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 	}
 
 	token, err := inst.DecryptBotToken()
-	if err != nil || token == "" {
+	if err != nil || token == "" || s.slackClient == nil {
 		return
 	}
 
@@ -269,7 +270,7 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 		binding, _ := s.storage.GetSlackChannelBinding(ctx, in.TeamID, in.ChannelID)
 		defaults := slackBindingDefaults(binding, inst.OrgID, "")
 		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
-			OrgID: inst.OrgID, Task: instruction, RepoURL: repoURL, TestCmd: defaults.testCmd,
+			OrgID: inst.OrgID, Task: instruction, RepoURL: repoURL, Ref: defaults.ref, TestCmd: defaults.testCmd,
 			Model: defaults.model, ArchitectModel: defaults.architectModel,
 		})
 		if err != nil {

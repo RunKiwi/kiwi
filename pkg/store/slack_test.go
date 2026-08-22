@@ -130,6 +130,41 @@ func TestChannelBindingRoundTrip(t *testing.T) {
 	}
 }
 
+// Regression test: CreateSlackChannelBinding upserts on (team_id,
+// channel_id) — re-binding an already-bound channel (e.g. to change its
+// configured model) must update every editable field, not just the ones
+// that existed before DefaultModel/DefaultArchitectModel were added.
+func TestChannelBindingRebindUpdatesAllEditableFields(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	if err := s.CreateSlackChannelBinding(ctx, &SlackChannelBinding{
+		OrgID: "org_1", TeamID: "T123", ChannelID: "C1", RepoURL: "https://github.com/acme/widget",
+		DefaultTestCmd: "go test ./...", DefaultRef: "main",
+		DefaultModel: "claude-haiku-4-5-20251001", DefaultArchitectModel: "claude-opus-4-8",
+	}); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	if err := s.CreateSlackChannelBinding(ctx, &SlackChannelBinding{
+		OrgID: "org_1", TeamID: "T123", ChannelID: "C1", RepoURL: "https://github.com/acme/other",
+		DefaultTestCmd: "make test", DefaultRef: "develop",
+		DefaultModel: "claude-3-5-haiku-20241022", DefaultArchitectModel: "gemini-2.5-pro",
+	}); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+
+	got, err := s.GetSlackChannelBinding(ctx, "T123", "C1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.RepoURL != "https://github.com/acme/other" || got.DefaultTestCmd != "make test" || got.DefaultRef != "develop" {
+		t.Fatalf("got %+v, want the rebind's repo/test-cmd/ref to have replaced the original", got)
+	}
+	if got.DefaultModel != "claude-3-5-haiku-20241022" || got.DefaultArchitectModel != "gemini-2.5-pro" {
+		t.Fatalf("got %+v, want the rebind's model/architect-model to have replaced the original", got)
+	}
+}
+
 func TestLatestSlackTriggeredTaskReturnsMostRecent(t *testing.T) {
 	s := newTestStore(t)
 	ctx := t.Context()
