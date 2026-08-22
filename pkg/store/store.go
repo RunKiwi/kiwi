@@ -89,6 +89,18 @@ type Store interface {
 	CreateManifest(ctx context.Context, m *Manifest) error
 	UpdateJobManifest(ctx context.Context, jobID, manifestID string) error
 
+	// Plan Mode lifecycle. SetJobPlanPendingReview also sets Job.Status to
+	// "PLAN_REVIEW" so it stops appearing as actively running; ApproveJobPlan
+	// and RejectJobPlan resolve it. None of these touch QueuedTask — the
+	// caller (ee/orchestrator) creates the continuation task separately once
+	// SetJobPlanPendingReview or ApproveJobPlan is decided by the human.
+	SetJobPlanPendingReview(ctx context.Context, jobID, planMarkdown string) error
+	ApproveJobPlan(ctx context.Context, jobID string) error
+	RejectJobPlan(ctx context.Context, jobID, reason string) error
+	// SetJobSpendCap updates a job's per-job spend cap. orgID scopes the
+	// update so an org-scoped caller cannot touch another org's job by ID.
+	SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error
+
 	// Events & Checkpoints
 	AppendEvent(ctx context.Context, event *Event) error
 	SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) error
