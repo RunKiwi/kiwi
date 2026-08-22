@@ -562,3 +562,60 @@ func TestSpendAllowanceReflectsUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleSpendIncludesQuotaCeilings(t *testing.T) {
+	s := newTestServer(t)
+	seedFreeOrg(t, s, "org-quota-test")
+
+	if err := s.db.Create(&store.OrgLimits{
+		OrgID:                   "org-quota-test",
+		MaxAgentMinutesPerMonth: 750.0,
+		MaxConcurrentJobs:       12,
+	}).Error; err != nil {
+		t.Fatalf("seed limits: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := s.db.Create(&store.QueuedTask{
+		ID: "t1", OrgID: "org-quota-test", JobID: "j1", Status: store.TaskLeased, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed task t1: %v", err)
+	}
+	if err := s.db.Create(&store.QueuedTask{
+		ID: "t2", OrgID: "org-quota-test", JobID: "j2", Status: store.TaskLeased, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed task t2: %v", err)
+	}
+	if err := s.db.Create(&store.QueuedTask{
+		ID: "t3", OrgID: "org-quota-test", JobID: "j3", Status: store.TaskSucceeded, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed task t3: %v", err)
+	}
+	if err := s.db.Create(&store.QueuedTask{
+		ID: "t4", OrgID: "other-org", JobID: "j4", Status: store.TaskLeased, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed task t4: %v", err)
+	}
+
+	req := authed(http.MethodGet, "/api/v1/spend", "", "org-quota-test")
+	rec := httptest.NewRecorder()
+	s.handleSpend(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got SpendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if got.AgentMinutesLimit != 750.0 {
+		t.Errorf("AgentMinutesLimit = %v, want 750.0", got.AgentMinutesLimit)
+	}
+	if got.ConcurrentLeasesMax != 12 {
+		t.Errorf("ConcurrentLeasesMax = %d, want 12", got.ConcurrentLeasesMax)
+	}
+	if got.ConcurrentLeasesActive != 2 {
+		t.Errorf("ConcurrentLeasesActive = %d, want 2", got.ConcurrentLeasesActive)
+	}
+}
