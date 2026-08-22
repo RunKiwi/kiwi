@@ -155,6 +155,21 @@ func ModelCostUSDWithCache(model string, inputTokens, outputTokens, cacheReadTok
 		float64(cacheWriteTokens)/1e6*writeRate
 }
 
+// CacheDiscountUSD returns the dollar savings achieved by serving cachedTokens
+// from prompt cache at the cache-read rate rather than the standard input rate
+// for the given model.
+func CacheDiscountUSD(model string, cachedTokens int64) float64 {
+	if cachedTokens <= 0 {
+		return 0
+	}
+	p := pricingFor(model)
+	readRate, _ := cacheRates(model)
+	if p.InputCostPerM <= readRate {
+		return 0
+	}
+	return float64(cachedTokens) / 1e6 * (p.InputCostPerM - readRate)
+}
+
 // costUSD computes the cost of a call given token usage at default Opus 4.8 pricing.
 func costUSD(inputTokens, outputTokens int64) float64 {
 	return ModelCostUSD("claude-opus-4-8", inputTokens, outputTokens)
