@@ -81,6 +81,10 @@ type ResultReq struct {
 	// ("docker" | "runsc" | "firecracker"), so the record states what was
 	// observed instead of assuming a default.
 	SandboxRuntime string `json:"sandbox_runtime,omitempty"`
+	// PlanSpecJSON is the marshaled session.Spec, present only when Status is
+	// "PLAN_REVIEW". An older Control Plane ignores an unknown field; an
+	// older daemon simply never sends it.
+	PlanSpecJSON string `json:"plan_spec_json,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.

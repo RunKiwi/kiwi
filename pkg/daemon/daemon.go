@@ -568,11 +568,13 @@ func isLLMKey(name string) bool {
 // sees the Actor–Critic loop; the Control Plane learns what happened solely
 // from what is reported here.
 type taskResult struct {
-	ok     bool
-	prURL  string
-	detail string
-	abuse  bool
-	events []ver.TaskEvent
+	ok               bool
+	prURL            string
+	detail           string
+	abuse            bool
+	events           []ver.TaskEvent
+	planReviewStatus string
+	planSpecJSON     string
 }
 
 // effectiveRef resolves what ref to check out, with no I/O of its own so the
@@ -1094,7 +1096,9 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		return
 	}
 	status := "SUCCEEDED"
-	if !out.ok {
+	if out.planReviewStatus != "" {
+		status = out.planReviewStatus
+	} else if !out.ok {
 		status = "FAILED"
 	}
 	sandboxRT := d.config.SandboxRuntime
@@ -1111,6 +1115,7 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		Abuse:          out.abuse,
 		Events:         out.events,
 		SandboxRuntime: sandboxRT,
+		PlanSpecJSON:   out.planSpecJSON,
 	}
 	// Attest the telemetry with the daemon's own signing key. In BYOC this key
 	// lives only in the customer's cloud, so the execution half of the record is

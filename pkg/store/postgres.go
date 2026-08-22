@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var ErrJobNotFound = errors.New("job not found")
 
 // PostgresStore implements the Store interface using a PostgreSQL GORM connection.
 type PostgresStore struct {
@@ -86,6 +90,47 @@ func (s *PostgresStore) UpdateJobStatus(ctx context.Context, id string, expected
 
 func (s *PostgresStore) UpdateJobCost(ctx context.Context, id string, additionalCost float64) error {
 	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", id).Update("cost_usd", gorm.Expr("cost_usd + ?", additionalCost)).Error
+}
+
+func (s *PostgresStore) SetJobPlanPendingReview(ctx context.Context, jobID, planMarkdown string) error {
+	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+		"plan_status":   "pending_review",
+		"plan_markdown": planMarkdown,
+		"status":        "PLAN_REVIEW",
+		"updated_at":    time.Now(),
+	}).Error
+}
+
+func (s *PostgresStore) ApproveJobPlan(ctx context.Context, jobID string) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+		"plan_status":      "approved",
+		"plan_accepted_at": &now,
+		"status":           "RUNNING",
+		"updated_at":       now,
+	}).Error
+}
+
+func (s *PostgresStore) RejectJobPlan(ctx context.Context, jobID, reason string) error {
+	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+		"plan_status":          "rejected",
+		"plan_rejected_reason": reason,
+		"status":               "FAILED",
+		"updated_at":           time.Now(),
+	}).Error
+}
+
+func (s *PostgresStore) SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error {
+	res := s.db.WithContext(ctx).Model(&Job{}).
+		Where("id = ? AND org_id = ?", jobID, orgID).
+		Update("spend_cap_usd", capUSD)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrJobNotFound
+	}
+	return nil
 }
 
 func (s *PostgresStore) AppendEvent(ctx context.Context, event *Event) error {

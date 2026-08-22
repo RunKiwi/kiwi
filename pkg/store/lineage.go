@@ -24,6 +24,11 @@ const (
 	OriginSubmit    = "submit"
 	OriginPRComment = "pr_comment"
 	OriginFork      = "fork"
+	// OriginPlanApproved marks a continuation created by approving a Plan
+	// Mode review. It reuses the same task-lineage mechanism as OriginPRComment
+	// (ParentTaskID/RootTaskID) so the daemon resumes the exact session that
+	// was paused, rather than starting a fresh one.
+	OriginPlanApproved = "plan_approved"
 	// OriginSlack marks a continuation that came from a Slack thread reply —
 	// distinct from OriginPRComment (a GitHub PR review comment), which a
 	// Slack-triggered continuation is not, even though buildContinuationTask

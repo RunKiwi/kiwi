@@ -13,12 +13,18 @@ const (
 	// two together would make the failure rate unreadable. Nothing retries a
 	// cancelled task automatically — RetryJob is an explicit act.
 	TaskCancelled = "CANCELLED"
+	// TaskPlanReview is terminal for the queue (this task's lease is released
+	// and it is never re-leased or swept) but not terminal for the job: the
+	// job stays open pending a human decision. A separate continuation task
+	// (Origin=OriginPlanApproved) resumes the work once approved. See
+	// docs/superpowers/plans/2026-08-22-plan-mode-and-routing-backend-plan.md.
+	TaskPlanReview = "PLAN_REVIEW"
 )
 
 // IsTerminal reports whether a task status is final. Terminal tasks are never
 // leased, swept, or diagnosed.
 func IsTerminal(status string) bool {
-	return status == TaskSucceeded || status == TaskFailed || status == TaskCancelled
+	return status == TaskSucceeded || status == TaskFailed || status == TaskCancelled || status == TaskPlanReview
 }
 
 // MaxLeaseAttempts bounds how many times a task may be leased before it is

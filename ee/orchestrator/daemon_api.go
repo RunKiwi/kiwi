@@ -11,10 +11,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
@@ -22,6 +24,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/agent"
 	"github.com/ibreakthecloud/kiwi/pkg/crypto"
 	"github.com/ibreakthecloud/kiwi/pkg/daemon"
+	"github.com/ibreakthecloud/kiwi/pkg/session"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -385,8 +388,8 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Only terminal statuses may be reported.
-	if req.Status != store.TaskSucceeded && req.Status != store.TaskFailed {
-		http.Error(w, "status must be SUCCEEDED or FAILED", http.StatusBadRequest)
+	if req.Status != store.TaskSucceeded && req.Status != store.TaskFailed && req.Status != store.TaskPlanReview {
+		http.Error(w, "status must be SUCCEEDED, FAILED, or PLAN_REVIEW", http.StatusBadRequest)
 		return
 	}
 
@@ -465,6 +468,14 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.WithContext(r.Context()).Where("id = ?", req.TaskID).First(&task).Error; err == nil {
 		s.meterKiwiUsage(r.Context(), &task, tokensIn, tokensOut, architectIn, architectOut)
 		s.reportSlackCompletion(r.Context(), req.TaskID, &task)
+		if req.Status == store.TaskPlanReview {
+			var spec session.Spec
+			if err := json.Unmarshal([]byte(req.PlanSpecJSON), &spec); err != nil {
+				log.Printf("[daemon] task %s: invalid plan spec JSON: %v", req.TaskID, err)
+			} else if err := s.storage.SetJobPlanPendingReview(r.Context(), task.JobID, renderPlanMarkdown(spec)); err != nil {
+				log.Printf("[daemon] task %s: failed to record plan for review: %v", req.TaskID, err)
+			}
+		}
 	}
 
 	log.Printf("[daemon] task %s reported %s", req.TaskID, req.Status)
@@ -974,4 +985,37 @@ func (s *Server) handleDaemonProgress(w http.ResponseWriter, r *http.Request) {
 	s.recordTaskEvents(r.Context(), d.OrgID, req.TaskID, req.Events)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// renderPlanMarkdown turns an Architect's Spec into the markdown a human
+// reviews before approving. Kept in ee/orchestrator (not pkg/session) because
+// it's a presentation concern, not an execution one.
+func renderPlanMarkdown(spec session.Spec) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", spec.Objective)
+	if len(spec.AcceptanceCriteria) > 0 {
+		b.WriteString("## Acceptance criteria\n")
+		for _, c := range spec.AcceptanceCriteria {
+			fmt.Fprintf(&b, "- %s\n", c)
+		}
+		b.WriteString("\n")
+	}
+	if len(spec.MustChange) > 0 {
+		b.WriteString("## Files expected to change\n")
+		for _, f := range spec.MustChange {
+			fmt.Fprintf(&b, "- `%s`\n", f)
+		}
+		b.WriteString("\n")
+	}
+	if len(spec.MustNotChange) > 0 {
+		b.WriteString("## Must not change\n")
+		for _, f := range spec.MustNotChange {
+			fmt.Fprintf(&b, "- `%s`\n", f)
+		}
+		b.WriteString("\n")
+	}
+	if spec.Rationale != "" {
+		fmt.Fprintf(&b, "## Rationale\n%s\n", spec.Rationale)
+	}
+	return b.String()
 }

@@ -140,6 +140,25 @@ type Job struct {
 	Error            *string   `json:"error"`
 	CreatedAt        time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 	UpdatedAt        time.Time `gorm:"not null;default:current_timestamp" json:"updated_at"`
+
+	// RequiresPlanApproval gates the session's Round-0 plan behind a human
+	// approve/reject before any Implementer round runs. See
+	// docs/superpowers/plans/2026-08-22-plan-mode-and-routing-backend-plan.md.
+	RequiresPlanApproval bool `gorm:"not null;default:false" json:"requires_plan_approval"`
+	// PlanStatus is '' (plan mode off), 'drafting', 'pending_review',
+	// 'approved', or 'rejected'.
+	PlanStatus string `gorm:"type:varchar(32);not null;default:''" json:"plan_status,omitempty"`
+	// PlanMarkdown is rendered from the Architect's Spec once Round 0
+	// finishes (see Task 4), not written by the daemon directly.
+	PlanMarkdown       string     `gorm:"type:text;not null;default:''" json:"plan_markdown,omitempty"`
+	PlanAcceptedAt     *time.Time `json:"plan_accepted_at,omitempty"`
+	PlanRejectedReason string     `gorm:"type:varchar(255);not null;default:''" json:"plan_rejected_reason,omitempty"`
+	// ArchitectModel and WorkerModel are denormalized from the submit-time
+	// request (ee/planner already routes them independently — see
+	// pkg/daemon/session_run.go:83) purely for display on the job/plan views.
+	ArchitectModel string  `gorm:"type:varchar(128);not null;default:''" json:"architect_model,omitempty"`
+	WorkerModel    string  `gorm:"type:varchar(128);not null;default:''" json:"worker_model,omitempty"`
+	SpendCapUSD    float64 `gorm:"not null;default:0" json:"spend_cap_usd,omitempty"`
 }
 
 // Agent represents an individual agent (master or worker) inside a job.

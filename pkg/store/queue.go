@@ -325,8 +325,8 @@ func (s *PostgresStore) RenewLease(ctx context.Context, taskID, leaseID string, 
 }
 
 func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (bool, error) {
-	if c.FinalStatus != TaskSucceeded && c.FinalStatus != TaskFailed {
-		return false, fmt.Errorf("invalid final status %q (want %s or %s)", c.FinalStatus, TaskSucceeded, TaskFailed)
+	if c.FinalStatus != TaskSucceeded && c.FinalStatus != TaskFailed && c.FinalStatus != TaskPlanReview {
+		return false, fmt.Errorf("invalid final status %q (want %s, %s, or %s)", c.FinalStatus, TaskSucceeded, TaskFailed, TaskPlanReview)
 	}
 
 	var rowsAffected int64
@@ -386,25 +386,27 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (boo
 			// independently and in any order, so "failed" must be sticky: any failed
 			// sibling fails the whole job, and a later success must not overwrite it.
 			// We therefore only let a success land while the row isn't already failed.
-			learningUpdates := map[string]interface{}{"outcome": strings.ToLower(c.FinalStatus)}
-			if c.ResultURL != "" {
-				learningUpdates["pr_url"] = c.ResultURL
+			if c.FinalStatus == TaskSucceeded || c.FinalStatus == TaskFailed {
+				learningUpdates := map[string]interface{}{"outcome": strings.ToLower(c.FinalStatus)}
+				if c.ResultURL != "" {
+					learningUpdates["pr_url"] = c.ResultURL
+				}
+				// Backfill the summary for jobs whose plan did not produce one at
+				// submit time. A session-mode job has no plan summary then — planning
+				// happens later, in the daemon — so the row was indexed with an empty
+				// one and would stay that way, making it useless as future context
+				// even though its embedding (computed from the task text) still
+				// matched. The daemon's detail on a successful task is the Architect's
+				// own account of the change, which is exactly what a summary should be.
+				if c.FinalStatus == TaskSucceeded && c.Detail != "" {
+					learningUpdates["summary"] = gorm.Expr("COALESCE(NULLIF(summary, ''), ?)", c.Detail)
+				}
+				q := tx.Model(&JobLearning{}).Where("org_id = ? AND job_id = ?", t.OrgID, t.JobID)
+				if c.FinalStatus == TaskSucceeded {
+					q = q.Where("outcome IS NULL OR outcome <> ?", strings.ToLower(TaskFailed))
+				}
+				_ = q.Updates(learningUpdates)
 			}
-			// Backfill the summary for jobs whose plan did not produce one at
-			// submit time. A session-mode job has no plan summary then — planning
-			// happens later, in the daemon — so the row was indexed with an empty
-			// one and would stay that way, making it useless as future context
-			// even though its embedding (computed from the task text) still
-			// matched. The daemon's detail on a successful task is the Architect's
-			// own account of the change, which is exactly what a summary should be.
-			if c.FinalStatus == TaskSucceeded && c.Detail != "" {
-				learningUpdates["summary"] = gorm.Expr("COALESCE(NULLIF(summary, ''), ?)", c.Detail)
-			}
-			q := tx.Model(&JobLearning{}).Where("org_id = ? AND job_id = ?", t.OrgID, t.JobID)
-			if c.FinalStatus == TaskSucceeded {
-				q = q.Where("outcome IS NULL OR outcome <> ?", strings.ToLower(TaskFailed))
-			}
-			_ = q.Updates(learningUpdates)
 		}
 		return nil
 	})
