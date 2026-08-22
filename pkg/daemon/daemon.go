@@ -575,6 +575,27 @@ type taskResult struct {
 	events []ver.TaskEvent
 }
 
+// effectiveRef resolves what ref to check out, with no I/O of its own so the
+// defaulting rule is table-testable on its own.
+//
+// An empty ref must not be read as "no repository at all" — that used to
+// fall straight into executeTask's no-clone fallback branch, leaving the
+// worktree a plain mkdir'd directory with no .git in it, so the session's
+// first `git rev-parse HEAD` failed with "not a git repository" for any
+// caller that set a repo URL without also setting a ref. Every other submit
+// path (dashboard, CLI) defaults its own ref field to "main" before a
+// request ever reaches here; the Slack trigger path is the one caller that
+// can legitimately leave it empty (a channel binding's Default Ref is
+// optional), so the default belongs here, once, rather than pushed onto
+// every caller to remember. "HEAD" — not a hardcoded "main" — resolves to
+// whatever the bare clone's actual default branch is, main or otherwise.
+func effectiveRef(repoURL, ref string) string {
+	if repoURL != "" && ref == "" {
+		return "HEAD"
+	}
+	return ref
+}
+
 func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds map[string]string, prog *progressReporter, leaseID string) taskResult {
 	log.Printf(" - Task ID: %s, Model: %s, Target: %s", spec.ID, spec.Model, spec.Task)
 
@@ -597,7 +618,9 @@ func (d *Daemon) executeTask(ctx context.Context, spec agent.WorkerSpec, creds m
 
 	worktreePath := filepath.Join(d.config.CacheDir, "worktrees", spec.ID)
 
-	if spec.RepoURL != "" && spec.Ref != "" {
+	spec.Ref = effectiveRef(spec.RepoURL, spec.Ref)
+
+	if spec.RepoURL != "" {
 		// One job = one branch (#126): base the worktree on the shared job branch
 		// when it already exists, so this worker sees earlier workers' committed
 		// edits and its commit fast-forwards onto them. The first worker falls

@@ -127,6 +127,38 @@ func seedWorkspace(t *testing.T, specID, name, content string) string {
 	return path
 }
 
+// Regression test: a Slack-triggered task whose channel binding has no
+// Default Ref configured reaches executeTask with RepoURL set and Ref
+// empty. Before effectiveRef existed, executeTask's worktree-provisioning
+// branch gated on "RepoURL != "" && Ref != """ — an empty Ref took the
+// no-clone fallback (a plain mkdir'd temp dir), and the session's first
+// git rev-parse HEAD then failed with "not a git repository", exactly the
+// failure a real free-fleet Slack task hit in production.
+func TestEffectiveRefDefaultsToHeadWhenRepoIsSetButRefIsNot(t *testing.T) {
+	got := effectiveRef("https://github.com/acme/widget", "")
+	if got != "HEAD" {
+		t.Fatalf("got %q, want HEAD so the clone resolves to the repo's actual default branch", got)
+	}
+}
+
+// An explicit ref is never second-guessed.
+func TestEffectiveRefLeavesAnExplicitRefUntouched(t *testing.T) {
+	got := effectiveRef("https://github.com/acme/widget", "develop")
+	if got != "develop" {
+		t.Fatalf("got %q, want the explicit ref unchanged", got)
+	}
+}
+
+// No repo URL at all means the fallback (no-clone, plain temp dir) path is
+// correct — an empty ref must stay empty rather than default to something
+// that only makes sense once there is actually a repository to check out.
+func TestEffectiveRefLeavesRefEmptyWithNoRepoURL(t *testing.T) {
+	got := effectiveRef("", "")
+	if got != "" {
+		t.Fatalf("got %q, want empty — nothing to default a ref against with no repo URL", got)
+	}
+}
+
 // The end-to-end property that matters: the Implementer's edit lands on disk,
 // the test command verifies it, and the task reports success.
 func TestExecuteTask_SessionEditsFileUntilTestPasses(t *testing.T) {
