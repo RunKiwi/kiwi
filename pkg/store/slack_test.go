@@ -34,6 +34,86 @@ func TestUpsertSlackInstallationRepointsExistingTeam(t *testing.T) {
 	}
 }
 
+// Regression test for the bug: a bot token used to live on the org-scoped
+// Credential table, unique on (org_id, name) — so a second Slack workspace
+// connected by the same org silently overwrote the first's token there, and
+// every lookup for EITHER team would return whichever token was saved most
+// recently. The token now lives on the team-scoped SlackInstallation row,
+// so two workspaces under one org must keep two independent tokens.
+func TestTwoWorkspacesUnderOneOrgKeepIndependentBotTokens(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+
+	if err := s.UpsertSlackInstallation(ctx, &SlackInstallation{TeamID: "T1", OrgID: "org_1"}); err != nil {
+		t.Fatalf("upsert T1: %v", err)
+	}
+	if err := s.UpsertSlackInstallation(ctx, &SlackInstallation{TeamID: "T2", OrgID: "org_1"}); err != nil {
+		t.Fatalf("upsert T2: %v", err)
+	}
+	if err := s.SetSlackBotToken(ctx, "T1", "xoxb-workspace-one"); err != nil {
+		t.Fatalf("set T1 token: %v", err)
+	}
+	if err := s.SetSlackBotToken(ctx, "T2", "xoxb-workspace-two"); err != nil {
+		t.Fatalf("set T2 token: %v", err)
+	}
+
+	inst1, err := s.GetSlackInstallationByTeamID(ctx, "T1")
+	if err != nil {
+		t.Fatalf("get T1: %v", err)
+	}
+	tok1, err := inst1.DecryptBotToken()
+	if err != nil || tok1 != "xoxb-workspace-one" {
+		t.Fatalf("T1 token = %q, err=%v, want xoxb-workspace-one", tok1, err)
+	}
+
+	inst2, err := s.GetSlackInstallationByTeamID(ctx, "T2")
+	if err != nil {
+		t.Fatalf("get T2: %v", err)
+	}
+	tok2, err := inst2.DecryptBotToken()
+	if err != nil || tok2 != "xoxb-workspace-two" {
+		t.Fatalf("T2 token = %q, err=%v, want xoxb-workspace-two", tok2, err)
+	}
+}
+
+// RecordSlackEvent is what turns a Slack redelivery into a no-op instead of
+// a second submission: the same event_id claimed twice must report fresh
+// only the first time.
+func TestRecordSlackEventClaimsOnceThenReportsDuplicate(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+
+	fresh, err := s.RecordSlackEvent(ctx, "Ev0PV52K21")
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if !fresh {
+		t.Fatal("expected the first claim of a new event_id to be fresh")
+	}
+
+	fresh, err = s.RecordSlackEvent(ctx, "Ev0PV52K21")
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if fresh {
+		t.Fatal("expected a redelivery of the same event_id to report NOT fresh")
+	}
+}
+
+// A different event_id must never be blocked by an unrelated one already
+// claimed — the ledger keys on event_id, not on "anything was recorded".
+func TestRecordSlackEventDistinctIDsBothClaimFresh(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+
+	if fresh, err := s.RecordSlackEvent(ctx, "Ev1"); err != nil || !fresh {
+		t.Fatalf("Ev1: fresh=%v err=%v", fresh, err)
+	}
+	if fresh, err := s.RecordSlackEvent(ctx, "Ev2"); err != nil || !fresh {
+		t.Fatalf("Ev2: fresh=%v err=%v", fresh, err)
+	}
+}
+
 func TestChannelBindingRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := t.Context()
@@ -47,6 +127,41 @@ func TestChannelBindingRoundTrip(t *testing.T) {
 	}
 	if got.RepoURL != "https://github.com/acme/widget" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+// Regression test: CreateSlackChannelBinding upserts on (team_id,
+// channel_id) — re-binding an already-bound channel (e.g. to change its
+// configured model) must update every editable field, not just the ones
+// that existed before DefaultModel/DefaultArchitectModel were added.
+func TestChannelBindingRebindUpdatesAllEditableFields(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	if err := s.CreateSlackChannelBinding(ctx, &SlackChannelBinding{
+		OrgID: "org_1", TeamID: "T123", ChannelID: "C1", RepoURL: "https://github.com/acme/widget",
+		DefaultTestCmd: "go test ./...", DefaultRef: "main",
+		DefaultModel: "claude-haiku-4-5-20251001", DefaultArchitectModel: "claude-opus-4-8",
+	}); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	if err := s.CreateSlackChannelBinding(ctx, &SlackChannelBinding{
+		OrgID: "org_1", TeamID: "T123", ChannelID: "C1", RepoURL: "https://github.com/acme/other",
+		DefaultTestCmd: "make test", DefaultRef: "develop",
+		DefaultModel: "claude-3-5-haiku-20241022", DefaultArchitectModel: "gemini-2.5-pro",
+	}); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+
+	got, err := s.GetSlackChannelBinding(ctx, "T123", "C1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.RepoURL != "https://github.com/acme/other" || got.DefaultTestCmd != "make test" || got.DefaultRef != "develop" {
+		t.Fatalf("got %+v, want the rebind's repo/test-cmd/ref to have replaced the original", got)
+	}
+	if got.DefaultModel != "claude-3-5-haiku-20241022" || got.DefaultArchitectModel != "gemini-2.5-pro" {
+		t.Fatalf("got %+v, want the rebind's model/architect-model to have replaced the original", got)
 	}
 }
 

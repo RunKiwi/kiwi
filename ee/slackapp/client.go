@@ -122,46 +122,89 @@ type Message struct {
 	TS     string `json:"ts"`
 }
 
-func (c *Client) history(ctx context.Context, token, method, channel string, extra url.Values) ([]Message, error) {
+// historyPage fetches one page and returns Slack's own cursor for the next
+// one — empty when there isn't one, per Slack's response_metadata.
+func (c *Client) historyPage(ctx context.Context, token, method, channel string, extra url.Values) (msgs []Message, nextCursor string, err error) {
 	q := url.Values{"channel": {channel}}
 	for k, v := range extra {
 		q[k] = v
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/"+method+"?"+q.Encode(), nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("slackapp: %s: %w", method, err)
+		return nil, "", fmt.Errorf("slackapp: %s: %w", method, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	var out struct {
-		OK       bool      `json:"ok"`
-		Error    string    `json:"error"`
-		Messages []Message `json:"messages"`
+		OK               bool      `json:"ok"`
+		Error            string    `json:"error"`
+		Messages         []Message `json:"messages"`
+		ResponseMetadata struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"response_metadata"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("slackapp: %s: decode: %w", method, err)
+		return nil, "", fmt.Errorf("slackapp: %s: decode: %w", method, err)
 	}
 	if !out.OK {
-		return nil, fmt.Errorf("slackapp: %s: %s", method, out.Error)
+		return nil, "", fmt.Errorf("slackapp: %s: %s", method, out.Error)
 	}
-	return out.Messages, nil
+	return out.Messages, out.ResponseMetadata.NextCursor, nil
+}
+
+func (c *Client) history(ctx context.Context, token, method, channel string, extra url.Values) ([]Message, error) {
+	msgs, _, err := c.historyPage(ctx, token, method, channel, extra)
+	return msgs, err
 }
 
 // ConversationHistory returns channel messages, newest first, capped at
-// limit — the fixed-lookback half of context assembly (Task 8).
+// limit — the fixed-lookback half of context assembly (Task 8). Never
+// paginates: limit is always well under a page (fixedLookback/
+// escalatedLookback in ee/orchestrator/slack_context.go, both far below
+// Slack's own page size), so there is never a second page to follow.
 func (c *Client) ConversationHistory(ctx context.Context, token, channel string, limit int) ([]Message, error) {
 	return c.history(ctx, token, "conversations.history", channel, url.Values{"limit": {fmt.Sprintf("%d", limit)}})
 }
 
-// ConversationReplies returns a whole thread, oldest first.
+// maxReplyPages bounds how many pages ConversationReplies will follow for
+// one thread — a tuning knob, not a contract, the same posture
+// fixedLookback/escalatedLookback take. Without a cap, a pathological
+// thread would make this call cost proportional to the whole thread's
+// length rather than to the summary the caller actually wants; with one, a
+// very long thread degrades to "the first maxReplyPages worth" instead of
+// hanging or ballooning the request.
+const maxReplyPages = 10
+
+// ConversationReplies returns a whole thread, oldest first, following
+// Slack's cursor across pages up to maxReplyPages. Before this it fetched
+// only the first page — Slack does not document conversations.replies'
+// default page size as unbounded, so a long-running thread silently
+// truncated with no error and no sign anything was cut off.
 func (c *Client) ConversationReplies(ctx context.Context, token, channel, threadTS string) ([]Message, error) {
-	return c.history(ctx, token, "conversations.replies", channel, url.Values{"ts": {threadTS}})
+	var all []Message
+	cursor := ""
+	for page := 0; page < maxReplyPages; page++ {
+		extra := url.Values{"ts": {threadTS}}
+		if cursor != "" {
+			extra["cursor"] = []string{cursor}
+		}
+		msgs, next, err := c.historyPage(ctx, token, "conversations.replies", channel, extra)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, msgs...)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return all, nil
 }
 
 // Button is one option in the continue/fork/new disambiguation prompt.

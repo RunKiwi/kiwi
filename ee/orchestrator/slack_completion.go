@@ -28,7 +28,11 @@ func (s *Server) reportSlackCompletion(ctx context.Context, taskID string, task 
 		return
 	}
 
-	token, err := s.storage.GetCredentialPlaintext(ctx, row.OrgID, "SLACK_BOT_TOKEN")
+	inst, err := s.storage.GetSlackInstallationByTeamID(ctx, row.TeamID)
+	if err != nil || inst == nil {
+		return
+	}
+	token, err := inst.DecryptBotToken()
 	if err != nil || token == "" {
 		return
 	}

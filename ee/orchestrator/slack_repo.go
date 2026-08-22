@@ -94,7 +94,7 @@ func (s *Server) resolveSlackRepo(ctx context.Context, orgID, text string, bindi
 		return "", "Couldn't find any repositories to infer from — bind this channel to a repository under Integrations."
 	}
 
-	complete, cerr := s.slackCompleter()
+	complete, cerr := s.slackCompleter(ctx)
 	if cerr != nil {
 		return "", "Couldn't determine which repository this is about — bind this channel to a repository under Integrations."
 	}

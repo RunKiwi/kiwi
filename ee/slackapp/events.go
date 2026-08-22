@@ -16,7 +16,14 @@ import (
 // same reasoning ee/orchestrator/pr_comment.go gives: cheap to table-test,
 // no DB or network involved in deciding what an event even is.
 type Event struct {
-	Type      string // "url_verification" or "event_callback"
+	Type string // "url_verification" or "event_callback"
+	// EventID is Slack's own delivery id (the envelope's "event_id"), stable
+	// across a redelivery of the SAME event — Slack retries a delivery that
+	// didn't get a 200 within 3 seconds, and again later if that retry also
+	// fails, so this is what lets a caller recognize "I already handled
+	// this" rather than acting on it twice. Empty for url_verification,
+	// which carries no event_id and needs no dedup.
+	EventID   string
 	Challenge string // set only for url_verification
 	TeamID    string
 	EventType string // "app_mention", "message", ...
@@ -29,6 +36,7 @@ type Event struct {
 
 type eventPayload struct {
 	Type      string `json:"type"`
+	EventID   string `json:"event_id"`
 	Challenge string `json:"challenge"`
 	TeamID    string `json:"team_id"`
 	Event     struct {
@@ -60,6 +68,7 @@ func ParseEvent(body []byte) (Event, bool) {
 		}
 		return Event{
 			Type:      p.Type,
+			EventID:   p.EventID,
 			TeamID:    p.TeamID,
 			EventType: p.Event.Type,
 			UserID:    p.Event.User,

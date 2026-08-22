@@ -19,9 +19,34 @@ import (
 
 var slackMentionRe = regexp.MustCompile(`<@[A-Z0-9]+>`)
 
+// instructionFromSlack also strips repo:/test: override tokens, not just the
+// mention: both are directives to Kiwi's Slack layer about which repo/test
+// command to use, not part of the task itself, and left in they read to the
+// Architect like part of the ask — worst for test:"<command>", a quoted
+// shell command that looks exactly like an instruction rather than the
+// verification guard it actually is (see CLAUDE.md's task-vs-guard
+// distinction).
 func instructionFromSlack(text string) string {
 	stripped := slackMentionRe.ReplaceAllString(text, "")
+	stripped = inlineOverrideRe.ReplaceAllString(stripped, "")
+	stripped = inlineTestCmdRe.ReplaceAllString(stripped, "")
 	return strings.TrimSpace(strings.Join(strings.Fields(stripped), " "))
+}
+
+// inlineTestCmdRe matches test:"<command>" anywhere in the message — the
+// only way to set a test command per-task rather than per-channel. Without
+// it the sole source is a channel binding's DefaultTestCmd, set once by an
+// admin, so a repo with no inferable test convention (pkg/daemon's infer.go)
+// can never be given one from Slack at all. Quoted because unlike repo:'s
+// owner/name token, a test command routinely contains spaces.
+var inlineTestCmdRe = regexp.MustCompile(`test:"([^"]+)"`)
+
+func inlineTestCmdOverride(text string) (string, bool) {
+	m := inlineTestCmdRe.FindStringSubmatch(text)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 // handleSlackTrigger turns an @mention into a task. Every path returns
@@ -57,7 +82,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		}
 	}
 
-	token, err := s.storage.GetCredentialPlaintext(ctx, inst.OrgID, "SLACK_BOT_TOKEN")
+	token, err := inst.DecryptBotToken()
 	if err != nil || token == "" {
 		log.Printf("[slackapp] org %s has an installation but no bot token", inst.OrgID)
 		return
@@ -101,14 +126,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		s.slackClient.AddReaction(ctx, token, channelID, messageTS, "eyes")
 	}
 
-	var defaultRef, defaultTestCmd string
-	if binding != nil {
-		defaultRef = binding.DefaultRef
-		defaultTestCmd = binding.DefaultTestCmd
-	}
+	// An inline test:"..." token outranks the channel's default, the same
+	// priority repo: takes over a bound repo.
+	testCmdOverride, _ := inlineTestCmdOverride(text)
+	defaults := slackBindingDefaults(binding, inst.OrgID, testCmdOverride)
 
 	var isInvestigation bool
-	if comp, err := s.slackCompleter(); err == nil {
+	if comp, err := s.slackCompleter(ctx); err == nil {
 		isInvestigation = investigationHint(ctx, comp, instruction)
 	}
 
@@ -117,9 +141,15 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		UserID:            userID,
 		Task:              instruction,
 		RepoURL:           repoURL,
-		Ref:               defaultRef,
-		TestCmd:           defaultTestCmd, // empty is fine: pkg/daemon infers it (see infer.go)
+		Ref:               defaults.ref,
+		TestCmd:           defaults.testCmd, // empty is fine: pkg/daemon infers it (see infer.go)
 		InvestigationOnly: isInvestigation,
+		// Empty leaves both up to SubmitPlan's own default resolution — the
+		// runtime Kiwi-funded catalog auto-pick for Model (defaultWorkerModelFor)
+		// and the architect split default for ArchitectModel. A channel that
+		// configured either always wins over that auto-pick.
+		Model:          defaults.model,
+		ArchitectModel: defaults.architectModel,
 	})
 	if err != nil {
 		if s.slackClient != nil {

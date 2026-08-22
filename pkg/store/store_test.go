@@ -30,6 +30,7 @@ func newTestStore(t *testing.T) *PostgresStore {
 		&SlackInstallation{},
 		&SlackChannelBinding{},
 		&SlackTriggeredTask{},
+		&SlackProcessedEvent{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

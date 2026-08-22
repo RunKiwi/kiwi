@@ -27,7 +27,7 @@ func newTestServer(t *testing.T) *Server {
 		&auth.Organization{}, &store.OrgLimits{}, &store.Fleet{}, &store.ModelEntry{}, &store.CatalogModel{}, &store.OrgTokenGrant{},
 		&store.Job{}, &store.QueuedTask{}, &store.Credential{}, &store.GitHubInstallation{},
 		&store.Manifest{}, &store.PlanSubmission{}, &store.JobLearning{},
-		&store.SlackInstallation{}, &store.SlackChannelBinding{}, &store.SlackTriggeredTask{},
+		&store.SlackInstallation{}, &store.SlackChannelBinding{}, &store.SlackTriggeredTask{}, &store.SlackProcessedEvent{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

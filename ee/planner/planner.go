@@ -20,9 +20,17 @@ type PlanRequest struct {
 	OrgID          string `json:"-"`
 	UserID         string `json:"-"`
 	IdempotencyKey string `json:"-"`
-	Task           string `json:"task"`
-	RepoURL        string `json:"repo_url"`
-	Ref            string `json:"ref"`
+	// Origin and ParentTaskID let a caller that already knows this submit's
+	// lineage (SubmitFork) have it land correctly in the same transaction
+	// that creates the task, instead of a separate UPDATE afterward. json:"-"
+	// because lineage is not something an API client gets to claim over
+	// HTTP — it is set by trusted callers inside this package only, the same
+	// posture as OrgID/UserID above.
+	Origin       string `json:"-"`
+	ParentTaskID string `json:"-"`
+	Task         string `json:"task"`
+	RepoURL      string `json:"repo_url"`
+	Ref          string `json:"ref"`
 	// File is the target file a worker edits, relative to the repo root.
 	File string `json:"file"`
 	// Files is an optional list of target files a worker edits.

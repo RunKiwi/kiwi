@@ -1156,6 +1156,11 @@ function CommandCenterContent() {
                                   comment
                                 </span>
                               )}
+                              {job.latest_origin === "slack" && (
+                                <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                                  slack
+                                </span>
+                              )}
                             </div>
                           )}
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -189,6 +190,36 @@ func (s *PostgresStore) ResolveModel(ctx context.Context, orgID, modelID string)
 		Tier:     TierUnknown,
 		Source:   SourceInferred,
 	}, nil
+}
+
+// CheapestKiwiFundedModel returns the lowest-output-cost selectable model
+// Kiwi funds for a provider and tier, or ok=false when none qualifies —
+// picked at call time against the live catalog rather than a hardcoded id,
+// so a caller that needs "some model Kiwi will pay for" always gets the
+// current cheapest option instead of one fixed at compile time. orgID scopes
+// to that org's own discovered rows in addition to the global catalog; pass
+// GlobalCatalogOrg for a lookup with no particular org in play.
+//
+// output_cost_per_m IS NOT NULL is explicit rather than assumed from tier:
+// Tier is a stored column, not recomputed at query time, so a row written
+// with TierEconomy and a nil cost (a caller building a CatalogModel by hand
+// rather than through ApplyDerived) would otherwise sort first — NULL
+// collates before every value in both Postgres ASC and SQLite.
+func (s *PostgresStore) CheapestKiwiFundedModel(ctx context.Context, orgID, providerID, tier string) (string, bool, error) {
+	var m CatalogModel
+	err := s.db.WithContext(ctx).
+		Where("org_id IN ? AND provider = ? AND tier = ? AND kiwi_provided = ? AND selectable = ? AND output_cost_per_m IS NOT NULL",
+			[]string{GlobalCatalogOrg, orgID}, providerID, tier, true, true).
+		Order("output_cost_per_m ASC, model_id ASC").
+		Limit(1).
+		First(&m).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return m.ModelID, true, nil
 }
 
 // MarkCatalogMissing records that a provider's refresh no longer lists a model,

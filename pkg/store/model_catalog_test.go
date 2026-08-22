@@ -285,6 +285,82 @@ func TestResolveModelPrefersOrgRow(t *testing.T) {
 	}
 }
 
+// The cheapest qualifying model wins, not the first discovered.
+func TestCheapestKiwiFundedModelPicksLowestOutputCost(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for _, m := range []*CatalogModel{
+		{OrgID: GlobalCatalogOrg, ModelID: "pricier", Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(1.80),
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+		{OrgID: GlobalCatalogOrg, ModelID: "cheapest", Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.40),
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+		// A row with TierEconomy but a nil cost — Tier is stored, not
+		// recomputed at query time, so nothing else stops a hand-built row
+		// like this reaching the table. NULL sorts first in an ASC order in
+		// both Postgres and SQLite, so without an explicit
+		// "output_cost_per_m IS NOT NULL" filter this would win over
+		// "cheapest" despite not actually being priced at all.
+		{OrgID: GlobalCatalogOrg, ModelID: "unpriced", Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: nil,
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now},
+	} {
+		if err := s.UpsertCatalogModel(ctx, m); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	got, ok, err := s.CheapestKiwiFundedModel(ctx, GlobalCatalogOrg, "openrouter", TierEconomy)
+	if err != nil {
+		t.Fatalf("CheapestKiwiFundedModel: %v", err)
+	}
+	if !ok || got != "cheapest" {
+		t.Fatalf("got %q, ok=%v, want %q", got, ok, "cheapest")
+	}
+}
+
+// Each disqualifying condition must be able to exclude a model on its own —
+// this is the same "the org has a working default" guarantee requireEntitlement
+// makes for the Architect default, applied to which candidates are even offered.
+func TestCheapestKiwiFundedModelExcludesDisqualified(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	base := func(id string) *CatalogModel {
+		return &CatalogModel{
+			OrgID: GlobalCatalogOrg, ModelID: id, Provider: "openrouter",
+			Tier: TierEconomy, KiwiProvided: true, Selectable: true, OutputCostPerM: f64(0.10),
+			Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+		}
+	}
+	notKiwi := base("not-kiwi-funded")
+	notKiwi.KiwiProvided = false
+	notSelectable := base("not-selectable")
+	notSelectable.Selectable = false
+	wrongTier := base("wrong-tier")
+	wrongTier.Tier = TierFrontier
+	wrongProvider := base("wrong-provider")
+	wrongProvider.Provider = "openai"
+
+	for _, m := range []*CatalogModel{notKiwi, notSelectable, wrongTier, wrongProvider} {
+		if err := s.UpsertCatalogModel(ctx, m); err != nil {
+			t.Fatalf("upsert %s: %v", m.ModelID, err)
+		}
+	}
+
+	_, ok, err := s.CheapestKiwiFundedModel(ctx, GlobalCatalogOrg, "openrouter", TierEconomy)
+	if err != nil {
+		t.Fatalf("CheapestKiwiFundedModel: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no qualifying model, every candidate fails one condition")
+	}
+}
+
 // A miss falls back to prefix inference so existing submits keep working.
 func TestResolveModelFallsBackToInference(t *testing.T) {
 	s := newTestStore(t)

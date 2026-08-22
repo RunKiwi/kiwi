@@ -14,6 +14,8 @@ export default function SlackBindingsPage() {
   const [repoURL, setRepoURL] = useState("");
   const [defaultRef, setDefaultRef] = useState("");
   const [defaultTestCmd, setDefaultTestCmd] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
+  const [defaultArchitectModel, setDefaultArchitectModel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -83,11 +85,15 @@ export default function SlackBindingsPage() {
         repo_url: repoURL.trim(),
         default_ref: defaultRef.trim() || undefined,
         default_test_cmd: defaultTestCmd.trim() || undefined,
+        default_model: defaultModel.trim() || undefined,
+        default_architect_model: defaultArchitectModel.trim() || undefined,
       });
       setChannelID("");
       setRepoURL("");
       setDefaultRef("");
       setDefaultTestCmd("");
+      setDefaultModel("");
+      setDefaultArchitectModel("");
       await refresh();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create binding");
@@ -202,6 +208,31 @@ export default function SlackBindingsPage() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-zinc-400 mb-1">
+                Worker Model (Optional) <span className="text-zinc-600">— leave blank to auto-pick the cheapest available at run time</span>
+              </label>
+              <input
+                placeholder="e.g. claude-haiku-4-5-20251001"
+                value={defaultModel}
+                onChange={(e) => setDefaultModel(e.target.value)}
+                className="w-full field text-sm bg-zinc-900 border border-white/10 rounded-lg p-2 text-white font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-zinc-400 mb-1">
+                Architect Model (Optional) <span className="text-zinc-600">— plans &amp; reviews; platform default if blank</span>
+              </label>
+              <input
+                placeholder="e.g. claude-opus-4-8"
+                value={defaultArchitectModel}
+                onChange={(e) => setDefaultArchitectModel(e.target.value)}
+                className="w-full field text-sm bg-zinc-900 border border-white/10 rounded-lg p-2 text-white font-mono"
+              />
+            </div>
+          </div>
+
           <div className="flex justify-end mt-2">
             <button
               type="submit"
@@ -249,6 +280,8 @@ export default function SlackBindingsPage() {
                     <span>Team: {b.team_id}</span>
                     {b.default_ref && <span>Ref: {b.default_ref}</span>}
                     {b.default_test_cmd && <span>Test: {b.default_test_cmd}</span>}
+                    {b.default_model && <span>Worker: {b.default_model}</span>}
+                    {b.default_architect_model && <span>Architect: {b.default_architect_model}</span>}
                   </div>
                 </div>
               </div>

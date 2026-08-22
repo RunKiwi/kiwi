@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
 // fixedLookback is how many prior channel messages a fresh (non-thread)
@@ -27,17 +28,37 @@ const escalatedLookback = 50
 
 type completeFunc func(ctx context.Context, system, user string) (string, error)
 
-// slackCompleter builds a cheap Control-Plane-side LLM call, the same way
-// SubmitPlan resolves a Kiwi-funded model's key via provider.PlatformKeyFor
-// — these calls (context sufficiency, repo inference, thread-reply
-// classification) all run on the Control Plane, not in a customer's daemon,
-// so they need their own key rather than the org's.
-func (s *Server) slackCompleter() (completeFunc, error) {
+// slackCompleter builds a cheap Control-Plane-side LLM call for these calls
+// (context sufficiency, repo inference, thread-reply classification), which
+// all run on the Control Plane rather than a customer's daemon and so need
+// their own key rather than the org's.
+//
+// The cheapest Kiwi-funded OpenRouter model in the catalog is tried first —
+// picked at call time, not hardcoded, so a discovery refresh that finds a
+// cheaper economy-tier model routes here automatically. No org is in play
+// for this call (it is a Control-Plane operating cost, not billed to any
+// org's allowance), so the lookup reads the global catalog and skips the
+// per-org entitlement check SubmitPlan's equivalent runs. Gemini is the
+// fallback for a deployment with no OpenRouter platform key configured, or
+// whose catalog has not discovered a qualifying model yet — the operator
+// override (KIWI_SLACK_INFERENCE_MODEL) still applies there, not to the
+// catalog pick, since overriding an already-cheapest model would only ever
+// make this call more expensive.
+func (s *Server) slackCompleter(ctx context.Context) (completeFunc, error) {
+	if or, ok, err := s.storage.CheapestKiwiFundedModel(ctx, store.GlobalCatalogOrg, provider.ProviderOpenRouter, store.TierEconomy); err == nil && ok {
+		if key, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); ok && key != "" {
+			if spec, ok := provider.SpecFor(provider.ProviderOpenRouter); ok {
+				p := provider.NewOpenAICompatibleProvider(key, or, or, spec.BaseURL, spec.ID)
+				return p.Complete, nil
+			}
+		}
+	}
+
 	model := os.Getenv("KIWI_SLACK_INFERENCE_MODEL")
 	if model == "" {
 		model = "gemini-flash-latest"
 	}
-	key, ok := provider.PlatformKeyFor("gemini")
+	key, ok := provider.PlatformKeyFor(provider.ProviderGemini)
 	if !ok || key == "" {
 		return nil, fmt.Errorf("no platform key configured for Slack inference")
 	}
@@ -110,7 +131,7 @@ func composeTaskDescription(history []string, triggerText string) string {
 // judged insufficient, the escalated one — the I/O half assembleContext and
 // assembleContextEscalating deliberately have none of.
 func (s *Server) fetchSlackContext(ctx context.Context, token, channelID, threadTS, triggerText string) (string, error) {
-	complete, err := s.slackCompleter()
+	complete, err := s.slackCompleter(ctx)
 	if err != nil {
 		log.Printf("[slackapp] no completer available, falling back to trigger text only: %v", err)
 		return triggerText, nil
@@ -124,7 +145,15 @@ func (s *Server) fetchSlackContext(ctx context.Context, token, channelID, thread
 				return nil, err
 			}
 			for _, m := range hist {
-				msgs = append(msgs, m.UserID+": "+m.Text)
+				// Sanitized the same way the triggering message is
+				// (instructionFromSlack): an old test:"..."/repo:owner/name
+				// token sitting in channel or thread history must not reach
+				// the Architect as literal task text just because it happened
+				// to be quoted while assembling context — those tokens are
+				// only ever meant to be read off the CURRENT trigger message,
+				// which handleSlackTrigger/handleSlackThreadReply already do
+				// directly against the raw text, not through this history.
+				msgs = append(msgs, m.UserID+": "+instructionFromSlack(m.Text))
 			}
 			return msgs, nil
 		}
@@ -133,7 +162,15 @@ func (s *Server) fetchSlackContext(ctx context.Context, token, channelID, thread
 			return nil, err
 		}
 		for _, m := range hist {
-			msgs = append(msgs, m.UserID+": "+m.Text)
+			// Sanitized the same way the triggering message is
+			// (instructionFromSlack): an old test:"..."/repo:owner/name
+			// token sitting in channel or thread history must not reach
+			// the Architect as literal task text just because it happened
+			// to be quoted while assembling context — those tokens are
+			// only ever meant to be read off the CURRENT trigger message,
+			// which handleSlackTrigger/handleSlackThreadReply already do
+			// directly against the raw text, not through this history.
+			msgs = append(msgs, m.UserID+": "+instructionFromSlack(m.Text))
 		}
 		return msgs, nil
 	}

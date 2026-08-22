@@ -38,7 +38,7 @@ env:
   GCP_REGION: us-central1
   ARTIFACT_REPO: us-central1-docker.pkg.dev/kiwi-prod-502913/kiwi-repo
   FLEET_VM_NAME: kiwi-free-fleet
-  FLEET_VM_ZONE: us-central1-a
+  FLEET_VM_ZONE: us-east1-b
 
 jobs:
   detect-changes:
