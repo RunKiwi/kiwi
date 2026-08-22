@@ -140,6 +140,10 @@ type Store interface {
 	GetExecutionRecord(ctx context.Context, orgID, jobID string) (*ExecutionRecord, error)
 	GetExecutionRecordByVer(ctx context.Context, orgID, jobID, ver string) (*ExecutionRecord, error)
 	GetJobExecutionRecords(ctx context.Context, orgID, jobID string) ([]ExecutionRecord, error)
+	// ListExecutionRecordsByOrgAndVer returns every record of one kind for an
+	// org since a given time — the org-wide counterpart to GetJobExecutionRecords,
+	// used for cross-job aggregation (velocity analytics).
+	ListExecutionRecordsByOrgAndVer(ctx context.Context, orgID, ver string, since time.Time) ([]ExecutionRecord, error)
 	GetQueuedTask(ctx context.Context, taskID string) (*QueuedTask, error)
 	GetManifest(ctx context.Context, id string) (*Manifest, error)
 
