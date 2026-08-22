@@ -480,6 +480,7 @@ func (s *Server) Start(addr string) error {
 		s.handleListMonitors(w, r)
 	})
 	mux.HandleFunc("/api/v1/monitors/", s.handleCancelMonitor)
+	mux.HandleFunc("/api/v1/sandbox/cache/stats", s.handleSandboxCacheStats)
 	mux.HandleFunc("/api/v1/integrations", s.handleIntegrations)
 	mux.HandleFunc("/api/v1/usage", s.handleAccountUsage)
 	mux.HandleFunc("/api/v1/spend", s.handleSpend)

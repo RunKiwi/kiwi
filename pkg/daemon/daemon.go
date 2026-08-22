@@ -304,12 +304,45 @@ func withJitter(d time.Duration) time.Duration {
 	return d + time.Duration(rand.Int63n(2*delta+1)-delta)
 }
 
-func (d *Daemon) pollCP(ctx context.Context) bool {
+// buildHeartbeatReq constructs the HeartbeatReq payload, populating identity keys,
+// timestamp, gitcache stats, and sandbox container memory stats.
+func (d *Daemon) buildHeartbeatReq(ctx context.Context) HeartbeatReq {
+	var pubKeyB64 string
+	if d.pubKey != nil {
+		pubKeyB64 = base64.StdEncoding.EncodeToString(d.pubKey.Bytes())
+	}
+	var signPubKeyB64 string
+	if len(d.signPubKey) > 0 {
+		signPubKeyB64 = base64.StdEncoding.EncodeToString(d.signPubKey)
+	}
+
 	req := HeartbeatReq{
-		PubKey:     base64.StdEncoding.EncodeToString(d.pubKey.Bytes()),
-		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		PubKey:     pubKeyB64,
+		SignPubKey: signPubKeyB64,
 		Timestamp:  time.Now().Unix(),
 	}
+
+	if d.gitCache != nil {
+		gs := d.gitCache.Stats()
+		req.CacheStats = &CacheHeartbeatStats{
+			TotalRepos:           gs.TotalRepos,
+			TotalActiveWorktrees: gs.TotalActiveWorktrees,
+			HitCount:             gs.HitCount,
+			MissCount:            gs.MissCount,
+		}
+	}
+
+	if mem, err := currentSandboxMemStats(ctx); err != nil {
+		log.Printf("[daemon] heartbeat: could not read sandbox memory stats: %v", err)
+	} else {
+		req.MemStats = mem
+	}
+
+	return req
+}
+
+func (d *Daemon) pollCP(ctx context.Context) bool {
+	req := d.buildHeartbeatReq(ctx)
 
 	res, err := d.client.Heartbeat(ctx, req)
 	if err != nil {

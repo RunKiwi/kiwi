@@ -45,6 +45,20 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 		handleAdminStats(db, w, r)
 	})
 
+	mux.HandleFunc("/admin/metrics/fleet", func(w http.ResponseWriter, r *http.Request) {
+		if !isAdminAuthorized(r) {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		handleAdminMetricsFleet(db, w, r)
+	})
+
 	mux.HandleFunc("/admin/orgs", func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminAuthorized(r) {
 			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
@@ -815,6 +829,23 @@ type AdminUsageRow struct {
 	KiwiCostUSD float64 `json:"kiwi_cost_usd"`
 	TokensIn    int64   `json:"tokens_in"`
 	TokensOut   int64   `json:"tokens_out"`
+}
+
+func handleAdminMetricsFleet(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
+	var daemons []store.Daemon
+	if err := db.Find(&daemons).Error; err != nil {
+		http.Error(w, "Failed to load fleet metrics", http.StatusInternalServerError)
+		return
+	}
+	var activeContainers int
+	for _, d := range daemons {
+		activeContainers += d.ActiveContainers
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_daemons":     len(daemons),
+		"active_containers": activeContainers,
+	})
 }
 
 func handleAdminStats(db *gorm.DB, w http.ResponseWriter, r *http.Request) {
