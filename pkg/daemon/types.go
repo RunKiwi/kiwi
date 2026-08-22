@@ -100,6 +100,11 @@ type ResultReq struct {
 	// "PLAN_REVIEW". An older Control Plane ignores an unknown field; an
 	// older daemon simply never sends it.
 	PlanSpecJSON string `json:"plan_spec_json,omitempty"`
+	// CachedPromptTokens and RawPromptTokens split TokensIn (reported
+	// separately, unchanged) by cache origin. An older daemon omits both;
+	// the Control Plane must not infer 0% cache usage from their absence.
+	CachedPromptTokens int64 `json:"cached_prompt_tokens,omitempty"`
+	RawPromptTokens    int64 `json:"raw_prompt_tokens,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.

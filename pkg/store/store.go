@@ -52,6 +52,7 @@ type TaskCompletion struct {
 	TaskID, LeaseID, FinalStatus, ResultURL, Detail string
 	CostUSD                                         float64
 	TokensIn, TokensOut                             int64
+	CachedPromptTokens, RawPromptTokens             int64
 }
 
 // Store defines the data access interface for the control plane.

@@ -333,12 +333,14 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (boo
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
 		updates := map[string]interface{}{
-			"status":     c.FinalStatus,
-			"updated_at": now,
-			"cost_usd":   c.CostUSD,
-			"tokens_in":  c.TokensIn,
-			"tokens_out": c.TokensOut,
-			"metered_at": now,
+			"status":               c.FinalStatus,
+			"updated_at":           now,
+			"cost_usd":             c.CostUSD,
+			"tokens_in":            c.TokensIn,
+			"tokens_out":           c.TokensOut,
+			"cached_prompt_tokens": c.CachedPromptTokens,
+			"raw_prompt_tokens":    c.RawPromptTokens,
+			"metered_at":           now,
 		}
 		if c.ResultURL == "" {
 			updates["result_url"] = nil

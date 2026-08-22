@@ -601,13 +601,15 @@ func isLLMKey(name string) bool {
 // sees the Actor–Critic loop; the Control Plane learns what happened solely
 // from what is reported here.
 type taskResult struct {
-	ok               bool
-	prURL            string
-	detail           string
-	abuse            bool
-	events           []ver.TaskEvent
-	planReviewStatus string
-	planSpecJSON     string
+	ok                 bool
+	prURL              string
+	detail             string
+	abuse              bool
+	events             []ver.TaskEvent
+	planReviewStatus   string
+	planSpecJSON       string
+	cachedPromptTokens int64
+	rawPromptTokens    int64
 }
 
 // effectiveRef resolves what ref to check out, with no I/O of its own so the
@@ -1139,16 +1141,18 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		sandboxRT = "docker"
 	}
 	req := ResultReq{
-		TaskID:         taskID,
-		LeaseID:        leaseID,
-		Status:         status,
-		SignPubKey:     base64.StdEncoding.EncodeToString(d.signPubKey),
-		ResultURL:      out.prURL,
-		Detail:         out.detail,
-		Abuse:          out.abuse,
-		Events:         out.events,
-		SandboxRuntime: sandboxRT,
-		PlanSpecJSON:   out.planSpecJSON,
+		TaskID:             taskID,
+		LeaseID:            leaseID,
+		Status:             status,
+		SignPubKey:         base64.StdEncoding.EncodeToString(d.signPubKey),
+		ResultURL:          out.prURL,
+		Detail:             out.detail,
+		Abuse:              out.abuse,
+		Events:             out.events,
+		SandboxRuntime:     sandboxRT,
+		PlanSpecJSON:       out.planSpecJSON,
+		CachedPromptTokens: out.cachedPromptTokens,
+		RawPromptTokens:    out.rawPromptTokens,
 	}
 	// Attest the telemetry with the daemon's own signing key. In BYOC this key
 	// lives only in the customer's cloud, so the execution half of the record is

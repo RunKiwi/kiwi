@@ -243,7 +243,14 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			log.Printf("Task %s: failed to marshal plan spec: %v", spec.ID, merr)
 			specJSON = []byte("{}")
 		}
-		return taskResult{detail: "plan pending review", events: prog.all(), planReviewStatus: store.TaskPlanReview, planSpecJSON: string(specJSON)}
+		return taskResult{
+			detail:             "plan pending review",
+			events:             prog.all(),
+			planReviewStatus:   store.TaskPlanReview,
+			planSpecJSON:       string(specJSON),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	}
 
 	if err != nil {
@@ -267,7 +274,13 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 				detail = truncateDetail(err.Error())
 			}
 		}
-		return taskResult{detail: truncateDetail(detail), abuse: abuse, events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(detail),
+			abuse:              abuse,
+			events:             prog.all(),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	}
 
 	if out, matched := investigationOutcome(res); matched {
@@ -277,10 +290,20 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 
 	gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, deps.leaseID, creds)
 	if gitErr != nil {
-		return taskResult{detail: truncateDetail(gitErr.Error()), events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(gitErr.Error()),
+			events:             prog.all(),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	}
 	if gitToken == "" {
-		return taskResult{detail: "no GIT_TOKEN; skipped PR", events: prog.all()}
+		return taskResult{
+			detail:             "no GIT_TOKEN; skipped PR",
+			events:             prog.all(),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	}
 
 	gh := &restGitHub{token: gitToken}
@@ -290,14 +313,31 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		// The reviewer is instructed never to approve an empty diff, and refuses
 		// to when asked; arriving here means something else went wrong, and a
 		// green tick with no pull request is the one outcome worse than failing.
-		return taskResult{detail: "the session was approved but left the repository unchanged, so there is nothing to open a PR with", events: prog.all()}
+		return taskResult{
+			detail:             "the session was approved but left the repository unchanged, so there is nothing to open a PR with",
+			events:             prog.all(),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	case perr != nil:
-		return taskResult{detail: truncateDetail(fmt.Sprintf("publish failed: %v", perr)), events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(fmt.Sprintf("publish failed: %v", perr)),
+			events:             prog.all(),
+			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+			rawPromptTokens:    res.Usage.InputTokens,
+		}
 	}
 	if detail == "" {
 		detail = res.Summary
 	}
-	return taskResult{ok: true, prURL: prURL, detail: truncateDetail(detail), events: prog.all()}
+	return taskResult{
+		ok:                 true,
+		prURL:              prURL,
+		detail:             truncateDetail(detail),
+		events:             prog.all(),
+		cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+		rawPromptTokens:    res.Usage.InputTokens,
+	}
 }
 
 // sessionPhase maps a session event onto the execution record's phase
@@ -388,5 +428,10 @@ func investigationOutcome(res session.Result) (taskResult, bool) {
 	if !res.Success || !res.NoDiffExpected {
 		return taskResult{}, false
 	}
-	return taskResult{ok: true, detail: truncateDetail(res.Summary)}, true
+	return taskResult{
+		ok:                 true,
+		detail:             truncateDetail(res.Summary),
+		cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
+		rawPromptTokens:    res.Usage.InputTokens,
+	}, true
 }

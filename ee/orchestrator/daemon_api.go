@@ -461,14 +461,16 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok, err := s.storage.CompleteTask(r.Context(), store.TaskCompletion{
-		TaskID:      req.TaskID,
-		LeaseID:     req.LeaseID,
-		FinalStatus: req.Status,
-		ResultURL:   req.ResultURL,
-		Detail:      req.Detail,
-		CostUSD:     costUSD,
-		TokensIn:    tokensIn,
-		TokensOut:   tokensOut,
+		TaskID:             req.TaskID,
+		LeaseID:            req.LeaseID,
+		FinalStatus:        req.Status,
+		ResultURL:          req.ResultURL,
+		Detail:             req.Detail,
+		CostUSD:            costUSD,
+		TokensIn:           tokensIn,
+		TokensOut:          tokensOut,
+		CachedPromptTokens: req.CachedPromptTokens,
+		RawPromptTokens:    req.RawPromptTokens,
 	})
 	if err != nil {
 		log.Printf("[daemon] complete task %s: %v", req.TaskID, err)

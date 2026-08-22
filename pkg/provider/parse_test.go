@@ -37,3 +37,26 @@ func TestCostUSD(t *testing.T) {
 		t.Errorf("costUSD=%v want 30", got)
 	}
 }
+
+func TestCacheDiscountUSD(t *testing.T) {
+	// For claude-opus-4-8: InputCostPerM = 5.00, readRate = 0.50 (10%).
+	// Savings per 1M tokens = 5.00 - 0.50 = 4.50 USD.
+	// For 1,000,000 cached tokens: 4.50 USD.
+	if got := CacheDiscountUSD("claude-opus-4-8", 1_000_000); math.Abs(got-4.50) > 1e-9 {
+		t.Errorf("CacheDiscountUSD(claude-opus-4-8, 1M)=%v want 4.50", got)
+	}
+
+	// For claude-sonnet-5: InputCostPerM = 3.00, readRate = 0.30 (10%).
+	// Savings per 1M tokens = 3.00 - 0.30 = 2.70 USD.
+	if got := CacheDiscountUSD("claude-sonnet-5", 1_000_000); math.Abs(got-2.70) > 1e-9 {
+		t.Errorf("CacheDiscountUSD(claude-sonnet-5, 1M)=%v want 2.70", got)
+	}
+
+	// Zero or negative tokens return 0
+	if got := CacheDiscountUSD("claude-opus-4-8", 0); got != 0 {
+		t.Errorf("CacheDiscountUSD(0)=%v want 0", got)
+	}
+	if got := CacheDiscountUSD("claude-opus-4-8", -500); got != 0 {
+		t.Errorf("CacheDiscountUSD(-500)=%v want 0", got)
+	}
+}
