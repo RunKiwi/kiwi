@@ -8,7 +8,6 @@ import {
   type AdminOrg,
   type AdminUserSearchRow,
   type AdminFleetStats,
-  formatTokens,
   providerLabel,
 } from "@/lib/api";
 import {
@@ -17,10 +16,7 @@ import {
   Users,
   Server,
   Zap,
-  CheckCircle2,
-  AlertTriangle,
   Search,
-  Plus,
   RefreshCw,
 } from "lucide-react";
 import { KiwiCoreSpinner, KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
@@ -67,7 +63,9 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const handleSearchUsers = async (q: string) => {
@@ -87,8 +85,8 @@ export default function AdminPage() {
       await api.setOrgPlan(planModalOrg.id, plan);
       setOrgs(orgs.map((o) => (o.id === planModalOrg.id ? { ...o, plan } : o)));
       setPlanModalOrg(null);
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSubmitting(false);
     }
@@ -101,8 +99,8 @@ export default function AdminPage() {
       await api.grantOrgMinutes(grantModalOrg.id, grantAmount);
       setGrantModalOrg(null);
       await fetchData();
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSubmitting(false);
     }
@@ -119,8 +117,8 @@ export default function AdminPage() {
         await api.suspendOrg(org.id);
         setOrgs(orgs.map((o) => (o.id === org.id ? { ...o, activation_state: "suspended" } : o)));
       }
-    } catch (e: any) {
-      alert("Error: " + e.message);
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -309,6 +307,12 @@ export default function AdminPage() {
                       >
                         {org.activation_state === "active" ? "Suspend" : "Activate"}
                       </button>
+                      <button
+                        onClick={() => router.push(`/admin/orgs/${org.id}`)}
+                        className="px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-[11px] font-semibold shadow-2xs"
+                      >
+                        Manage →
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -406,18 +410,23 @@ export default function AdminPage() {
               AI Provider Volume Matrix
             </h3>
             <div className="space-y-2 text-xs font-mono">
-              <div className="flex justify-between p-2 rounded-xl bg-sand-50">
-                <span className="text-stone-500">Anthropic (Claude 3.7 Sonnet):</span>
-                <span className="font-bold text-indigo-700">62.4% token volume</span>
-              </div>
-              <div className="flex justify-between p-2 rounded-xl bg-sand-50">
-                <span className="text-stone-500">OpenAI (GPT-4.5 / 4o-mini):</span>
-                <span className="font-bold text-stone-900">28.1% token volume</span>
-              </div>
-              <div className="flex justify-between p-2 rounded-xl bg-sand-50">
-                <span className="text-stone-500">DeepSeek (V3):</span>
-                <span className="font-bold text-emerald-700">9.5% token volume</span>
-              </div>
+              {(() => {
+                const rows = stats?.provider_usage ?? [];
+                const totalTokens = rows.reduce((n, r) => n + r.tokens_in + r.tokens_out, 0);
+                if (rows.length === 0) {
+                  return <p className="text-stone-400 py-2">No provider usage recorded yet.</p>;
+                }
+                return rows.map((r) => {
+                  const tokens = r.tokens_in + r.tokens_out;
+                  const pct = totalTokens > 0 ? ((tokens / totalTokens) * 100).toFixed(1) : "0.0";
+                  return (
+                    <div key={r.provider} className="flex justify-between p-2 rounded-xl bg-sand-50">
+                      <span className="text-stone-500">{providerLabel(r.provider)}:</span>
+                      <span className="font-bold text-stone-900">{pct}% token volume</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>
