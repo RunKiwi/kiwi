@@ -112,21 +112,21 @@ export default function MetricsPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col text-white">
+    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col text-stone-900">
       <div className="mb-8">
         <h1 className="text-3xl font-light tracking-tight mb-2">Metrics</h1>
-        <p className="text-zinc-400">
+        <p className="text-stone-500">
           Telemetry metrics post-merge verification watches after a Kiwi PR merges. Configure one below,
           or leave this empty — repos with none run on GitHub-native signals alone.
         </p>
       </div>
 
-      <div className="glass-panel border border-white/10 rounded-2xl p-5 mb-8">
+      <div className="bg-white shadow-2xs border border-sand-200 rounded-2xl p-5 mb-8">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Repository</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">Repository</label>
             {reposLoading ? (
-              <div className="flex items-center gap-2 text-sm text-zinc-500">
+              <div className="flex items-center gap-2 text-sm text-stone-400">
                 <Loader2 className="w-4 h-4 animate-spin" /> Loading repositories...
               </div>
             ) : repos.length > 0 ? (
@@ -141,25 +141,25 @@ export default function MetricsPage() {
             )}
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Name</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">Name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="checkout_p95_latency"
               className="w-full field text-sm" />
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Provider</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">Provider</label>
             <Select ariaLabel="Provider" value={provider}
               onChange={v => { setProvider(v); setTestResult(null); setTestedQueryKey(null); }}
               options={PROVIDER_OPTIONS} />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Direction</label>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">Direction</label>
             <Select ariaLabel="Comparison direction" value={direction} onChange={setDirection} options={DIRECTION_OPTIONS} />
           </div>
         </div>
         <div className="mb-3">
-          <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Query</label>
+          <label className="block text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">Query</label>
           <textarea
             value={query}
             onChange={e => { setQuery(e.target.value); setTestResult(null); setTestedQueryKey(null); }}
@@ -170,16 +170,16 @@ export default function MetricsPage() {
         </div>
 
         {testResult && (
-          <div className={`flex items-center gap-2 text-sm mb-3 ${testResult.ok ? "text-green-400" : "text-red-400"}`}>
+          <div className={`flex items-center gap-2 text-sm mb-3 ${testResult.ok ? "text-emerald-600" : "text-rose-600"}`}>
             {testResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
             {testResult.message}
           </div>
         )}
-        {error && <div className="flex items-center gap-2 text-red-400 text-sm mb-3"><AlertCircle className="w-4 h-4" />{error}</div>}
+        {error && <div className="flex items-center gap-2 text-rose-600 text-sm mb-3"><AlertCircle className="w-4 h-4" />{error}</div>}
 
         <div className="flex gap-3">
           <button onClick={runTest} disabled={testing || !query.trim()}
-            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold border border-white/10 bg-white/5 text-white hover:bg-white/10 disabled:opacity-50 h-[38px]">
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold border border-sand-200 bg-sand-50 text-stone-900 hover:bg-sand-100 disabled:opacity-50 h-[38px]">
             {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Test query
           </button>
           <button onClick={save} disabled={saving || !canSave}
@@ -190,25 +190,25 @@ export default function MetricsPage() {
         </div>
       </div>
 
-      <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Configured</h2>
+      <h2 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">Configured</h2>
       {metrics.length === 0 ? (
-        <p className="text-zinc-500 text-sm">No metrics configured yet.</p>
+        <p className="text-stone-400 text-sm">No metrics configured yet.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {metrics.map(m => (
-            <div key={m.id} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center justify-between group">
+            <div key={m.id} className="bg-white shadow-2xs p-4 border border-sand-200 rounded-xl flex items-center justify-between group">
               <div className="flex items-center gap-3 min-w-0">
-                <LineChart className="w-5 h-5 text-zinc-400 shrink-0" />
+                <LineChart className="w-5 h-5 text-stone-500 shrink-0" />
                 <div className="min-w-0">
-                  <div className="text-sm text-white truncate">{m.name}</div>
-                  <div className="text-xs text-zinc-500 truncate">{m.repo} · {m.provider}</div>
-                  <div className="text-[11px] text-zinc-600 font-mono truncate">{m.query}</div>
+                  <div className="text-sm text-stone-900 truncate">{m.name}</div>
+                  <div className="text-xs text-stone-400 truncate">{m.repo} · {m.provider}</div>
+                  <div className="text-[11px] text-stone-400 font-mono truncate">{m.query}</div>
                 </div>
               </div>
               <button
                 onClick={() => remove(m.id)}
                 aria-label={`Delete metric ${m.name}`}
-                className="text-zinc-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 shrink-0"
+                className="text-stone-400 hover:text-rose-600 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 shrink-0"
               >
                 <Trash2 className="w-4 h-4" />
               </button>

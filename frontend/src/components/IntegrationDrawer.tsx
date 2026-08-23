@@ -69,7 +69,7 @@ export function IntegrationDrawer({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 transition-opacity animate-in fade-in duration-200"
+        className="fixed inset-0 bg-stone-900/30 backdrop-blur-xs z-40 transition-opacity animate-in fade-in duration-200"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -81,7 +81,7 @@ export function IntegrationDrawer({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
-        className="fixed inset-y-0 right-0 w-full sm:w-[560px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] z-50 flex flex-col outline-none animate-in slide-in-from-right duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        className="fixed inset-y-0 right-0 w-full sm:w-[560px] max-w-full bg-white border-l border-sand-200 shadow-popover z-50 flex flex-col outline-none animate-in slide-in-from-right duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <IntegrationDrawerBody
           key={integration.id}
@@ -256,19 +256,19 @@ function IntegrationDrawerBody({
   return (
     <>
       {/* Drawer Header */}
-      <div className="flex items-start justify-between p-6 border-b border-white/10 bg-black/40">
+      <div className="flex items-start justify-between p-6 border-b border-sand-200 bg-stone-900">
         <div className="flex items-center gap-4 min-w-0">
           <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border border-white/10 ${integration.iconBg}`}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border border-sand-200 ${integration.iconBg}`}
           >
             <Icon className={`w-6 h-6 ${integration.iconColor}`} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 id={headingId} className="text-lg font-medium text-white tracking-tight">
+              <h2 id={headingId} className="text-lg font-medium text-stone-900 tracking-tight">
                 {integration.name}
               </h2>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-zinc-400">
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-sand-100 text-stone-500">
                 {integration.categoryLabel}
               </span>
               {isAllConnected && (
@@ -277,12 +277,12 @@ function IntegrationDrawerBody({
                 </span>
               )}
             </div>
-            <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{integration.description}</p>
+            <p className="text-xs text-stone-500 mt-1 line-clamp-2">{integration.description}</p>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white shrink-0 ml-2"
+          className="p-2 hover:bg-sand-100 rounded-full transition-colors text-stone-500 hover:text-stone-900 shrink-0 ml-2"
           title="Close drawer (Esc)"
         >
           <X className="w-5 h-5" />
@@ -292,10 +292,10 @@ function IntegrationDrawerBody({
       {/* Drawer Content */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Security Banner */}
-        <div className="flex items-start gap-3 p-3.5 rounded-xl border border-white/5 bg-white/[0.02] text-xs text-zinc-400">
-          <Lock className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-3.5 rounded-xl border border-sand-150 bg-sand-50/60 text-xs text-stone-500">
+          <Lock className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
           <div>
-            <span className="text-zinc-200 font-medium">Encrypted & Sealed: </span>
+            <span className="text-stone-800 font-medium">Encrypted & Sealed: </span>
             Tokens are AES-encrypted at rest and sealed to daemon runtimes. They are never rendered
             or returned to the browser.
           </div>
@@ -303,8 +303,8 @@ function IntegrationDrawerBody({
 
         {/* Docs Reference Link */}
         {integration.docUrl && (
-          <div className="flex items-center justify-between text-xs p-3 rounded-xl border border-white/5 bg-white/[0.02]">
-            <span className="text-zinc-400">Need help creating credentials?</span>
+          <div className="flex items-center justify-between text-xs p-3 rounded-xl border border-sand-150 bg-sand-50/60">
+            <span className="text-stone-500">Need help creating credentials?</span>
             <a
               href={integration.docUrl}
               target="_blank"
@@ -321,16 +321,16 @@ function IntegrationDrawerBody({
         {integration.isGithubHybrid ? (
           <div className="space-y-6">
             {/* GitHub App Section */}
-            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-4">
+            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-white">Kiwi GitHub App</h3>
+                    <h3 className="text-sm font-medium text-stone-900">Kiwi GitHub App</h3>
                     <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
                       Recommended
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">
+                  <p className="text-xs text-stone-500 mt-1">
                     Installs hourly rotating tokens scoped strictly to repositories you select.
                     Revocable anytime via GitHub.
                   </p>
@@ -338,11 +338,11 @@ function IntegrationDrawerBody({
               </div>
 
               {installs === null ? (
-                <div className="flex items-center gap-2 text-xs text-zinc-500 py-2">
+                <div className="flex items-center gap-2 text-xs text-stone-400 py-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading installations…
                 </div>
               ) : appUnavailable ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-stone-400">
                   GitHub App is not configured on this deployment. Please use a Personal Access
                   Token below.
                 </p>
@@ -353,12 +353,12 @@ function IntegrationDrawerBody({
                       {installs.map((i) => (
                         <li
                           key={i.installation_id}
-                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-sand-50 px-3 py-2"
                         >
                           <span className="flex items-center gap-2 min-w-0">
                             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span className="truncate text-white font-mono">{i.account_login}</span>
-                            <span className="text-zinc-500 shrink-0">
+                            <span className="truncate text-stone-900 font-mono">{i.account_login}</span>
+                            <span className="text-stone-400 shrink-0">
                               ({i.repo_selection === "all" ? "all repositories" : "selected repos"})
                             </span>
                           </span>
@@ -366,7 +366,7 @@ function IntegrationDrawerBody({
                             href="https://github.com/settings/installations"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white shrink-0 transition-colors"
+                            className="flex items-center gap-1 text-[11px] text-stone-500 hover:text-stone-900 shrink-0 transition-colors"
                           >
                             Manage <ExternalLink className="w-3 h-3" />
                           </a>
@@ -380,7 +380,7 @@ function IntegrationDrawerBody({
                       type="button"
                       onClick={handleConnectGithubApp}
                       disabled={githubBusy}
-                      className="rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      className="rounded-lg bg-white hover:bg-sand-100 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
                     >
                       {githubBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                       {githubBusy
@@ -392,7 +392,7 @@ function IntegrationDrawerBody({
                   </div>
 
                   {githubError && (
-                    <p className="text-xs text-red-400 flex items-center gap-1.5">
+                    <p className="text-xs text-rose-600 flex items-center gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {githubError}
                     </p>
                   )}
@@ -401,18 +401,18 @@ function IntegrationDrawerBody({
             </div>
 
             {/* Fallback PAT Section */}
-            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-3">
+            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-white">Fallback Personal Access Token</h3>
-                  <p className="text-xs text-zinc-500 mt-0.5">
+                  <h3 className="text-sm font-medium text-stone-900">Fallback Personal Access Token</h3>
+                  <p className="text-xs text-stone-400 mt-0.5">
                     Only required if you cannot install the GitHub App.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowFallbackToken((v) => !v)}
-                  className="text-xs text-zinc-400 hover:text-white underline transition-colors"
+                  className="text-xs text-stone-500 hover:text-stone-900 underline transition-colors"
                 >
                   {showFallbackToken ? "Hide" : status["github"] ? "Manage PAT" : "Set PAT"}
                 </button>
@@ -428,9 +428,9 @@ function IntegrationDrawerBody({
                   const isErr = fieldErr[field.key];
 
                   return (
-                    <div key={field.key} className="space-y-2 pt-2 border-t border-white/5">
+                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-150">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-zinc-300">{field.label}</label>
+                        <label className="text-xs font-medium text-stone-700">{field.label}</label>
                         {isConnected && (
                           <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
                             <CheckCircle2 className="w-3 h-3" /> Token Active
@@ -459,7 +459,7 @@ function IntegrationDrawerBody({
                               onClick={() =>
                                 setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                               }
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
                               title={visible ? "Hide token" : "Show token"}
                             >
                               {visible ? (
@@ -490,7 +490,7 @@ function IntegrationDrawerBody({
                       {msg && (
                         <div
                           className={`flex items-center gap-1.5 text-xs ${
-                            isErr ? "text-red-400" : "text-emerald-400"
+                            isErr ? "text-rose-600" : "text-emerald-400"
                           }`}
                         >
                           {isErr ? (
@@ -509,16 +509,16 @@ function IntegrationDrawerBody({
         ) : integration.isSlackHybrid ? (
           <div className="space-y-6">
             {/* Slack App Section */}
-            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-4">
+            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-white">Kiwi Slack App</h3>
+                    <h3 className="text-sm font-medium text-stone-900">Kiwi Slack App</h3>
                     <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
                       Recommended
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">
+                  <p className="text-xs text-stone-500 mt-1">
                     Trigger Kiwi tasks by @mentioning the bot in a channel or thread, with status
                     updates posted back in the thread. Revocable anytime from Slack.
                   </p>
@@ -526,11 +526,11 @@ function IntegrationDrawerBody({
               </div>
 
               {slackInstalls === null ? (
-                <div className="flex items-center gap-2 text-xs text-zinc-500 py-2">
+                <div className="flex items-center gap-2 text-xs text-stone-400 py-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading workspaces…
                 </div>
               ) : slackAppUnavailable ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-stone-400">
                   Slack App is not configured on this deployment.
                 </p>
               ) : (
@@ -540,11 +540,11 @@ function IntegrationDrawerBody({
                       {slackInstalls.map((s) => (
                         <li
                           key={s.team_id}
-                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-sand-50 px-3 py-2"
                         >
                           <span className="flex items-center gap-2 min-w-0">
                             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span className="truncate text-white font-mono">{s.team_name || s.team_id}</span>
+                            <span className="truncate text-stone-900 font-mono">{s.team_name || s.team_id}</span>
                           </span>
                         </li>
                       ))}
@@ -556,7 +556,7 @@ function IntegrationDrawerBody({
                       type="button"
                       onClick={handleConnectSlack}
                       disabled={slackBusy}
-                      className="rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      className="rounded-lg bg-white hover:bg-sand-100 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
                     >
                       {slackBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                       {slackBusy
@@ -576,7 +576,7 @@ function IntegrationDrawerBody({
                   </div>
 
                   {slackError && (
-                    <p className="text-xs text-red-400 flex items-center gap-1.5">
+                    <p className="text-xs text-rose-600 flex items-center gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {slackError}
                     </p>
                   )}
@@ -585,18 +585,18 @@ function IntegrationDrawerBody({
             </div>
 
             {/* Optional Notification Webhook Section */}
-            <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-3">
+            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-white">Notification Webhook</h3>
-                  <p className="text-xs text-zinc-500 mt-0.5">
+                  <h3 className="text-sm font-medium text-stone-900">Notification Webhook</h3>
+                  <p className="text-xs text-stone-400 mt-0.5">
                     Optional — posts monitor verdicts to a channel, independent of the app install above.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowNotificationWebhook((v) => !v)}
-                  className="text-xs text-zinc-400 hover:text-white underline transition-colors"
+                  className="text-xs text-stone-500 hover:text-stone-900 underline transition-colors"
                 >
                   {showNotificationWebhook ? "Hide" : status["slack"] ? "Manage webhook" : "Set webhook"}
                 </button>
@@ -612,9 +612,9 @@ function IntegrationDrawerBody({
                   const isErr = fieldErr[field.key];
 
                   return (
-                    <div key={field.key} className="space-y-2 pt-2 border-t border-white/5">
+                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-150">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-zinc-300">{field.label}</label>
+                        <label className="text-xs font-medium text-stone-700">{field.label}</label>
                         {isConnected && (
                           <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
                             <CheckCircle2 className="w-3 h-3" /> Webhook Active
@@ -643,7 +643,7 @@ function IntegrationDrawerBody({
                               onClick={() =>
                                 setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                               }
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
                               title={visible ? "Hide URL" : "Show URL"}
                             >
                               {visible ? (
@@ -672,13 +672,13 @@ function IntegrationDrawerBody({
                       </div>
 
                       {field.helpText && (
-                        <p className="text-[11px] text-zinc-500">{field.helpText}</p>
+                        <p className="text-[11px] text-stone-400">{field.helpText}</p>
                       )}
 
                       {msg && (
                         <div
                           className={`flex items-center gap-1.5 text-xs ${
-                            isErr ? "text-red-400" : "text-emerald-400"
+                            isErr ? "text-rose-600" : "text-emerald-400"
                           }`}
                         >
                           {isErr ? (
@@ -708,21 +708,21 @@ function IntegrationDrawerBody({
               return (
                 <div
                   key={field.key}
-                  className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5"
+                  className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-2.5"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-zinc-200 uppercase tracking-wide">
+                      <label className="text-xs font-semibold text-stone-800 uppercase tracking-wide">
                         {field.label}
                       </label>
-                      <span className="font-mono text-[10px] text-zinc-500">({field.credName})</span>
+                      <span className="font-mono text-[10px] text-stone-400">({field.credName})</span>
                     </div>
                     {isConnected ? (
                       <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                         <CheckCircle2 className="w-3 h-3" /> Configured
                       </span>
                     ) : (
-                      <span className="text-[11px] text-zinc-500 font-medium">Not set</span>
+                      <span className="text-[11px] text-stone-400 font-medium">Not set</span>
                     )}
                   </div>
 
@@ -743,7 +743,7 @@ function IntegrationDrawerBody({
                           onClick={() =>
                             setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                           }
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
                           title={visible ? "Hide" : "Show"}
                         >
                           {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -770,7 +770,7 @@ function IntegrationDrawerBody({
                   {msg && (
                     <div
                       className={`flex items-center gap-1.5 text-xs pt-1 ${
-                        isErr ? "text-red-400" : "text-emerald-400"
+                        isErr ? "text-rose-600" : "text-emerald-400"
                       }`}
                     >
                       {isErr ? (
@@ -789,7 +789,7 @@ function IntegrationDrawerBody({
       </div>
 
       {/* Drawer Footer */}
-      <div className="p-4 sm:p-6 border-t border-white/10 bg-black/40 flex items-center justify-between gap-3">
+      <div className="p-4 sm:p-6 border-t border-sand-200 bg-stone-900 flex items-center justify-between gap-3">
         <button type="button" onClick={onClose} className="btn-ghost text-xs px-4 py-2 rounded-xl">
           Close
         </button>

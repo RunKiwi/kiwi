@@ -140,10 +140,10 @@ export default function ActivityPage() {
   ];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-white">
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-stone-900">
       <div className="mb-6">
         <h1 className="text-3xl font-light tracking-tight mb-2">Activity</h1>
-        <p className="text-zinc-400">
+        <p className="text-stone-500">
           Live view of what your fleet is doing right now, one lane per daemon. Each bar is a job, segmented by
           who&apos;s driving it — Architect, Implementer, or the sandboxed verify step. Click a bar for the full run.
         </p>
@@ -151,9 +151,9 @@ export default function ActivityPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {tiles.map((t) => (
-          <div key={t.label} className="glass-panel p-5">
-            <div className="text-2xl font-light text-white">{t.value}</div>
-            <div className="text-xs text-zinc-500 uppercase tracking-widest mt-1">{t.label}</div>
+          <div key={t.label} className="bg-white shadow-2xs p-5">
+            <div className="text-2xl font-light text-stone-900">{t.value}</div>
+            <div className="text-xs text-stone-400 uppercase tracking-widest mt-1">{t.label}</div>
           </div>
         ))}
       </div>
