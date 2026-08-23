@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseToolArgs, parseNumberedFile, languageOf, editDiff, parseUnifiedDiff } from "./toolContent.ts";
+import { parseToolArgs, parseNumberedFile, languageOf, editDiff, parseUnifiedDiff, groupDiffsByFile } from "./toolContent.ts";
 
 describe("parseToolArgs", () => {
   it("pulls out an edit's before and after", () => {
@@ -15,6 +15,12 @@ describe("parseToolArgs", () => {
   it("pulls out a read's path and a run's command", () => {
     assert.equal(parseToolArgs(JSON.stringify({ path: "main.go" })).path, "main.go");
     assert.equal(parseToolArgs(JSON.stringify({ command: "go test ./..." })).command, "go test ./...");
+  });
+
+  it("pulls out a write's path and content", () => {
+    const args = parseToolArgs(JSON.stringify({ path: "new.go", content: "package main\n" }));
+    assert.equal(args.path, "new.go");
+    assert.equal(args.content, "package main\n");
   });
 
   // The input is head-truncated on the way in, so half a JSON object is the
@@ -171,5 +177,48 @@ describe("parseUnifiedDiff", () => {
     assert.equal(parseUnifiedDiff("edited main.go"), null);
     assert.equal(parseUnifiedDiff("ok"), null);
     assert.equal(parseUnifiedDiff(""), null);
+  });
+});
+
+describe("groupDiffsByFile", () => {
+  it("aggregates multiple edits for the same file into a single group with multiple hunks", () => {
+    const edit1 = {
+      path: "react/KiwiMascot.tsx",
+      lines: [
+        { kind: "ctx" as const, text: "import React from 'react';", oldNo: 1, newNo: 1 },
+        { kind: "del" as const, text: "export type KiwiPose = 'idle';", oldNo: 3 },
+        { kind: "add" as const, text: "export type KiwiPose = 'idle' | 'suspicious';", newNo: 3 },
+      ],
+      lang: "tsx",
+    };
+    const edit2 = {
+      path: "react/KiwiMascot.tsx",
+      lines: [
+        { kind: "ctx" as const, text: "<rect x=\"7\" y=\"4\" />", oldNo: 47, newNo: 47 },
+        { kind: "add" as const, text: "<rect x=\"8\" y=\"4\" />", newNo: 48 },
+      ],
+      lang: "tsx",
+    };
+    const edit3 = {
+      path: "pkg/auth/jwt.go",
+      lines: [
+        { kind: "add" as const, text: "func VerifyToken() {}", newNo: 1 },
+      ],
+      lang: "go",
+    };
+
+    const grouped = groupDiffsByFile([edit1, edit2, edit3]);
+    assert.equal(grouped.length, 2, "should group into 2 unique files");
+    const mascot = grouped.find((g) => g.path === "react/KiwiMascot.tsx");
+    assert.ok(mascot);
+    assert.equal(mascot!.hunks.length, 2, "should contain 2 distinct hunks");
+    assert.equal(mascot!.additions, 2, "1 + 1 additions");
+    assert.equal(mascot!.deletions, 1, "1 deletion");
+
+    const auth = grouped.find((g) => g.path === "pkg/auth/jwt.go");
+    assert.ok(auth);
+    assert.equal(auth!.hunks.length, 1);
+    assert.equal(auth!.additions, 1);
+    assert.equal(auth!.deletions, 0);
   });
 });

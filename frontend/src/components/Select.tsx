@@ -58,7 +58,16 @@ export function Select({
   const listRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
 
-  const selected = options.find((o) => o.value === value);
+  const selected = options.find(
+    (o) =>
+      o.value === value ||
+      (value && (
+        o.value.toLowerCase() === value.toLowerCase() ||
+        o.label.toLowerCase() === value.toLowerCase() ||
+        o.value.endsWith("/" + value) ||
+        value.endsWith("/" + o.label)
+      ))
+  );
   const display = selected?.label ?? placeholder;
 
   const filtered = useMemo(() => {

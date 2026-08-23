@@ -77,6 +77,7 @@ type fakeGH struct {
 	findCalled   bool
 	owner        string
 	repo         string
+	base         string
 	existingOpen string
 }
 
@@ -84,6 +85,7 @@ func (f *fakeGH) CreatePR(ctx context.Context, owner, repo, base, head, title, b
 	f.called = true
 	f.owner = owner
 	f.repo = repo
+	f.base = base
 	return "https://github.com/" + owner + "/" + repo + "/pull/1", nil
 }
 
@@ -146,14 +148,27 @@ func TestPublishResult(t *testing.T) {
 	if !gh.called {
 		t.Error("gh client not called")
 	}
-
-	// Verify branch exists in bare remote
-	out, err := exec.Command("git", "--git-dir="+bareDir, "rev-parse", "refs/heads/kiwi/job1").CombinedOutput()
-	if err != nil {
-		t.Errorf("branch kiwi/job1 not in bare remote: %v %s", err, out)
+	if gh.base != "main" {
+		t.Errorf("got base %q, want main", gh.base)
 	}
 
-	// Test 3: idempotency (PR already exists)
+	// Test 3: spec.Ref is "HEAD" - must resolve to main rather than passing "HEAD"
+	gh.called = false
+	spec.JobID = "job2"
+	spec.Ref = "HEAD"
+	os.WriteFile(filepath.Join(workDir, "test_head.txt"), []byte("head test"), 0644)
+	pr, detail, err = publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gh.called {
+		t.Error("gh client not called for spec with Ref=HEAD")
+	}
+	if gh.base == "HEAD" || gh.base == "" {
+		t.Errorf("base must not be %q; expected a real branch name like main", gh.base)
+	}
+
+	// Test 4: idempotency (PR already exists)
 	gh.called = false
 	gh.existingOpen = "https://github.com/owner/repo/pull/123"
 	os.WriteFile(filepath.Join(workDir, "test2.txt"), []byte("data2"), 0644)

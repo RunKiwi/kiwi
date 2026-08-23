@@ -26,22 +26,91 @@ import { Select } from "@/components/Select";
 function ComposerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const targetRepoParam = searchParams.get("repo");
 
-  const [prompt, setPrompt] = useState("");
+  const targetRepoParam = searchParams.get("repo") || searchParams.get("repo_url");
+  const initialTask = searchParams.get("task") || searchParams.get("prompt") || "";
+  const initialBranch = searchParams.get("branch") || searchParams.get("ref") || "";
+  const initialTestCmd = searchParams.get("test_cmd") || "";
+  const initialStrategy =
+    searchParams.get("strategy") === "plan" || searchParams.get("plan_mode") === "true"
+      ? "plan"
+      : "direct";
+  const initialSpendCap =
+    searchParams.get("spend_cap") || searchParams.get("spend_cap_usd")
+      ? parseFloat(searchParams.get("spend_cap") || searchParams.get("spend_cap_usd") || "0.5")
+      : 0.50;
+  const initialMode =
+    searchParams.get("mode") === "dryrun" || searchParams.get("dry_run") === "true"
+      ? "dryrun"
+      : "pr";
+  const initialArchitect = searchParams.get("architect_model") || "claude-sonnet-5";
+  const initialWorker = searchParams.get("worker_model") || searchParams.get("model") || DEFAULT_WORKER_MODEL;
+  const sourceJobId = searchParams.get("job_id");
+
+  const [prompt, setPrompt] = useState(initialTask);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
   const [repo, setRepo] = useState(targetRepoParam || "");
-  const [branch, setBranch] = useState("");
-  const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
-  const [strategy, setStrategy] = useState<"direct" | "plan">("direct");
-  const [spendCap, setSpendCap] = useState(0.50);
-  const [mode, setMode] = useState<"pr" | "dryrun">("pr");
-  const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
-  const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
+  const [branch, setBranch] = useState(initialBranch);
+  const [testCmd, setTestCmd] = useState(initialTestCmd);
+  const [strategy, setStrategy] = useState<"direct" | "plan">(initialStrategy);
+  const [spendCap, setSpendCap] = useState(initialSpendCap);
+  const [mode, setMode] = useState<"pr" | "dryrun">(initialMode);
+  const [architectModel, setArchitectModel] = useState(initialArchitect);
+  const [workerModel, setWorkerModel] = useState(initialWorker);
   const [spend, setSpend] = useState<SpendResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Helper to match repository URL from repo name, short name or full name
+  const matchRepo = (target: string, list: GithubRepo[]): string => {
+    if (!target) return "";
+    const clean = target.trim();
+    const normClean = clean.toLowerCase().replace(/\.git$/, "").replace(/^https?:\/\/github\.com\//, "").replace(/^git@github\.com:/, "");
+
+    const match = list.find((item) => {
+      const full = (item.full_name || "").toLowerCase().replace(/\.git$/, "");
+      const name = (item.name || "").toLowerCase();
+      const normUrl = (item.url || "").toLowerCase().replace(/\.git$/, "").replace(/^https?:\/\/github\.com\//, "").replace(/^git@github\.com:/, "");
+
+      return (
+        normUrl === normClean ||
+        full === normClean ||
+        name === normClean ||
+        normClean.endsWith("/" + name) ||
+        full.endsWith("/" + normClean) ||
+        normUrl.endsWith("/" + normClean) ||
+        (name.length > 0 && (normClean.includes(name) || full.includes(normClean)))
+      );
+    });
+    if (match) {
+      return match.url || `https://github.com/${match.full_name || match.name}`;
+    }
+    return clean.includes("://") || clean.includes("@") ? clean : `https://github.com/${clean}`;
+  };
+
+  // If a source job_id is passed, fetch its full details to prefill any missing fields
+  useEffect(() => {
+    if (!sourceJobId) return;
+    Promise.all([
+      api.getJob(sourceJobId).catch(() => null),
+      api.getJobPlan(sourceJobId).catch(() => null),
+    ]).then(([job, plan]) => {
+      if (job) {
+        if (job.task) setPrompt((p) => p || job.task || "");
+        const arch = job.architect_model || plan?.architect_model || job.tasks?.[0]?.architect_model;
+        if (arch) setArchitectModel(arch);
+        const worker = job.worker_model || job.tasks?.[0]?.model;
+        if (worker) setWorkerModel(worker);
+        if (job.spend_cap_usd != null) setSpendCap(job.spend_cap_usd);
+        if (job.is_dry_run) setMode("dryrun");
+        if (job.requires_plan_approval || job.plan_status) setStrategy("plan");
+        if (job.repo) {
+          setRepo(matchRepo(job.repo, repos));
+        }
+      }
+    });
+  }, [sourceJobId, repos]);
 
   useEffect(() => {
     api.getSpend().then(setSpend).catch(() => {});
@@ -49,31 +118,41 @@ function ComposerContent() {
       .then((r) => {
         const list = r.repos || [];
         setRepos(list);
-        if (targetRepoParam) {
-          const match = list.find((item) => (item.full_name || item.name) === targetRepoParam);
-          if (match) {
-            setRepo(match.full_name || match.name || targetRepoParam);
-          } else {
-            setRepo(targetRepoParam);
-          }
-        } else if (list.length > 0) {
-          setRepo((prev) => prev || (list[0].full_name || list[0].name || ""));
+        const target = targetRepoParam;
+        if (target) {
+          setRepo(matchRepo(target, list));
+        } else if (list.length > 0 && !sourceJobId) {
+          const first = list[0];
+          setRepo((prev) => prev || first.url || `https://github.com/${first.full_name || first.name}`);
         }
       })
       .catch(() => {})
       .finally(() => setReposLoaded(true));
-  }, [targetRepoParam]);
+  }, [targetRepoParam, sourceJobId]);
 
   const handleStart = async () => {
     if (!prompt.trim() || !repo) return;
     setIsSubmitting(true);
     setSubmitError(null);
+
+    const selectedRepo = repos.find(
+      (r) =>
+        r.url === repo ||
+        (r.full_name && r.full_name === repo) ||
+        (r.name && r.name === repo)
+    );
+    const repoUrl =
+      selectedRepo?.url ||
+      (repo.includes("://") || repo.includes("@")
+        ? repo
+        : `https://github.com/${repo}`);
+
     try {
       await api.submitPlan({
         task: prompt.trim(),
-        repo_url: repo,
+        repo_url: repoUrl,
         ref: branch.trim() || undefined,
-        test_cmd: testCmd,
+        test_cmd: testCmd.trim() || undefined,
         architect_model: architectModel,
         model: workerModel,
         plan_mode: strategy === "plan",
@@ -224,8 +303,9 @@ function ComposerContent() {
                     onChange={setRepo}
                     options={repos.map((r) => {
                       const repoName = r.full_name || r.name || "repo";
+                      const repoUrl = r.url || `https://github.com/${repoName}`;
                       return {
-                        value: repoName,
+                        value: repoUrl,
                         label: repoName,
                         hint: r.private ? "private" : "public",
                       };
@@ -255,6 +335,7 @@ function ComposerContent() {
                 type="text"
                 value={testCmd}
                 onChange={(e) => setTestCmd(e.target.value)}
+                placeholder="e.g. npm test, pytest, go test ./... (auto-detected if blank)"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shadow-xs"
               />
             </div>
