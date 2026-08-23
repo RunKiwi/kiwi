@@ -233,7 +233,7 @@ export default function SpendPage() {
             <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
               <div className="text-[11px] font-medium text-stone-500">Zero-Shot Test Pass Rate</div>
               <div className="text-2xl font-bold text-emerald-700 font-mono mt-1">
-                {velocity?.test_pass_metrics?.zero_shot_pct ? velocity.test_pass_metrics.zero_shot_pct.toFixed(1) : "72.4"}%
+                {velocity?.test_pass_metrics?.zero_shot_pct != null ? `${velocity.test_pass_metrics.zero_shot_pct.toFixed(1)}%` : "—"}
               </div>
               <div className="text-[10px] text-stone-400 font-mono mt-1">Passed on first critic review</div>
             </div>
@@ -241,7 +241,7 @@ export default function SpendPage() {
             <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
               <div className="text-[11px] font-medium text-stone-500">Self-Healed Test Pass Rate</div>
               <div className="text-2xl font-bold text-amber-700 font-mono mt-1">
-                {velocity?.test_pass_metrics?.self_healed_pct ? velocity.test_pass_metrics.self_healed_pct.toFixed(1) : "21.1"}%
+                {velocity?.test_pass_metrics?.self_healed_pct != null ? `${velocity.test_pass_metrics.self_healed_pct.toFixed(1)}%` : "—"}
               </div>
               <div className="text-[10px] text-stone-400 font-mono mt-1">Autonomous critic loop repair</div>
             </div>
@@ -249,7 +249,7 @@ export default function SpendPage() {
             <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
               <div className="text-[11px] font-medium text-stone-500">Human Guided Continuation</div>
               <div className="text-2xl font-bold text-indigo-700 font-mono mt-1">
-                {velocity?.test_pass_metrics?.human_guided_pct ? velocity.test_pass_metrics.human_guided_pct.toFixed(1) : "6.5"}%
+                {velocity?.test_pass_metrics?.human_guided_pct != null ? `${velocity.test_pass_metrics.human_guided_pct.toFixed(1)}%` : "—"}
               </div>
               <div className="text-[10px] text-stone-400 font-mono mt-1">Operator input requested</div>
             </div>
@@ -263,11 +263,11 @@ export default function SpendPage() {
                   AST Prompt Token Caching (90% Discount)
                 </h3>
                 <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  {caching?.cache_discount_rate ? (caching.cache_discount_rate * 100).toFixed(0) : "90"}% Hit Rate
+                  {caching?.cache_discount_rate != null ? `${(caching.cache_discount_rate * 100).toFixed(0)}% Hit Rate` : "No data yet"}
                 </span>
               </div>
               <div className="text-2xl font-bold font-mono text-stone-900">
-                ${caching?.total_dollar_savings_usd ? caching.total_dollar_savings_usd.toFixed(2) : "1,284.50"} <span className="text-xs text-stone-500 font-normal font-sans">Saved</span>
+                {caching?.total_dollar_savings_usd != null ? `$${caching.total_dollar_savings_usd.toFixed(2)}` : "—"} <span className="text-xs text-stone-500 font-normal font-sans">Saved</span>
               </div>
               <p className="text-xs text-stone-500 leading-relaxed">
                 By maintaining persistent repository AST memory checkpoints, Kiwi reuses cached prompt tokens across all worker iterations, yielding dramatic cost reduction.
@@ -281,17 +281,17 @@ export default function SpendPage() {
                   Sandbox Memory & Git Cache
                 </h3>
                 <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  {sandboxCache?.cache_hit_rate_pct ? sandboxCache.cache_hit_rate_pct.toFixed(1) : "94.2"}% Hit Rate
+                  {sandboxCache?.cache_hit_rate_pct != null ? `${sandboxCache.cache_hit_rate_pct.toFixed(1)}% Hit Rate` : "No data yet"}
                 </span>
               </div>
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                   <span className="text-stone-500">Cached Trees:</span>
-                  <span className="font-bold text-stone-900">{sandboxCache?.total_cached_trees || 18} repos</span>
+                  <span className="font-bold text-stone-900">{sandboxCache?.total_cached_trees ?? "—"} repos</span>
                 </div>
                 <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                   <span className="text-stone-500">Active Worktrees:</span>
-                  <span className="font-bold text-stone-900">{sandboxCache?.total_active_worktrees || 4} branches</span>
+                  <span className="font-bold text-stone-900">{sandboxCache?.total_active_worktrees ?? "—"} branches</span>
                 </div>
               </div>
             </div>

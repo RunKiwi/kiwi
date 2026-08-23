@@ -140,6 +140,97 @@ body {
   100% { stroke-dasharray: 85, 150; stroke-dashoffset: -120; }
 }
 
+/* Bespoke Kiwi Custom Loaders — the keyframes above existed but the classes
+   that actually apply them to an element never did, so KiwiLoaders.tsx had
+   re-implemented its own different-looking spinners instead. These make the
+   four loaders pixel-match the design (thinking-orbs studio). */
+.kiwi-loader-core {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.kiwi-loader-core svg {
+  animation: kiwi-spin 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.kiwi-loader-core-ring-1 {
+  stroke-dasharray: 80, 200;
+  stroke-dashoffset: 0;
+  animation: kiwi-dash 1.5s ease-in-out infinite;
+}
+.kiwi-loader-core-ring-2 {
+  stroke-dasharray: 50, 180;
+  stroke-dashoffset: -30;
+  animation: kiwi-dash-rev 1.3s ease-in-out infinite;
+}
+.kiwi-loader-core-dot {
+  position: absolute;
+  width: 26%;
+  height: 26%;
+  border-radius: 9999px;
+  animation: kiwi-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.kiwi-loader-ast {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+.kiwi-loader-ast span {
+  width: 3px;
+  height: 100%;
+  border-radius: 9999px;
+  animation: kiwi-wave 1s ease-in-out infinite;
+}
+.kiwi-loader-ast span:nth-child(1) { animation-delay: 0.0s; }
+.kiwi-loader-ast span:nth-child(2) { animation-delay: 0.15s; }
+.kiwi-loader-ast span:nth-child(3) { animation-delay: 0.3s; }
+.kiwi-loader-ast span:nth-child(4) { animation-delay: 0.45s; }
+
+.kiwi-loader-orbit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.kiwi-loader-orbit-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px dashed rgba(101, 163, 13, 0.4);
+  animation: kiwi-spin 5s linear infinite;
+}
+.kiwi-loader-orbit-ping {
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 1.5px solid #65A30D;
+  animation: kiwi-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.kiwi-loader-orbit-satellite {
+  position: absolute;
+  top: -3px;
+  left: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #65A30D;
+  box-shadow: 0 0 8px #65A30D;
+}
+
+.kiwi-loader-micro {
+  display: inline-block;
+  animation: kiwi-spin 0.9s linear infinite;
+}
+.kiwi-loader-micro-circle {
+  stroke: currentColor;
+  stroke-dasharray: 45, 150;
+  stroke-dashoffset: 0;
+  stroke-linecap: round;
+  animation: kiwi-dash-micro 1.4s ease-in-out infinite;
+}
+
 /* ================= SHARED PRIMITIVES (light theme) =================
    Re-declared here so pages that predate the sand/kiwi redesign — and still
    reference these class names — keep working instead of rendering

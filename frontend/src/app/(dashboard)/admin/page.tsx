@@ -387,19 +387,19 @@ export default function AdminPage() {
             <div className="space-y-2 text-xs font-mono">
               <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                 <span className="text-stone-500">Host Pool:</span>
-                <span className="font-bold text-stone-900">{fleet?.host_pool || "gce-us-central1"}</span>
+                <span className="font-bold text-stone-900">{fleet?.host_pool || "—"}</span>
               </div>
               <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                 <span className="text-stone-500">Active Container Leases:</span>
-                <span className="font-bold text-stone-900">{fleet?.active_containers || 14} / {fleet?.max_capacity || 32}</span>
+                <span className="font-bold text-stone-900">{fleet ? `${fleet.active_containers} / ${fleet.max_capacity}` : "—"}</span>
               </div>
               <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                 <span className="text-stone-500">Avg Cold Start Latency:</span>
-                <span className="font-bold text-stone-900">{fleet?.avg_cold_start_ms ? fleet.avg_cold_start_ms.toFixed(0) : "4200"}ms</span>
+                <span className="font-bold text-stone-900">{fleet?.avg_cold_start_ms != null ? `${fleet.avg_cold_start_ms.toFixed(0)}ms` : "—"}</span>
               </div>
               <div className="flex justify-between p-2 rounded-xl bg-sand-50">
                 <span className="text-stone-500">Security IMDS Blocks:</span>
-                <span className="font-bold text-emerald-600">{fleet?.imds_blocked_count || 1842} receipts</span>
+                <span className="font-bold text-emerald-600">{fleet?.imds_blocked_count != null ? `${fleet.imds_blocked_count} receipts` : "—"}</span>
               </div>
             </div>
           </div>
