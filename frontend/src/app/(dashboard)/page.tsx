@@ -1,1358 +1,605 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef, Suspense } from "react";
-import { useFleetStore } from "@/store/useFleetStore";
-import { Clock, CheckCircle2, Loader2, GitPullRequest, Bot, ArrowRight, FolderGit2, AlertCircle, ChevronDown, Server, ExternalLink, Ban, RotateCcw, Trash2, Info, Search, Filter, X, Gauge, Copy } from "lucide-react";
-import { TaskDrawer } from "@/components/TaskDrawer";
-import { Select } from "@/components/Select";
-import { useRouter, useSearchParams } from "next/navigation";
-import { client, DEFAULT_WORKER_MODEL, modelClassLabel, formatTokens, MODEL_CLASS_BLURB, type Fleet, type ModelEntry, type CatalogModel, type AllowanceBucket, type GithubRepo, type UsageResponse, type Integration, type PlanRequest } from "@/lib/api";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
-import { TaskComposer } from "@/components/TaskComposer/TaskComposer";
-import { filterJobs, sortJobs, groupJobsByDate, parseStatusParam, parseSortParam, FILTERABLE_STATUSES, type JobSortOption } from "@/lib/jobFilters";
-import { usePolling } from "@/hooks/usePolling";
-import { parseActionableError } from "@/lib/errors";
-import { sendJobCompletionNotification } from "@/lib/notifications";
-import { statusOf, CARD_BASE } from "@/lib/statusColors";
-import { capture } from "@/lib/analytics";
-import { LoadingState } from "@/components/LoadingState";
-import { shortTime, exactTime } from "@/lib/datetime";
-import { AllowancePopover } from "@/components/AllowancePopover";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  getModelAllowanceStatus,
-  getOverallAllowanceHealth,
-  findFallbackNoCostModel,
-} from "@/lib/allowanceUtils";
+  FolderGit2,
+  GitPullRequest,
+  CheckCircle2,
+  Server,
+  Zap,
+  Plus,
+  Compass,
+  Hammer,
+  Check,
+  Search,
+  Sliders,
+  Play,
+  RotateCcw,
+  Sparkles,
+  ArrowRight,
+  Activity,
+  Layers,
+  ShieldCheck,
+  AlertCircle,
+  Eye,
+} from "lucide-react";
+import { api, type JobSummary, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
+import { TaskDrawer } from "@/components/TaskDrawer";
+import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
+import { ThinkingOrb } from "@/components/ThinkingOrb";
+import { useFleetStore } from "@/store/useFleetStore";
 
-// How many jobs render before "Show more". Sized so a normal week fits in one
-// screenful of scrolling rather than to any rendering limit.
-const PAGE_SIZE = 60;
-
-// Job statuses that cannot change on their own. Kept in step with the drawer's
-// task-level TERMINAL set — a cancelled job is finished, and treating it as
-// live would keep the board polling forever.
-const TERMINAL_JOB_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
+function SegmentedMeter({
+  totalTicks = 36,
+  activeTicks = 18,
+  activeColorClass = "meter-tick-active-emerald",
+}: {
+  totalTicks?: number;
+  activeTicks?: number;
+  activeColorClass?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1 py-1 overflow-x-auto">
+      {Array.from({ length: totalTicks }).map((_, i) => {
+        const isActive = i < activeTicks;
+        return (
+          <div
+            key={i}
+            className={`meter-tick ${
+              isActive ? activeColorClass : "meter-tick-inactive"
+            }`}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 function CommandCenterContent() {
-  const { jobs, loadJobs } = useFleetStore();
-  const searchParams = useSearchParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { jobs, daemons, loadJobs, loadDaemons } = useFleetStore();
 
   const [activeDrawerTaskId, setActiveDrawerTaskId] = useState<string | null>(searchParams.get("job") || null);
-  // Which job's PR list popover is open (job_id), if any.
-  const [openPrJob, setOpenPrJob] = useState<string | null>(null);
-
-  // Job lifecycle action states
-  const [confirmCancelJob, setConfirmCancelJob] = useState<string | null>(null);
-  const [confirmDeleteJob, setConfirmDeleteJob] = useState<string | null>(null);
-  const [cardNotice, setCardNotice] = useState<{ jobId: string; message: string; tasksAffected: number } | null>(null);
-  const [cardBusyJob, setCardBusyJob] = useState<string | null>(null);
-
-  // Filter & Sort state initialized from URL query params. The URL is user-editable
-  // input, so each value is validated against what the control can actually render —
-  // an unchecked cast would leave a Select displaying a value absent from its options.
-  const [statusFilter, setStatusFilter] = useState(() => parseStatusParam(searchParams.get("status")));
-  const [repoFilter, setRepoFilter] = useState(searchParams.get("repo") || "all");
-  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
-  const [sortBy, setSortBy] = useState<JobSortOption>(() => parseSortParam(searchParams.get("sort")));
-  const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE);
-
-  const openJobDrawer = (jobId: string) => {
-    setActiveDrawerTaskId(jobId);
-  };
-
-  const closeJobDrawer = () => {
-    setActiveDrawerTaskId(null);
-  };
-
-  // Synchronize the filters and the open job with the URL query string. This goes
-  // through the Next router rather than window.history so the router's own view of
-  // the URL stays in step — useSearchParams does not observe a raw
-  // history.replaceState, which would leave route state and the address bar
-  // disagreeing. Both writers share one effect precisely so they cannot clobber
-  // each other's params.
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
-    if (repoFilter && repoFilter !== "all") params.set("repo", repoFilter);
-    if (searchQuery.trim()) params.set("q", searchQuery.trim());
-    if (sortBy && sortBy !== "newest") params.set("sort", sortBy);
-    if (activeDrawerTaskId) params.set("job", activeDrawerTaskId);
-
-    const queryString = params.toString();
-    router.replace(queryString ? `/?${queryString}` : "/", { scroll: false });
-  }, [statusFilter, repoFilter, searchQuery, sortBy, activeDrawerTaskId, router]);
-
-  // A narrowed result set should start from the top of the page, not inherit an
-  // expansion the user requested for a different set of jobs. Adjusted during
-  // render rather than in an effect so the first paint after a filter change is
-  // already correct — the same pattern TaskDrawer uses to reset per-job state.
-  const filterSignature = `${statusFilter}|${repoFilter}|${searchQuery.trim()}`;
-  const [prevFilterSignature, setPrevFilterSignature] = useState(filterSignature);
-  if (prevFilterSignature !== filterSignature) {
-    setPrevFilterSignature(filterSignature);
-    setDisplayLimit(PAGE_SIZE);
-  }
-
-  // Form State — only task + repo are required. Everything else is a hint.
-  // Hand-off from onboarding. The initializers only read — clearing happens in
-  // the effect below. Consuming inside an initializer would break under
-  // StrictMode, which invokes it twice in development: the first pass would
-  // take and delete the value, the second would find nothing, and the starter
-  // task would silently vanish.
-  const starterOf = (key: string) =>
-    typeof window === "undefined" ? "" : localStorage.getItem(key) ?? "";
-  const [task, setTask] = useState(() => starterOf("kiwi_starter_task"));
-  const [repoUrl, setRepoUrl] = useState(() => starterOf("kiwi_starter_repo"));
-  // Whether onboarding pre-filled this composer. Read at mount because the
-  // effect below clears the hand-off keys, and submit happens long after —
-  // by then there is no way left to tell a starter task from a typed one.
-  const cameFromStarter = useRef(task !== "");
-
-  useEffect(() => {
-    localStorage.removeItem("kiwi_starter_task");
-    localStorage.removeItem("kiwi_starter_repo");
-  }, []);
-  const [fleetId, setFleetId] = useState("");
-  const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
-  const [ref, setRef] = useState("main");
-  const [file, setFile] = useState("");
-  const [testCmd, setTestCmd] = useState("");
-  const [maxWorkers, setMaxWorkers] = useState(1);
-  const [architectModel, setArchitectModel] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  // Shared context off by default: it's opt-in, so a task never silently spends
-  // extra tokens on prior-work retrieval unless the user turns it on.
-  const [referenceMode, setReferenceMode] = useState("off");
-  const [referenceJobIds, setReferenceJobIds] = useState<string[]>([]);
-  const [inlineData, setInlineData] = useState<Partial<PlanRequest>>({});
-
-  const [greeting, setGreeting] = useState("What should the swarm build?");
-
-  useEffect(() => {
-    const hour = new Date().getHours();
-    let timeGreeting = "";
-    if (hour < 12) timeGreeting = "Good morning";
-    else if (hour < 18) timeGreeting = "Good afternoon";
-    else timeGreeting = "Good evening";
-
-    const prompts = [
-      "what are we building today?",
-      "what should Kiwi do today?",
-      "ready to write some code?",
-      "what's the master plan?",
-      "let's build something awesome.",
-      "what bugs are we squashing today?",
-      "time to ship something great.",
-      "what's on the roadmap?",
-      "what is in your mind?",
-      "what is 'bug'ging you?"
-    ];
-    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setGreeting(`${timeGreeting}, ${randomPrompt}`);
-  }, []);
-
-  // Options loaded from the control plane.
-  const [fleets, setFleets] = useState<Fleet[]>([]);
-  const [customModels, setCustomModels] = useState<ModelEntry[]>([]);
-  // Discovered models, which replaced the hardcoded BUILTIN_MODELS list. Each
-  // row carries the provider the catalog resolved, so the picker no longer has
-  // to guess one from the model id.
-  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
-  // The picker needs to say how much of each class's monthly allowance is left,
-  // which is the one fact that decides whether a model is actually usable right
-  // now. It lives on the spend endpoint because that is where allowances are
-  // computed; duplicating that maths here would let the two disagree.
-  const [allowance, setAllowance] = useState<AllowanceBucket[]>([]);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
-  const [u, setU] = useState<UsageResponse | null>(null);
-  const [integrations, setIntegrations] = useState<Integration[] | null>(null);
+  const [spend, setSpend] = useState<SpendResponse | null>(null);
+  const [cacheStats, setCacheStats] = useState<SandboxCacheStats | null>(null);
+  const [loading, setLoading] = useState(true);
 
+  // Composer drawer/modal state
+  const [showComposer, setShowComposer] = useState(searchParams.get("compose") === "true");
+  const [taskPrompt, setTaskPrompt] = useState("");
+  const [repoUrl, setRepoUrl] = useState("acme-corp/core-api");
+  const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
+  const [architectModel, setArchitectModel] = useState("anthropic/claude-sonnet-5");
+  const [workerModel, setWorkerModel] = useState("anthropic/claude-haiku-4.5");
+  const [spendCap, setSpendCap] = useState(0.50);
+  const [planMode, setPlanMode] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const [isAllowancePopoverOpen, setIsAllowancePopoverOpen] = useState(false);
-
-  // Two different ceilings with two different meanings. Running out of
-  // agent-minutes stops work until the month rolls over or the plan changes;
-  // hitting the concurrency limit only means the next task waits its turn.
-  const outOfMinutes = !!u && u.agent_minutes_limit > 0 && u.agent_minutes_used >= u.agent_minutes_limit;
-  const atConcurrencyLimit =
-    !!u && u.max_concurrent_jobs > 0 && u.concurrent_jobs_running >= u.max_concurrent_jobs;
-
-  const effectiveWorkerModel = inlineData.model || workerModel;
-
-  const workerAllowanceStatus = useMemo(
-    () => getModelAllowanceStatus(effectiveWorkerModel, catalogModels, allowance),
-    [effectiveWorkerModel, catalogModels, allowance],
-  );
-
-  const overallHealth = useMemo(
-    () => getOverallAllowanceHealth(allowance, u),
-    [allowance, u],
-  );
-
-  const isWorkerExhausted = workerAllowanceStatus.isExhausted;
-  const isWorkerWarning = workerAllowanceStatus.isWarning;
-
-  // Idle means nothing can change without a user action, so the board can back
-  // off. An empty board counts as idle: there is nothing to watch.
-  const allJobsTerminal = useMemo(
-    () => jobs.every(j => TERMINAL_JOB_STATUSES.has(j.status)),
-    [jobs],
-  );
+  // Status Filter
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("filter") || "all");
 
   useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
+    loadJobs().catch(() => {}).finally(() => setLoading(false));
+    loadDaemons().catch(() => {});
 
-  // Track job transitions to trigger completion notifications
-  const prevJobsRef = useRef<Map<string, string>>(new Map());
+    api.getUsage().then(setUsage).catch(() => {});
+    api.listGithubRepos().then((r) => setRepos(r.repos || [])).catch(() => {});
+    api.getSpend().then(setSpend).catch(() => {});
+    api.getSandboxCacheStats().then(setCacheStats).catch(() => {});
+  }, [loadJobs, loadDaemons]);
 
-  useEffect(() => {
-    if (!jobs || jobs.length === 0) return;
-    const prevMap = prevJobsRef.current;
-    const nextMap = new Map<string, string>();
+  const handleLaunch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!taskPrompt.trim()) return;
 
-    for (const j of jobs) {
-      nextMap.set(j.job_id, j.status);
-      const prevStatus = prevMap.get(j.job_id);
-
-      if (prevStatus && (prevStatus === "QUEUED" || prevStatus === "RUNNING")) {
-        if (j.status === "SUCCEEDED" || j.status === "FAILED") {
-          sendJobCompletionNotification(j.job_id, j.status, j.task);
-        }
-      }
-    }
-
-    prevJobsRef.current = nextMap;
-  }, [jobs]);
-
-  usePolling(loadJobs, {
-    activeIntervalMs: 2500,
-    idleIntervalMs: 15000,
-    isIdle: allJobsTerminal,
-  });
-
-  useEffect(() => {
-    client.listFleets().then(r => setFleets(r.fleets)).catch(() => {});
-    client.listModels().then(r => setCustomModels(r.models)).catch(() => {});
-    client.listCatalogModels().then(r => setCatalogModels(r.models)).catch(() => {});
-    {
-      const to = new Date();
-      const from = new Date(to.getTime() - 30 * 864e5);
-      client.getSpend(from.toISOString(), to.toISOString())
-        .then(r => setAllowance(r.allowance ?? []))
-        .catch(() => {});
-    }
-    client.getUsage().then(setU).catch(() => setU(null));
-    // GitHub repos are best-effort — only available once the integration is connected.
-    client.listGithubRepos().then(r => setRepos(r.repos)).catch(() => {});
-
-    // Load integrations once, then use them for two things: the first-run
-    // onboarding redirect, and the M14 model default (prefer the provider the
-    // org actually has a key for, so a BYOK user isn't defaulted to a model
-    // they can't call). Jobs are only needed for the first-run check.
-    const firstRun = typeof window !== "undefined" && !localStorage.getItem("onboarded");
-    Promise.all([client.listIntegrations(), firstRun ? client.listJobs() : Promise.resolve(null)])
-      .then(([ints, jbs]) => {
-        setIntegrations(ints.integrations);
-        const connected = (key: string) =>
-          ints.integrations.some((i: Integration) => i.key === key && i.connected);
-        // The defaults are Anthropic models, so when Anthropic is the one
-        // provider NOT connected, fall to a provider the org can actually call.
-        // Without this a BYOK user's first task fails on a key they never added.
-        //
-        // The Architect is set explicitly here rather than left on "platform
-        // default": that default is an Anthropic model, and the Control Plane
-        // declines to apply it when the org has no Anthropic key — correct, but
-        // it would silently hand this user the worker model as their Architect.
-        // Naming one they can actually reach keeps the two-model split.
-        if (!connected("anthropic")) {
-          if (connected("gemini")) {
-            setArchitectModel("gemini-2.5-pro");
-            setWorkerModel("gemini-flash-latest");
-          } else if (connected("openai")) {
-            setArchitectModel("gpt-5");
-            setWorkerModel("gpt-5-mini");
-          }
-        }
-        if (firstRun) {
-          const hasInt = ints.integrations.some((i: Integration) => i.connected);
-          const hasJob = (jbs?.jobs.length ?? 0) > 0;
-          if (!hasInt && !hasJob) router.push("/onboarding");
-          localStorage.setItem("onboarded", "1");
-        }
-      }).catch(() => {});
-  }, [router]);
-
-  // Show the fleet selector only once we positively know the org is not Free
-  // (Free work always routes to the shared fleet, so the control is a no-op there).
-  const showFleetSelector = !!u && u.plan !== "free";
-
-  // Close the PR popover on Escape or any click outside the popover / its trigger.
-  useEffect(() => {
-    if (!openPrJob) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenPrJob(null); };
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.closest(".pr-popover") || t.closest("[data-pr-trigger]")) return;
-      setOpenPrJob(null);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onDown);
-    };
-  }, [openPrJob]);
-
-  // Stand a primed confirm down on Escape or any click outside the primed button.
-  // This deliberately does not use onBlur: clicking a <button> does not focus it
-  // in every browser, so a blur-based reset can leave a destructive action armed
-  // indefinitely after the pointer has moved on.
-  useEffect(() => {
-    if (!confirmCancelJob && !confirmDeleteJob) return;
-    const standDown = () => { setConfirmCancelJob(null); setConfirmDeleteJob(null); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") standDown(); };
-    const onDown = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest("[data-confirm-action]")) return;
-      standDown();
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onDown);
-    };
-  }, [confirmCancelJob, confirmDeleteJob]);
-
-  const handleRerunWithEdits = (job: { task?: string; repo?: string; fleet_id?: string }) => {
-    setTask(job.task || "");
-    if (job.repo) {
-      // JobSummary.repo is "owner/name", but the composer submits repo_url and
-      // matches the repo chip on url. Assigning the short form straight through
-      // leaves the chip showing nothing and submits an unusable repository.
-      const known = repos.find(r => r.full_name === job.repo);
-      setRepoUrl(known?.url ?? (job.repo.includes("://") ? job.repo : `https://github.com/${job.repo}`));
-      if (known?.default_branch) setRef(known.default_branch);
-    }
-    if (job.fleet_id) setFleetId(job.fleet_id);
-
-    // A re-run is a fresh attempt; carrying the previous outcome into it just
-    // leaves a stale success or error sitting under the composer.
-    setSubmitError("");
-    setSubmitSuccess(null);
-
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const allModels = Array.from(new Set([
-    ...catalogModels.map(m => m.model_id),
-    ...customModels.map(m => m.name),
-  ]));
-  // The worker runs on the org's own provider key — only offer models it can
-  // actually reach, so a task can't be launched with an unrunnable worker model.
-  let workerOptions = allModels;
-  let showIntegrationsHint = false;
-
-  if (integrations !== null) {
-    const connected = (prov: string) => integrations.some(i => i.key === prov && i.connected);
-    const filteredOptions = allModels.filter(m => {
-      // A Kiwi-provided model runs on Kiwi's key, so the org's own connections
-      // say nothing about whether it can be reached.
-      const fromCatalog = catalogModels.find(cm => cm.model_id === m);
-      if (fromCatalog?.kiwi_provided) return true;
-
-      // Otherwise use the provider the catalog resolved, then an explicit
-      // provider on a custom model. There is deliberately no client-side
-      // inference: that rule lives in Go, and a second copy here is how the two
-      // drift into telling users to connect the wrong key.
-      const isCustom = customModels.find(cm => cm.name === m);
-      const prov = fromCatalog?.provider
-        || (isCustom && isCustom.provider && isCustom.provider !== "auto" ? isCustom.provider : "");
-      return prov !== "" && connected(prov);
-    });
-    if (filteredOptions.length > 0) {
-      workerOptions = filteredOptions;
-    } else {
-      showIntegrationsHint = true;
-    }
-  }
-
-  // A model id alone ("moonshotai/kimi-k2") says nothing about what it costs,
-  // what it is for, or whether there is any budget left for it. The picker
-  // carries the class as a trailing hint on every row, and a detail panel for
-  // whichever row is highlighted.
-  const catalogById = useMemo(() => {
-    const m = new Map<string, CatalogModel>();
-    for (const c of catalogModels) m.set(c.model_id, c);
-    return m;
-  }, [catalogModels]);
-
-  const allowanceByClass = useMemo(() => {
-    const m = new Map<string, AllowanceBucket>();
-    for (const a of allowance) m.set(a.tier, a);
-    return m;
-  }, [allowance]);
-
-  const modelOption = (id: string) => {
-    const status = getModelAllowanceStatus(id, catalogModels, allowance);
-    return {
-      value: id,
-      label: id,
-      hint: status.isBYOK ? "your key" : status.hint,
-    };
-  };
-
-  const renderModelDetail = (o: { value: string }) => {
-    const c = catalogById.get(o.value);
-    if (!c) {
-      return (
-        <div className="px-2.5 py-1 text-[11px] text-zinc-500">
-          Not in the catalog — it will run if one of your connected keys serves it.
-        </div>
-      );
-    }
-    const a = c.kiwi_provided ? allowanceByClass.get(c.tier) : undefined;
-    const unlimited = a ? a.granted < 0 : false;
-    const exhausted = !!a && !unlimited && a.remaining <= 0;
-    const price =
-      c.input_cost_per_m == null || c.output_cost_per_m == null
-        ? null
-        : c.input_cost_per_m === 0 && c.output_cost_per_m === 0
-          ? "free"
-          : `$${c.input_cost_per_m}/M in · $${c.output_cost_per_m}/M out`;
-
-    return (
-      <div className="px-2.5 py-1.5">
-        <div className="flex items-center gap-2 flex-wrap mb-1.5">
-          {c.kiwi_provided ? (
-            <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
-              {modelClassLabel(c.tier)}
-            </span>
-          ) : (
-            <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
-              Your key
-            </span>
-          )}
-          {a && (
-            <span className={`text-[11px] ${exhausted ? "text-red-400" : "text-zinc-400"}`}>
-              {unlimited
-                ? "Unlimited"
-                : exhausted
-                  ? "No tokens left this month"
-                  : `${formatTokens(a.remaining)} tokens left this month`}
-            </span>
-          )}
-          {!c.kiwi_provided && (
-            <span className="text-[11px] text-zinc-500">Billed to you · no Kiwi allowance used</span>
-          )}
-        </div>
-
-        {c.description ? (
-          <p className="text-[11px] leading-relaxed text-zinc-400 mb-1.5">{c.description}</p>
-        ) : c.kiwi_provided ? (
-          <p className="text-[11px] leading-relaxed text-zinc-500 mb-1.5">{MODEL_CLASS_BLURB[c.tier]}</p>
-        ) : null}
-
-        <div className="flex items-center gap-3 text-[11px] text-zinc-500 tabular-nums flex-wrap">
-          {price && <span>{price}</span>}
-          {c.context_length != null && <span>{formatTokens(c.context_length)} context</span>}
-          <span className="text-zinc-600">{c.provider}</span>
-        </div>
-      </div>
-    );
-  };
-
-
-  const handleSubmit = async () => {
-    setSubmitError("");
-    setSubmitSuccess(null);
-    if (!task.trim() || !repoUrl.trim()) {
-      capture("task_submit_failed", { reason: "missing_task_or_repo" });
-      setSubmitError("A task and a repository are required.");
-      return;
-    }
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
-      const resp = await client.submitPlan({
-        task,
+      await api.submitPlan({
+        task: taskPrompt.trim(),
         repo_url: repoUrl,
-        ref: inlineData.ref || ref || "main",
-        file: (inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file,
-        test_cmd: inlineData.test_cmd || testCmd,
-        model: inlineData.model || workerModel,
-        max_workers: inlineData.max_workers || maxWorkers,
-        fleet_id: fleetId,
-        reference_mode: inlineData.reference_mode || referenceMode,
-        reference_job_ids: inlineData.reference_mode === "manual" ? inlineData.reference_job_ids : (referenceMode === "manual" ? referenceJobIds : undefined),
-        // Omitted when the submitter left this on "Platform default", so the
-        // Control Plane chooses — see DefaultArchitectModel in ee/planner. It
-        // declines to apply that default when the org has no key for its
-        // provider, or when it would not share a payer with the worker model.
-        architect_model: architectModel || undefined,
+        test_cmd: testCmd,
+        architect_model: architectModel,
+        model: workerModel,
+        plan_mode: planMode,
+        spend_cap_usd: spendCap,
+        dry_run: dryRun,
       });
-      setSubmitSuccess(resp.job_id);
-      // Task text, repository and branch are deliberately absent — see the
-      // note at the top of lib/analytics.ts. The model ids are ours, not the
-      // customer's, and which of them people actually pick is the reason this
-      // event exists.
-      capture("task_submitted", {
-        architect_model: architectModel || undefined,
-        worker_model: inlineData.model || workerModel,
-        max_workers: inlineData.max_workers || maxWorkers,
-        has_test_cmd: Boolean(inlineData.test_cmd || testCmd),
-        from_starter: cameFromStarter.current,
-      });
-      // The launch just spent budget; refresh so the meter beside this button
-      // reflects it rather than the figure from page load.
-      client.getUsage().then(setU).catch(() => {});
-      {
-        const to = new Date();
-        const from = new Date(to.getTime() - 30 * 864e5);
-        client.getSpend(from.toISOString(), to.toISOString())
-          .then(r => setAllowance(r.allowance ?? []))
-          .catch(() => {});
-      }
-      setTask("");
-      setInlineData({});
-      loadJobs();
-    } catch (err) {
-      capture("task_submit_failed", {
-        reason: err instanceof Error ? err.message : "unknown",
-      });
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit plan");
+      setTaskPrompt("");
+      setShowComposer(false);
+      await loadJobs();
+    } catch (err: any) {
+      setSubmitError(err?.message || "Failed to submit task");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const onPickRepo = (fullName: string) => {
-    const repo = repos.find(r => r.full_name === fullName);
-    if (repo) {
-      setRepoUrl(repo.url);
-      if (repo.default_branch) setRef(repo.default_branch);
-    }
-  };
-
-  const handleCardCancel = async (e: React.MouseEvent, jobId: string) => {
-    e.stopPropagation();
-    if (confirmCancelJob !== jobId) {
-      setConfirmCancelJob(jobId);
-      setConfirmDeleteJob(null);
-      return;
-    }
-    setConfirmCancelJob(null);
-    setCardBusyJob(jobId);
-    setCardNotice(null);
-    try {
-      const res = await client.cancelJob(jobId);
-      setCardNotice({ jobId, message: res.message || "Cancelled", tasksAffected: res.tasks_affected });
-      await loadJobs();
-    } catch (err) {
-      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Cancel failed", tasksAffected: 0 });
-    } finally {
-      setCardBusyJob(null);
-    }
-  };
-
-  const handleCardRetry = async (e: React.MouseEvent, jobId: string) => {
-    e.stopPropagation();
-    setCardBusyJob(jobId);
-    setCardNotice(null);
-    try {
-      const res = await client.retryJob(jobId);
-      setCardNotice({ jobId, message: res.message || "Retried", tasksAffected: res.tasks_affected });
-      await loadJobs();
-    } catch (err) {
-      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Retry failed", tasksAffected: 0 });
-    } finally {
-      setCardBusyJob(null);
-    }
-  };
-
-  const handleCardDelete = async (e: React.MouseEvent, jobId: string) => {
-    e.stopPropagation();
-    if (confirmDeleteJob !== jobId) {
-      setConfirmDeleteJob(jobId);
-      setConfirmCancelJob(null);
-      return;
-    }
-    setConfirmDeleteJob(null);
-    setCardBusyJob(jobId);
-    setCardNotice(null);
-    try {
-      const res = await client.deleteJob(jobId);
-      setCardNotice({ jobId, message: res.message || "Deleted", tasksAffected: res.tasks_affected });
-      await loadJobs();
-    } catch (err) {
-      setCardNotice({ jobId, message: err instanceof Error ? err.message : "Delete failed", tasksAffected: 0 });
-    } finally {
-      setCardBusyJob(null);
-    }
-  };
-
-  // Derived filter calculations
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { all: jobs.length };
-    for (const s of FILTERABLE_STATUSES) c[s] = 0;
-    for (const j of jobs) {
-      const s = j.status?.toUpperCase();
-      if (s && s in c) {
-        c[s]++;
-      }
-    }
-    return c;
-  }, [jobs]);
-
-  const availableRepos = useMemo(() => {
-    const set = new Set<string>();
-    for (const j of jobs) {
-      if (j.repo) set.add(j.repo);
-    }
-    return Array.from(set);
-  }, [jobs]);
-
-  const repoOptions = useMemo(() => {
-    return [
-      { value: "all", label: "All repositories" },
-      ...availableRepos.map(r => ({ value: r, label: r })),
-    ];
-  }, [availableRepos]);
-
   const filteredJobs = useMemo(() => {
-    return filterJobs(jobs, {
-      status: statusFilter,
-      repo: repoFilter,
-      query: searchQuery,
+    const list = jobs || [];
+    return list.filter((job) => {
+      const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval;
+      const isWaitingUser = job.status === "WAITING_USER";
+      const isRunning = job.status === "LEASED" || job.status === "RUNNING";
+      const isPrReady = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+
+      if (statusFilter === "plan") return isPlanReview;
+      if (statusFilter === "waiting") return isWaitingUser;
+      if (statusFilter === "running") return isRunning;
+      if (statusFilter === "pr_created") return isPrReady;
+      return true;
     });
-  }, [jobs, statusFilter, repoFilter, searchQuery]);
+  }, [jobs, statusFilter]);
 
-  const sortedJobs = useMemo(() => {
-    return sortJobs(filteredJobs, sortBy);
-  }, [filteredJobs, sortBy]);
+  const usedMinutes = usage?.agent_minutes_used ?? 0;
+  const limitMinutes = usage?.agent_minutes_limit ?? 500;
+  const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
-  const displayedJobs = useMemo(() => {
-    return sortedJobs.slice(0, displayLimit);
-  }, [sortedJobs, displayLimit]);
+  const activeWorkers = usage?.concurrent_jobs_running ?? (jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
+  const maxWorkers = usage?.max_concurrent_jobs || usage?.concurrent_jobs_limit || (usage?.plan === "enterprise" ? 16 : usage?.plan === "pro" ? 8 : 2);
+  const workerPercent = Math.min(100, Math.round((activeWorkers / maxWorkers) * 100));
+  const workerTicks = Math.max(0, Math.min(36, Math.round((activeWorkers / maxWorkers) * 36)));
 
-  const groupedJobs = useMemo(() => {
-    return groupJobsByDate(displayedJobs);
-  }, [displayedJobs]);
+  const tokensUsed = (usage?.tokens_in ?? 0) + (usage?.tokens_out ?? 0) || (spend?.tokens_in ?? 0) + (spend?.tokens_out ?? 0);
+  const tokenLimit = 2500000;
+  const tokenPercent = Math.min(100, Math.round((tokensUsed / tokenLimit) * 100));
+  const tokenTicks = Math.max(0, Math.min(36, Math.round((tokensUsed / tokenLimit) * 36)));
 
-  const dateGroups = [
-    { label: "Today", items: groupedJobs.today },
-    { label: "Yesterday", items: groupedJobs.yesterday },
-    { label: "This Week", items: groupedJobs.thisWeek },
-    { label: "Older", items: groupedJobs.older },
-  ];
+  const storageMB = cacheStats?.storage_footprint_mb ?? 0;
+  const storageLimitMB = 16384;
+  const storageGB = (storageMB / 1024).toFixed(2);
+  const storageLimitGB = (storageLimitMB / 1024).toFixed(2);
+  const storagePercent = Math.min(100, Math.round((storageMB / storageLimitMB) * 100));
+  const storageTicks = Math.max(0, Math.min(36, Math.round((storageMB / storageLimitMB) * 36)));
 
-  const prLabel = (url: string) => {
-    // Render a compact "owner/repo#123" from a GitHub PR URL when possible.
-    const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-    return m ? `${m[1]}/${m[2]}#${m[3]}` : url.replace(/^https?:\/\//, "");
-  };
-
-  // Job ids are `job_` + 16 hex; show a friendly short form (job_a3f19c…).
-  const shortId = (id: string) => (id.length > 12 ? id.slice(0, 10) : id);
-
-  const formatRepoName = (repo: string) => {
-    if (!repo.includes("/")) return repo;
-    const [org, name] = repo.split("/");
-    return org.length > 3 ? `${org.slice(0, 3)}../${name}` : repo;
-  };
-
-  const fieldClass = "field text-sm";
-  const labelClass = "block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2";
-  // Which repo (full_name) the current repoUrl corresponds to, for the select.
-  const selectedRepo = repos.find(r => r.url === repoUrl)?.full_name ?? "";
+  const prsDeliveredCount = (jobs || []).filter((j) => (j.pr_urls && j.pr_urls.length > 0) || j.status === "SUCCEEDED").length;
+  const verifiedPassedCount = (jobs || []).filter((j) => j.status === "SUCCEEDED").length;
+  const privateRunnersCount = (daemons || []).length;
 
   return (
-    <div className="p-3 md:p-8 max-w-6xl mx-auto h-full flex flex-col">
-      <div className="mb-8">
-        <p className="eyebrow mb-3"><span className="dot"></span> Tasks</p>
-        <h1 className="text-[32px] font-semibold tracking-tight text-white mb-2">{greeting}</h1>
-        <p className="text-zinc-400 max-w-2xl">Describe the goal in plain English. Kiwi plans it, runs a swarm of agents, and opens one verified pull request — everything else is optional.</p>
+    <div className="p-6 space-y-7 max-w-6xl mx-auto font-sans text-stone-900">
+      
+      {/* 1. ONBOARDING / PLAN BANNER WITH DYNAMIC UPGRADE CTA */}
+      <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/80 flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-stone-900 text-white flex items-center justify-center font-bold shadow-2xs">
+            ⚡
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="font-bold text-stone-900 capitalize">{usage?.plan || "Free"} Tier Active ({limitMinutes} Mins Cap)</p>
+              <span className="text-[9px] font-mono font-bold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200 uppercase">
+                {limitMinutes} MINS CAP
+              </span>
+            </div>
+            <p className="text-stone-600 text-[11px]">
+              {usedMinutes} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {usage?.plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/spend"
+            className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
+          >
+            <Zap className="w-3.5 h-3.5 text-kiwi-400 fill-current" />
+            <span>Upgrade to Pro</span>
+          </Link>
+          <button
+            onClick={() => setShowComposer(true)}
+            className="px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-300 text-stone-800 font-semibold text-xs shadow-2xs transition-all"
+          >
+            + Assign Task
+          </button>
+        </div>
       </div>
 
-      {/* Composer — one compact input with an inline control rail underneath. */}
-      <div className="glass-panel mb-6 flex flex-col relative z-30 overflow-visible p-4">
-        <TaskComposer
-          value={task}
-          onChange={(p) => {
-            setTask(p.task ?? "");
-            setInlineData(p);
-          }}
-          repos={repos}
-          jobs={jobs}
-          models={allModels}
-          repoSelected={!!repoUrl}
-        />
-
-        {/* Control rail: repo · plan · worker chips, then Launch. */}
-        <div className="flex flex-wrap items-center gap-2 pt-3 mt-1 border-t border-white/5">
-          {/* Repository — searchable when repos are available, else a URL input. */}
-          {repos.length > 0 ? (
-            <Select
-              variant="chip" searchable label="Repo" ariaLabel="Repository"
-              icon={<FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
-              value={selectedRepo} onChange={onPickRepo} placeholder="Select…"
-              options={repos.map(r => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined }))}
-            />
-          ) : (
-            <label className="chip">
-              <FolderGit2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              <span className="k">Repo</span>
-              <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="github.com/you/repo"
-                className="bg-transparent outline-none border-0 text-sm font-mono text-white placeholder:text-zinc-600 w-[190px]" />
-            </label>
-          )}
-
-          {/* Worker */}
-          <Select
-            variant="chip" searchable label="Work" ariaLabel="Worker model"
-            className={isWorkerExhausted ? "!border-red-500/50 !bg-red-950/30 !text-red-200" : isWorkerWarning ? "!border-amber-500/40 !bg-amber-950/20" : ""}
-            icon={<span className="pdot" style={{ background: isWorkerExhausted ? "#F87171" : isWorkerWarning ? "#F59E0B" : "#E8A153" }} />}
-            value={effectiveWorkerModel} onChange={setWorkerModel}
-            options={workerOptions.map(modelOption)}
-            renderDetail={renderModelDetail}
-          />
-
-          {/* Advanced toggle */}
-          <button type="button" onClick={() => setShowAdvanced(v => !v)}
-            className="chip cursor-pointer text-zinc-400 hover:text-white">
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
-            <span className="text-xs">Advanced</span>
-          </button>
-
-          {showIntegrationsHint && (
-            <Link href="/integrations" className="text-xs text-amber-500/90 hover:text-amber-400 ml-2 transition-colors">
-              Connect a provider key in Integrations to run tasks.
-            </Link>
-          )}
-
-          <div className="flex-1" />
-
-          {/* Unified Allowance Health Pill with Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              data-allowance-trigger
-              onClick={() => setIsAllowancePopoverOpen(v => !v)}
-              aria-expanded={isAllowancePopoverOpen}
-              aria-label="View monthly allowance status"
-              className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border text-xs font-mono shrink-0 cursor-pointer transition-all hover:border-white/20 ${overallHealth.badgeClass}`}
-              title={`${overallHealth.summaryText} (Click for breakdown)`}
-            >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${overallHealth.dotColorClass}`} />
-              <Gauge className="w-3.5 h-3.5 shrink-0 opacity-80" />
-              <span>{overallHealth.summaryText}</span>
-              <div className="w-8 h-1.5 rounded-full bg-white/10 overflow-hidden shrink-0">
-                <div
-                  className={`h-full transition-all duration-300 ${overallHealth.barColorClass}`}
-                  style={{ width: `${overallHealth.worstPercentage}%` }}
-                />
-              </div>
-            </button>
-
-            <AllowancePopover
-              allowance={allowance}
-              usage={u}
-              health={overallHealth}
-              isOpen={isAllowancePopoverOpen}
-              onClose={() => setIsAllowancePopoverOpen(false)}
-            />
+      {/* 2. ACTIVE WORK & CAPACITY TILES */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-base font-bold text-stone-900 tracking-tight">Active Work & Capacity</h1>
+            <p className="text-xs text-stone-500 mt-0.5">Real-time status of autonomous agents building code and passing automated tests.</p>
           </div>
-
           <button
-            onClick={handleSubmit}
-            disabled={isSubmitting || outOfMinutes || isWorkerExhausted}
-            // A control that refuses to work has to say so. Without this the
-            // button just goes dim and the reason lives only in a colour.
-            title={
-              outOfMinutes
-                ? "Out of agent-minutes for this month"
-                : isWorkerExhausted
-                ? `${workerAllowanceStatus.tierLabel} allowance exhausted for this month`
-                : undefined
-            }
-            className="btn-primary px-5 py-2 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => setShowComposer(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
           >
-            {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Launching…</> : <>Launch <ArrowRight className="w-4 h-4" /></>}
+            <Plus className="w-3.5 h-3.5 text-kiwi-400" />
+            <span>New Task</span>
           </button>
         </div>
 
-        {/* Advanced options — hidden by default to keep the composer compact. */}
-        {showAdvanced && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 mt-3 border-t border-white/5">
-            {showFleetSelector && (
-              <div>
-                <label className={labelClass}>Fleet</label>
-                <Select
-                  ariaLabel="Fleet" value={fleetId} onChange={setFleetId}
-                  options={[{ value: "", label: "Any available fleet" }, ...fleets.map(f => ({ value: f.id, label: f.name, hint: f.type === "byoc" ? "BYOC" : "Managed" }))]}
-                />
-              </div>
-            )}
-            {repos.length > 0 && (
-              <div>
-                <label className={labelClass}>Repository URL <span className="text-zinc-600 normal-case font-normal">(override)</span></label>
-                <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)} placeholder="…or paste a URL" className={fieldClass} />
-              </div>
-            )}
-            <div>
-              <label className={labelClass}>Git ref {inlineData.ref && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
-              <input type="text" value={inlineData.ref || ref} onChange={e => setRef(e.target.value)} disabled={!!inlineData.ref} placeholder="main" className={`${fieldClass} ${inlineData.ref ? 'opacity-50 cursor-not-allowed' : ''}`} />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
+            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
+              <FolderGit2 className="w-3.5 h-3.5 text-stone-400" />
+              <span>Connected Repos</span>
             </div>
-            <div>
-              <label className={labelClass}>Target file <span className="text-zinc-600 normal-case font-normal">(optional)</span> {(inlineData.files && inlineData.files.length > 0) && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
-              <input type="text" value={(inlineData.files && inlineData.files.length > 0) ? inlineData.files[0] : file} onChange={e => setFile(e.target.value)} disabled={!!(inlineData.files && inlineData.files.length > 0)} placeholder="let the agent decide" className={`${fieldClass} ${(inlineData.files && inlineData.files.length > 0) ? 'opacity-50 cursor-not-allowed' : ''}`} />
-            </div>
-            <div>
-              <label className={labelClass}>Test command <span className="text-zinc-600 normal-case font-normal">(optional)</span> {inlineData.test_cmd && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
-              <input type="text" value={inlineData.test_cmd || testCmd} onChange={e => setTestCmd(e.target.value)} disabled={!!inlineData.test_cmd} placeholder="e.g. go test ./..." className={`${fieldClass} ${inlineData.test_cmd ? 'opacity-50 cursor-not-allowed' : ''}`} />
-            </div>
-            <div>
-              <label className={labelClass}>Max workers {inlineData.max_workers && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
-              <input type="number" min="1" max="10" value={inlineData.max_workers || maxWorkers} onChange={e => setMaxWorkers(parseInt(e.target.value) || 1)} disabled={!!inlineData.max_workers} className={`${fieldClass} ${inlineData.max_workers ? 'opacity-50 cursor-not-allowed' : ''}`} />
-            </div>
-            <div>
-              <label className={labelClass}>Architect model <span className="text-zinc-600 normal-case font-normal">(plans &amp; reviews)</span></label>
-              <Select
-                ariaLabel="Architect model" searchable value={architectModel} onChange={setArchitectModel}
-                options={[{ value: "", label: "Platform default" }, ...workerOptions.map(modelOption)]}
-                renderDetail={renderModelDetail}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Shared context {inlineData.reference_mode && <span className="text-green-500 normal-case font-normal ml-1">(set inline ✓)</span>}</label>
-              <button
-                type="button" role="switch" aria-checked={(inlineData.reference_mode || referenceMode) !== "off"}
-                aria-label="Use context from past jobs"
-                onClick={() => !inlineData.reference_mode && setReferenceMode(referenceMode === "off" ? "auto" : "off")}
-                disabled={!!inlineData.reference_mode}
-                className={`flex items-center gap-3 w-full h-[42px] px-3 rounded-lg border transition-colors ${(inlineData.reference_mode || referenceMode) !== "off" ? "border-[#93C645]/40 bg-[#93C645]/10" : "border-white/10 bg-black/20"} ${inlineData.reference_mode ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${referenceMode !== "off" ? "bg-[#93C645]" : "bg-white/15"}`}>
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${referenceMode !== "off" ? "left-4" : "left-0.5"}`} />
-                </span>
-                <span className="text-sm text-zinc-300">{referenceMode !== "off" ? "Using past jobs" : "Off"}</span>
-              </button>
-            </div>
-            {(inlineData.reference_mode || referenceMode) !== "off" && (
-              <div>
-                <label className={labelClass}>Context source</label>
-                <Select
-                  ariaLabel="Context source" value={inlineData.reference_mode || referenceMode} onChange={setReferenceMode}
-                  options={[{ value: "auto", label: "Auto — related past jobs" }, { value: "manual", label: "Manual — pick jobs" }]}
-                  className={inlineData.reference_mode ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}
-                />
-                {(inlineData.reference_mode || referenceMode) === "auto" && (
-                  <p className="text-xs text-amber-400/80 mt-1.5">Auto-selects related past jobs — may use extra tokens.</p>
-                )}
-              </div>
-            )}
-            {referenceMode === "manual" && !inlineData.reference_mode && (
-              <div className="md:col-span-2 lg:col-span-3">
-                <label className={labelClass}>Reference Jobs</label>
-                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-2 border border-white/5 rounded-lg bg-black/20">
-                  {jobs.map(j => (
-                    <label key={j.job_id} className="flex items-start gap-3 cursor-pointer p-2 hover:bg-white/5 rounded-md">
-                      <input 
-                        type="checkbox" 
-                        checked={referenceJobIds.includes(j.job_id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setReferenceJobIds([...referenceJobIds, j.job_id]);
-                          else setReferenceJobIds(referenceJobIds.filter(id => id !== j.job_id));
-                        }}
-                        className="mt-1 accent-[#93C645]"
-                      />
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-mono text-xs text-zinc-400">{shortId(j.job_id)}</span>
-                        <span className="text-sm text-zinc-200 line-clamp-1 truncate">{j.task}</span>
-                      </div>
-                    </label>
-                  ))}
-                  {jobs.length === 0 && <div className="text-zinc-500 text-sm p-2">No past jobs available.</div>}
-                </div>
-              </div>
-            )}
+            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{repos.length}</p>
           </div>
-        )}
 
-        {/* Why Launch will not do what you expect, stated before you press it. */}
-        {(outOfMinutes || atConcurrencyLimit || isWorkerExhausted) && (() => {
-          const fallbackModel = findFallbackNoCostModel(catalogModels, allowance);
-          return (
-            <div className="pt-3 mt-1 space-y-2">
-              {isWorkerExhausted && (
-                <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-red-300">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                    <span>
-                      <strong>{workerAllowanceStatus.tierLabel} token allowance is exhausted</strong> until the 1st of next month.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {fallbackModel && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setWorkerModel(fallbackModel);
-                          if (inlineData.model) {
-                            setInlineData((prev) => ({ ...prev, model: fallbackModel }));
-                          }
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-[#93C645] text-[#0B141D] font-semibold hover:bg-[#a4d656] transition-colors"
-                      >
-                        ⚡ Switch to {fallbackModel} (No-Cost)
-                      </button>
-                    )}
-                    <Link
-                      href="/integrations"
-                      className="px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors"
-                    >
-                      Connect API Key →
-                    </Link>
-                  </div>
-                </div>
-              )}
-              {outOfMinutes && (
-                <div className="flex items-center gap-2 text-sm text-red-400">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>
-                    Out of agent-minutes for this month, so new tasks will not start.
-                    <Link href="/settings#plan" className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
-                      Review plan and usage →
-                    </Link>
-                  </span>
-                </div>
-              )}
-              {atConcurrencyLimit && !outOfMinutes && (
-                <div className="flex items-center gap-2 text-sm text-amber-400/90">
-                  <Clock className="w-4 h-4 shrink-0" />
-                  <span>
-                    {u?.concurrent_jobs_running} of {u?.max_concurrent_jobs} concurrent
-                    {" "}job{u?.max_concurrent_jobs === 1 ? "" : "s"} running — this task will queue until one finishes.
-                  </span>
-                </div>
-              )}
+          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
+            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
+              <GitPullRequest className="w-3.5 h-3.5 text-stone-400" />
+              <span>PRs Delivered</span>
             </div>
-          );
-        })()}
-
-        {/* Status line */}
-        {(submitError || submitSuccess) && (
-          <div className="pt-3 mt-1">
-            {submitError && (() => {
-              // Plan matters: a Free org never goes through paid activation, so
-              // it must never be told to activate.
-              const err = parseActionableError(submitError, { plan: u?.plan });
-              return (
-                <div className="flex items-center gap-2 text-red-400 text-sm">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>
-                    {err.message}
-                    {err.actionHref && err.actionLabel && (
-                      <Link href={err.actionHref} className="underline ml-1.5 font-semibold text-red-300 hover:text-white transition-colors">
-                        {err.actionLabel} →
-                      </Link>
-                    )}
-                  </span>
-                </div>
-              );
-            })()}
-            {submitSuccess && (
-              <div className="flex items-center gap-2 text-green-400 text-sm">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                Launched — <button className="underline" onClick={() => setActiveDrawerTaskId(submitSuccess)}>{shortId(submitSuccess)}</button>
-              </div>
-            )}
+            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{prsDeliveredCount}</p>
           </div>
-        )}
+
+          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
+            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Verified Passed</span>
+            </div>
+            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{verifiedPassedCount}</p>
+          </div>
+
+          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
+            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
+              <Server className="w-3.5 h-3.5 text-stone-400" />
+              <span>Private Runners</span>
+            </div>
+            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{privateRunnersCount}</p>
+          </div>
+        </div>
       </div>
 
-      {/* Filter Bar */}
-      {jobs.length > 0 && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/[0.03] border border-white/5 relative z-20">
-          {/* Status filter chips */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { key: "all", label: "All", count: counts.all },
-              ...FILTERABLE_STATUSES.map(s => ({
-                key: s,
-                // "QUEUED" -> "Queued": the chips read as words, not enum values.
-                label: s.charAt(0) + s.slice(1).toLowerCase(),
-                count: counts[s],
-              })),
-            ].map(chip => {
-              const isActive = statusFilter.toLowerCase() === chip.key.toLowerCase();
+      <hr className="border-sand-200/80" />
+
+      {/* 3. MONTHLY CAPACITY & LIMITS (HARDWARE SEGMENTED METERS) */}
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-stone-900">Monthly Capacity & Limits</h2>
+            <p className="text-xs text-stone-500 mt-0.5">Current usage across parallel agent workers, monthly AI tokens, and workspace cache.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/spend"
+              className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1"
+            >
+              <Zap className="w-3 h-3 fill-current" />
+              <span>Upgrade to Pro</span>
+            </Link>
+            <span className="px-2.5 py-1 rounded-lg bg-sand-150 text-stone-800 text-[11px] font-mono font-bold uppercase">
+              PLAN: {usage?.plan || "FREE"} ({maxWorkers} WORKERS CAP)
+            </span>
+          </div>
+        </div>
+
+        {/* Meter 1: Active Workers */}
+        <div className="space-y-1.5 p-3.5 rounded-2xl bg-sand-50/60 border border-sand-200">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-stone-700">Active Agent Workers</span>
+          </div>
+          <SegmentedMeter totalTicks={36} activeTicks={workerTicks} activeColorClass="meter-tick-active-emerald" />
+          <div className="flex items-center justify-between text-xs text-stone-500 font-mono">
+            <span>Active: <strong className="text-stone-800">{activeWorkers} of {maxWorkers} Workers ({workerPercent}%)</strong></span>
+            <span>Concurrent Limit: {maxWorkers} Workers</span>
+          </div>
+        </div>
+
+        {/* Meter 2: Monthly Token Allowance */}
+        <div className="space-y-1.5 p-3.5 rounded-2xl bg-sand-50/60 border border-sand-200">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-stone-700">Monthly AI Token Allowance (Anthropic, Gemini & OpenAI)</span>
+          </div>
+          <SegmentedMeter totalTicks={36} activeTicks={tokenTicks} activeColorClass="meter-tick-active-orange" />
+          <div className="flex items-center justify-between text-xs text-stone-500 font-mono">
+            <span>Used: <strong className="text-stone-800">{(tokensUsed / 1000000).toFixed(2)}M of {(tokenLimit / 1000000).toFixed(2)}M Tokens ({tokenPercent}%)</strong></span>
+            <span>Monthly Budget: {(tokenLimit / 1000000).toFixed(2)}M Tokens</span>
+          </div>
+        </div>
+
+        {/* Meter 3: Sandbox Memory & Cache */}
+        <div className="space-y-1.5 p-3.5 rounded-2xl bg-sand-50/60 border border-sand-200">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-stone-700">Sandbox Memory & Workspace Cache</span>
+          </div>
+          <SegmentedMeter totalTicks={36} activeTicks={storageTicks} activeColorClass="meter-tick-active-kiwi" />
+          <div className="flex items-center justify-between text-xs text-stone-500 font-mono">
+            <span>Allocated: <strong className="text-stone-800">{storageGB} GB / {storageLimitGB} GB ({storagePercent}%)</strong></span>
+            <span>Cache Hit Rate: {cacheStats?.cache_hit_rate_pct ? `${cacheStats.cache_hit_rate_pct.toFixed(1)}%` : "N/A"}</span>
+          </div>
+        </div>
+      </div>
+
+      <hr className="border-sand-200/80" />
+
+      {/* 4. TASK EXECUTION QUEUE */}
+      <div className="space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-stone-900">Task Execution Queue</h2>
+            <p className="text-xs text-stone-500 mt-0.5">Click to inspect real-time progress, live logs, code diffs, and verification receipts.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1 text-xs">
+            <button
+              onClick={() => setStatusFilter("all")}
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all ${
+                statusFilter === "all" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              }`}
+            >
+              All ({(jobs || []).length})
+            </button>
+            <button
+              onClick={() => setStatusFilter("running")}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
+                statusFilter === "running" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              }`}
+            >
+              Running ({(jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length})
+            </button>
+            <button
+              onClick={() => setStatusFilter("waiting")}
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1 ${
+                statusFilter === "waiting" ? "bg-amber-600 text-white shadow-2xs" : "text-amber-800 bg-amber-50 hover:bg-amber-100"
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span>Needs Input ({(jobs || []).filter((j) => j.status === "WAITING_USER").length})</span>
+            </button>
+            <button
+              onClick={() => setStatusFilter("plan")}
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1 border border-indigo-200/80 ${
+                statusFilter === "plan" ? "bg-indigo-600 text-white shadow-2xs" : "text-indigo-900 bg-indigo-50 hover:bg-indigo-100"
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+              <span>📋 Plan Review ({(jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.status === "AWAITING_PLAN_APPROVAL" || j.requires_plan_approval).length})</span>
+            </button>
+            <button
+              onClick={() => setStatusFilter("pr_created")}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
+                statusFilter === "pr_created" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              }`}
+            >
+              PR Ready ({(jobs || []).filter((j) => j.status === "SUCCEEDED" || (j.pr_urls && j.pr_urls.length > 0)).length})
+            </button>
+          </div>
+        </div>
+
+        {/* Task Cards List */}
+        {filteredJobs.length === 0 ? (
+          <div className="p-8 rounded-2xl border border-sand-200 bg-sand-50/50 text-center space-y-3">
+            <p className="text-xs text-stone-500">No tasks in execution queue for this filter.</p>
+            <button
+              onClick={() => setShowComposer(true)}
+              className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs"
+            >
+              + Create New Task
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredJobs.map((job) => {
+              const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval;
+              const isWaitingInput = job.status === "WAITING_USER";
+              const isRunning = job.status === "LEASED" || job.status === "RUNNING";
+              const isSucceeded = job.status === "SUCCEEDED";
+
               return (
-                <button
-                  key={chip.key}
-                  type="button"
-                  onClick={() => setStatusFilter(chip.key)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                    isActive
-                      ? "bg-white/15 text-white border border-white/20 shadow-sm"
-                      : "text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent"
+                <div
+                  key={job.job_id}
+                  onClick={() => setActiveDrawerTaskId(job.job_id)}
+                  className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs group bg-white ${
+                    isPlanReview
+                      ? "border-sand-200 border-l-4 border-l-indigo-600 bg-gradient-to-r from-indigo-50/35 via-white to-white hover:border-indigo-300"
+                      : isWaitingInput
+                      ? "border-sand-200 border-l-4 border-l-amber-500 bg-gradient-to-r from-amber-50/35 via-white to-white hover:border-amber-300"
+                      : isRunning
+                      ? "border-sand-200 border-l-4 border-l-emerald-500 hover:border-emerald-300"
+                      : "border-sand-200 hover:border-sand-300"
                   }`}
                 >
-                  <span>{chip.label}</span>
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${isActive ? "bg-white/20 text-white" : "bg-white/5 text-zinc-500"}`}>
-                    {chip.count}
-                  </span>
-                </button>
+                  {/* Header Row */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-stone-900 bg-sand-100 px-2 py-0.5 rounded-md border border-sand-200">
+                        #{job.job_id.slice(0, 8)}
+                      </span>
+                      <span className="text-xs font-mono text-stone-600">
+                        {job.repo || "acme-corp/core-api"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                          isPlanReview
+                            ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                            : isWaitingInput
+                            ? "bg-amber-50 text-amber-800 border-amber-200"
+                            : isRunning
+                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                            : isSucceeded
+                            ? "bg-kiwi-50 text-kiwi-800 border-kiwi-200"
+                            : "bg-rose-50 text-rose-700 border-rose-200"
+                        }`}
+                      >
+                        {job.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <h3 className="text-xs font-bold text-stone-900 mb-2.5 leading-snug">
+                    {job.task || "Autonomous execution task"}
+                  </h3>
+
+                  {/* 4-Stage Balanced Pipeline */}
+                  <div className="grid grid-cols-4 gap-1.5 p-1 bg-sand-50 rounded-xl border border-sand-200 text-[10px] font-mono mb-3">
+                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      isPlanReview || isWaitingInput || isRunning || isSucceeded
+                        ? "bg-white border-sand-200 text-emerald-800 font-semibold"
+                        : "text-stone-400 border-transparent"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isPlanReview || isWaitingInput || isRunning || isSucceeded ? "bg-emerald-500" : "bg-stone-300"
+                      }`} />
+                      <span>1. Plan ✓</span>
+                    </div>
+
+                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      isPlanReview
+                        ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
+                        : isWaitingInput || isRunning || isSucceeded
+                        ? "bg-white border-sand-200 text-emerald-800 font-semibold"
+                        : "text-stone-400 border-transparent"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isPlanReview ? "bg-indigo-600 animate-ping" : isWaitingInput || isRunning || isSucceeded ? "bg-emerald-500" : "bg-stone-300"
+                      }`} />
+                      <span>2. Review</span>
+                    </div>
+
+                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      isRunning || isWaitingInput
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-bold"
+                        : isSucceeded
+                        ? "bg-white border-sand-200 text-emerald-800"
+                        : "text-stone-400 border-transparent"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isRunning ? "bg-emerald-500 animate-pulse" : isSucceeded ? "bg-emerald-500" : "bg-stone-300"
+                      }`} />
+                      <span>3. Code & Test</span>
+                    </div>
+
+                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      isSucceeded
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-bold"
+                        : "text-stone-400 border-transparent"
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isSucceeded ? "bg-emerald-500" : "bg-stone-300"
+                      }`} />
+                      <span>4. PR Ready</span>
+                    </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono pt-1">
+                    <div className="flex items-center gap-2">
+                      <span>{job.architect_model ? job.architect_model.split("/").pop() : "Claude Sonnet"} + {job.worker_model ? job.worker_model.split("/").pop() : "Claude Haiku"}</span>
+                      <span>•</span>
+                      <span className="text-kiwi-700 font-bold">{job.cost_usd ? `$${job.cost_usd.toFixed(2)}` : "$0.00"}</span>
+                      {job.spend_cap_usd && (
+                        <>
+                          <span>•</span>
+                          <span className="text-stone-400">${job.spend_cap_usd.toFixed(2)} cap</span>
+                        </>
+                      )}
+                    </div>
+
+                    <span className="text-stone-400 group-hover:text-stone-800 font-sans font-semibold text-xs flex items-center gap-1">
+                      <span>{isPlanReview ? "Review Plan" : isWaitingInput ? "Provide Input" : "Inspect"}</span>
+                      <span>&rarr;</span>
+                    </span>
+                  </div>
+                </div>
               );
             })}
           </div>
+        )}
+      </div>
 
-          {/* Search, Repo, and Sort controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Search Input */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Filter jobs…"
-                className="field text-xs pl-8 pr-7 py-1.5 h-8 w-44 md:w-56"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+      {/* 5. TASK COMPOSER MODAL / SHEET */}
+      {showComposer && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-sand-200 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-sand-150 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold bg-kiwi-100 text-kiwi-800 px-2 py-0.5 rounded">NEW TASK</span>
+                <h2 className="text-base font-bold text-stone-900">Assign Work to AI Agent</h2>
+              </div>
+              <button onClick={() => setShowComposer(false)} className="text-stone-400 hover:text-stone-800 text-xs font-semibold">
+                ✕ Close
+              </button>
             </div>
 
-            {/* Repo Select */}
-            {availableRepos.length > 0 && (
-              <Select
-                variant="chip"
-                searchable
-                label="Repo"
-                ariaLabel="Filter by repo"
-                value={repoFilter}
-                onChange={setRepoFilter}
-                options={repoOptions}
-              />
-            )}
+            <form onSubmit={handleLaunch} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-800 mb-1">Task Objective</label>
+                <textarea
+                  value={taskPrompt}
+                  onChange={(e) => setTaskPrompt(e.target.value)}
+                  placeholder="e.g. Refactor the JWT authentication middleware in pkg/auth to use Ed25519 asymmetric verification and add race-condition unit tests in jwt_test.go"
+                  rows={4}
+                  className="w-full p-3 rounded-xl border border-sand-300 focus:border-stone-900 text-xs font-sans text-stone-900 outline-none leading-relaxed"
+                />
+              </div>
 
-            {/* Sort Select */}
-            <Select
-              variant="chip"
-              label="Sort"
-              ariaLabel="Sort jobs"
-              value={sortBy}
-              onChange={(v) => setSortBy(v as JobSortOption)}
-              options={[
-                { value: "newest", label: "Newest first" },
-                { value: "oldest", label: "Oldest first" },
-                { value: "status", label: "By status" },
-              ]}
-            />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Target Repository</label>
+                  <input
+                    type="text"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-sand-200 bg-sand-50 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Verification Guard</label>
+                  <input
+                    type="text"
+                    value={testCmd}
+                    onChange={(e) => setTestCmd(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-sand-200 bg-sand-50 font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-sand-150">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-stone-500">Est: <strong className="text-kiwi-700">$0.18</strong></span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowComposer(false)}
+                    className="px-4 py-2 rounded-xl border border-sand-200 bg-white hover:bg-sand-100 text-xs font-semibold text-stone-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !taskPrompt.trim()}
+                    className="px-5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current text-kiwi-400" />
+                    <span>Launch Task</span>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Grid of Jobs */}
-      {jobs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center text-center py-20 text-zinc-500">
-          <Server className="w-10 h-10 mb-3 text-zinc-700" />
-          No jobs yet — describe a goal above and launch your first one.
-        </div>
-      ) : sortedJobs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center text-center py-16 text-zinc-400 bg-white/[0.02] border border-white/5 rounded-2xl">
-          <Filter className="w-8 h-8 mb-3 text-zinc-600" />
-          <p className="text-sm font-medium text-zinc-300">No jobs match these filters</p>
-          <p className="text-xs text-zinc-500 mt-1 max-w-sm">Try searching for a different term or clearing active status and repository filters.</p>
-          <button
-            type="button"
-            onClick={() => {
-              setStatusFilter("all");
-              setRepoFilter("all");
-              setSearchQuery("");
-              setSortBy("newest");
-            }}
-            className="btn-ghost mt-4"
-          >
-            Clear filters
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-8 pb-32 relative z-10">
-          {dateGroups.map(group => {
-            if (group.items.length === 0) return null;
-            return (
-              <div key={group.label} className="flex flex-col">
-                <div className="sticky top-0 z-20 py-2 bg-[var(--background)]/90 backdrop-blur-md mb-3 flex items-center gap-2 border-b border-white/5">
-                  <p className="eyebrow"><span className="dot"></span> {group.label}</p>
-                  <span className="text-[10px] font-mono text-zinc-500 bg-white/5 rounded-full px-2 py-0.5">{group.items.length}</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {group.items.map(job => {
-                    const m = statusOf(job.status);
-                    const Icon = m.Icon;
-                    return (
-                      <div
-                        key={job.job_id}
-                        style={{
-                          background: `linear-gradient(0deg, ${m.wash}, ${m.wash}), ${CARD_BASE}`,
-                          borderColor: m.border,
-                          boxShadow: `0 4px 30px rgba(0,0,0,0.5), 0 0 15px -2px ${m.glow}`,
-                        }}
-                        className="group relative text-left rounded-2xl p-4 border flex flex-col h-full card-hover"
-                      >
-                        {/* Stretched click target overlay (valid HTML5 semantics, no button nesting) */}
-                        <button
-                          type="button"
-                          aria-label={`View details for job ${shortId(job.job_id)}`}
-                          onClick={() => openJobDrawer(job.job_id)}
-                          className="absolute inset-0 z-0 rounded-2xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--green)]/60"
-                        />
-
-                        {/* Card inner content sitting above click overlay */}
-                        <div className="relative z-10 pointer-events-none flex flex-col h-full">
-                          <div className="flex items-center justify-between gap-2 mb-3">
-                            <span title={job.job_id} className="font-mono text-xs text-zinc-500 truncate min-w-0 group-hover:text-zinc-300 transition-colors">
-                              {shortId(job.job_id)}
-                            </span>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <div
-                                className="group/status inline-flex items-center gap-1.5 rounded-full border px-1.5 py-0.5 hover:px-2 text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all"
-                                style={{ color: m.color, borderColor: m.border, background: m.wash }}
-                              >
-                                <Icon className={`w-3 h-3 shrink-0 ${m.spin ? "animate-spin" : ""}`} />
-                                <span className="hidden group-hover/status:inline">{m.label}</span>
-                              </div>
-                              <div className="flex items-center gap-1 pointer-events-auto" onClick={e => e.stopPropagation()}>
-                                {cardBusyJob === job.job_id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
-                                ) : (
-                                  <>
-                                    {(job.status === "QUEUED" || job.status === "RUNNING") && (
-                                      <button
-                                        type="button"
-                                        onClick={e => handleCardCancel(e, job.job_id)}
-                                        data-confirm-action
-                                        title="Cancel job"
-                                        className={`group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border transition-all ${
-                                          confirmCancelJob === job.job_id
-                                            ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-                                            : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                                        }`}
-                                      >
-                                        <Ban className="w-3 h-3 shrink-0" />
-                                        <span className="hidden group-hover/btn:inline whitespace-nowrap">{confirmCancelJob === job.job_id ? "Confirm cancel?" : "Cancel"}</span>
-                                      </button>
-                                    )}
-                                    {/* Retry requeues failed AND cancelled tasks (see store.RetryJob),
-                                        so a job you called off is resumable straight from the card
-                                        rather than only from the drawer. */}
-                                    {(job.status === "FAILED" || job.status === "CANCELLED") && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={e => handleCardRetry(e, job.job_id)}
-                                          title="Retry job"
-                                          className="group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-blue-300 hover:border-blue-500/30 hover:bg-blue-500/10 transition-all"
-                                        >
-                                          <RotateCcw className="w-3 h-3 shrink-0" />
-                                          <span className="hidden group-hover/btn:inline whitespace-nowrap">Retry</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={e => {
-                                            e.stopPropagation();
-                                            handleRerunWithEdits(job);
-                                          }}
-                                          title="Re-run with edits"
-                                          className="group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border border-white/10 text-zinc-400 hover:text-[#93C645] hover:border-[#93C645]/30 hover:bg-[#93C645]/10 transition-all"
-                                        >
-                                          <Copy className="w-3 h-3 shrink-0" />
-                                          <span className="hidden group-hover/btn:inline whitespace-nowrap">Re-run</span>
-                                        </button>
-                                      </>
-                                    )}
-                                    {(job.status === "SUCCEEDED" || job.status === "FAILED" || job.status === "CANCELLED") && (
-                                      <button
-                                        type="button"
-                                        onClick={e => handleCardDelete(e, job.job_id)}
-                                        data-confirm-action
-                                        title="Delete job"
-                                        className={`group/btn flex items-center gap-1 px-1.5 py-0.5 hover:px-2 rounded text-[10px] font-medium border transition-all ${
-                                          confirmDeleteJob === job.job_id
-                                            ? "border-red-500/50 bg-red-500/20 text-red-300"
-                                            : "border-white/10 text-zinc-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10"
-                                        }`}
-                                      >
-                                        <Trash2 className="w-3 h-3 shrink-0" />
-                                        <span className="hidden group-hover/btn:inline whitespace-nowrap">{confirmDeleteJob === job.job_id ? "Confirm delete?" : "Delete"}</span>
-                                      </button>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          <h3 className="text-sm font-medium text-white mb-2 line-clamp-2 leading-snug">
-                            {job.task?.trim() || `Job ${shortId(job.job_id)}`}
-                          </h3>
-
-                          {/* A row is a thread now. The chip appears only when a
-                              review comment actually continued the work — a plan
-                              with three workers is not three runs — and the badge
-                              says what moved it last, so a thread continued an
-                              hour ago does not still read as "submitted". */}
-                          {(job.continuation_count ?? 0) > 0 && (
-                            <div className="flex items-center gap-1.5 mb-2">
-                              <Link
-                                href={`/tasks/${job.job_id}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/6 text-zinc-400 hover:text-zinc-200"
-                              >
-                                {(job.continuation_count ?? 0) + 1} runs
-                              </Link>
-                              {job.latest_origin === "pr_comment" && (
-                                <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                                  comment
-                                </span>
-                              )}
-                              {job.latest_origin === "slack" && (
-                                <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                                  slack
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {cardNotice?.jobId === job.job_id && (
-                            <div
-                              role="status"
-                              aria-live="polite"
-                              className={`mb-3 p-2 rounded-lg text-xs flex items-start gap-1.5 border pointer-events-auto ${
-                                cardNotice.tasksAffected === 0
-                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
-                                  : "bg-green-500/10 border-green-500/20 text-green-300"
-                              }`}
-                              onClick={e => e.stopPropagation()}
-                            >
-                              {cardNotice.tasksAffected === 0 ? (
-                                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                              ) : (
-                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                              )}
-                              <span className="leading-tight">{cardNotice.message}</span>
-                            </div>
-                          )}
-
-                          <div className="pt-3 border-t border-white/5 mt-auto flex items-center justify-between gap-2 text-xs text-zinc-400">
-                            {/* Left: compact PR count popover or repo or time */}
-                            <div className="min-w-0 relative pointer-events-auto">
-                              {job.pr_urls && job.pr_urls.length > 0 ? (
-                                <>
-                                  <button
-                                    data-pr-trigger
-                                    onClick={(e) => { e.stopPropagation(); setOpenPrJob(openPrJob === job.job_id ? null : job.job_id); }}
-                                    className="flex items-center gap-1.5 rounded-full border border-green-500/25 bg-green-500/10 pl-2 pr-2.5 py-1 text-green-300 hover:text-green-200 hover:border-green-500/40 hover:bg-green-500/15 transition-colors"
-                                    title={`${job.pr_urls.length} pull request${job.pr_urls.length > 1 ? "s" : ""}`}
-                                    aria-expanded={openPrJob === job.job_id}
-                                  >
-                                    <GitPullRequest className="w-3.5 h-3.5 shrink-0" />
-                                    <span className="font-mono text-[11px] font-semibold">{job.pr_urls.length}</span>
-                                    <span className="text-[11px]">PR{job.pr_urls.length > 1 ? "s" : ""}</span>
-                                  </button>
-                                  {openPrJob === job.job_id && (
-                                    <div
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="pr-popover absolute bottom-full left-0 mb-2 z-50 w-72 rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
-                                    >
-                                      <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-white/5">
-                                        <GitPullRequest className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                                        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Pull requests</span>
-                                        <span className="ml-auto font-mono text-[10px] text-zinc-400 bg-white/5 rounded-full px-1.5 py-0.5">{job.pr_urls.length}</span>
-                                      </div>
-                                      <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto">
-                                        {job.pr_urls.map((url) => (
-                                          <a key={url} href={url} target="_blank" rel="noreferrer"
-                                            onClick={() => setOpenPrJob(null)}
-                                            className="group/pr flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-white/[0.06] transition-colors">
-                                            <span className="w-6 h-6 rounded-md bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0">
-                                              <GitPullRequest className="w-3.5 h-3.5 text-green-400" />
-                                            </span>
-                                            <span className="font-mono truncate flex-1">{prLabel(url)}</span>
-                                            <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover/pr:text-zinc-300 transition-colors shrink-0" />
-                                          </a>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </>
-                              ) : job.repo ? (
-                                <span className="flex items-center gap-1.5 font-mono text-zinc-400 truncate" title={job.repo}>
-                                  <FolderGit2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />{formatRepoName(job.repo)}
-                                </span>
-                              ) : null}
-                              {/* Always rendered, not just as a repo-less fallback. It used
-                                  to be the `else` branch, so a job with a repo — the normal
-                                  case — showed no time at all, and one without showed a bare
-                                  clock that said nothing about which day. */}
-                              <span
-                                className="flex items-center gap-1.5 text-zinc-500 shrink-0"
-                                title={exactTime(job.created_at)}
-                              >
-                                <Clock className="w-3 h-3 shrink-0" />{shortTime(job.created_at)}
-                              </span>
-                            </div>
-                            {/* Right: task count */}
-                            <div className="flex items-center gap-1.5 shrink-0" title={`${job.task_count} task${job.task_count !== 1 ? "s" : ""}`}>
-                              <Bot className="w-3.5 h-3.5 text-zinc-500" />
-                              <span>{job.task_count} task{job.task_count !== 1 ? "s" : ""}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-          {sortedJobs.length > displayLimit && (
-            <div className="flex justify-center pt-4">
-              <button
-                type="button"
-                onClick={() => setDisplayLimit(l => l + 60)}
-                className="px-6 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-semibold text-zinc-300 transition-colors"
-              >
-                Show more ({sortedJobs.length - displayLimit} remaining)
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      <TaskDrawer taskId={activeDrawerTaskId} onClose={closeJobDrawer} onRerunWithEdits={handleRerunWithEdits} />
+      {/* TASK DRAWER */}
+      <TaskDrawer
+        taskId={activeDrawerTaskId}
+        onClose={() => setActiveDrawerTaskId(null)}
+      />
     </div>
   );
 }
 
-export default function CommandCenter() {
+export default function DashboardPage() {
   return (
-    <Suspense fallback={<LoadingState label="Loading command center…" className="min-h-[70vh]" />}>
+    <Suspense fallback={<div className="p-12 text-center flex flex-col items-center gap-3"><ThinkingOrb state="working" size={64} /><span className="text-xs text-stone-400 font-mono">Loading dashboard...</span></div>}>
       <CommandCenterContent />
     </Suspense>
   );

@@ -2,24 +2,40 @@
 
 import { useEffect, useState } from "react";
 import { client, type PostMergeMonitor } from "@/lib/api";
-import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest, Plus } from "lucide-react";
+import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest, Plus, ShieldCheck, Activity } from "lucide-react";
+import { KiwiCoreSpinner } from "@/components/KiwiLoaders";
 
-// Monitor statuses are a distinct state machine from job statuses (statusColors.ts
-// is keyed to QUEUED/RUNNING/... and has no MONITORING/VERIFIED/REGRESSION), so
-// this is its own small map rather than overloading that one.
-const STATUS_META: Record<PostMergeMonitor["status"], { label: string; Icon: typeof Radar; color: string; border: string; wash: string }> = {
-  MONITORING: { label: "Monitoring", Icon: Loader2, color: "#5A9DF5", border: "rgba(59,130,246,0.34)", wash: "rgba(59,130,246,0.15)" },
-  VERIFIED: { label: "Verified", Icon: CheckCircle2, color: "#93C645", border: "rgba(147,198,69,0.30)", wash: "rgba(147,198,69,0.13)" },
-  REGRESSION: { label: "Regression", Icon: XCircle, color: "#EF6060", border: "rgba(239,68,68,0.30)", wash: "rgba(239,68,68,0.14)" },
-  CANCELLED: { label: "Cancelled", Icon: Ban, color: "#A0A0A0", border: "rgba(160,160,160,0.30)", wash: "rgba(160,160,160,0.10)" },
+const STATUS_META: Record<PostMergeMonitor["status"], { label: string; Icon: any; colorClass: string; badgeClass: string }> = {
+  MONITORING: {
+    label: "Monitoring",
+    Icon: Loader2,
+    colorClass: "text-sky-600",
+    badgeClass: "bg-sky-50 text-sky-800 border-sky-200",
+  },
+  VERIFIED: {
+    label: "Verified",
+    Icon: CheckCircle2,
+    colorClass: "text-emerald-600",
+    badgeClass: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  },
+  REGRESSION: {
+    label: "Regression",
+    Icon: XCircle,
+    colorClass: "text-rose-600",
+    badgeClass: "bg-rose-50 text-rose-800 border-rose-200",
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    Icon: Ban,
+    colorClass: "text-stone-400",
+    badgeClass: "bg-sand-100 text-stone-600 border-sand-200",
+  },
 };
 
 export default function MonitorsPage() {
   const [monitors, setMonitors] = useState<PostMergeMonitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -27,158 +43,122 @@ export default function MonitorsPage() {
   const load = async () => {
     try {
       const res = await client.listMonitors();
-      setMonitors(res.monitors);
+      setMonitors(res.monitors || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load monitors");
     } finally {
       setLoading(false);
     }
   };
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+
   useEffect(() => { load(); }, []);
-
-  // Stand a primed confirm down on Escape or any click outside the primed
-  // button — same convention as the Tasks board's card cancel/delete buttons.
-  useEffect(() => {
-    if (!confirmCancelId) return;
-    const standDown = () => setConfirmCancelId(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") standDown(); };
-    const onDown = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest("[data-confirm-action]")) return;
-      standDown();
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onDown);
-    };
-  }, [confirmCancelId]);
-
-  const handleCancel = async (id: string) => {
-    if (confirmCancelId !== id) {
-      setConfirmCancelId(id);
-      return;
-    }
-    setConfirmCancelId(null);
-    setError("");
-    setBusyId(id);
-    try {
-      await client.cancelMonitor(id);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to cancel monitor");
-    } finally {
-      setBusyId(null);
-    }
-  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!prUrl.trim()) return;
     setCreateError(null);
     setCreating(true);
     try {
-      await client.createMonitor(prUrl);
+      await client.createMonitor(prUrl.trim());
       setPrUrl("");
       await load();
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create monitor");
+    } catch (err: any) {
+      setCreateError(err?.message || "Failed to create monitor");
     } finally {
       setCreating(false);
     }
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col text-white">
-      <div className="mb-8">
-        <h1 className="text-3xl font-light tracking-tight mb-2">Post-Merge Monitors</h1>
-        <p className="text-zinc-400">
-          Kiwi watches a merged PR&apos;s telemetry for a window after deploy and flags a regression
-          if one appears.
-        </p>
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-bold text-stone-900">Post-Merge PR Watchdogs</h1>
+        <p className="text-xs text-stone-500">Continuous telemetry verification after pull request merge & deploy.</p>
       </div>
 
-      {error && <div className="flex items-center gap-2 text-red-400 text-sm mb-4"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}
-
-      <div className="glass-panel border border-white/10 rounded-2xl p-5 mb-8">
-        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Watch a merged PR</label>
-        <form onSubmit={handleCreate} className="flex gap-3">
-          <input
-            value={prUrl}
-            onChange={e => setPrUrl(e.target.value)}
-            placeholder="https://github.com/org/repo/pull/123"
-            aria-label="Pull request URL"
-            className="w-full field text-sm"
-          />
-          <button type="submit" disabled={creating || !prUrl.trim()}
-            className="flex items-center justify-center gap-2 btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50 h-[38px] shrink-0">
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Add
-          </button>
-        </form>
-        {createError && <div className="flex items-center gap-2 text-red-400 text-sm mt-3"><AlertCircle className="w-4 h-4 shrink-0" />{createError}</div>}
-      </div>
-
-      <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Monitors</h2>
-      {loading ? (
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading monitors...
-        </div>
-      ) : monitors.length === 0 ? (
-        <p className="text-zinc-500 text-sm">No monitors yet.</p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {monitors.map(m => {
-            const meta = STATUS_META[m.status] ?? STATUS_META.MONITORING;
-            const StatusIcon = meta.Icon;
-            return (
-              <div key={m.id} className="glass-panel p-4 border border-white/10 rounded-xl flex items-center justify-between group">
-                <div className="flex items-center gap-3 min-w-0">
-                  <GitPullRequest className="w-5 h-5 text-zinc-400 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-sm text-white truncate">
-                      {m.repo} <span className="text-zinc-500">#{m.pr_number}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded shrink-0">
-                        {m.origin === "kiwi_pr" ? "Kiwi-authored" : "Watching"}
-                      </span>
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0"
-                        style={{ color: meta.color, borderColor: meta.border, background: meta.wash }}
-                      >
-                        <StatusIcon className={`w-3 h-3 shrink-0 ${m.status === "MONITORING" ? "animate-spin" : ""}`} />
-                        {meta.label}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-zinc-600 truncate mt-1">
-                      Window ends {new Date(m.window_ends_at).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-                {m.status === "MONITORING" && (
-                  busyId === m.id ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-zinc-400 shrink-0" />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleCancel(m.id)}
-                      data-confirm-action
-                      className={`shrink-0 flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium border transition-all ${
-                        confirmCancelId === m.id
-                          ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-                          : "border-white/10 text-zinc-400 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                      }`}
-                    >
-                      <Ban className="w-3.5 h-3.5 shrink-0" />
-                      {confirmCancelId === m.id ? "Confirm cancel?" : "Cancel"}
-                    </button>
-                  )
-                )}
-              </div>
-            );
-          })}
+      {error && (
+        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
+
+      {/* Add Watchdog Form */}
+      <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-2">
+        <label className="block text-[11px] font-bold text-stone-700">Watch a merged pull request</label>
+        <form onSubmit={handleCreate} className="flex gap-2">
+          <input
+            value={prUrl}
+            onChange={(e) => setPrUrl(e.target.value)}
+            placeholder="https://github.com/org/repo/pull/123"
+            aria-label="Pull request URL"
+            className="flex-1 p-2.5 rounded-xl border border-sand-200 bg-sand-50/50 text-xs font-mono text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-900"
+          />
+          <button
+            type="submit"
+            disabled={creating || !prUrl.trim()}
+            className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 transition-all shadow-2xs"
+          >
+            {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>Add Watchdog</span>
+          </button>
+        </form>
+        {createError && (
+          <div className="text-xs text-rose-600 flex items-center gap-1.5 pt-1">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{createError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Monitors List */}
+      <div className="rounded-2xl border border-sand-200 bg-white overflow-hidden shadow-2xs">
+        <div className="px-4 py-3 border-b border-sand-200 bg-sand-50/50 flex items-center justify-between">
+          <span className="text-xs font-bold text-stone-900">Active Monitors ({monitors.length})</span>
+          <span className="text-[10px] font-mono text-stone-500">p99 Latency & Error Rate Telemetry</span>
+        </div>
+
+        {loading ? (
+          <div className="py-12 flex flex-col items-center justify-center gap-2">
+            <KiwiCoreSpinner size="md" />
+            <span className="text-xs font-mono text-stone-500">Loading telemetry monitors...</span>
+          </div>
+        ) : monitors.length === 0 ? (
+          <div className="p-8 text-center text-xs text-stone-500 space-y-2">
+            <Radar className="w-6 h-6 mx-auto text-stone-400" />
+            <p>No active pull request watchdogs configured.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-sand-200">
+            {monitors.map((m) => {
+              const meta = STATUS_META[m.status] || STATUS_META.MONITORING;
+              return (
+                <div key={m.id} className="p-4 flex items-center justify-between gap-4 hover:bg-sand-50/50 transition-all">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <GitPullRequest className="w-3.5 h-3.5 text-stone-500" />
+                      <span className="text-xs font-bold text-stone-900">
+                        {m.repo} #{m.pr_number}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-mono text-stone-500">
+                      ID: {m.id} • SHA: {m.merge_commit_sha ? m.merge_commit_sha.slice(0, 7) : "HEAD"}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 ${meta.badgeClass}`}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span>{meta.label}</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,26 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async rewrites() {
+    const target =
+      process.env.KIWI_BACKEND_URL ||
+      process.env.NEXT_PUBLIC_KIWI_API_URL ||
+      "https://api.runkiwi.dev";
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${target}/api/:path*`,
+      },
+      {
+        source: "/admin/:path*",
+        destination: `${target}/admin/:path*`,
+      },
+      {
+        source: "/auth/:path*",
+        destination: `${target}/auth/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
