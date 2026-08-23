@@ -63,28 +63,49 @@
   scrollbar-width: none;
 }
 
-/* Ambient Warm Canvas with gentle organic grain */
+/* Ambient Technical Dot-Grid Blueprint Canvas */
 body {
-  background-color: #F4F3EE;
-  color: #1C1917;
+  background-color: #F8F7F4;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.065) 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: #18181B;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Plus Jakarta Sans", "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }
 
-/* Floating Island Sheet */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.065) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Floating Island Sheet (Modern Swiss: crisp micro-radius + hairline border) */
 .floating-island {
   background: #FFFFFF;
-  border: 1px solid #EAE7DE;
-  border-radius: 1.25rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 4px 12px -2px rgba(0, 0, 0, 0.025);
+  border: 1px solid rgba(230, 226, 216, 0.9);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 4px 12px -2px rgba(0, 0, 0, 0.025);
 }
 
 .island-sidebar {
   background: #FAF9F6;
-  border: 1px solid #EAE7DE;
-  border-radius: 1.25rem;
+  border: 1px solid rgba(230, 226, 216, 0.9);
+  border-radius: 1rem;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* High-Density Swiss Industrial Cards */
+.swiss-card {
+  background: #FFFFFF;
+  border: 1px solid rgba(228, 224, 214, 0.95);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  transition: all 0.15s ease-out;
+}
+
+.swiss-card:hover {
+  border-color: rgba(168, 160, 142, 0.8);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.05);
 }
 
 /* Segmented Hardware Meter Ticks */

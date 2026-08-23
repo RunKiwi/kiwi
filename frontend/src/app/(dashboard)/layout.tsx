@@ -27,6 +27,8 @@ import {
   ShieldCheck,
   Server,
   GitPullRequest,
+  Menu,
+  X,
 } from "lucide-react";
 import { api, type UsageResponse, type ValidateResponse, type GithubRepo } from "@/lib/api";
 import { SiGithub, SiDatadog, SiPrometheus } from "react-icons/si";
@@ -65,6 +67,44 @@ function getAvatarInitials(email?: string, name?: string): string {
   return "KW";
 }
 
+function UserAvatar({
+  email,
+  name,
+  avatarUrl,
+  githubLogin,
+  className = "w-6 h-6",
+}: {
+  email?: string;
+  name?: string;
+  avatarUrl?: string;
+  githubLogin?: string;
+  className?: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const src = avatarUrl || (githubLogin ? `https://github.com/${githubLogin}.png?size=64` : undefined);
+  const initials = getAvatarInitials(email, name);
+
+  if (src && !imgError) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name || email || "User Avatar"}
+        onError={() => setImgError(true)}
+        className={`${className} rounded-full object-cover shrink-0 border border-sand-300 shadow-2xs bg-stone-100`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${className} rounded-full bg-stone-800 text-white font-bold flex items-center justify-center text-[10px] shrink-0 uppercase select-none`}
+    >
+      {initials}
+    </div>
+  );
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -76,9 +116,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [repoSearchQuery, setRepoSearchQuery] = useState("");
   const [primaryCollapsed, setPrimaryCollapsed] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Auto-close mobile drawer on navigation
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowMobileMenu(false);
+  }, [pathname]);
 
   useEffect(() => {
     loadJobs().catch(() => {});
@@ -280,16 +327,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />,
         hint: "/records",
         keywords: "records audit verifiable receipts cryptographic hashes ledger compliance security logs",
-      },
-      {
-        id: "nav-design-lab",
-        title: "Design Lab & Card Options",
-        subtitle: "Review card accents, mesh gradients, obsidian dark mode, and mascot styles",
-        category: "Navigation",
-        href: "/design-lab",
-        icon: <Sparkles className="w-3.5 h-3.5 text-purple-600" />,
-        hint: "/design-lab",
-        keywords: "design lab styles card accents gradients grains review options ui theme",
       },
       ...(isSuperAdmin
         ? [
@@ -496,11 +533,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [cmdQuery, showCommandPalette]);
 
   return (
-    <div className="h-screen max-h-screen overflow-hidden p-3 md:p-4 flex flex-col font-sans bg-[#F4F3EE] text-stone-900 selection:bg-kiwi-200">
+    <div className="h-screen max-h-screen overflow-hidden p-2.5 sm:p-3 md:p-4 flex flex-col font-sans bg-[#F8F7F4] bg-dot-grid text-stone-900 selection:bg-kiwi-200">
       
       {/* ================= TOP COMPACT NAVBAR ================= */}
-      <header className="shrink-0 mb-2 px-3 py-1.5 flex items-center justify-between gap-3 text-xs bg-sand-50/70 backdrop-blur-md rounded-2xl border border-sand-200/70 shadow-2xs z-30 font-sans">
-        <div className="flex items-center gap-3">
+      <header className="shrink-0 mb-2 px-2.5 sm:px-3 py-1.5 flex items-center justify-between gap-2 sm:gap-3 text-xs bg-sand-50/80 backdrop-blur-md rounded-xl sm:rounded-2xl border border-sand-200/80 shadow-2xs z-30 font-sans">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Mobile Menu Toggle Button */}
+          <button
+            onClick={() => setShowMobileMenu(true)}
+            className="md:hidden p-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-700 shadow-2xs transition-all shrink-0 cursor-pointer"
+            title="Open Navigation Menu"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+
           {/* Kiwi Brand Identity */}
           <Link
             href="/"
@@ -523,17 +569,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Global Search / Command Palette Trigger */}
           <button
             onClick={() => setShowCommandPalette(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-500 hover:text-stone-800 text-xs shadow-2xs transition-all group min-w-[200px] sm:min-w-[260px]"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-500 hover:text-stone-800 text-xs shadow-2xs transition-all group min-w-0 max-w-[260px]"
           >
-            <Search className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-600" />
-            <span className="text-stone-500 font-medium truncate">Search tasks, repos, or jump to...</span>
+            <Search className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-600 shrink-0" />
+            <span className="text-stone-500 font-medium truncate hidden sm:inline">Search tasks, repos, or jump to...</span>
+            <span className="text-stone-500 font-medium truncate sm:hidden">Search...</span>
             <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono bg-sand-100 text-stone-500 px-1.5 py-0.5 rounded border border-sand-200 ml-auto">
               ⌘K
             </kbd>
           </button>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {/* Live Agent Compute Minutes Meter Pill */}
           <Link
             href="/settings"
@@ -552,12 +599,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="hidden md:inline-block px-2 py-0.5 rounded-lg bg-sand-100 border border-sand-200 text-[10px] font-mono font-bold uppercase text-stone-700">
                 Free Tier
               </span>
-              <UpgradeButton variant="compact" label="Upgrade to Pro" />
+              <UpgradeButton variant="compact" label="Upgrade" />
             </div>
           ) : (
-            <span className="px-2.5 py-1 rounded-xl bg-kiwi-50 border border-kiwi-200 text-[11px] font-mono font-bold text-kiwi-900 shadow-2xs flex items-center gap-1.5">
+            <span className="px-2 sm:px-2.5 py-1 rounded-xl bg-kiwi-50 border border-kiwi-200 text-[10px] sm:text-[11px] font-mono font-bold text-kiwi-900 shadow-2xs flex items-center gap-1.5">
               <Zap className="w-3 h-3 text-kiwi-600 fill-current" />
-              <span>Pro Active</span>
+              <span className="hidden sm:inline">Pro Active</span>
+              <span className="sm:hidden">Pro</span>
             </span>
           )}
 
@@ -566,7 +614,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Quick Help & Support */}
           <a
             href="mailto:support@runkiwi.dev?subject=Kiwi%20Support%20Request"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-600 hover:text-stone-900 text-xs font-semibold shadow-2xs transition-all"
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-600 hover:text-stone-900 text-xs font-semibold shadow-2xs transition-all"
             title="Support & Docs (support@runkiwi.dev)"
           >
             <HelpCircle className="w-3.5 h-3.5 text-stone-500" />
@@ -578,9 +626,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ================= DUAL-ISLAND SIDEBARS & SCROLLABLE MAIN CONTENT ================= */}
       <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
         
-        {/* COLUMN 1: COLLAPSIBLE PRIMARY WORKSPACE & REPO ISLAND (~185px Expanded / 54px Collapsed) */}
+        {/* COLUMN 1: COLLAPSIBLE PRIMARY WORKSPACE & REPO ISLAND (~185px Expanded / 54px Collapsed on Desktop) */}
         <aside
-          className={`island-sidebar p-3 flex flex-col shrink-0 select-none shadow-island relative h-full overflow-hidden transition-all duration-200 ${
+          className={`island-sidebar p-3 hidden md:flex flex-col shrink-0 select-none shadow-island relative h-full overflow-hidden transition-all duration-200 ${
             primaryCollapsed ? "w-14 items-center" : "w-48"
           }`}
         >
@@ -789,26 +837,51 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* PINNED USER PROFILE (Single Logout Action) */}
           <div className="shrink-0 pt-2 border-t border-sand-200 w-full">
-            <div className="flex items-center justify-between p-1.5 rounded-xl bg-white border border-sand-200 shadow-2xs">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-full bg-stone-800 text-white font-bold flex items-center justify-center text-[10px] shrink-0 uppercase">
-                  {getAvatarInitials(org?.user_email, org?.org_name)}
-                </div>
-                {!primaryCollapsed && (
+            {primaryCollapsed ? (
+              <div className="flex flex-col items-center gap-1.5 w-full">
+                <Link
+                  href="/settings"
+                  className="w-8 h-8 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 shadow-2xs flex items-center justify-center transition-all shrink-0 cursor-pointer group"
+                  title={`${org?.name || org?.email || org?.user_email || org?.org_name || "Kiwi User"} (${plan} Tier)`}
+                >
+                  <UserAvatar
+                    email={org?.email || org?.user_email}
+                    name={org?.name || org?.org_name}
+                    avatarUrl={org?.avatar_url}
+                    githubLogin={org?.github_login}
+                    className="w-5.5 h-5.5"
+                  />
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="p-1 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-1.5 rounded-xl bg-white border border-sand-200 shadow-2xs w-full">
+                <div className="flex items-center gap-2 min-w-0">
+                  <UserAvatar
+                    email={org?.email || org?.user_email}
+                    name={org?.name || org?.org_name}
+                    avatarUrl={org?.avatar_url}
+                    githubLogin={org?.github_login}
+                    className="w-6 h-6"
+                  />
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold text-stone-800 truncate leading-tight">
-                      {org?.user_email ? org.user_email.split("@")[0] : org?.org_name || "Kiwi User"}
+                      {org?.name || (org?.email || org?.user_email ? (org.email || org.user_email)!.split("@")[0] : org?.org_name || "Kiwi User")}
                     </p>
                     <p className="text-[9px] text-stone-400 font-mono leading-none mt-0.5 capitalize">{plan} Tier</p>
                   </div>
-                )}
-              </div>
-              {!primaryCollapsed && (
-                <button onClick={handleLogout} className="p-1 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-all" title="Sign Out">
+                </div>
+                <button onClick={handleLogout} className="p-1 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer" title="Sign Out">
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -984,29 +1057,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <span className="truncate">Integration</span>
                   </span>
 
-                  {/* Horizontally stacked micro-avatars that expand on hover */}
-                  <div className="flex items-center -space-x-1.5 group-hover:space-x-1 group-hover:-space-x-0 transition-all duration-300 ease-out shrink-0">
+                  {/* Horizontally stacked micro-avatars that slightly expand on hover while staying stacked */}
+                  <div className="flex items-center -space-x-2 group-hover:-space-x-1 transition-all duration-200 ease-out shrink-0">
                     <div
                       title="GitHub"
-                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-150 group-hover:scale-105"
                     >
                       <SiGithub className="w-2.5 h-2.5 text-stone-900" />
                     </div>
                     <div
                       title="Datadog"
-                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-150 group-hover:scale-105"
                     >
                       <SiDatadog className="w-2.5 h-2.5 text-[#632CA6]" />
                     </div>
                     <div
                       title="Slack"
-                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-150 group-hover:scale-105"
                     >
                       <FaSlack className="w-2.5 h-2.5 text-[#ECB22E]" />
                     </div>
                     <div
                       title="Prometheus"
-                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-150 group-hover:scale-105"
                     >
                       <SiPrometheus className="w-2.5 h-2.5 text-[#E6522C]" />
                     </div>
@@ -1069,7 +1142,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </aside>
 
         {/* COLUMN 3: MAIN CONTENT SHEET */}
-        <main className="flex-1 floating-island p-6 overflow-y-auto overflow-x-hidden h-full min-h-0">
+        <main className="flex-1 floating-island p-3.5 sm:p-5 md:p-6 overflow-y-auto overflow-x-hidden h-full min-h-0 rounded-xl sm:rounded-2xl">
           {children}
         </main>
       </div>
@@ -1192,6 +1265,175 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
         </div>
+      )}
+
+      {/* ================= MOBILE SLIDE-OVER NAVIGATION DRAWER ================= */}
+      {showMobileMenu && (
+        <>
+          <div
+            className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 md:hidden transition-opacity animate-in fade-in duration-150"
+            onClick={() => setShowMobileMenu(false)}
+            aria-hidden="true"
+          />
+          <div className="fixed inset-y-0 left-0 w-72 max-w-[85vw] bg-[#F8F7F4] bg-dot-grid border-r border-sand-200 shadow-popover z-50 md:hidden flex flex-col p-4 space-y-4 animate-in slide-in-from-left duration-200">
+            {/* Mobile Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-sand-200">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-xl bg-white border border-sand-200 flex items-center justify-center shadow-2xs">
+                  <Logo variant="full-color" className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <p className="font-bold text-stone-900 text-xs">Kiwi Platform</p>
+                  <p className="text-[10px] font-mono text-stone-400 capitalize">{plan} Plan</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMobileMenu(false)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-800 hover:bg-sand-150 transition-all cursor-pointer"
+                title="Close Navigation Menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Action: New Task */}
+            <Link
+              href="/composer"
+              onClick={() => setShowMobileMenu(false)}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5 text-kiwi-400" />
+              <span>Assign New Task</span>
+            </Link>
+
+            {/* Navigation Links */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs no-scrollbar">
+              <div className="space-y-1">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold px-2">Navigation</div>
+                <Link
+                  href="/"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname === "/" ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <LayoutGrid className="w-4 h-4 text-stone-600" />
+                  <span>Tasks Dashboard</span>
+                </Link>
+                <Link
+                  href="/monitors"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/monitors") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <Radar className="w-4 h-4 text-stone-600" />
+                  <span>PR Watchdogs</span>
+                </Link>
+                <Link
+                  href="/fleet"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/fleet") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <Server className="w-4 h-4 text-stone-600" />
+                  <span>Daemons &amp; Runners</span>
+                </Link>
+                <Link
+                  href="/spend"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/spend") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <Receipt className="w-4 h-4 text-stone-600" />
+                  <span>Spend &amp; Tokens</span>
+                </Link>
+                <Link
+                  href="/records"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/records") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Audit Records</span>
+                </Link>
+              </div>
+
+              <div className="space-y-1 pt-2 border-t border-sand-200">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold px-2">Settings &amp; Org</div>
+                <Link
+                  href="/integrations"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/integrations") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <Link2 className="w-4 h-4 text-stone-600" />
+                  <span>Integrations</span>
+                </Link>
+                <Link
+                  href="/team"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/team") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <Users className="w-4 h-4 text-stone-600" />
+                  <span>Team Members</span>
+                </Link>
+                <Link
+                  href="/settings"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/settings") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4 text-stone-600" />
+                  <span>Plans &amp; Billing</span>
+                </Link>
+                {isSuperAdmin && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setShowMobileMenu(false)}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-rose-50 text-rose-900 border border-rose-200 font-semibold"
+                  >
+                    <ShieldAlert className="w-4 h-4 text-rose-600" />
+                    <span>Super Admin</span>
+                  </Link>
+                )}
+              </div>
+            </div>
+
+            {/* Mobile Footer: User Avatar & Logout */}
+            <div className="pt-3 border-t border-sand-200 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <UserAvatar
+                  email={org?.email || org?.user_email}
+                  name={org?.name || org?.org_name}
+                  avatarUrl={org?.avatar_url}
+                  githubLogin={org?.github_login}
+                  className="w-7 h-7"
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-stone-900 truncate">
+                    {org?.name || org?.email || org?.user_email || "Kiwi User"}
+                  </p>
+                  <p className="text-[10px] text-stone-400 font-mono capitalize">{plan} Tier</p>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

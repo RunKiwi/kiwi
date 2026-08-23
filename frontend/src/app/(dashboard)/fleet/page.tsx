@@ -22,6 +22,8 @@ import { LoadingState } from "@/components/LoadingState";
 import { Logo } from "@/components/Logo";
 import { UpgradeButton } from "@/components/UpgradeButton";
 
+import { usePolling } from "@/hooks/usePolling";
+
 export default function FleetPage() {
   const { daemons, loadDaemons, jobs, loadJobs } = useFleetStore();
   const [fleets, setFleets] = useState<Fleet[]>([]);
@@ -51,29 +53,31 @@ export default function FleetPage() {
     }
   };
 
-  useEffect(() => {
-    loadDaemons();
-    loadJobs();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadFleets();
-    client
-      .getUsage()
-      .then(setU)
-      .catch(() => setU(null))
-      .finally(() => setUsageLoaded(true));
+  const activeTasksCount = jobs.filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
 
-    const interval = setInterval(() => {
-      loadDaemons();
-      loadJobs();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [loadDaemons, loadJobs]);
+  usePolling(
+    async () => {
+      await Promise.all([
+        loadDaemons().catch(() => {}),
+        loadJobs().catch(() => {}),
+        loadFleets().catch(() => {}),
+        client
+          .getUsage()
+          .then(setU)
+          .catch(() => setU(null))
+          .finally(() => setUsageLoaded(true)),
+      ]);
+    },
+    {
+      activeIntervalMs: 3000,
+      idleIntervalMs: 10000,
+      isIdle: activeTasksCount === 0,
+    }
+  );
 
   const isFree = u?.plan === "free";
   const hasCap = (u?.agent_minutes_limit ?? 0) > 0;
   const daemonsOnline = daemons.filter((d) => d.online).length;
-  const activeTasksCount = jobs.filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
-
   const managedFleets = useMemo(() => fleets.filter((f) => f.type === "managed"), [fleets]);
   const byocFleets = useMemo(() => fleets.filter((f) => f.type === "byoc"), [fleets]);
 
@@ -152,7 +156,7 @@ export default function FleetPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 font-sans text-stone-900">
+    <div className="p-0 sm:p-2 md:p-4 max-w-7xl mx-auto space-y-6 font-sans text-stone-900">
       {/* ================= HEADER & QUICK ACTION ROW ================= */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sand-200 pb-4">
         <div>

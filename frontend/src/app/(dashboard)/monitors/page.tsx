@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { client, type PostMergeMonitor } from "@/lib/api";
 import {
   Radar,
@@ -24,6 +24,8 @@ import {
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { LoadingState } from "@/components/LoadingState";
 import { Logo } from "@/components/Logo";
+
+import { usePolling } from "@/hooks/usePolling";
 
 export default function MonitorsPage() {
   const [monitors, setMonitors] = useState<PostMergeMonitor[]>([]);
@@ -49,15 +51,17 @@ export default function MonitorsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    const interval = setInterval(() => {
+  usePolling(
+    async () => {
       setNow(Date.now());
-      load();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [load]);
+      await load();
+    },
+    {
+      activeIntervalMs: 5000,
+      idleIntervalMs: 15000,
+      isIdle: monitors.length === 0 || !monitors.some((m) => m.status === "MONITORING"),
+    }
+  );
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

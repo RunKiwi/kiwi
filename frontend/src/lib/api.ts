@@ -372,6 +372,10 @@ export interface CatalogModel {
 export interface ValidateResponse {
   user_id: string;
   user_email?: string;
+  email?: string;
+  name?: string;
+  github_login?: string;
+  avatar_url?: string;
   org_id: string;
   org_name: string;
   activation_state: string;
@@ -539,6 +543,8 @@ export interface AdminUser {
   id: string;
   email: string;
   name: string;
+  github_login?: string;
+  avatar_url?: string;
   org_id: string;
   role: string;
   created_at: string;
