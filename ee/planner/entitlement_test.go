@@ -40,7 +40,11 @@ func newPlannerWithKiwiModel(t *testing.T) (*Service, context.Context) {
 	if err := s.UpsertCatalogModel(ctx, &store.CatalogModel{
 		OrgID: store.GlobalCatalogOrg, ModelID: "kimi-k2", Provider: "openrouter",
 		Tier: store.TierEconomy, KiwiProvided: true, Selectable: true,
-		Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+		// FirstSeenAt is well past CheapestKiwiFundedModel's maturity window
+		// (pkg/store/model_catalog.go) — these tests are about entitlement and
+		// funding-source selection, not catalog freshness, so the fixture must
+		// not accidentally fail the freshness gate too.
+		Source: "discovered", FirstSeenAt: now.Add(-30 * 24 * time.Hour), LastSeenAt: now,
 	}); err != nil {
 		t.Fatalf("seed catalog model: %v", err)
 	}
