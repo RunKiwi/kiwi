@@ -2,6 +2,9 @@
 
 import React from "react";
 
+// Kiwi Core Multi-Ring Harmonic Spinner — counter-rotating dual arcs with a
+// pulsating nucleus. Markup and classes match enterprise_saas_showcase.html's
+// Loaders & Agent Particle Studio exactly (.kiwi-loader-core*, globals.css).
 export function KiwiCoreSpinner({
   size = "md",
   className = "",
@@ -9,50 +12,24 @@ export function KiwiCoreSpinner({
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
-  const dim = size === "sm" ? 18 : size === "lg" ? 40 : 26;
+  const dim = size === "sm" ? 20 : size === "lg" ? 40 : 28;
   return (
     <div
-      className={`relative inline-flex items-center justify-center shrink-0 ${className}`}
+      className={`kiwi-loader-core shrink-0 ${className}`}
       style={{ width: dim, height: dim }}
       role="status"
       aria-label="Loading"
     >
-      <svg
-        className="absolute inset-0 w-full h-full animate-[spin_2.4s_linear_infinite]"
-        viewBox="0 0 32 32"
-        fill="none"
-      >
-        <circle cx="16" cy="16" r="13" stroke="#E5E5E0" strokeWidth="2.5" />
-        <circle
-          cx="16"
-          cy="16"
-          r="13"
-          stroke="#65A30D"
-          strokeWidth="2.5"
-          strokeDasharray="45 40"
-          strokeLinecap="round"
-        />
+      <svg className="w-full h-full" viewBox="0 0 40 40">
+        <circle className="kiwi-loader-core-ring-1 stroke-kiwi-600" cx="20" cy="20" r="14" fill="none" strokeWidth="3" />
+        <circle className="kiwi-loader-core-ring-2 stroke-stone-900" cx="20" cy="20" r="9" fill="none" strokeWidth="2.5" />
       </svg>
-      <svg
-        className="absolute inset-1 w-[calc(100%-8px)] h-[calc(100%-8px)] animate-[spin_1.2s_linear_infinite_reverse]"
-        viewBox="0 0 24 24"
-        fill="none"
-      >
-        <circle
-          cx="12"
-          cy="12"
-          r="9"
-          stroke="#4D7C0F"
-          strokeWidth="2"
-          strokeDasharray="25 35"
-          strokeLinecap="round"
-        />
-      </svg>
-      <span className="w-1.5 h-1.5 rounded-full bg-lime-500 animate-ping opacity-75" />
+      <div className="kiwi-loader-core-dot bg-kiwi-600" />
     </div>
   );
 }
 
+// AST Token Waveform Stream — staggered harmonic wave simulating LLM reasoning.
 export function KiwiASTWave({
   size = "md",
   className = "",
@@ -60,31 +37,24 @@ export function KiwiASTWave({
   size?: "sm" | "md";
   className?: string;
 }) {
-  const height = size === "sm" ? 14 : 20;
-  const barWidth = size === "sm" ? 2.5 : 3.5;
+  const height = size === "sm" ? 12 : 16;
   return (
     <div
-      className={`inline-flex items-center gap-1 shrink-0 ${className}`}
+      className={`kiwi-loader-ast shrink-0 ${className}`}
       style={{ height }}
       role="status"
       aria-label="Reasoning AST"
     >
-      {[0, 150, 300, 450].map((delay, idx) => (
-        <span
-          key={idx}
-          className="rounded-full bg-gradient-to-t from-lime-600 to-emerald-400 animate-pulse"
-          style={{
-            width: barWidth,
-            height: "100%",
-            animationDuration: "900ms",
-            animationDelay: `${delay}ms`,
-          }}
-        />
-      ))}
+      <span className="bg-kiwi-600" />
+      <span className="bg-purple-600" />
+      <span className="bg-amber-500" />
+      <span className="bg-stone-900" />
     </div>
   );
 }
 
+// Test Guard Sandbox Orbit Radar — concentric ping radar with an orbiting
+// satellite electron.
 export function KiwiTestOrbit({
   size = "md",
   className = "",
@@ -92,42 +62,35 @@ export function KiwiTestOrbit({
   size?: "sm" | "md";
   className?: string;
 }) {
-  const dim = size === "sm" ? 18 : 26;
+  const dim = size === "sm" ? 20 : 28;
   return (
     <div
-      className={`relative inline-flex items-center justify-center shrink-0 ${className}`}
+      className={`kiwi-loader-orbit shrink-0 ${className}`}
       style={{ width: dim, height: dim }}
       role="status"
       aria-label="Executing test guard"
     >
-      <div className="absolute inset-0 rounded-full border border-sand-300 animate-ping opacity-40" />
-      <div className="w-full h-full rounded-full border-2 border-emerald-500/30 border-t-emerald-600 animate-spin" />
-      <span className="absolute w-2 h-2 rounded-full bg-emerald-600" />
+      <div className="kiwi-loader-orbit-ping" />
+      <div className="kiwi-loader-orbit-ring">
+        <div className="kiwi-loader-orbit-satellite" />
+      </div>
+      <div className="w-2.5 h-2.5 rounded-full bg-emerald-600 z-10 shadow-xs" />
     </div>
   );
 }
 
+// Precision Button Micro Dash Spinner — ultra-clean variable-velocity SVG
+// dash loader, sized for inline button loading states.
 export function KiwiMicroButtonLoader({ className = "" }: { className?: string }) {
   return (
-    <svg
-      className={`animate-spin h-3.5 w-3.5 text-current shrink-0 ${className}`}
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
+    <div
+      className={`kiwi-loader-micro w-3.5 h-3.5 text-current shrink-0 ${className}`}
+      role="status"
+      aria-label="Loading"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-      />
-    </svg>
+      <svg className="w-full h-full" viewBox="0 0 32 32">
+        <circle className="kiwi-loader-micro-circle" cx="16" cy="16" r="12" fill="none" strokeWidth="3" />
+      </svg>
+    </div>
   );
 }
