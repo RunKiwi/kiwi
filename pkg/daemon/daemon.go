@@ -601,15 +601,18 @@ func isLLMKey(name string) bool {
 // sees the Actor–Critic loop; the Control Plane learns what happened solely
 // from what is reported here.
 type taskResult struct {
-	ok                 bool
-	prURL              string
-	detail             string
-	abuse              bool
-	events             []ver.TaskEvent
-	planReviewStatus   string
-	planSpecJSON       string
-	cachedPromptTokens int64
-	rawPromptTokens    int64
+	ok               bool
+	prURL            string
+	detail           string
+	abuse            bool
+	events           []ver.TaskEvent
+	planReviewStatus string
+	planSpecJSON     string
+	// Cache-usage telemetry: pointer to distinguish "not available" (nil) from zero.
+	// Session mode always provides these (possibly as explicit zeros), but the
+	// path must still support nil for any non-session code path.
+	cachedPromptTokens *int64
+	rawPromptTokens    *int64
 }
 
 // effectiveRef resolves what ref to check out, with no I/O of its own so the

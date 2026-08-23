@@ -139,9 +139,14 @@ func runDocker(ctx context.Context, dir string, cmdStr string, env []string, cfg
 	}, nil
 }
 
+// sandboxLabel is the fixed label applied to all sandbox containers, so telemetry
+// queries (docker stats, docker ps) can filter to managed containers and exclude
+// unrelated workloads on the host.
+const sandboxLabel = "io.kiwi.sandbox=true"
+
 // buildDockerArgs constructs the docker run arguments and optionally an env file path.
 func buildDockerArgs(dir string, cmdStr string, env []string, cfg *SandboxConfig, dockerImage string) ([]string, string, error) {
-	args := []string{"run", "--rm", "-i"}
+	args := []string{"run", "--rm", "-i", "--label", sandboxLabel}
 	args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
 
 	for _, m := range cfg.Mounts {

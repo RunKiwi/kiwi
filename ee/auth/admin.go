@@ -1343,7 +1343,10 @@ func handleAdminUsersSearch(db *gorm.DB, w http.ResponseWriter, r *http.Request)
 	var orgs []Organization
 	orgName := map[string]string{}
 	if len(orgIDs) > 0 {
-		db.Where("id IN ?", orgIDs).Find(&orgs)
+		if err := db.Where("id IN ?", orgIDs).Find(&orgs).Error; err != nil {
+			http.Error(w, "Failed to load organization names", http.StatusInternalServerError)
+			return
+		}
 		for _, o := range orgs {
 			orgName[o.ID] = o.Name
 		}

@@ -52,7 +52,9 @@ type TaskCompletion struct {
 	TaskID, LeaseID, FinalStatus, ResultURL, Detail string
 	CostUSD                                         float64
 	TokensIn, TokensOut                             int64
-	CachedPromptTokens, RawPromptTokens             int64
+	// CachedPromptTokens and RawPromptTokens are pointers to distinguish
+	// unavailable (nil) from explicitly zero.
+	CachedPromptTokens, RawPromptTokens *int64
 }
 
 // Store defines the data access interface for the control plane.
@@ -74,6 +76,7 @@ type Store interface {
 	// Task lineage. A review comment on a pull request starts another task that
 	// continues the same session, so a task's history is a thread of them.
 	ThreadTasks(ctx context.Context, orgID, rootTaskID string) ([]QueuedTask, error)
+	BatchThreadTasks(ctx context.Context, orgID string, rootTaskIDs []string) ([]QueuedTask, error)
 	ActiveTaskInThread(ctx context.Context, orgID, rootTaskID string) (*QueuedTask, error)
 	PRCommentMode(ctx context.Context, orgID string) (string, error)
 	SetPRCommentMode(ctx context.Context, orgID, mode string) error
@@ -97,6 +100,10 @@ type Store interface {
 	// SetJobPlanPendingReview or ApproveJobPlan is decided by the human.
 	SetJobPlanPendingReview(ctx context.Context, jobID, planMarkdown string) error
 	ApproveJobPlan(ctx context.Context, jobID string) error
+	// ApproveJobPlanAndEnqueue atomically approves a plan and creates the
+	// continuation task. It returns ErrPlanStatusConflict if the plan is not
+	// in pending_review state or if a duplicate approval is attempted.
+	ApproveJobPlanAndEnqueue(ctx context.Context, jobID string, continuation *QueuedTask) error
 	RejectJobPlan(ctx context.Context, jobID, reason string) error
 	// SetJobSpendCap updates a job's per-job spend cap. orgID scopes the
 	// update so an org-scoped caller cannot touch another org's job by ID.

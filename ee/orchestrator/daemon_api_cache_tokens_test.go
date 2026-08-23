@@ -50,13 +50,15 @@ func TestHandleDaemonResultForwardsCacheTokenSplit(t *testing.T) {
 	require.Len(t, res.Specs, 1)
 	require.NotEmpty(t, res.LeaseID)
 
+	cachedTokens := int64(800)
+	rawTokens := int64(200)
 	err = d.client.ReportResult(ctx, daemon.ResultReq{
 		TaskID:             res.Specs[0].ID,
 		LeaseID:            res.LeaseID,
 		Status:             store.TaskSucceeded,
 		SignPubKey:         d.signPubB64(),
-		CachedPromptTokens: 800,
-		RawPromptTokens:    200,
+		CachedPromptTokens: &cachedTokens,
+		RawPromptTokens:    &rawTokens,
 	})
 	require.NoError(t, err)
 

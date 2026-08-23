@@ -248,8 +248,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			planReviewStatus:   store.TaskPlanReview,
 			planSpecJSON:       string(specJSON),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	}
 
@@ -278,8 +278,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			detail:             truncateDetail(detail),
 			abuse:              abuse,
 			events:             prog.all(),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	}
 
@@ -293,16 +293,16 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		return taskResult{
 			detail:             truncateDetail(gitErr.Error()),
 			events:             prog.all(),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	}
 	if gitToken == "" {
 		return taskResult{
 			detail:             "no GIT_TOKEN; skipped PR",
 			events:             prog.all(),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	}
 
@@ -316,15 +316,15 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		return taskResult{
 			detail:             "the session was approved but left the repository unchanged, so there is nothing to open a PR with",
 			events:             prog.all(),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	case perr != nil:
 		return taskResult{
 			detail:             truncateDetail(fmt.Sprintf("publish failed: %v", perr)),
 			events:             prog.all(),
-			cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-			rawPromptTokens:    res.Usage.InputTokens,
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 		}
 	}
 	if detail == "" {
@@ -335,10 +335,13 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		prURL:              prURL,
 		detail:             truncateDetail(detail),
 		events:             prog.all(),
-		cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-		rawPromptTokens:    res.Usage.InputTokens,
+		cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+		rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 	}
 }
+
+// int64Ptr returns a pointer to an int64, for building cache-usage telemetry.
+func int64Ptr(v int64) *int64 { return &v }
 
 // sessionPhase maps a session event onto the execution record's phase
 // vocabulary. The record already understands the single-file loop's phases, and
@@ -431,7 +434,7 @@ func investigationOutcome(res session.Result) (taskResult, bool) {
 	return taskResult{
 		ok:                 true,
 		detail:             truncateDetail(res.Summary),
-		cachedPromptTokens: res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens,
-		rawPromptTokens:    res.Usage.InputTokens,
+		cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+		rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
 	}, true
 }

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -192,6 +193,18 @@ func TestParseDockerMemSize(t *testing.T) {
 	}
 }
 
+type fakeDockerStatsRunner struct {
+	output []byte
+	err    error
+}
+
+func (f fakeDockerStatsRunner) run(ctx context.Context) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return f.output, f.err
+}
+
 func TestCurrentSandboxMemStatsFailsSoft(t *testing.T) {
 	// Calling currentSandboxMemStats must not panic.
 	defer func() {
@@ -200,23 +213,48 @@ func TestCurrentSandboxMemStatsFailsSoft(t *testing.T) {
 		}
 	}()
 
+	// Save original runner and restore after test
+	orig := statsRunner
+	defer func() { statsRunner = orig }()
+
+	// Test normal stats request with fake output
+	statsRunner = fakeDockerStatsRunner{
+		output: []byte("a1b2c3d4e5f6 512.3MiB / 4GiB\n"),
+		err:    nil,
+	}
 	stats, err := currentSandboxMemStats(context.Background())
 	if err != nil {
-		if !strings.Contains(err.Error(), "docker stats") {
-			t.Errorf("expected error to wrap 'docker stats', got %v", err)
-		}
-	} else {
-		// If docker is running and reachable, stats should be returned
-		t.Logf("docker stats returned %d containers", len(stats))
+		t.Errorf("expected no error with valid output, got %v", err)
+	}
+	if len(stats) != 1 {
+		t.Errorf("expected 1 stat, got %d", len(stats))
+	}
+
+	// Test error case
+	statsRunner = fakeDockerStatsRunner{
+		output: []byte("error output"),
+		err:    fmt.Errorf("docker command failed"),
+	}
+	_, err = currentSandboxMemStats(context.Background())
+	if err == nil {
+		t.Error("expected error when docker command fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "docker stats") {
+		t.Errorf("expected error to wrap 'docker stats', got %v", err)
 	}
 
 	// Test with cancelled context fails gracefully with properly wrapped error
+	statsRunner = fakeDockerStatsRunner{
+		output: nil,
+		err:    nil,
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, cancelErr := currentSandboxMemStats(ctx)
 	if cancelErr == nil {
 		t.Error("expected error with cancelled context, got nil")
-	} else if !strings.Contains(cancelErr.Error(), "docker stats") {
+	}
+	if !strings.Contains(cancelErr.Error(), "docker stats") {
 		t.Errorf("expected cancel error to wrap 'docker stats', got %v", cancelErr)
 	}
 }

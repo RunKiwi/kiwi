@@ -83,6 +83,22 @@ func (s *PostgresStore) ThreadTasks(ctx context.Context, orgID, rootTaskID strin
 	return tasks, nil
 }
 
+// BatchThreadTasks returns every task across all given root task IDs in a single
+// query, avoiding N+1 when checking multiple threads at once (e.g. velocity analytics).
+func (s *PostgresStore) BatchThreadTasks(ctx context.Context, orgID string, rootTaskIDs []string) ([]QueuedTask, error) {
+	if orgID == "" || len(rootTaskIDs) == 0 {
+		return nil, nil
+	}
+	var tasks []QueuedTask
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND root_task_id IN ?", orgID, rootTaskIDs).
+		Order("root_task_id asc, created_at asc, id asc").
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 // ActiveTaskInThread returns the thread's unfinished task, or nil when every
 // task in it has concluded.
 //

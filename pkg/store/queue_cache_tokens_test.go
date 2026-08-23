@@ -18,10 +18,12 @@ func TestQueuedTaskCacheTokenColumnsRoundTrip(t *testing.T) {
 	leased, err := s.LeaseNextTask(ctx, "org-1", "daemon-1", "", time.Minute)
 	require.NoError(t, err)
 
+	cachedTokens := int64(800)
+	rawTokens := int64(200)
 	ok, err := s.CompleteTask(ctx, TaskCompletion{
 		TaskID: "t-cache-1", LeaseID: *leased.LeaseID, FinalStatus: TaskSucceeded,
 		TokensIn: 1000, TokensOut: 200,
-		CachedPromptTokens: 800, RawPromptTokens: 200,
+		CachedPromptTokens: &cachedTokens, RawPromptTokens: &rawTokens,
 	})
 	require.NoError(t, err)
 	require.True(t, ok)

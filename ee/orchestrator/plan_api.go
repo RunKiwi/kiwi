@@ -89,11 +89,6 @@ func (s *Server) handleApproveJobPlan(w http.ResponseWriter, r *http.Request, jo
 		return
 	}
 
-	if err := s.storage.ApproveJobPlan(r.Context(), job.ID); err != nil {
-		http.Error(w, "failed to approve plan", http.StatusInternalServerError)
-		return
-	}
-
 	rootTaskID := parent.RootTaskID
 	if rootTaskID == "" {
 		rootTaskID = parent.ID
@@ -110,8 +105,12 @@ func (s *Server) handleApproveJobPlan(w http.ResponseWriter, r *http.Request, jo
 		Spec:         parent.Spec, // same worker-spec: same repo, model, test command, SessionID
 		FleetID:      parent.FleetID,
 	}
-	if err := s.storage.EnqueueTask(r.Context(), continuation); err != nil {
-		http.Error(w, "failed to enqueue continuation", http.StatusInternalServerError)
+	if err := s.storage.ApproveJobPlanAndEnqueue(r.Context(), job.ID, continuation); err != nil {
+		if err == store.ErrPlanStatusConflict {
+			http.Error(w, "plan approval conflict: plan is not in pending_review state or was already approved", http.StatusConflict)
+			return
+		}
+		http.Error(w, "failed to approve plan and enqueue continuation", http.StatusInternalServerError)
 		return
 	}
 
@@ -128,11 +127,20 @@ func (s *Server) handleRejectJobPlan(w http.ResponseWriter, r *http.Request, job
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
+	if len(body.Feedback) > 255 {
+		http.Error(w, "feedback exceeds 255 character limit", http.StatusBadRequest)
+		return
+	}
+
 	if err := s.storage.RejectJobPlan(r.Context(), job.ID, body.Feedback); err != nil {
+		if err == store.ErrPlanStatusConflict {
+			http.Error(w, "plan rejection conflict: plan is not in pending_review state", http.StatusConflict)
+			return
+		}
 		http.Error(w, "failed to reject plan", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected", "planner_notified": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected"})
 }
 
 func (s *Server) handleJobSpendCap(w http.ResponseWriter, r *http.Request, orgID, jobID string) {
