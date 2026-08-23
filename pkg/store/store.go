@@ -52,6 +52,9 @@ type TaskCompletion struct {
 	TaskID, LeaseID, FinalStatus, ResultURL, Detail string
 	CostUSD                                         float64
 	TokensIn, TokensOut                             int64
+	// CachedPromptTokens and RawPromptTokens are pointers to distinguish
+	// unavailable (nil) from explicitly zero.
+	CachedPromptTokens, RawPromptTokens *int64
 }
 
 // Store defines the data access interface for the control plane.
@@ -73,6 +76,7 @@ type Store interface {
 	// Task lineage. A review comment on a pull request starts another task that
 	// continues the same session, so a task's history is a thread of them.
 	ThreadTasks(ctx context.Context, orgID, rootTaskID string) ([]QueuedTask, error)
+	BatchThreadTasks(ctx context.Context, orgID string, rootTaskIDs []string) ([]QueuedTask, error)
 	ActiveTaskInThread(ctx context.Context, orgID, rootTaskID string) (*QueuedTask, error)
 	PRCommentMode(ctx context.Context, orgID string) (string, error)
 	SetPRCommentMode(ctx context.Context, orgID, mode string) error
@@ -88,6 +92,22 @@ type Store interface {
 	UpdateJobCost(ctx context.Context, id string, additionalCost float64) error
 	CreateManifest(ctx context.Context, m *Manifest) error
 	UpdateJobManifest(ctx context.Context, jobID, manifestID string) error
+
+	// Plan Mode lifecycle. SetJobPlanPendingReview also sets Job.Status to
+	// "PLAN_REVIEW" so it stops appearing as actively running; ApproveJobPlan
+	// and RejectJobPlan resolve it. None of these touch QueuedTask — the
+	// caller (ee/orchestrator) creates the continuation task separately once
+	// SetJobPlanPendingReview or ApproveJobPlan is decided by the human.
+	SetJobPlanPendingReview(ctx context.Context, jobID, planMarkdown string) error
+	ApproveJobPlan(ctx context.Context, jobID string) error
+	// ApproveJobPlanAndEnqueue atomically approves a plan and creates the
+	// continuation task. It returns ErrPlanStatusConflict if the plan is not
+	// in pending_review state or if a duplicate approval is attempted.
+	ApproveJobPlanAndEnqueue(ctx context.Context, jobID string, continuation *QueuedTask) error
+	RejectJobPlan(ctx context.Context, jobID, reason string) error
+	// SetJobSpendCap updates a job's per-job spend cap. orgID scopes the
+	// update so an org-scoped caller cannot touch another org's job by ID.
+	SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error
 
 	// Events & Checkpoints
 	AppendEvent(ctx context.Context, event *Event) error
@@ -127,6 +147,10 @@ type Store interface {
 	GetExecutionRecord(ctx context.Context, orgID, jobID string) (*ExecutionRecord, error)
 	GetExecutionRecordByVer(ctx context.Context, orgID, jobID, ver string) (*ExecutionRecord, error)
 	GetJobExecutionRecords(ctx context.Context, orgID, jobID string) ([]ExecutionRecord, error)
+	// ListExecutionRecordsByOrgAndVer returns every record of one kind for an
+	// org since a given time — the org-wide counterpart to GetJobExecutionRecords,
+	// used for cross-job aggregation (velocity analytics).
+	ListExecutionRecordsByOrgAndVer(ctx context.Context, orgID, ver string, since time.Time) ([]ExecutionRecord, error)
 	GetQueuedTask(ctx context.Context, taskID string) (*QueuedTask, error)
 	GetManifest(ctx context.Context, id string) (*Manifest, error)
 
@@ -151,6 +175,11 @@ type Store interface {
 	RegisterDaemon(ctx context.Context, joinToken, signPubKey, encPubKey string) (*Daemon, error)
 	GetDaemonBySignPubKey(ctx context.Context, signPubKey string) (*Daemon, error)
 	TouchDaemon(ctx context.Context, id string) error
+	// UpdateDaemonTelemetry records the latest heartbeat's cache and memory
+	// stats. Called alongside TouchDaemon, not instead of it — liveness and
+	// telemetry are tracked separately since an older daemon updates the
+	// former without ever calling this.
+	UpdateDaemonTelemetry(ctx context.Context, daemonID string, cache *CacheHeartbeatStats, mem []ContainerMemStats) error
 	ListDaemons(ctx context.Context, orgID string) ([]Daemon, error)
 	// DeleteDaemonsByOrgAndFleet removes an org's daemon registrations for a fleet
 	// (used by idle-reclaim to deregister a stopped free daemon so it does not

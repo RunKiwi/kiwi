@@ -936,3 +936,63 @@ func TestHandleDaemonTelemetryReportReschedulesOrphanedPoll(t *testing.T) {
 		t.Error("expected LastResult to be recorded even when the monitor lookup failed")
 	}
 }
+
+func TestHeartbeatStoresDaemonTelemetry(t *testing.T) {
+	ts, st := newSeamTestServer(t)
+	ctx := context.Background()
+
+	if err := st.DB().Create(&store.Organization{ID: "o1", Name: "Org One"}).Error; err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	d := newDaemonKeys(t, ts.URL)
+	token, err := st.CreateDaemonJoinToken(ctx, "o1", "", time.Hour)
+	if err != nil {
+		t.Fatalf("mint join token: %v", err)
+	}
+	if err := d.client.Register(ctx, daemon.RegisterReq{
+		JoinToken:  token,
+		PubKey:     d.encPubB64(),
+		SignPubKey: d.signPubB64(),
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	cacheStats := &daemon.CacheHeartbeatStats{
+		TotalRepos:           18,
+		TotalActiveWorktrees: 2,
+		HitCount:             94,
+		MissCount:            6,
+	}
+	memStats := []daemon.ContainerMemStats{
+		{ContainerID: "c-01", RSSMB: 1024, LimitMB: 4096},
+	}
+
+	_, err = d.client.Heartbeat(ctx, daemon.HeartbeatReq{
+		PubKey:     d.encPubB64(),
+		SignPubKey: d.signPubB64(),
+		Timestamp:  time.Now().Unix(),
+		CacheStats: cacheStats,
+		MemStats:   memStats,
+	})
+	if err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+
+	got, err := st.GetDaemonBySignPubKey(ctx, d.signPubB64())
+	if err != nil {
+		t.Fatalf("get daemon by sign pub key: %v", err)
+	}
+	if got.LastCacheStats == nil {
+		t.Fatal("expected LastCacheStats to be populated")
+	}
+	if got.LastCacheStats.TotalRepos != 18 || got.LastCacheStats.TotalActiveWorktrees != 2 || got.LastCacheStats.HitCount != 94 || got.LastCacheStats.MissCount != 6 {
+		t.Errorf("LastCacheStats = %+v, want TotalRepos=18, TotalActiveWorktrees=2, HitCount=94, MissCount=6", got.LastCacheStats)
+	}
+	if got.ActiveContainers != 1 {
+		t.Errorf("ActiveContainers = %d, want 1", got.ActiveContainers)
+	}
+	if len(got.LastMemStats) != 1 || got.LastMemStats[0].ContainerID != "c-01" || got.LastMemStats[0].RSSMB != 1024 || got.LastMemStats[0].LimitMB != 4096 {
+		t.Errorf("LastMemStats = %+v, want 1 entry with c-01/1024/4096", got.LastMemStats)
+	}
+}

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/sandbox"
 	"github.com/ibreakthecloud/kiwi/pkg/session"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"github.com/ibreakthecloud/kiwi/pkg/telemetry"
 	"github.com/ibreakthecloud/kiwi/pkg/ver"
 )
@@ -161,9 +163,9 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	// commit; with it, the task resumes at its last finished round. The daemon
 	// has no database, so this travels over the same signed, lease-fenced
 	// channel as every other daemon report.
-	var store session.Store
+	var sessionStore session.Store
 	if deps.leaseID != "" {
-		store = &cpSessionStore{
+		sessionStore = &cpSessionStore{
 			client:         d.client,
 			taskID:         spec.ID,
 			leaseID:        deps.leaseID,
@@ -180,7 +182,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	rounds, budget := d.sessionLimits()
 
 	runner := &session.Runner{
-		Store:            store,
+		Store:            sessionStore,
 		SessionID:        sessionIDFor(spec.ID),
 		Architect:        &session.LLMArchitect{Provider: architectProv, Model: architectModel, Tools: session.NewArchitectTools(deps.worktreePath)},
 		Implementer:      implementer,
@@ -226,13 +228,30 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		spec.ID, architectModel, spec.Model, deps.testCmd)
 
 	res, err := runner.Run(ctx, session.Task{
-		ID:                spec.ID,
-		Description:       description,
-		TestCmd:           deps.testCmd,
-		InvestigationOnly: spec.InvestigationOnly,
-		RepoContext:       repoCtx,
-		Learnings:         spec.Learnings,
+		ID:                   spec.ID,
+		Description:          description,
+		TestCmd:              deps.testCmd,
+		InvestigationOnly:    spec.InvestigationOnly,
+		RepoContext:          repoCtx,
+		Learnings:            spec.Learnings,
+		RequiresPlanApproval: spec.RequiresPlanApproval,
 	})
+
+	if res.PlanPendingReview {
+		specJSON, merr := json.Marshal(res.Spec)
+		if merr != nil {
+			log.Printf("Task %s: failed to marshal plan spec: %v", spec.ID, merr)
+			specJSON = []byte("{}")
+		}
+		return taskResult{
+			detail:             "plan pending review",
+			events:             prog.all(),
+			planReviewStatus:   store.TaskPlanReview,
+			planSpecJSON:       string(specJSON),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
+	}
 
 	if err != nil {
 		log.Printf("Task %s session ended without success: %v (rounds=%d, cost=$%.2f)", spec.ID, err, res.Rounds, res.CostUSD)
@@ -255,7 +274,13 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 				detail = truncateDetail(err.Error())
 			}
 		}
-		return taskResult{detail: truncateDetail(detail), abuse: abuse, events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(detail),
+			abuse:              abuse,
+			events:             prog.all(),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
 	}
 
 	if out, matched := investigationOutcome(res); matched {
@@ -265,10 +290,20 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 
 	gitToken, gitErr := d.resolveGitToken(ctx, spec.ID, deps.leaseID, creds)
 	if gitErr != nil {
-		return taskResult{detail: truncateDetail(gitErr.Error()), events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(gitErr.Error()),
+			events:             prog.all(),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
 	}
 	if gitToken == "" {
-		return taskResult{detail: "no GIT_TOKEN; skipped PR", events: prog.all()}
+		return taskResult{
+			detail:             "no GIT_TOKEN; skipped PR",
+			events:             prog.all(),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
 	}
 
 	gh := &restGitHub{token: gitToken}
@@ -278,15 +313,35 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		// The reviewer is instructed never to approve an empty diff, and refuses
 		// to when asked; arriving here means something else went wrong, and a
 		// green tick with no pull request is the one outcome worse than failing.
-		return taskResult{detail: "the session was approved but left the repository unchanged, so there is nothing to open a PR with", events: prog.all()}
+		return taskResult{
+			detail:             "the session was approved but left the repository unchanged, so there is nothing to open a PR with",
+			events:             prog.all(),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
 	case perr != nil:
-		return taskResult{detail: truncateDetail(fmt.Sprintf("publish failed: %v", perr)), events: prog.all()}
+		return taskResult{
+			detail:             truncateDetail(fmt.Sprintf("publish failed: %v", perr)),
+			events:             prog.all(),
+			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		}
 	}
 	if detail == "" {
 		detail = res.Summary
 	}
-	return taskResult{ok: true, prURL: prURL, detail: truncateDetail(detail), events: prog.all()}
+	return taskResult{
+		ok:                 true,
+		prURL:              prURL,
+		detail:             truncateDetail(detail),
+		events:             prog.all(),
+		cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+		rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+	}
 }
+
+// int64Ptr returns a pointer to an int64, for building cache-usage telemetry.
+func int64Ptr(v int64) *int64 { return &v }
 
 // sessionPhase maps a session event onto the execution record's phase
 // vocabulary. The record already understands the single-file loop's phases, and
@@ -376,5 +431,10 @@ func investigationOutcome(res session.Result) (taskResult, bool) {
 	if !res.Success || !res.NoDiffExpected {
 		return taskResult{}, false
 	}
-	return taskResult{ok: true, detail: truncateDetail(res.Summary)}, true
+	return taskResult{
+		ok:                 true,
+		detail:             truncateDetail(res.Summary),
+		cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
+		rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+	}, true
 }

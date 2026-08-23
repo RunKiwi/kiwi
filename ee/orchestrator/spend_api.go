@@ -74,6 +74,10 @@ type SpendResponse struct {
 	// AllowanceStale reports that usage could not be read, so Allowance is
 	// omitted rather than shown with an understated Used.
 	AllowanceStale bool `json:"allowance_stale,omitempty"`
+
+	AgentMinutesLimit      float64 `json:"agent_minutes_limit"`
+	ConcurrentLeasesActive int     `json:"concurrent_leases_active"`
+	ConcurrentLeasesMax    int     `json:"concurrent_leases_max"`
 }
 
 // AllowanceBucket is one tier's Kiwi token allowance for the current period.
@@ -192,6 +196,22 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 			}
 			resp.Allowance = append(resp.Allowance, b)
 		}
+	}
+
+	if limits, lerr := s.storage.GetOrgLimits(r.Context(), claims.OrgID); lerr != nil {
+		log.Printf("[spend] loading limits for org %s: %v", claims.OrgID, lerr)
+	} else if limits != nil {
+		resp.AgentMinutesLimit = limits.MaxAgentMinutesPerMonth
+		resp.ConcurrentLeasesMax = limits.MaxConcurrentJobs
+	}
+
+	var activeLeases int64
+	if err := s.db.WithContext(r.Context()).Model(&store.QueuedTask{}).
+		Where("org_id = ? AND status = ?", claims.OrgID, store.TaskLeased).
+		Count(&activeLeases).Error; err != nil {
+		log.Printf("[spend] counting active leases for org %s: %v", claims.OrgID, err)
+	} else {
+		resp.ConcurrentLeasesActive = int(activeLeases)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

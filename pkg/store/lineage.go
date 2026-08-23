@@ -24,6 +24,11 @@ const (
 	OriginSubmit    = "submit"
 	OriginPRComment = "pr_comment"
 	OriginFork      = "fork"
+	// OriginPlanApproved marks a continuation created by approving a Plan
+	// Mode review. It reuses the same task-lineage mechanism as OriginPRComment
+	// (ParentTaskID/RootTaskID) so the daemon resumes the exact session that
+	// was paused, rather than starting a fresh one.
+	OriginPlanApproved = "plan_approved"
 	// OriginSlack marks a continuation that came from a Slack thread reply —
 	// distinct from OriginPRComment (a GitHub PR review comment), which a
 	// Slack-triggered continuation is not, even though buildContinuationTask
@@ -72,6 +77,22 @@ func (s *PostgresStore) ThreadTasks(ctx context.Context, orgID, rootTaskID strin
 	if err := s.db.WithContext(ctx).
 		Where("org_id = ? AND root_task_id = ?", orgID, rootTaskID).
 		Order("created_at asc, id asc").
+		Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// BatchThreadTasks returns every task across all given root task IDs in a single
+// query, avoiding N+1 when checking multiple threads at once (e.g. velocity analytics).
+func (s *PostgresStore) BatchThreadTasks(ctx context.Context, orgID string, rootTaskIDs []string) ([]QueuedTask, error) {
+	if orgID == "" || len(rootTaskIDs) == 0 {
+		return nil, nil
+	}
+	var tasks []QueuedTask
+	if err := s.db.WithContext(ctx).
+		Where("org_id = ? AND root_task_id IN ?", orgID, rootTaskIDs).
+		Order("root_task_id asc, created_at asc, id asc").
 		Find(&tasks).Error; err != nil {
 		return nil, err
 	}

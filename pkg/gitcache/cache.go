@@ -35,6 +35,15 @@ import (
 // access runs eviction. The daemon clones sequentially per task, so in practice
 // the bound holds tightly — the eventual guarantee only matters under an
 // artificial concurrent cold-start burst.
+// CacheStats is a point-in-time summary of the cache's contents, used to
+// report gitcache health to the Control Plane over the daemon heartbeat.
+type CacheStats struct {
+	TotalRepos           int
+	TotalActiveWorktrees int
+	HitCount             int64
+	MissCount            int64
+}
+
 type Cache struct {
 	baseDir string
 	// maxRepos bounds the number of cached bare repos. 0 means unbounded.
@@ -42,8 +51,28 @@ type Cache struct {
 
 	locks sync.Map // barePath -> *sync.Mutex, serializes git ops on one repo
 
-	mu   sync.Mutex           // guards meta
-	meta map[string]*repoMeta // barePath -> access metadata
+	mu        sync.Mutex           // guards meta, hitCount, missCount
+	meta      map[string]*repoMeta // barePath -> access metadata
+	hitCount  int64
+	missCount int64
+}
+
+// Stats reports the cache's current contents. It takes the same lock the
+// eviction and access-recording paths already take, so a stats read never
+// races a concurrent GetWorktree/RemoveWorktree.
+func (c *Cache) Stats() CacheStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var active int
+	for _, e := range c.meta {
+		active += e.active
+	}
+	return CacheStats{
+		TotalRepos:           len(c.meta),
+		TotalActiveWorktrees: active,
+		HitCount:             c.hitCount,
+		MissCount:            c.missCount,
+	}
 }
 
 // repoMeta is the LFU bookkeeping for one cached bare repo.
@@ -164,8 +193,15 @@ func (c *Cache) GetWorktree(ctx context.Context, repoURL, ref, worktreePath stri
 		if err := runGitAuth(ctx, "", repoURL, tok, "clone", "--bare", repoURL, barePath); err != nil {
 			return fmt.Errorf("failed to clone bare repo: %w", err)
 		}
+		c.mu.Lock()
+		c.missCount++
+		c.mu.Unlock()
 	} else if err != nil {
 		return fmt.Errorf("failed to check cache repo stat: %w", err)
+	} else {
+		c.mu.Lock()
+		c.hitCount++
+		c.mu.Unlock()
 	}
 
 	// Remove any stale target directory (from a previous failure)
@@ -220,8 +256,15 @@ func (c *Cache) GetJobWorktree(ctx context.Context, repoURL, baseRef, jobBranch,
 		if err := runGitAuth(ctx, "", repoURL, tok, "clone", "--bare", repoURL, barePath); err != nil {
 			return fmt.Errorf("failed to clone bare repo: %w", err)
 		}
+		c.mu.Lock()
+		c.missCount++
+		c.mu.Unlock()
 	} else if err != nil {
 		return fmt.Errorf("failed to check cache repo stat: %w", err)
+	} else {
+		c.mu.Lock()
+		c.hitCount++
+		c.mu.Unlock()
 	}
 
 	os.RemoveAll(worktreePath)

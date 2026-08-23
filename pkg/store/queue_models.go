@@ -13,12 +13,18 @@ const (
 	// two together would make the failure rate unreadable. Nothing retries a
 	// cancelled task automatically — RetryJob is an explicit act.
 	TaskCancelled = "CANCELLED"
+	// TaskPlanReview is terminal for the queue (this task's lease is released
+	// and it is never re-leased or swept) but not terminal for the job: the
+	// job stays open pending a human decision. A separate continuation task
+	// (Origin=OriginPlanApproved) resumes the work once approved. See
+	// docs/superpowers/plans/2026-08-22-plan-mode-and-routing-backend-plan.md.
+	TaskPlanReview = "PLAN_REVIEW"
 )
 
 // IsTerminal reports whether a task status is final. Terminal tasks are never
 // leased, swept, or diagnosed.
 func IsTerminal(status string) bool {
-	return status == TaskSucceeded || status == TaskFailed || status == TaskCancelled
+	return status == TaskSucceeded || status == TaskFailed || status == TaskCancelled || status == TaskPlanReview
 }
 
 // MaxLeaseAttempts bounds how many times a task may be leased before it is
@@ -103,6 +109,13 @@ type QueuedTask struct {
 	Funding            string     `gorm:"not null;default:'byok'" json:"funding"`
 	TokensIn           int64      `gorm:"not null;default:0" json:"tokens_in"`
 	TokensOut          int64      `gorm:"not null;default:0" json:"tokens_out"`
+	// CachedPromptTokens and RawPromptTokens split TokensIn by whether the
+	// provider served it from prompt cache. TokensIn itself stays the sum
+	// (InputTokens + CacheReadTokens + CacheWriteTokens, per
+	// pkg/daemon/session_store.go) so every existing reader of TokensIn is
+	// unaffected; these two are additive detail for cache-discount reporting.
+	CachedPromptTokens int64      `gorm:"not null;default:0" json:"cached_prompt_tokens"`
+	RawPromptTokens    int64      `gorm:"not null;default:0" json:"raw_prompt_tokens"`
 	MeteredAt          *time.Time `json:"metered_at"`
 	CreatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
 	UpdatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`

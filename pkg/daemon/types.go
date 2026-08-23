@@ -40,6 +40,21 @@ type HeartbeatReq struct {
 	SignPubKey string `json:"sign_pub_key,omitempty"`
 	// Timestamp is the unix time (seconds) the request was created; it is signed to bound replay windows.
 	Timestamp int64 `json:"timestamp,omitempty"`
+	// CacheStats and MemStats are best-effort telemetry, omitted (nil/empty)
+	// rather than zero-valued when unavailable — an org-wide aggregate must
+	// be able to tell "no data this heartbeat" from "0% hit rate."
+	CacheStats *CacheHeartbeatStats `json:"cache_stats,omitempty"`
+	MemStats   []ContainerMemStats  `json:"mem_stats,omitempty"`
+}
+
+// CacheHeartbeatStats mirrors gitcache.CacheStats without pkg/daemon
+// depending on pkg/gitcache's internal Cache type directly in the wire
+// struct — keeps the JSON contract stable if gitcache's internals change.
+type CacheHeartbeatStats struct {
+	TotalRepos           int   `json:"total_repos"`
+	TotalActiveWorktrees int   `json:"total_active_worktrees"`
+	HitCount             int64 `json:"hit_count"`
+	MissCount            int64 `json:"miss_count"`
 }
 
 // HeartbeatRes is the payload received from the Control Plane if tasks are available.
@@ -81,6 +96,15 @@ type ResultReq struct {
 	// ("docker" | "runsc" | "firecracker"), so the record states what was
 	// observed instead of assuming a default.
 	SandboxRuntime string `json:"sandbox_runtime,omitempty"`
+	// PlanSpecJSON is the marshaled session.Spec, present only when Status is
+	// "PLAN_REVIEW". An older Control Plane ignores an unknown field; an
+	// older daemon simply never sends it.
+	PlanSpecJSON string `json:"plan_spec_json,omitempty"`
+	// CachedPromptTokens and RawPromptTokens split TokensIn (reported
+	// separately, unchanged) by cache origin. Pointers distinguish "not
+	// provided" (nil, from an older daemon) from "explicitly zero" (0% cache hit).
+	CachedPromptTokens *int64 `json:"cached_prompt_tokens,omitempty"`
+	RawPromptTokens    *int64 `json:"raw_prompt_tokens,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.

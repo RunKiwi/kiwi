@@ -190,6 +190,15 @@ func (s *PostgresStore) GetJobExecutionRecords(ctx context.Context, orgID, jobID
 	return recs, nil
 }
 
+func (s *PostgresStore) ListExecutionRecordsByOrgAndVer(ctx context.Context, orgID, ver string, since time.Time) ([]ExecutionRecord, error) {
+	var recs []ExecutionRecord
+	err := s.db.WithContext(ctx).
+		Where("org_id = ? AND ver = ? AND created_at >= ?", orgID, ver, since).
+		Order("created_at desc").
+		Find(&recs).Error
+	return recs, err
+}
+
 // GetQueuedTask returns one task by ID. The caller must check OrgID before
 // acting on it — this is a lookup by primary key, not an authorization check.
 func (s *PostgresStore) GetQueuedTask(ctx context.Context, taskID string) (*QueuedTask, error) {

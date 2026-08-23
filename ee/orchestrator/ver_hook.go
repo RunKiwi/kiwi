@@ -128,9 +128,14 @@ func (s *Server) maybeAssembleRecord(ctx context.Context, orgID, taskID string, 
 	// Assemble only once the whole job is done, so the record covers every
 	// worker rather than whichever one happened to report last.
 	for _, t := range tasks {
-		if t.Status != store.TaskSucceeded && t.Status != store.TaskFailed {
-			return
+		if t.Status == store.TaskSucceeded || t.Status == store.TaskFailed {
+			continue
 		}
+		// A TaskPlanReview task is acceptable if it was superseded by a completed continuation.
+		if t.Status == store.TaskPlanReview && hasCompletedSuccessor(t, tasks) {
+			continue
+		}
+		return
 	}
 
 	job, err := s.storage.GetJob(ctx, jobID)
@@ -432,4 +437,22 @@ func (s *Server) replaceTaskEvents(ctx context.Context, orgID, taskID string, ev
 		return
 	}
 	s.recordTaskEvents(ctx, orgID, taskID, events)
+}
+
+// hasCompletedSuccessor reports whether a superseded task (such as a TaskPlanReview
+// task) has a completed continuation in the same job.
+func hasCompletedSuccessor(t store.QueuedTask, tasks []store.QueuedTask) bool {
+	for _, other := range tasks {
+		if other.ID == t.ID {
+			continue
+		}
+		if other.Status != store.TaskSucceeded && other.Status != store.TaskFailed {
+			continue
+		}
+		if (other.ParentTaskID != nil && *other.ParentTaskID == t.ID) ||
+			(other.RootTaskID != "" && (other.RootTaskID == t.RootTaskID || other.RootTaskID == t.ID) && other.Origin == store.OriginPlanApproved) {
+			return true
+		}
+	}
+	return false
 }

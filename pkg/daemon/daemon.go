@@ -304,12 +304,45 @@ func withJitter(d time.Duration) time.Duration {
 	return d + time.Duration(rand.Int63n(2*delta+1)-delta)
 }
 
-func (d *Daemon) pollCP(ctx context.Context) bool {
+// buildHeartbeatReq constructs the HeartbeatReq payload, populating identity keys,
+// timestamp, gitcache stats, and sandbox container memory stats.
+func (d *Daemon) buildHeartbeatReq(ctx context.Context) HeartbeatReq {
+	var pubKeyB64 string
+	if d.pubKey != nil {
+		pubKeyB64 = base64.StdEncoding.EncodeToString(d.pubKey.Bytes())
+	}
+	var signPubKeyB64 string
+	if len(d.signPubKey) > 0 {
+		signPubKeyB64 = base64.StdEncoding.EncodeToString(d.signPubKey)
+	}
+
 	req := HeartbeatReq{
-		PubKey:     base64.StdEncoding.EncodeToString(d.pubKey.Bytes()),
-		SignPubKey: base64.StdEncoding.EncodeToString(d.signPubKey),
+		PubKey:     pubKeyB64,
+		SignPubKey: signPubKeyB64,
 		Timestamp:  time.Now().Unix(),
 	}
+
+	if d.gitCache != nil {
+		gs := d.gitCache.Stats()
+		req.CacheStats = &CacheHeartbeatStats{
+			TotalRepos:           gs.TotalRepos,
+			TotalActiveWorktrees: gs.TotalActiveWorktrees,
+			HitCount:             gs.HitCount,
+			MissCount:            gs.MissCount,
+		}
+	}
+
+	if mem, err := currentSandboxMemStats(ctx); err != nil {
+		log.Printf("[daemon] heartbeat: could not read sandbox memory stats: %v", err)
+	} else {
+		req.MemStats = mem
+	}
+
+	return req
+}
+
+func (d *Daemon) pollCP(ctx context.Context) bool {
+	req := d.buildHeartbeatReq(ctx)
 
 	res, err := d.client.Heartbeat(ctx, req)
 	if err != nil {
@@ -568,11 +601,18 @@ func isLLMKey(name string) bool {
 // sees the Actor–Critic loop; the Control Plane learns what happened solely
 // from what is reported here.
 type taskResult struct {
-	ok     bool
-	prURL  string
-	detail string
-	abuse  bool
-	events []ver.TaskEvent
+	ok               bool
+	prURL            string
+	detail           string
+	abuse            bool
+	events           []ver.TaskEvent
+	planReviewStatus string
+	planSpecJSON     string
+	// Cache-usage telemetry: pointer to distinguish "not available" (nil) from zero.
+	// Session mode always provides these (possibly as explicit zeros), but the
+	// path must still support nil for any non-session code path.
+	cachedPromptTokens *int64
+	rawPromptTokens    *int64
 }
 
 // effectiveRef resolves what ref to check out, with no I/O of its own so the
@@ -1094,7 +1134,9 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		return
 	}
 	status := "SUCCEEDED"
-	if !out.ok {
+	if out.planReviewStatus != "" {
+		status = out.planReviewStatus
+	} else if !out.ok {
 		status = "FAILED"
 	}
 	sandboxRT := d.config.SandboxRuntime
@@ -1102,15 +1144,18 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		sandboxRT = "docker"
 	}
 	req := ResultReq{
-		TaskID:         taskID,
-		LeaseID:        leaseID,
-		Status:         status,
-		SignPubKey:     base64.StdEncoding.EncodeToString(d.signPubKey),
-		ResultURL:      out.prURL,
-		Detail:         out.detail,
-		Abuse:          out.abuse,
-		Events:         out.events,
-		SandboxRuntime: sandboxRT,
+		TaskID:             taskID,
+		LeaseID:            leaseID,
+		Status:             status,
+		SignPubKey:         base64.StdEncoding.EncodeToString(d.signPubKey),
+		ResultURL:          out.prURL,
+		Detail:             out.detail,
+		Abuse:              out.abuse,
+		Events:             out.events,
+		SandboxRuntime:     sandboxRT,
+		PlanSpecJSON:       out.planSpecJSON,
+		CachedPromptTokens: out.cachedPromptTokens,
+		RawPromptTokens:    out.rawPromptTokens,
 	}
 	// Attest the telemetry with the daemon's own signing key. In BYOC this key
 	// lives only in the customer's cloud, so the execution half of the record is
