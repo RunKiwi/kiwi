@@ -139,3 +139,84 @@ body {
   50% { stroke-dasharray: 85, 150; stroke-dashoffset: -30; }
   100% { stroke-dasharray: 85, 150; stroke-dashoffset: -120; }
 }
+
+/* ================= SHARED PRIMITIVES (light theme) =================
+   Re-declared here so pages that predate the sand/kiwi redesign — and still
+   reference these class names — keep working instead of rendering
+   unstyled. The originals (see git history) targeted the old dark-navy
+   theme; these are the same primitives against the current light shell. */
+
+.field {
+  width: 100%;
+  background: #FAF9F6;
+  border: 1px solid #E6E2D8;
+  border-radius: 0.7rem;
+  color: #1C1917;
+  padding: 0.62rem 0.85rem;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.field::placeholder { color: #A8A08E; }
+.field:hover { border-color: #D6D0C2; background: #FFFFFF; }
+.field:focus, .field:focus-visible { border-color: #93C645; background: #FFFFFF; outline: none; box-shadow: 0 0 0 3px rgba(147, 198, 69, 0.15); }
+
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: linear-gradient(180deg, #9ED052, #93C645);
+  color: #1A2708; font-weight: 650; font-size: 0.9rem;
+  padding: 0.6rem 1.15rem; border: none; border-radius: 0.7rem; cursor: pointer;
+  box-shadow: 0 8px 22px -10px rgba(147, 198, 69, 0.35), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -10px rgba(147, 198, 69, 0.4), 0 1px 0 rgba(255, 255, 255, 0.45) inset; }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: #FAF9F6; color: #1C1917; font-weight: 500; font-size: 0.88rem;
+  padding: 0.55rem 1rem; border: 1px solid #E6E2D8; border-radius: 0.7rem; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+.btn-ghost:hover { border-color: #D6D0C2; background: #FFFFFF; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: #FAF9F6; border: 1px solid #E6E2D8; color: #1C1917;
+  padding: 0.5rem 0.75rem; border-radius: 0.6rem; font-size: 0.8rem; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chip:hover { border-color: #D6D0C2; background: #FFFFFF; }
+.chip .k { color: #A8A08E; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; }
+
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  color: #5C8422; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: #93C645; box-shadow: 0 0 10px rgba(147, 198, 69, 0.4); }
+
+.card-hover { transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease; }
+.card-hover:hover { transform: translateY(-2px); border-color: #D6D0C2; }
+
+/* Status badge — icon-only by default; the label reveals on card/badge hover. */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 0;
+  border: 1px solid; border-radius: 999px; padding: 4px; line-height: 1;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  transition: gap 0.25s ease, padding 0.25s ease;
+}
+.status-label {
+  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
+  transition: max-width 0.28s ease, opacity 0.2s ease;
+}
+.group:hover .status-badge,
+.status-badge:hover { gap: 6px; padding: 4px 10px 4px 6px; }
+.group:hover .status-label,
+.status-badge:hover .status-label { max-width: 110px; opacity: 1; }
+
+/* Popover spring-in, used by dropdown/context menus. */
+@keyframes pr-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pr-popover { animation: pr-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom left; }

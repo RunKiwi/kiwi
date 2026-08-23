@@ -50,7 +50,7 @@ function TimeRuler({ window }: { window: TimeWindow }) {
   const steps = 4;
   const ticks = Array.from({ length: steps + 1 }, (_, i) => window.startMs + (i * (window.endMs - window.startMs)) / steps);
   return (
-    <div className="flex justify-between text-[10px] text-zinc-500 mb-2 pl-[132px] pr-3">
+    <div className="flex justify-between text-[10px] text-stone-400 mb-2 pl-[132px] pr-3">
       {ticks.map((t, i) => (
         <span key={i}>{fmtTick(t)}</span>
       ))}
@@ -105,9 +105,9 @@ function JobBarView({ bar, onSelect }: { bar: ActivityBar; onSelect: (jobId: str
 function LaneRow({ data, onSelect }: { data: ActivityLaneData; onSelect: (jobId: string) => void }) {
   const height = Math.max(1, data.rowCount) * ROW_H + Math.max(0, data.rowCount - 1) * ROW_GAP + LANE_PAD * 2;
   return (
-    <div className="flex items-stretch border-b border-white/5 last:border-b-0">
-      <div className="w-[132px] shrink-0 flex flex-col justify-center px-3 py-2 border-r border-white/5">
-        <div className="text-xs text-zinc-300 truncate flex items-center gap-1.5">
+    <div className="flex items-stretch border-b border-sand-150 last:border-b-0">
+      <div className="w-[132px] shrink-0 flex flex-col justify-center px-3 py-2 border-r border-sand-150">
+        <div className="text-xs text-stone-700 truncate flex items-center gap-1.5">
           {data.lane.kind === "daemon" && (
             <span
               className="w-1.5 h-1.5 rounded-full shrink-0"
@@ -116,7 +116,7 @@ function LaneRow({ data, onSelect }: { data: ActivityLaneData; onSelect: (jobId:
           )}
           {data.lane.label}
         </div>
-        <div className="text-[10px] text-zinc-600 uppercase tracking-widest mt-0.5">{data.lane.kind}</div>
+        <div className="text-[10px] text-stone-400 uppercase tracking-widest mt-0.5">{data.lane.kind}</div>
       </div>
       <div className="relative flex-1" style={{ height }}>
         <div className="absolute inset-0" style={{ padding: `${LANE_PAD}px 12px` }}>
@@ -142,23 +142,23 @@ export function ActivityTimeline({
 }) {
   if (lanes.length === 0) {
     return (
-      <div className="glass-panel border border-white/10 rounded-2xl flex-1 min-h-[320px] flex items-center justify-center text-center px-8">
+      <div className="bg-white shadow-2xs border border-sand-200 rounded-2xl flex-1 min-h-[320px] flex items-center justify-center text-center px-8">
         <div>
-          <div className="text-zinc-300 text-sm mb-1">No fleet activity yet</div>
-          <div className="text-zinc-500 text-xs">Submit a task and its run will show up here as it happens.</div>
+          <div className="text-stone-700 text-sm mb-1">No fleet activity yet</div>
+          <div className="text-stone-400 text-xs">Submit a task and its run will show up here as it happens.</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="glass-panel border border-white/10 rounded-2xl flex-1 overflow-hidden flex flex-col">
-      <div className="flex items-center gap-4 px-4 py-2.5 border-b border-white/5 text-[10px] uppercase tracking-widest text-zinc-500">
+    <div className="bg-white shadow-2xs border border-sand-200 rounded-2xl flex-1 overflow-hidden flex flex-col">
+      <div className="flex items-center gap-4 px-4 py-2.5 border-b border-sand-150 text-[10px] uppercase tracking-widest text-stone-400">
         <span>Legend</span>
         {(Object.keys(PHASE_COLOR) as PhaseCategory[])
           .filter((c) => c !== "other")
           .map((c) => (
-            <span key={c} className="flex items-center gap-1.5 normal-case tracking-normal text-zinc-400">
+            <span key={c} className="flex items-center gap-1.5 normal-case tracking-normal text-stone-500">
               <span className="w-2 h-2 rounded-sm" style={{ background: PHASE_COLOR[c] }} />
               {PHASE_LABEL[c]}
             </span>

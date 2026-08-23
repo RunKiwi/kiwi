@@ -178,8 +178,8 @@ export default function OnboardingPage() {
         <p className="eyebrow justify-center mb-3">
           <span className="dot" /> Onboarding
         </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-white mb-3">Welcome to Kiwi</h1>
-        <p className="text-zinc-400 text-base max-w-xl mx-auto">
+        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 mb-3">Welcome to Kiwi</h1>
+        <p className="text-stone-500 text-base max-w-xl mx-auto">
           Set up your repository connection, model credentials, and launch your first swarm task in 3 simple steps.
         </p>
       </div>
@@ -187,30 +187,30 @@ export default function OnboardingPage() {
       <div className="space-y-6">
         {/* Step 1: Connect Repository */}
         <div
-          className={`glass-panel p-6 transition-all duration-300 ${
-            step === 1 ? "border-white/20 shadow-[0_0_30px_rgba(255,255,255,0.08)] scale-[1.01]" : step > 1 ? "border-green-500/20 bg-green-950/10" : "opacity-60"
+          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
+            step === 1 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : step > 1 ? "border-emerald-200 bg-emerald-50" : "opacity-60"
           }`}
         >
           <div className="flex items-start gap-4">
             <div
               className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step > 1 ? "bg-[#93C645] text-black" : "bg-white text-black"
+                step > 1 ? "bg-kiwi-500 text-white" : "bg-white border border-sand-300 text-stone-600"
               }`}
             >
               {step > 1 ? <CheckCircle2 className="w-5 h-5" /> : "1"}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-medium text-white mb-1 flex items-center gap-2">
-                  <FolderGit2 className="w-5 h-5 text-zinc-400" /> Connect your Repository
+                <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
+                  <FolderGit2 className="w-5 h-5 text-stone-500" /> Connect your Repository
                 </h2>
                 {step > 1 && (
-                  <button type="button" onClick={() => setStep(1)} className="text-xs text-zinc-500 hover:text-zinc-300 underline">
+                  <button type="button" onClick={() => setStep(1)} className="text-xs text-stone-400 hover:text-stone-700 underline">
                     Edit
                   </button>
                 )}
               </div>
-              <p className="text-zinc-400 text-sm mb-4">
+              <p className="text-stone-500 text-sm mb-4">
                 Link your codebase so Kiwi agents can analyze, plan, and submit pull requests. Install the GitHub App and pick the repositories Kiwi may touch.
               </p>
               {step === 1 && (
@@ -223,13 +223,13 @@ export default function OnboardingPage() {
                     {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     Install the GitHub App
                   </button>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-stone-400">
                     Access covers only the repositories you select, expires
                     hourly, and you can revoke it from GitHub at any time.
                   </p>
 
                   <details className="pt-1">
-                    <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300">
+                    <summary className="text-xs text-stone-400 cursor-pointer hover:text-stone-700">
                       Use a personal access token instead
                     </summary>
                     <div className="flex gap-2 pt-3">
@@ -251,7 +251,7 @@ export default function OnboardingPage() {
                     </div>
                   </details>
                   {err && (
-                    <div className="flex items-center gap-2 text-red-400 text-sm">
+                    <div className="flex items-center gap-2 text-rose-600 text-sm">
                       <AlertCircle className="w-4 h-4 shrink-0" /> {err}
                     </div>
                   )}
@@ -261,7 +261,7 @@ export default function OnboardingPage() {
                       capture("onboarding_step_skipped", { step: 1 });
                       setStep(2);
                     }}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 text-left mt-1 underline"
+                    className="text-xs text-stone-400 hover:text-stone-700 text-left mt-1 underline"
                   >
                     Skip for now →
                   </button>
@@ -273,30 +273,30 @@ export default function OnboardingPage() {
 
         {/* Step 2: Shared Model Credential */}
         <div
-          className={`glass-panel p-6 transition-all duration-300 ${
-            step === 2 ? "border-white/20 shadow-[0_0_30px_rgba(255,255,255,0.08)] scale-[1.01]" : step > 2 ? "border-green-500/20 bg-green-950/10" : "opacity-60"
+          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
+            step === 2 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : step > 2 ? "border-emerald-200 bg-emerald-50" : "opacity-60"
           }`}
         >
           <div className="flex items-start gap-4">
             <div
               className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step > 2 ? "bg-[#93C645] text-black" : step === 2 ? "bg-blue-500 text-white" : "bg-white/20 text-white"
+                step > 2 ? "bg-kiwi-500 text-white" : step === 2 ? "bg-sky-600 text-white" : "bg-sand-200 text-stone-500"
               }`}
             >
               {step > 2 ? <CheckCircle2 className="w-5 h-5" /> : "2"}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-medium text-white mb-1 flex items-center gap-2">
-                  <Key className="w-5 h-5 text-zinc-400" /> Model Credentials
+                <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
+                  <Key className="w-5 h-5 text-stone-500" /> Model Credentials
                 </h2>
                 {step > 2 && (
-                  <button type="button" onClick={() => setStep(2)} className="text-xs text-zinc-500 hover:text-zinc-300 underline">
+                  <button type="button" onClick={() => setStep(2)} className="text-xs text-stone-400 hover:text-stone-700 underline">
                     Edit
                   </button>
                 )}
               </div>
-              <p className="text-zinc-400 text-sm mb-4">
+              <p className="text-stone-500 text-sm mb-4">
                 Kiwi provides access to hosted models with a daily quota, but you can also bring your own key. Add an Anthropic, Gemini or OpenAI key to bypass quotas and power the planner and worker agents.
               </p>
               {step === 2 && (
@@ -320,7 +320,7 @@ export default function OnboardingPage() {
                     />
                   </div>
                   {err && (
-                    <div className="flex items-center gap-2 text-red-400 text-sm">
+                    <div className="flex items-center gap-2 text-rose-600 text-sm">
                       <AlertCircle className="w-4 h-4 shrink-0" /> {err}
                     </div>
                   )}
@@ -339,7 +339,7 @@ export default function OnboardingPage() {
                         capture("onboarding_step_skipped", { step: 2 });
                         setStep(3);
                       }}
-                      className="text-xs text-zinc-400 hover:text-white transition-colors"
+                      className="text-xs text-stone-500 hover:text-stone-900 transition-colors"
                     >
                       Skip (use default)
                     </button>
@@ -352,23 +352,23 @@ export default function OnboardingPage() {
 
         {/* Step 3: Starter Task Launcher */}
         <div
-          className={`glass-panel p-6 transition-all duration-300 ${
-            step === 3 ? "border-white/20 shadow-[0_0_30px_rgba(255,255,255,0.08)] scale-[1.01]" : "opacity-60"
+          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
+            step === 3 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : "opacity-60"
           }`}
         >
           <div className="flex items-start gap-4">
             <div
               className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step === 3 ? "bg-[#93C645] text-black" : "bg-white/20 text-white"
+                step === 3 ? "bg-kiwi-500 text-white" : "bg-sand-200 text-stone-500"
               }`}
             >
               3
             </div>
             <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-medium text-white mb-1 flex items-center gap-2">
+              <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
                 <Rocket className="w-5 h-5 text-[#93C645]" /> Launch Your First Task
               </h2>
-              <p className="text-zinc-400 text-sm mb-4">
+              <p className="text-stone-500 text-sm mb-4">
                 Choose a starter goal template below to pre-fill the command center composer and kick off your first agent swarm.
               </p>
               {step === 3 && (
@@ -382,11 +382,11 @@ export default function OnboardingPage() {
                           onClick={() => setSelectedStarter(t.id)}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all ${
                             isSelected
-                              ? "border-[#93C645]/50 bg-[#93C645]/10 text-white"
-                              : "border-white/10 bg-black/20 text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                              ? "border-[#93C645]/50 bg-[#93C645]/10 text-stone-900"
+                              : "border-sand-200 bg-sand-50 text-stone-500 hover:text-stone-800 hover:bg-sand-50"
                           }`}
                         >
-                          <div className="flex items-center gap-2 mb-1.5 font-semibold text-xs text-white">
+                          <div className="flex items-center gap-2 mb-1.5 font-semibold text-xs text-stone-900">
                             <Sparkles className="w-3.5 h-3.5 text-[#93C645]" />
                             {t.title}
                           </div>
@@ -398,7 +398,7 @@ export default function OnboardingPage() {
 
                   {repos.length > 0 ? (
                     <label className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                      <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">
                         Repository
                       </span>
                       <select
@@ -434,7 +434,7 @@ export default function OnboardingPage() {
                         capture("onboarding_step_skipped", { step: 3 });
                         handleLaunchStarter("");
                       }}
-                      className="text-xs text-zinc-400 hover:text-white transition-colors"
+                      className="text-xs text-stone-500 hover:text-stone-900 transition-colors"
                     >
                       Skip to dashboard
                     </button>

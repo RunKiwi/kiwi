@@ -89,17 +89,17 @@ function ThreadPage({ jobId }: { jobId: string }) {
   return (
     <div className="mx-auto flex h-full max-w-6xl flex-col p-3 md:p-8">
       <header className="mb-4">
-        <Link href="/" className="mb-2 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300">
+        <Link href="/" className="mb-2 inline-flex items-center gap-1 text-[11px] text-stone-400 hover:text-stone-700">
           <ArrowLeft className="h-3 w-3" /> Tasks
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-[15px] text-zinc-100">{job.task || job.job_id}</h1>
+          <h1 className="text-[15px] text-stone-900">{job.task || job.job_id}</h1>
           {summary.continued && (
-            <span className="rounded-full bg-white/6 px-2 py-0.5 text-[10px] text-zinc-400">
+            <span className="rounded-full bg-sand-100 px-2 py-0.5 text-[10px] text-stone-500">
               {summary.runs} runs
             </span>
           )}
-          {job.repo && <span className="text-[11px] text-zinc-600">{job.repo}</span>}
+          {job.repo && <span className="text-[11px] text-stone-400">{job.repo}</span>}
         </div>
       </header>
 
@@ -112,7 +112,7 @@ function ThreadPage({ jobId }: { jobId: string }) {
         {selected ? (
           <RunDetail task={selected.task} />
         ) : (
-          <p className="pl-4 text-[12px] text-zinc-500">This task has no runs yet.</p>
+          <p className="pl-4 text-[12px] text-stone-400">This task has no runs yet.</p>
         )}
       </div>
     </div>

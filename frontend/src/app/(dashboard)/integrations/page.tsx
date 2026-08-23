@@ -25,8 +25,8 @@ const CATALOG: CatalogIntegration[] = [
     categoryLabel: "Source Control",
     description: "Connect repositories for automated pull requests, review workflows, and branch tracking.",
     icon: SiGithub,
-    iconBg: "bg-white/10",
-    iconColor: "text-white",
+    iconBg: "bg-sand-100",
+    iconColor: "text-stone-900",
     brandAccent: "#ffffff",
     docUrl: "https://github.com/settings/installations",
     docLabel: "GitHub Installations",
@@ -427,7 +427,7 @@ export default function IntegrationsPage() {
   ];
 
   return (
-    <div className="p-8 max-w-6xl mx-auto h-full flex flex-col text-white">
+    <div className="p-8 max-w-6xl mx-auto h-full flex flex-col text-stone-900">
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
@@ -437,7 +437,7 @@ export default function IntegrationsPage() {
               {stats.connected} of {stats.total} Active
             </span>
           </div>
-          <p className="text-sm text-zinc-400 mt-1.5 max-w-2xl">
+          <p className="text-sm text-stone-500 mt-1.5 max-w-2xl">
             Connect your source control, AI provider keys, alerting webhooks, and telemetry endpoints.
             Credentials are encrypted at rest and sealed to daemon runtimes.
           </p>
@@ -446,7 +446,7 @@ export default function IntegrationsPage() {
         <button
           onClick={load}
           disabled={isRefreshing}
-          className="btn-ghost self-start md:self-auto text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 text-zinc-400 hover:text-white"
+          className="btn-ghost self-start md:self-auto text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 text-stone-500 hover:text-stone-900"
           title="Refresh statuses"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-400" : ""}`} />
@@ -456,33 +456,33 @@ export default function IntegrationsPage() {
 
       {/* Connectivity Overview Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
-        <div className="glass-panel p-4 flex items-center gap-4">
+        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <div className="text-xl font-light text-white">{stats.connected}</div>
-            <div className="text-[11px] text-zinc-400 uppercase tracking-wider font-medium">Connected</div>
+            <div className="text-xl font-light text-stone-900">{stats.connected}</div>
+            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Connected</div>
           </div>
         </div>
 
-        <div className="glass-panel p-4 flex items-center gap-4">
+        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
             <AlertCircle className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <div className="text-xl font-light text-white">{stats.incomplete}</div>
-            <div className="text-[11px] text-zinc-400 uppercase tracking-wider font-medium">Partially Set</div>
+            <div className="text-xl font-light text-stone-900">{stats.incomplete}</div>
+            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Partially Set</div>
           </div>
         </div>
 
-        <div className="glass-panel p-4 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-            <Sparkles className="w-5 h-5 text-zinc-400" />
+        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-sand-50 border border-sand-200 flex items-center justify-center shrink-0">
+            <Sparkles className="w-5 h-5 text-stone-500" />
           </div>
           <div>
-            <div className="text-xl font-light text-white">{stats.unconnected}</div>
-            <div className="text-[11px] text-zinc-400 uppercase tracking-wider font-medium">Available to Add</div>
+            <div className="text-xl font-light text-stone-900">{stats.unconnected}</div>
+            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Available to Add</div>
           </div>
         </div>
       </div>
@@ -500,13 +500,13 @@ export default function IntegrationsPage() {
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 ${
                   active
                     ? "bg-white text-black font-semibold shadow-sm"
-                    : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 border border-white/5"
+                    : "bg-sand-50 text-stone-500 hover:text-stone-900 hover:bg-sand-100 border border-sand-150"
                 }`}
               >
                 <span>{cat.label}</span>
                 <span
                   className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    active ? "bg-black/15 text-black font-bold" : "bg-white/10 text-zinc-400"
+                    active ? "bg-black/15 text-black font-bold" : "bg-sand-100 text-stone-500"
                   }`}
                 >
                   {cat.count}
@@ -519,7 +519,7 @@ export default function IntegrationsPage() {
         {/* Search & Status Controls */}
         <div className="flex items-center gap-2.5">
           <div className="relative flex-1 sm:w-64">
-            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -529,11 +529,11 @@ export default function IntegrationsPage() {
             />
           </div>
 
-          <div className="flex items-center bg-white/5 border border-white/10 rounded-xl p-0.5 shrink-0">
+          <div className="flex items-center bg-sand-50 border border-sand-200 rounded-xl p-0.5 shrink-0">
             <button
               onClick={() => setStatusFilter("all")}
               className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                statusFilter === "all" ? "bg-white/15 text-white font-semibold" : "text-zinc-400 hover:text-white"
+                statusFilter === "all" ? "bg-white/15 text-stone-900 font-semibold" : "text-stone-500 hover:text-stone-900"
               }`}
             >
               All
@@ -543,7 +543,7 @@ export default function IntegrationsPage() {
               className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
                 statusFilter === "connected"
                   ? "bg-white/15 text-emerald-400 font-semibold"
-                  : "text-zinc-400 hover:text-white"
+                  : "text-stone-500 hover:text-stone-900"
               }`}
             >
               Connected
@@ -554,10 +554,10 @@ export default function IntegrationsPage() {
 
       {/* Integrations Grid */}
       {filteredCatalog.length === 0 ? (
-        <div className="glass-panel p-12 text-center rounded-2xl border border-white/10 my-6">
-          <SlidersHorizontal className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
-          <h3 className="text-sm font-medium text-white mb-1">No integrations match your filters</h3>
-          <p className="text-xs text-zinc-500 mb-4 max-w-sm mx-auto">
+        <div className="bg-white shadow-2xs p-12 text-center rounded-2xl border border-sand-200 my-6">
+          <SlidersHorizontal className="w-8 h-8 text-stone-400 mx-auto mb-3" />
+          <h3 className="text-sm font-medium text-stone-900 mb-1">No integrations match your filters</h3>
+          <p className="text-xs text-stone-400 mb-4 max-w-sm mx-auto">
             Try adjusting your search keywords or switching category filters to find the integration you need.
           </p>
           <button
@@ -566,7 +566,7 @@ export default function IntegrationsPage() {
               setSelectedCategory("all");
               setStatusFilter("all");
             }}
-            className="btn-ghost text-xs px-3.5 py-1.5 rounded-xl text-zinc-300"
+            className="btn-ghost text-xs px-3.5 py-1.5 rounded-xl text-stone-700"
           >
             Clear all filters
           </button>
@@ -582,12 +582,12 @@ export default function IntegrationsPage() {
             return (
               <div
                 key={item.id}
-                className={`glass-panel border rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:border-white/20 group relative overflow-hidden ${
+                className={`bg-white shadow-2xs border rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:border-sand-200 group relative overflow-hidden ${
                   isConnected
                     ? "border-emerald-500/20 bg-gradient-to-b from-[#10202C] to-[#0E1A24]"
                     : isIncomplete
                     ? "border-amber-500/20"
-                    : "border-white/10"
+                    : "border-sand-200"
                 }`}
               >
                 <div>
@@ -595,17 +595,17 @@ export default function IntegrationsPage() {
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-center gap-3.5 min-w-0">
                       <div
-                        className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10 transition-transform group-hover:scale-105 duration-200 ${item.iconBg}`}
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-sand-200 transition-transform group-hover:scale-105 duration-200 ${item.iconBg}`}
                       >
                         <Icon className={`w-5 h-5 ${item.iconColor}`} />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <h3 className="font-medium text-white tracking-tight text-base truncate">
+                          <h3 className="font-medium text-stone-900 tracking-tight text-base truncate">
                             {item.name}
                           </h3>
                         </div>
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400">
                           {item.categoryLabel}
                         </span>
                       </div>
@@ -624,7 +624,7 @@ export default function IntegrationsPage() {
                           <span>{state.label}</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-white/5 text-zinc-500 border border-white/5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sand-50 text-stone-400 border border-sand-150">
                           <span>Not set</span>
                         </span>
                       )}
@@ -632,7 +632,7 @@ export default function IntegrationsPage() {
                   </div>
 
                   {/* Blurb */}
-                  <p className="text-xs text-zinc-400 leading-relaxed mb-4 line-clamp-2">
+                  <p className="text-xs text-stone-500 leading-relaxed mb-4 line-clamp-2">
                     {item.description}
                   </p>
 
@@ -642,14 +642,14 @@ export default function IntegrationsPage() {
                       {githubInstalls.slice(0, 3).map((g) => (
                         <span
                           key={g.installation_id}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300"
+                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-sand-50 border border-sand-200 text-stone-700"
                         >
                           <ShieldCheck className="w-3 h-3 text-emerald-400" />
                           <span className="truncate max-w-[120px]">{g.account_login}</span>
                         </span>
                       ))}
                       {githubInstalls.length > 3 && (
-                        <span className="text-[10px] text-zinc-500 self-center">
+                        <span className="text-[10px] text-stone-400 self-center">
                           +{githubInstalls.length - 3} more
                         </span>
                       )}
@@ -662,14 +662,14 @@ export default function IntegrationsPage() {
                       {slackInstalls.slice(0, 3).map((s) => (
                         <span
                           key={s.team_id}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300"
+                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-sand-50 border border-sand-200 text-stone-700"
                         >
                           <ShieldCheck className="w-3 h-3 text-emerald-400" />
                           <span className="truncate max-w-[120px]">{s.team_name || s.team_id}</span>
                         </span>
                       ))}
                       {slackInstalls.length > 3 && (
-                        <span className="text-[10px] text-zinc-500 self-center">
+                        <span className="text-[10px] text-stone-400 self-center">
                           +{slackInstalls.length - 3} more
                         </span>
                       )}
@@ -687,12 +687,12 @@ export default function IntegrationsPage() {
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono ${
                               isFieldConnected
                                 ? "bg-emerald-500/5 text-emerald-300 border-emerald-500/20"
-                                : "bg-white/5 text-zinc-500 border-white/10"
+                                : "bg-sand-50 text-stone-400 border-sand-200"
                             }`}
                           >
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                isFieldConnected ? "bg-emerald-400" : "bg-zinc-600"
+                                isFieldConnected ? "bg-emerald-400" : "bg-stone-300"
                               }`}
                             />
                             {f.label}
@@ -704,8 +704,8 @@ export default function IntegrationsPage() {
                 </div>
 
                 {/* Bottom Row: Actions */}
-                <div className="flex items-center justify-between pt-3 border-t border-white/5 mt-auto">
-                  <span className="text-[11px] text-zinc-500 truncate max-w-[200px]">
+                <div className="flex items-center justify-between pt-3 border-t border-sand-150 mt-auto">
+                  <span className="text-[11px] text-stone-400 truncate max-w-[200px]">
                     {state.summary}
                   </span>
 
@@ -714,7 +714,7 @@ export default function IntegrationsPage() {
                     onClick={() => setActiveIntegration(item)}
                     className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-xl transition-all ${
                       isConnected
-                        ? "bg-white/10 hover:bg-white/15 text-white border border-white/10"
+                        ? "bg-sand-100 hover:bg-white/15 text-stone-900 border border-sand-200"
                         : "btn-primary text-black"
                     }`}
                   >

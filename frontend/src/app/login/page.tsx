@@ -72,19 +72,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4 relative overflow-hidden bg-[#0A1017]">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#93C645]/[0.04] rounded-full blur-3xl mix-blend-screen pointer-events-none" />
-      
-      <div className="glass-panel w-full max-w-md p-8 relative z-10 flex flex-col items-center text-center border border-white/10 rounded-2xl shadow-2xl">
-        <div className="w-16 h-16 rounded-2xl bg-[#0E1A24] border border-[#93C645]/40 shadow-[0_0_30px_rgba(147,198,69,0.3)] flex items-center justify-center mb-6">
-          <Logo className="w-9 h-9 text-[#93C645]" />
+    <div className="flex min-h-screen items-center justify-center p-4 relative overflow-hidden bg-[#F4F3EE]">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-kiwi-400/[0.10] rounded-full blur-3xl pointer-events-none" />
+
+      <div className="bg-white w-full max-w-md p-8 relative z-10 flex flex-col items-center text-center border border-sand-200 rounded-2xl shadow-popover">
+        <div className="w-16 h-16 rounded-2xl bg-kiwi-100 border border-kiwi-200 flex items-center justify-center mb-6">
+          <Logo className="w-9 h-9 text-kiwi-700" />
         </div>
-        
-        <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">Welcome to Kiwi</h1>
-        <p className="text-zinc-400 text-sm mb-8">Sign in to plan a task and ship a verified pull request</p>
+
+        <h1 className="text-3xl font-bold tracking-tight text-stone-900 mb-2">Welcome to Kiwi</h1>
+        <p className="text-stone-500 text-sm mb-8">Sign in to plan a task and ship a verified pull request</p>
 
         {loadingProviders ? (
-          <div className="w-5 h-5 border-2 border-white/20 border-t-[#93C645] rounded-full animate-spin mb-8" />
+          <div className="w-5 h-5 border-2 border-sand-200 border-t-kiwi-500 rounded-full animate-spin mb-8" />
         ) : !showApiKey ? (
           <div className="w-full flex flex-col gap-4">
             {providers.includes("github") && (
@@ -94,7 +94,7 @@ export default function LoginPage() {
                   rememberAuthMethod("github");
                   capture("signup_started", { method: "github" });
                 }}
-                className="w-full flex items-center justify-center gap-3 bg-white text-black hover:bg-zinc-200 transition-colors py-3 px-4 rounded-xl font-semibold"
+                className="w-full flex items-center justify-center gap-3 bg-stone-900 text-white hover:bg-stone-800 transition-colors py-3 px-4 rounded-xl font-semibold"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
@@ -109,7 +109,7 @@ export default function LoginPage() {
                   rememberAuthMethod("google");
                   capture("signup_started", { method: "google" });
                 }}
-                className="w-full flex items-center justify-center gap-3 bg-white/10 text-white hover:bg-white/20 transition-colors py-3 px-4 rounded-xl font-medium"
+                className="w-full flex items-center justify-center gap-3 bg-white border border-sand-200 text-stone-800 hover:bg-sand-50 transition-colors py-3 px-4 rounded-xl font-medium"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -123,15 +123,15 @@ export default function LoginPage() {
 
             {providers.length > 0 && (
               <div className="mt-4 flex items-center justify-center gap-2">
-                <div className="h-px bg-white/10 w-full" />
-                <span className="text-xs text-zinc-500 uppercase">or</span>
-                <div className="h-px bg-white/10 w-full" />
+                <div className="h-px bg-sand-200 w-full" />
+                <span className="text-xs text-stone-400 uppercase">or</span>
+                <div className="h-px bg-sand-200 w-full" />
               </div>
             )}
 
             <button
               onClick={() => setShowApiKey(true)}
-              className="text-sm text-zinc-400 hover:text-white transition-colors"
+              className="text-sm text-stone-500 hover:text-stone-900 transition-colors"
             >
               Sign in with API Key
             </button>
@@ -139,25 +139,25 @@ export default function LoginPage() {
         ) : (
           <form onSubmit={handleLogin} className="w-full flex flex-col gap-4">
             <div className="relative">
-              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
               <input
                 type="password"
                 placeholder="API Key (e.g. kw_...)"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white placeholder-zinc-500 focus:outline-none focus:border-[#93C645]/50 transition-colors"
+                className="w-full bg-sand-50 border border-sand-200 rounded-xl py-3 pl-10 pr-4 text-stone-900 placeholder-stone-400 focus:outline-none focus:border-kiwi-500 transition-colors"
               />
             </div>
-            
-            {error && <p className="text-red-400 text-sm text-left">{error}</p>}
 
-            <button 
+            {error && <p className="text-rose-600 text-sm text-left">{error}</p>}
+
+            <button
               type="submit"
               disabled={isLoading || !apiKey.trim()}
-              className="w-full flex items-center justify-center gap-3 bg-[#93C645] text-[#0A1017] hover:bg-[#82b33b] transition-colors py-3 px-4 rounded-xl font-semibold disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-3 bg-kiwi-600 text-white hover:bg-kiwi-700 transition-colors py-3 px-4 rounded-xl font-semibold disabled:opacity-50"
             >
               {isLoading ? (
-                <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 "Continue"
               )}
@@ -167,7 +167,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowApiKey(false)}
-                className="mt-4 text-sm text-zinc-400 hover:text-white transition-colors"
+                className="mt-4 text-sm text-stone-500 hover:text-stone-900 transition-colors"
               >
                 Back to OAuth
               </button>

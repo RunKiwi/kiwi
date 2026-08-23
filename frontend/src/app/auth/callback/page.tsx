@@ -58,16 +58,16 @@ export default function AuthCallbackPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="glass-panel w-full max-w-md p-8 flex flex-col items-center text-center gap-6">
-        <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center">
-          <Logo className="w-9 h-9 text-black" />
+      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs w-full max-w-md p-8 flex flex-col items-center text-center gap-6">
+        <div className="w-14 h-14 rounded-2xl bg-kiwi-100 border border-kiwi-200 flex items-center justify-center">
+          <Logo className="w-9 h-9 text-kiwi-700" />
         </div>
         {error ? (
           <>
-            <p className="text-red-400 text-sm">{error}</p>
+            <p className="text-rose-600 text-sm">{error}</p>
             <button
               onClick={() => router.replace("/login")}
-              className="text-sm text-zinc-400 hover:text-white transition-colors"
+              className="text-sm text-stone-500 hover:text-stone-900 transition-colors"
             >
               Back to sign in
             </button>
@@ -77,7 +77,7 @@ export default function AuthCallbackPage() {
             {/* "connecting" is the literal act here — the session is being
                 established against the control plane. */}
             <ThinkingOrb state="connecting" size={64} aria-label="Completing sign-in" />
-            <p className="text-zinc-400 text-sm">Completing sign-in…</p>
+            <p className="text-stone-500 text-sm">Completing sign-in…</p>
           </>
         )}
       </div>
