@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { client, type PostMergeMonitor } from "@/lib/api";
-import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest, Plus, ShieldCheck, Activity } from "lucide-react";
+import { Radar, Ban, Loader2, AlertCircle, CheckCircle2, XCircle, GitPullRequest, Plus, type LucideIcon } from "lucide-react";
 import { KiwiCoreSpinner } from "@/components/KiwiLoaders";
 
-const STATUS_META: Record<PostMergeMonitor["status"], { label: string; Icon: any; colorClass: string; badgeClass: string }> = {
+const STATUS_META: Record<PostMergeMonitor["status"], { label: string; Icon: LucideIcon; colorClass: string; badgeClass: string }> = {
   MONITORING: {
     label: "Monitoring",
     Icon: Loader2,
@@ -51,7 +51,10 @@ export default function MonitorsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,8 +65,8 @@ export default function MonitorsPage() {
       await client.createMonitor(prUrl.trim());
       setPrUrl("");
       await load();
-    } catch (err: any) {
-      setCreateError(err?.message || "Failed to create monitor");
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create monitor");
     } finally {
       setCreating(false);
     }

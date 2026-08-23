@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  type UsageResponse,
   type VelocityMetrics,
   type CachingAnalytics,
   type SandboxCacheStats,
@@ -31,7 +32,7 @@ import { KiwiCoreSpinner } from "@/components/KiwiLoaders";
 export default function SpendPage() {
   const [subTab, setSubTab] = useState<"spend" | "velocity">("spend");
   const [loading, setLoading] = useState(true);
-  const [usage, setUsage] = useState<any>(null);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [spend, setSpend] = useState<SpendResponse | null>(null);
   const [velocity, setVelocity] = useState<VelocityMetrics | null>(null);
   const [caching, setCaching] = useState<CachingAnalytics | null>(null);
@@ -59,6 +60,7 @@ export default function SpendPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []);
 
