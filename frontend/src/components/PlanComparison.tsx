@@ -1,123 +1,261 @@
-import { Check } from "lucide-react";
-import { PLAN_TIERS, PLAN_FEATURES, PlanTier, PlanFeatureValue } from "@/lib/plans";
-import { PRO_UPGRADE_MAILTO, ENTERPRISE_MAILTO } from "@/lib/api";
+"use client";
+
+import React, { useState } from "react";
+import { Check, Zap, ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
+import { PLAN_FEATURES, type PlanFeatureValue } from "@/lib/plans";
+import { ENTERPRISE_MAILTO } from "@/lib/api";
+import { UpgradeButton } from "@/components/UpgradeButton";
 
 export function PlanComparison({ currentPlan }: { currentPlan?: string | null }) {
   const currentPlanId = currentPlan || "free";
+  const [showFullMatrix, setShowFullMatrix] = useState(false);
 
   const renderValue = (val: PlanFeatureValue) => {
     return (
       <div className="flex items-center gap-2">
         {val.value === true ? (
-          <Check className="w-4 h-4 text-kiwi-600" />
+          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
         ) : val.value === false || val.value === "—" ? (
-          <span className="text-stone-300">—</span>
+          <span className="text-stone-300 font-mono">—</span>
         ) : (
-          <span className="text-stone-700">{val.value}</span>
+          <span className="text-stone-800 font-medium text-xs">{val.value}</span>
         )}
         {val.soon && (
-          <span className="text-[10px] font-medium uppercase tracking-wider text-kiwi-700 bg-kiwi-50 border border-kiwi-200 px-1.5 py-0.5 rounded">
-            Coming soon
+          <span className="text-[9px] font-bold font-mono uppercase tracking-wider text-stone-500 bg-sand-100 border border-sand-200 px-1.5 py-0.5 rounded">
+            Soon
           </span>
         )}
       </div>
     );
   };
 
-  const renderCTA = (tier: PlanTier) => {
-    if (tier.id === "free") {
-      if (currentPlanId === "free") {
-        return (
-          <button disabled className="w-full px-4 py-2 text-sm rounded-xl bg-sand-100 text-stone-500 font-medium cursor-not-allowed">
-            Current plan
-          </button>
-        );
-      }
-      return <div className="h-[36px]" />;
-    }
-    if (tier.id === "pro") {
-      if (currentPlanId === "pro") {
-        return (
-          <button disabled className="w-full px-4 py-2 text-sm rounded-xl bg-kiwi-50 text-kiwi-800 font-medium cursor-not-allowed border border-kiwi-200">
-            Current plan
-          </button>
-        );
-      }
-      return (
-        <a href={PRO_UPGRADE_MAILTO} className="flex items-center justify-center w-full px-4 py-2 text-sm rounded-xl bg-kiwi-600 text-white font-semibold hover:bg-kiwi-700 transition-colors shadow-sm">
-          Upgrade to Pro
-        </a>
-      );
-    }
-    if (tier.id === "enterprise") {
-      return (
-        <a href={ENTERPRISE_MAILTO} className="flex items-center justify-center w-full px-4 py-2 text-sm rounded-xl bg-sand-100 text-stone-800 font-semibold hover:bg-sand-200 transition-colors border border-sand-200">
-          Contact sales
-        </a>
-      );
-    }
-  };
-
   return (
-    <div className="flex flex-col gap-4 w-full bg-white border border-sand-200 rounded-2xl shadow-2xs p-6">
-      <h2 className="text-lg font-bold text-stone-900 mb-2">Compare Plans</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[700px]">
-          <thead>
-            <tr>
-              <th className="p-4 w-1/4"></th>
-              {PLAN_TIERS.map(tier => {
-                const isCurrent = currentPlanId === tier.id;
-                return (
-                  <th key={tier.id} className={`p-4 w-1/4 rounded-t-xl border-x border-t relative ${isCurrent ? 'bg-kiwi-50/60 border-kiwi-200' : 'bg-transparent border-transparent'}`}>
-                    {isCurrent && (
-                      <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-kiwi-800 bg-white border border-kiwi-300 px-2 py-0.5 rounded-full whitespace-nowrap shadow-2xs">
-                          Current plan
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-1 mb-4">
-                      <div className="text-lg font-bold text-stone-900">{tier.name}</div>
-                      <div className="text-sm text-stone-500">{tier.price}</div>
-                    </div>
-                    {renderCTA(tier)}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {PLAN_FEATURES.map((feature, idx) => (
-              <tr key={idx} className="border-t border-sand-150">
-                <td className="p-4 text-sm font-medium text-stone-500 border-r border-transparent">
-                  {feature.name}
-                </td>
-                {PLAN_TIERS.map(tier => {
-                  const isCurrent = currentPlanId === tier.id;
-                  const val = feature[tier.id];
-                  return (
-                    <td key={tier.id} className={`p-4 text-sm border-x ${isCurrent ? 'bg-kiwi-50/60 border-kiwi-200' : 'bg-transparent border-transparent'}`}>
-                      {renderValue(val)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-            <tr>
-              <td className="p-0 h-4 border-r border-transparent"></td>
-              {PLAN_TIERS.map(tier => {
-                const isCurrent = currentPlanId === tier.id;
-                return (
-                  <td key={tier.id} className={`p-0 h-4 rounded-b-xl border-x border-b ${isCurrent ? 'bg-kiwi-50/60 border-kiwi-200' : 'bg-transparent border-transparent'}`}></td>
-                );
-              })}
-            </tr>
-          </tbody>
-        </table>
+    <div className="flex flex-col gap-6 w-full font-sans">
+      {/* 3 Elevated Tier Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* FREE TIER CARD */}
+        <div
+          className={`p-6 rounded-2xl bg-white border shadow-2xs flex flex-col justify-between space-y-6 transition-all ${
+            currentPlanId === "free" ? "border-stone-400 ring-1 ring-stone-400" : "border-sand-200"
+          }`}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold font-mono uppercase tracking-wider text-stone-500">Free Tier</span>
+              {currentPlanId === "free" && (
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-stone-700 bg-sand-100 border border-sand-200 px-2 py-0.5 rounded-full">
+                  Current Plan
+                </span>
+              )}
+            </div>
+
+            <div>
+              <div className="text-3xl font-bold font-mono text-stone-900">$0</div>
+              <div className="text-xs text-stone-500 mt-1">Free forever for individuals & hobbyists</div>
+            </div>
+
+            <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span><strong className="text-stone-900">200</strong> agent-minutes / month</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span><strong className="text-stone-900">1</strong> concurrent task runner</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Shared managed compute fleet</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>GitHub pull request integration</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>gVisor sandbox & sealed keys</span>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            {currentPlanId === "free" ? (
+              <button disabled className="w-full py-2 rounded-xl bg-sand-100 text-stone-500 font-bold text-xs cursor-default">
+                Your Current Plan
+              </button>
+            ) : (
+              <button disabled className="w-full py-2 rounded-xl bg-sand-50 text-stone-400 font-medium text-xs">
+                Included Base
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* PRO TIER CARD (FEATURED) */}
+        <div
+          className={`p-6 rounded-2xl bg-white border shadow-2xs flex flex-col justify-between space-y-6 relative overflow-hidden transition-all ${
+            currentPlanId === "pro"
+              ? "border-kiwi-500 ring-2 ring-kiwi-500/20"
+              : "border-sand-300 hover:border-stone-400"
+          }`}
+        >
+          <div className="absolute top-0 right-0">
+            <span className="bg-stone-900 text-kiwi-400 font-mono text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl border-l border-b border-sand-200 shadow-2xs flex items-center gap-1">
+              <Zap className="w-2.5 h-2.5 fill-current" />
+              Most Popular
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold font-mono uppercase tracking-wider text-kiwi-800">Pro Tier</span>
+              {currentPlanId === "pro" && (
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-kiwi-800 bg-kiwi-50 border border-kiwi-200 px-2 py-0.5 rounded-full">
+                  Current Plan
+                </span>
+              )}
+            </div>
+
+            <div>
+              <div className="text-3xl font-bold font-mono text-stone-900">
+                $18 <span className="text-xs font-normal text-stone-500">/ user / mo</span>
+              </div>
+              <div className="text-xs text-stone-500 mt-1">High-throughput execution for engineering teams</div>
+            </div>
+
+            <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-kiwi-600 shrink-0 font-bold" />
+                <span><strong className="text-stone-900">2,000</strong> pooled agent-min / seat</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-kiwi-600 shrink-0 font-bold" />
+                <span><strong className="text-stone-900">20</strong> concurrent task runners</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-kiwi-600 shrink-0 font-bold" />
+                <span><strong className="text-stone-900">Private BYOC</strong> &amp; dedicated runners</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-kiwi-600 shrink-0 font-bold" />
+                <span>GitHub, Slack &amp; Linear triggers</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-kiwi-600 shrink-0 font-bold" />
+                <span>Higher swarm width &amp; critic models</span>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            {currentPlanId === "pro" ? (
+              <button disabled className="w-full py-2.5 rounded-xl bg-kiwi-50 text-kiwi-900 font-bold text-xs border border-kiwi-200 cursor-default">
+                Active Pro Subscription
+              </button>
+            ) : (
+              <UpgradeButton variant="full" className="w-full" label="Upgrade to Pro" />
+            )}
+          </div>
+        </div>
+
+        {/* ENTERPRISE TIER CARD */}
+        <div
+          className={`p-6 rounded-2xl bg-white border shadow-2xs flex flex-col justify-between space-y-6 transition-all ${
+            currentPlanId === "enterprise" ? "border-stone-900 ring-2 ring-stone-900" : "border-sand-200"
+          }`}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold font-mono uppercase tracking-wider text-stone-500">Enterprise</span>
+              {currentPlanId === "enterprise" && (
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-stone-900 bg-sand-100 border border-sand-200 px-2 py-0.5 rounded-full">
+                  Current Plan
+                </span>
+              )}
+            </div>
+
+            <div>
+              <div className="text-3xl font-bold font-mono text-stone-900">Custom</div>
+              <div className="text-xs text-stone-500 mt-1">Zero-knowledge VPC, on-prem &amp; custom SLAs</div>
+            </div>
+
+            <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-stone-900 shrink-0 font-bold" />
+                <span><strong className="text-stone-900">Custom</strong> pooled agent-minutes</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-stone-900 shrink-0 font-bold" />
+                <span><strong className="text-stone-900">Unlimited</strong> concurrent jobs</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-stone-900 shrink-0 font-bold" />
+                <span>Firecracker microVMs &amp; VPC peer</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-stone-900 shrink-0 font-bold" />
+                <span>SSO / SAML &amp; custom audit export</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-stone-900 shrink-0 font-bold" />
+                <span>Dedicated slack &amp; 99.9% uptime SLA</span>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <a
+              href={ENTERPRISE_MAILTO}
+              className="flex items-center justify-center w-full py-2.5 rounded-xl bg-white hover:bg-sand-100 text-stone-900 font-bold text-xs border border-sand-200 shadow-2xs transition-all"
+            >
+              <span>Contact Enterprise Sales</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1 text-stone-400" />
+            </a>
+          </div>
+        </div>
       </div>
-      <div className="text-xs text-stone-400 text-center mt-2">
-        Pro agent-minutes are per seat, pooled across your org.
+
+      {/* Feature Matrix Collapsible Card */}
+      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-stone-900 uppercase tracking-wider">Detailed Feature Matrix</h3>
+            <p className="text-xs text-stone-500 mt-0.5">Compare features and resource limits across all plans.</p>
+          </div>
+
+          <button
+            onClick={() => setShowFullMatrix(!showFullMatrix)}
+            className="text-xs font-semibold text-stone-600 hover:text-stone-900 flex items-center gap-1 transition-colors px-3 py-1.5 rounded-xl border border-sand-200 hover:bg-sand-50"
+          >
+            <span>{showFullMatrix ? "Hide Feature Matrix" : "View Full Feature Matrix"}</span>
+            {showFullMatrix ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {showFullMatrix && (
+          <div className="pt-3 border-t border-sand-150 overflow-x-auto no-scrollbar">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-sand-200 text-stone-500 font-mono text-[11px] uppercase">
+                  <th className="py-2.5 pr-4 font-bold">Feature / Resource</th>
+                  <th className="py-2.5 px-3 font-bold w-1/4">Free</th>
+                  <th className="py-2.5 px-3 font-bold w-1/4 text-kiwi-800">Pro</th>
+                  <th className="py-2.5 px-3 font-bold w-1/4 text-stone-900">Enterprise</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sand-150 text-xs">
+                {PLAN_FEATURES.map((feature, idx) => (
+                  <tr key={idx} className="hover:bg-sand-50/50 transition-colors">
+                    <td className="py-3 pr-4 font-medium text-stone-800">{feature.name}</td>
+                    <td className="py-3 px-3">{renderValue(feature.free)}</td>
+                    <td className="py-3 px-3 bg-kiwi-50/20">{renderValue(feature.pro)}</td>
+                    <td className="py-3 px-3">{renderValue(feature.enterprise)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,11 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState, useId } from "react";
-import { X, CheckCircle2, AlertCircle, Loader2, ExternalLink, Eye, EyeOff, ShieldCheck, Lock, ArrowRight } from "lucide-react";
+import React, { useEffect, useRef, useState, useId } from "react";
+import {
+  X,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Lock,
+  ArrowRight,
+  Hash,
+  BookOpen,
+} from "lucide-react";
 import Link from "next/link";
 import { client, type GithubInstallation, type SlackInstallation } from "@/lib/api";
 import { parseActionableError } from "@/lib/errors";
 import { capture } from "@/lib/analytics";
+import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 
 export type IntegrationCategory = "scm" | "llm" | "notifications" | "telemetry";
 
@@ -69,7 +82,7 @@ export function IntegrationDrawer({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-stone-900/30 backdrop-blur-xs z-40 transition-opacity animate-in fade-in duration-200"
+        className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-40 transition-opacity animate-in fade-in duration-200"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -81,7 +94,7 @@ export function IntegrationDrawer({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
-        className="fixed inset-y-0 right-0 w-full sm:w-[560px] max-w-full bg-white border-l border-sand-200 shadow-popover z-50 flex flex-col outline-none animate-in slide-in-from-right duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        className="fixed inset-y-0 right-0 w-full sm:w-[560px] max-w-full bg-white border-l border-sand-200 shadow-popover z-50 flex flex-col outline-none animate-in slide-in-from-right duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] font-sans text-stone-900"
       >
         <IntegrationDrawerBody
           key={integration.id}
@@ -255,47 +268,47 @@ function IntegrationDrawerBody({
 
   return (
     <>
-      {/* Drawer Header */}
-      <div className="flex items-start justify-between p-6 border-b border-sand-200 bg-stone-900">
-        <div className="flex items-center gap-4 min-w-0">
+      {/* ================= DRAWER HEADER (LIGHT THEME) ================= */}
+      <div className="flex items-start justify-between p-5 sm:p-6 border-b border-sand-200 bg-white">
+        <div className="flex items-center gap-3.5 min-w-0">
           <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border border-sand-200 ${integration.iconBg}`}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border border-sand-200 shadow-2xs ${integration.iconBg}`}
           >
             <Icon className={`w-6 h-6 ${integration.iconColor}`} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 id={headingId} className="text-lg font-medium text-stone-900 tracking-tight">
+              <h2 id={headingId} className="text-lg font-bold text-stone-900 tracking-tight">
                 {integration.name}
               </h2>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-sand-100 text-stone-500">
+              <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-sand-100 text-stone-600 border border-sand-200">
                 {integration.categoryLabel}
               </span>
               {isAllConnected && (
-                <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Connected
+                <span className="flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-800 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Connected
                 </span>
               )}
             </div>
-            <p className="text-xs text-stone-500 mt-1 line-clamp-2">{integration.description}</p>
+            <p className="text-xs text-stone-500 mt-1 line-clamp-2 leading-relaxed">{integration.description}</p>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="p-2 hover:bg-sand-100 rounded-full transition-colors text-stone-500 hover:text-stone-900 shrink-0 ml-2"
+          className="p-1.5 hover:bg-sand-100 rounded-xl transition-colors text-stone-400 hover:text-stone-700 shrink-0 ml-2"
           title="Close drawer (Esc)"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Drawer Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* ================= DRAWER CONTENT ================= */}
+      <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
         {/* Security Banner */}
-        <div className="flex items-start gap-3 p-3.5 rounded-xl border border-sand-150 bg-sand-50/60 text-xs text-stone-500">
+        <div className="flex items-start gap-3 p-3.5 rounded-2xl border border-sand-200 bg-sand-50/70 text-xs text-stone-600">
           <Lock className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
-          <div>
-            <span className="text-stone-800 font-medium">Encrypted & Sealed: </span>
+          <div className="leading-relaxed">
+            <span className="text-stone-900 font-bold">Encrypted & Sealed: </span>
             Tokens are AES-encrypted at rest and sealed to daemon runtimes. They are never rendered
             or returned to the browser.
           </div>
@@ -303,13 +316,16 @@ function IntegrationDrawerBody({
 
         {/* Docs Reference Link */}
         {integration.docUrl && (
-          <div className="flex items-center justify-between text-xs p-3 rounded-xl border border-sand-150 bg-sand-50/60">
-            <span className="text-stone-500">Need help creating credentials?</span>
+          <div className="flex items-center justify-between text-xs p-3.5 rounded-2xl border border-sand-200 bg-sand-50/70">
+            <span className="text-stone-600 flex items-center gap-1.5">
+              <BookOpen className="w-3.5 h-3.5 text-stone-400" />
+              <span>Need help creating credentials?</span>
+            </span>
             <a
               href={integration.docUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300 font-medium transition-colors"
+              className="flex items-center gap-1 text-xs font-semibold text-kiwi-700 hover:underline transition-colors"
             >
               <span>{integration.docLabel || "Documentation"}</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -319,14 +335,14 @@ function IntegrationDrawerBody({
 
         {/* GitHub Hybrid Flow */}
         {integration.isGithubHybrid ? (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* GitHub App Section */}
-            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-4">
+            <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3.5">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-stone-900">Kiwi GitHub App</h3>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                    <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Kiwi GitHub App</h3>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
                       Recommended
                     </span>
                   </div>
@@ -338,8 +354,8 @@ function IntegrationDrawerBody({
               </div>
 
               {installs === null ? (
-                <div className="flex items-center gap-2 text-xs text-stone-400 py-2">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading installations…
+                <div className="flex items-center gap-2 text-xs text-stone-500 py-2">
+                  <KiwiMicroButtonLoader /> Loading installations…
                 </div>
               ) : appUnavailable ? (
                 <p className="text-xs text-stone-400">
@@ -353,22 +369,23 @@ function IntegrationDrawerBody({
                       {installs.map((i) => (
                         <li
                           key={i.installation_id}
-                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-sand-50 px-3 py-2"
+                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-white px-3.5 py-2.5 shadow-2xs"
                         >
                           <span className="flex items-center gap-2 min-w-0">
-                            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span className="truncate text-stone-900 font-mono">{i.account_login}</span>
-                            <span className="text-stone-400 shrink-0">
-                              ({i.repo_selection === "all" ? "all repositories" : "selected repos"})
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="truncate text-stone-900 font-mono font-bold">{i.account_login}</span>
+                            <span className="text-stone-400 shrink-0 text-[11px] font-mono">
+                              ({i.repo_selection === "all" ? "all repos" : "selected repos"})
                             </span>
                           </span>
                           <a
                             href="https://github.com/settings/installations"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-[11px] text-stone-500 hover:text-stone-900 shrink-0 transition-colors"
+                            className="flex items-center gap-1 text-[11px] font-semibold text-stone-500 hover:text-stone-900 shrink-0 transition-colors"
                           >
-                            Manage <ExternalLink className="w-3 h-3" />
+                            <span>Manage</span>
+                            <ExternalLink className="w-3 h-3 text-stone-400" />
                           </a>
                         </li>
                       ))}
@@ -380,14 +397,16 @@ function IntegrationDrawerBody({
                       type="button"
                       onClick={handleConnectGithubApp}
                       disabled={githubBusy}
-                      className="rounded-lg bg-white hover:bg-sand-100 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      className="rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-2xs"
                     >
-                      {githubBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                      {githubBusy
-                        ? "Opening GitHub…"
-                        : (installs?.length ?? 0) > 0
-                        ? "Install on another account"
-                        : "Install GitHub App"}
+                      {githubBusy ? <KiwiMicroButtonLoader /> : null}
+                      <span>
+                        {githubBusy
+                          ? "Opening GitHub…"
+                          : (installs?.length ?? 0) > 0
+                          ? "Install on another account"
+                          : "Install GitHub App"}
+                      </span>
                     </button>
                   </div>
 
@@ -401,10 +420,10 @@ function IntegrationDrawerBody({
             </div>
 
             {/* Fallback PAT Section */}
-            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-3">
+            <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-stone-900">Fallback Personal Access Token</h3>
+                  <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Fallback Personal Access Token</h3>
                   <p className="text-xs text-stone-400 mt-0.5">
                     Only required if you cannot install the GitHub App.
                   </p>
@@ -412,7 +431,7 @@ function IntegrationDrawerBody({
                 <button
                   type="button"
                   onClick={() => setShowFallbackToken((v) => !v)}
-                  className="text-xs text-stone-500 hover:text-stone-900 underline transition-colors"
+                  className="text-xs text-stone-600 hover:text-stone-900 font-semibold underline transition-colors"
                 >
                   {showFallbackToken ? "Hide" : status["github"] ? "Manage PAT" : "Set PAT"}
                 </button>
@@ -428,12 +447,12 @@ function IntegrationDrawerBody({
                   const isErr = fieldErr[field.key];
 
                   return (
-                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-150">
+                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-200">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-stone-700">{field.label}</label>
+                        <label className="text-xs font-bold text-stone-700">{field.label}</label>
                         {isConnected && (
-                          <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                            <CheckCircle2 className="w-3 h-3" /> Token Active
+                          <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Token Active
                           </span>
                         )}
                       </div>
@@ -451,7 +470,7 @@ function IntegrationDrawerBody({
                                 ? "•••••••• (paste new PAT to replace)"
                                 : field.placeholder
                             }
-                            className="w-full field text-xs pr-9"
+                            className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 pr-9 shadow-2xs"
                           />
                           {isPwd && (
                             <button
@@ -459,7 +478,7 @@ function IntegrationDrawerBody({
                               onClick={() =>
                                 setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                               }
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1"
                               title={visible ? "Hide token" : "Show token"}
                             >
                               {visible ? (
@@ -475,10 +494,10 @@ function IntegrationDrawerBody({
                           type="button"
                           onClick={() => handleSaveField(field)}
                           disabled={isBusy || !(fieldValues[field.key] || "").trim()}
-                          className="btn-primary text-xs px-3.5 py-1.5 rounded-lg disabled:opacity-50 shrink-0"
+                          className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs disabled:opacity-50 shrink-0 transition-all"
                         >
                           {isBusy ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <KiwiMicroButtonLoader />
                           ) : isConnected ? (
                             "Update"
                           ) : (
@@ -489,14 +508,14 @@ function IntegrationDrawerBody({
 
                       {msg && (
                         <div
-                          className={`flex items-center gap-1.5 text-xs ${
-                            isErr ? "text-rose-600" : "text-emerald-400"
+                          className={`flex items-center gap-1.5 text-xs pt-0.5 ${
+                            isErr ? "text-rose-600" : "text-emerald-700 font-medium"
                           }`}
                         >
                           {isErr ? (
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                           ) : (
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                           )}
                           <span>{msg}</span>
                         </div>
@@ -507,14 +526,14 @@ function IntegrationDrawerBody({
             </div>
           </div>
         ) : integration.isSlackHybrid ? (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Slack App Section */}
-            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-4">
+            <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3.5">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium text-stone-900">Kiwi Slack App</h3>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                    <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Kiwi Slack App</h3>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
                       Recommended
                     </span>
                   </div>
@@ -526,8 +545,8 @@ function IntegrationDrawerBody({
               </div>
 
               {slackInstalls === null ? (
-                <div className="flex items-center gap-2 text-xs text-stone-400 py-2">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading workspaces…
+                <div className="flex items-center gap-2 text-xs text-stone-500 py-2">
+                  <KiwiMicroButtonLoader /> Loading workspaces…
                 </div>
               ) : slackAppUnavailable ? (
                 <p className="text-xs text-stone-400">
@@ -540,37 +559,47 @@ function IntegrationDrawerBody({
                       {slackInstalls.map((s) => (
                         <li
                           key={s.team_id}
-                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-sand-50 px-3 py-2"
+                          className="flex items-center justify-between gap-3 text-xs rounded-xl border border-sand-200 bg-white px-3.5 py-2.5 shadow-2xs"
                         >
                           <span className="flex items-center gap-2 min-w-0">
-                            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span className="truncate text-stone-900 font-mono">{s.team_name || s.team_id}</span>
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="truncate text-stone-900 font-mono font-bold">{s.team_name || s.team_id}</span>
+                          </span>
+
+                          <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-bold">
+                            Installed
                           </span>
                         </li>
                       ))}
                     </ul>
                   )}
 
-                  <div className="flex items-center gap-3 pt-1">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
                     <button
                       type="button"
                       onClick={handleConnectSlack}
                       disabled={slackBusy}
-                      className="rounded-lg bg-white hover:bg-sand-100 text-black text-xs font-semibold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      className="rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold px-4 py-2 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-2xs"
                     >
-                      {slackBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                      {slackBusy
-                        ? "Opening Slack…"
-                        : (slackInstalls?.length ?? 0) > 0
-                        ? "Add another workspace"
-                        : "Add to Slack"}
+                      {slackBusy ? <KiwiMicroButtonLoader /> : null}
+                      <span>
+                        {slackBusy
+                          ? "Opening Slack…"
+                          : (slackInstalls?.length ?? 0) > 0
+                          ? "Add another workspace"
+                          : "Add to Slack"}
+                      </span>
                     </button>
+
                     {(slackInstalls?.length ?? 0) > 0 && (
                       <Link
                         href="/integrations/slack"
-                        className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                        onClick={onClose}
+                        className="flex items-center gap-1.5 text-xs text-kiwi-700 hover:underline font-bold transition-colors"
                       >
-                        Manage channel bindings <ArrowRight className="w-3.5 h-3.5" />
+                        <Hash className="w-3.5 h-3.5 text-kiwi-600" />
+                        <span>Manage channel bindings</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
                       </Link>
                     )}
                   </div>
@@ -585,10 +614,10 @@ function IntegrationDrawerBody({
             </div>
 
             {/* Optional Notification Webhook Section */}
-            <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-3">
+            <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-stone-900">Notification Webhook</h3>
+                  <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Notification Webhook</h3>
                   <p className="text-xs text-stone-400 mt-0.5">
                     Optional — posts monitor verdicts to a channel, independent of the app install above.
                   </p>
@@ -596,7 +625,7 @@ function IntegrationDrawerBody({
                 <button
                   type="button"
                   onClick={() => setShowNotificationWebhook((v) => !v)}
-                  className="text-xs text-stone-500 hover:text-stone-900 underline transition-colors"
+                  className="text-xs text-stone-600 hover:text-stone-900 font-semibold underline transition-colors"
                 >
                   {showNotificationWebhook ? "Hide" : status["slack"] ? "Manage webhook" : "Set webhook"}
                 </button>
@@ -612,12 +641,12 @@ function IntegrationDrawerBody({
                   const isErr = fieldErr[field.key];
 
                   return (
-                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-150">
+                    <div key={field.key} className="space-y-2 pt-2 border-t border-sand-200">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-stone-700">{field.label}</label>
+                        <label className="text-xs font-bold text-stone-700">{field.label}</label>
                         {isConnected && (
-                          <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                            <CheckCircle2 className="w-3 h-3" /> Webhook Active
+                          <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Webhook Active
                           </span>
                         )}
                       </div>
@@ -635,7 +664,7 @@ function IntegrationDrawerBody({
                                 ? "•••••••• (paste new URL to replace)"
                                 : field.placeholder
                             }
-                            className="w-full field text-xs pr-9"
+                            className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 pr-9 shadow-2xs"
                           />
                           {isPwd && (
                             <button
@@ -643,7 +672,7 @@ function IntegrationDrawerBody({
                               onClick={() =>
                                 setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                               }
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1"
                               title={visible ? "Hide URL" : "Show URL"}
                             >
                               {visible ? (
@@ -659,10 +688,10 @@ function IntegrationDrawerBody({
                           type="button"
                           onClick={() => handleSaveField(field)}
                           disabled={isBusy || !(fieldValues[field.key] || "").trim()}
-                          className="btn-primary text-xs px-3.5 py-1.5 rounded-lg disabled:opacity-50 shrink-0"
+                          className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs disabled:opacity-50 shrink-0 transition-all"
                         >
                           {isBusy ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <KiwiMicroButtonLoader />
                           ) : isConnected ? (
                             "Update"
                           ) : (
@@ -671,20 +700,16 @@ function IntegrationDrawerBody({
                         </button>
                       </div>
 
-                      {field.helpText && (
-                        <p className="text-[11px] text-stone-400">{field.helpText}</p>
-                      )}
-
                       {msg && (
                         <div
-                          className={`flex items-center gap-1.5 text-xs ${
-                            isErr ? "text-rose-600" : "text-emerald-400"
+                          className={`flex items-center gap-1.5 text-xs pt-0.5 ${
+                            isErr ? "text-rose-600" : "text-emerald-700 font-medium"
                           }`}
                         >
                           {isErr ? (
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                           ) : (
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                           )}
                           <span>{msg}</span>
                         </div>
@@ -695,7 +720,7 @@ function IntegrationDrawerBody({
             </div>
           </div>
         ) : (
-          /* Standard & Multi-Field Integrations */
+          /* Standard Provider Credentials Form (LLM, Datadog, Prometheus, Git) */
           <div className="space-y-4">
             {integration.fields.map((field) => {
               const isConnected = status[field.key];
@@ -706,23 +731,18 @@ function IntegrationDrawerBody({
               const isErr = fieldErr[field.key];
 
               return (
-                <div
-                  key={field.key}
-                  className="p-4 rounded-xl border border-sand-200 bg-sand-50/60 space-y-2.5"
-                >
+                <div key={field.key} className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-stone-800 uppercase tracking-wide">
-                        {field.label}
-                      </label>
-                      <span className="font-mono text-[10px] text-stone-400">({field.credName})</span>
+                    <div>
+                      <label className="text-xs font-bold text-stone-900 block">{field.label}</label>
+                      {field.helpText && (
+                        <p className="text-[11px] text-stone-400 mt-0.5">{field.helpText}</p>
+                      )}
                     </div>
-                    {isConnected ? (
-                      <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                        <CheckCircle2 className="w-3 h-3" /> Configured
+                    {isConnected && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Active
                       </span>
-                    ) : (
-                      <span className="text-[11px] text-stone-400 font-medium">Not set</span>
                     )}
                   </div>
 
@@ -734,8 +754,12 @@ function IntegrationDrawerBody({
                         onChange={(e) =>
                           setFieldValues((prev) => ({ ...prev, [field.key]: e.target.value }))
                         }
-                        placeholder={isConnected ? "•••••••• (paste to update)" : field.placeholder}
-                        className="w-full field text-xs pr-9 font-mono"
+                        placeholder={
+                          isConnected
+                            ? "•••••••• (paste new key to replace)"
+                            : field.placeholder
+                        }
+                        className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 pr-9 shadow-2xs"
                       />
                       {isPwd && (
                         <button
@@ -743,10 +767,14 @@ function IntegrationDrawerBody({
                           onClick={() =>
                             setShowPassword((p) => ({ ...p, [field.key]: !p[field.key] }))
                           }
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-900 p-1"
-                          title={visible ? "Hide" : "Show"}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1"
+                          title={visible ? "Hide credential" : "Show credential"}
                         >
-                          {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          {visible ? (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -755,10 +783,10 @@ function IntegrationDrawerBody({
                       type="button"
                       onClick={() => handleSaveField(field)}
                       disabled={isBusy || !(fieldValues[field.key] || "").trim()}
-                      className="btn-primary text-xs px-3.5 py-1.5 rounded-lg disabled:opacity-50 shrink-0"
+                      className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs disabled:opacity-50 shrink-0 transition-all"
                     >
                       {isBusy ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <KiwiMicroButtonLoader />
                       ) : isConnected ? (
                         "Update"
                       ) : (
@@ -769,14 +797,14 @@ function IntegrationDrawerBody({
 
                   {msg && (
                     <div
-                      className={`flex items-center gap-1.5 text-xs pt-1 ${
-                        isErr ? "text-rose-600" : "text-emerald-400"
+                      className={`flex items-center gap-1.5 text-xs pt-0.5 ${
+                        isErr ? "text-rose-600" : "text-emerald-700 font-medium"
                       }`}
                     >
                       {isErr ? (
                         <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                       ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                       )}
                       <span>{msg}</span>
                     </div>
@@ -788,9 +816,13 @@ function IntegrationDrawerBody({
         )}
       </div>
 
-      {/* Drawer Footer */}
-      <div className="p-4 sm:p-6 border-t border-sand-200 bg-stone-900 flex items-center justify-between gap-3">
-        <button type="button" onClick={onClose} className="btn-ghost text-xs px-4 py-2 rounded-xl">
+      {/* ================= DRAWER FOOTER (LIGHT THEME) ================= */}
+      <div className="p-4 sm:p-5 border-t border-sand-200 bg-sand-50/80 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-4 py-2 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-700 font-semibold text-xs transition-colors shadow-2xs"
+        >
           Close
         </button>
 
@@ -799,9 +831,9 @@ function IntegrationDrawerBody({
             type="button"
             onClick={handleSaveAllFields}
             disabled={savingKey !== null}
-            className="btn-primary text-xs px-5 py-2 rounded-xl"
+            className="px-5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs transition-all disabled:opacity-50"
           >
-            {savingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save All Changes"}
+            {savingKey ? <KiwiMicroButtonLoader /> : "Save All Changes"}
           </button>
         )}
       </div>

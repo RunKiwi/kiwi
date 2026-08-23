@@ -19,7 +19,8 @@ import {
   Search,
   RefreshCw,
 } from "lucide-react";
-import { KiwiCoreSpinner, KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
+import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
+import { LoadingState } from "@/components/LoadingState";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -130,9 +131,8 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <KiwiCoreSpinner size="lg" />
-        <p className="text-xs font-mono text-stone-500">Loading Super Admin Governance Console...</p>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <LoadingState state="connecting" label="Loading Super Admin Governance Console..." />
       </div>
     );
   }
@@ -173,7 +173,7 @@ export default function AdminPage() {
 
         <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
           <div className="text-[11px] font-medium text-stone-500">Global Compute</div>
-          <div className="text-2xl font-bold text-stone-900 font-mono mt-1">{(stats?.total_agent_minutes ?? 0).toFixed(0)}m</div>
+          <div className="text-2xl font-bold text-stone-900 font-mono mt-1">{(stats?.total_agent_minutes ?? 0).toFixed(1)}m</div>
           <div className="text-[10px] font-mono text-stone-400 mt-1">Active Runner Pool</div>
         </div>
 
@@ -282,7 +282,7 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td className="p-3 font-mono text-stone-600">
-                      {org.agent_minutes_used ? org.agent_minutes_used.toFixed(0) : "0"}m
+                      {org.agent_minutes_used ? org.agent_minutes_used.toFixed(1) : "0.0"}m
                     </td>
                     <td className="p-3 text-right space-x-2">
                       <button

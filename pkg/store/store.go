@@ -45,6 +45,16 @@ type JobSummary struct {
 	// thread continued an hour ago still reads as "submitted", and the row is a
 	// receipt for something that has since moved on.
 	LatestOrigin string `json:"latest_origin"`
+
+	ArchitectModel       string  `json:"architect_model,omitempty"`
+	WorkerModel          string  `json:"worker_model,omitempty"`
+	CostUSD              float64 `json:"cost_usd"`
+	TokensIn             int64   `json:"tokens_in"`
+	TokensOut            int64   `json:"tokens_out"`
+	RequiresPlanApproval bool    `json:"requires_plan_approval,omitempty"`
+	PlanStatus           string  `json:"plan_status,omitempty"`
+	SpendCapUSD          float64 `json:"spend_cap_usd,omitempty"`
+	IsDryRun             bool    `json:"is_dry_run,omitempty"`
 }
 
 // TaskCompletion wraps the arguments for ending a task's lease.
