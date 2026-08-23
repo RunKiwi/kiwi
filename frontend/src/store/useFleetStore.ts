@@ -39,7 +39,7 @@ interface FleetState {
   loadDaemons: () => Promise<void>;
 }
 
-export const useFleetStore = create<FleetState>((set) => ({
+export const useFleetStore = create<FleetState>((set, get) => ({
   jobs: [],
   currentJob: null,
   daemons: [],
@@ -52,12 +52,14 @@ export const useFleetStore = create<FleetState>((set) => ({
   error: null,
   
   loadJobs: async () => {
-    set({ isLoading: true, error: null });
+    if (get().jobs.length === 0) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const data = await client.listJobs();
       const jobs = data.jobs || [];
       reportPullRequests(jobs);
-      set({ jobs, isLoading: false });
+      set({ jobs, isLoading: false, error: null });
     } catch (err) {
       set({ error: (err as Error).message || "Failed to load jobs", isLoading: false });
     }
@@ -74,10 +76,12 @@ export const useFleetStore = create<FleetState>((set) => ({
   },
   
   loadDaemons: async () => {
-    set({ isLoading: true, error: null });
+    if (get().daemons.length === 0) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const data = await client.listDaemons();
-      set({ daemons: data || [], isLoading: false });
+      set({ daemons: data || [], isLoading: false, error: null });
     } catch (err) {
       set({ error: (err as Error).message || "Failed to load daemons", isLoading: false });
     }

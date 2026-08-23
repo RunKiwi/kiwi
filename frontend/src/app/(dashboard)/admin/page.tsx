@@ -138,7 +138,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-0 sm:p-2 md:p-4 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-sand-200 pb-4">
         <div>

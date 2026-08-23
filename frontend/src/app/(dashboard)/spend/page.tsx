@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   AreaChart,
   Area,
@@ -33,6 +33,8 @@ import {
 } from "@/lib/api";
 import { LoadingState } from "@/components/LoadingState";
 
+import { usePolling } from "@/hooks/usePolling";
+
 export default function SpendPage() {
   const [subTab, setSubTab] = useState<"spend" | "velocity">("spend");
   const [loading, setLoading] = useState(true);
@@ -63,10 +65,11 @@ export default function SpendPage() {
     }
   };
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchData();
-  }, []);
+  usePolling(fetchData, {
+    activeIntervalMs: 5000,
+    idleIntervalMs: 15000,
+    isIdle: false,
+  });
 
   const spendDailyData = spend?.daily && spend.daily.length > 0
     ? spend.daily.map((d) => ({
@@ -118,7 +121,7 @@ export default function SpendPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 font-sans">
+    <div className="p-0 sm:p-2 md:p-4 max-w-7xl mx-auto space-y-6 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-sand-200 pb-4">
         <div>

@@ -345,11 +345,24 @@ func AdminRouter(db *gorm.DB, mux *http.ServeMux) {
 			primaryDomain = org.PrimaryDomain
 		}
 
+		// Look up user to retrieve GitHub login and avatar info.
+		var user User
+		var githubLogin *string
+		var avatarURL string
+		if err := db.First(&user, "id = ?", claims.UserID).Error; err == nil {
+			githubLogin = user.GitHubLogin
+			if githubLogin != nil && *githubLogin != "" {
+				avatarURL = fmt.Sprintf("https://github.com/%s.png", *githubLogin)
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"user_id":          claims.UserID,
 			"email":            claims.Email,
 			"name":             claims.Name,
+			"github_login":     githubLogin,
+			"avatar_url":       avatarURL,
 			"org_id":           claims.OrgID,
 			"org_name":         orgName,
 			"role":             claims.Role,

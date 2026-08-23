@@ -46,7 +46,7 @@ export default function RecordsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6 font-sans text-stone-900">
+    <div className="p-0 sm:p-2 md:p-4 max-w-6xl mx-auto space-y-6 font-sans text-stone-900">
       {/* Header */}
       <div className="border-b border-sand-150 pb-4">
         <div className="flex items-center gap-2 mb-1">

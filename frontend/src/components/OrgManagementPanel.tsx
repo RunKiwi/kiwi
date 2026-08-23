@@ -56,6 +56,48 @@ function getAvatarInitials(email?: string, name?: string): string {
   return "KW";
 }
 
+function UserAvatar({
+  email,
+  name,
+  avatarUrl,
+  githubLogin,
+  colorClass,
+  className = "w-7 h-7",
+}: {
+  email?: string;
+  name?: string;
+  avatarUrl?: string;
+  githubLogin?: string;
+  colorClass?: string;
+  className?: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const src = avatarUrl || (githubLogin ? `https://github.com/${githubLogin}.png?size=64` : undefined);
+  const initials = getAvatarInitials(email, name);
+
+  if (src && !imgError) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name || email || "Member"}
+        onError={() => setImgError(true)}
+        className={`${className} rounded-full object-cover shrink-0 border border-sand-300 shadow-2xs bg-stone-100`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${className} rounded-full font-bold flex items-center justify-center text-[11px] shrink-0 shadow-2xs ${
+        colorClass || "bg-stone-800 text-white"
+      }`}
+    >
+      {initials}
+    </div>
+  );
+}
+
 const AVATAR_BG_COLORS = [
   "bg-emerald-700 text-emerald-100",
   "bg-indigo-700 text-indigo-100",
@@ -700,7 +742,6 @@ export function OrgManagementPanel({
                 </thead>
                 <tbody className="divide-y divide-sand-150">
                   {filteredUsers.map((u) => {
-                    const initials = getAvatarInitials(u.email, u.name);
                     const colorClass = getAvatarColor(u.email || u.id);
 
                     return (
@@ -708,9 +749,14 @@ export function OrgManagementPanel({
                         {/* Member profile */}
                         <td className="py-2.5 px-3.5">
                           <div className="flex items-center gap-2.5">
-                            <div className={`w-7 h-7 rounded-full font-bold flex items-center justify-center text-[11px] shrink-0 shadow-2xs ${colorClass}`}>
-                              {initials}
-                            </div>
+                            <UserAvatar
+                              email={u.email}
+                              name={u.name}
+                              avatarUrl={u.avatar_url}
+                              githubLogin={u.github_login}
+                              colorClass={colorClass}
+                              className="w-7 h-7"
+                            />
                             <div className="min-w-0">
                               <div className="font-bold text-stone-900 truncate flex items-center gap-1.5 leading-tight">
                                 <span>{u.name || "Unnamed Member"}</span>

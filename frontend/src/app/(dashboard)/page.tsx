@@ -9,7 +9,6 @@ import {
   Server,
   Plus,
   Play,
-  Folder,
   Compass,
   Hammer,
   Ban,
@@ -23,6 +22,8 @@ import { ThinkingOrb } from "@/components/ThinkingOrb";
 import { UpgradeButton } from "@/components/UpgradeButton";
 import { useFleetStore } from "@/store/useFleetStore";
 import { Logo } from "@/components/Logo";
+
+import { usePolling } from "@/hooks/usePolling";
 
 function SegmentedMeter({
   totalTicks = 36,
@@ -79,6 +80,7 @@ function CommandCenterContent() {
   // Status Filter
   const [statusFilter, setStatusFilter] = useState(searchParams.get("filter") || "all");
 
+  // Initial load for static metadata like GitHub repos
   useEffect(() => {
     loadJobs().catch(() => {}).finally(() => setLoading(false));
     loadDaemons().catch(() => {});
@@ -96,6 +98,31 @@ function CommandCenterContent() {
     api.getSpend().then(setSpend).catch(() => {});
     api.getSandboxCacheStats().then(setCacheStats).catch(() => {});
   }, [loadJobs, loadDaemons]);
+
+  // Check if any job is currently queued or running
+  const hasActiveJobs = useMemo(() => {
+    return (jobs || []).some(
+      (j) => j.status === "QUEUED" || j.status === "LEASED" || j.status === "RUNNING"
+    );
+  }, [jobs]);
+
+  // Dynamic continuous polling for live dashboard updates
+  usePolling(
+    async () => {
+      await Promise.all([
+        loadJobs().catch(() => {}),
+        loadDaemons().catch(() => {}),
+        api.getUsage().then(setUsage).catch(() => {}),
+        api.getSpend().then(setSpend).catch(() => {}),
+        api.getSandboxCacheStats().then(setCacheStats).catch(() => {}),
+      ]);
+    },
+    {
+      activeIntervalMs: 2500,
+      idleIntervalMs: 10000,
+      isIdle: !hasActiveJobs,
+    }
+  );
 
   const handleLaunch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -179,7 +206,7 @@ function CommandCenterContent() {
   const privateRunnersCount = (daemons || []).length;
 
   return (
-    <div className="p-6 space-y-7 max-w-6xl mx-auto font-sans text-stone-900">
+    <div className="p-0 sm:p-2 md:p-4 space-y-5 sm:space-y-7 max-w-6xl mx-auto font-sans text-stone-900">
       
       {/* 1. ONBOARDING / PLAN BANNER WITH DYNAMIC UPGRADE CTA & ANIMATED MASCOT */}
       <div className="relative overflow-hidden p-5 rounded-3xl border border-sand-200/90 bg-gradient-to-r from-sand-100/90 via-white to-kiwi-50/70 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 text-xs shadow-2xs group">
@@ -499,41 +526,25 @@ function CommandCenterContent() {
                 <div
                   key={job.job_id}
                   onClick={() => setActiveDrawerTaskId(job.job_id)}
-                  className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer shadow-2xs group bg-white ${
+                  className={`p-4 sm:p-5 rounded-xl border transition-all cursor-pointer shadow-2xs group bg-white ${
                     isPlanReview
-                      ? "border-indigo-200/80 bg-gradient-to-r from-indigo-50/20 via-white to-white hover:border-indigo-300 hover:shadow-xs"
+                      ? "border-indigo-300/80 bg-gradient-to-r from-indigo-50/25 via-white to-white hover:border-indigo-400 hover:shadow-xs"
                       : isWaitingInput
-                      ? "border-amber-200/80 bg-gradient-to-r from-amber-50/20 via-white to-white hover:border-amber-300 hover:shadow-xs"
+                      ? "border-amber-300/80 bg-gradient-to-r from-amber-50/25 via-white to-white hover:border-amber-400 hover:shadow-xs"
                       : isRunning
-                      ? "border-sand-200 hover:border-emerald-300 hover:shadow-xs"
-                      : "border-sand-200 hover:border-sand-300 hover:shadow-xs"
+                      ? "border-sand-200/90 hover:border-emerald-400 hover:shadow-xs"
+                      : "border-sand-200/90 hover:border-stone-400/90 hover:shadow-xs"
                   }`}
                 >
                   {/* Header Row */}
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md border shadow-2xs transition-colors ${
-                          isPlanReview
-                            ? "bg-indigo-50 text-indigo-900 border-indigo-200"
-                            : isWaitingInput
-                            ? "bg-amber-50 text-amber-900 border-amber-200"
-                            : isRunning
-                            ? "bg-emerald-50 text-emerald-900 border-emerald-200"
-                            : isSucceeded
-                            ? "bg-purple-50 text-purple-900 border-purple-200"
-                            : isFailed
-                            ? "bg-rose-50/80 text-rose-900 border-rose-200"
-                            : isCancelled
-                            ? "bg-sand-100 text-stone-500 border-sand-200"
-                            : "bg-sand-100 text-stone-800 border-sand-200"
-                        }`}
-                      >
-                        #{job.job_id.slice(0, 8)}
+                      <span className="text-xs font-mono font-bold text-stone-900 flex items-center gap-1">
+                        <FolderGit2 className="w-3.5 h-3.5 text-stone-500" />
+                        <span>{job.repo || "RunKiwi/kiwi"}</span>
                       </span>
-                      <span className="text-xs font-mono text-stone-600 flex items-center gap-1">
-                        <Folder className="w-3.5 h-3.5 text-stone-400" />
-                        <span>{job.repo || "RunKiwi/website"}</span>
+                      <span className="font-mono text-[11px] text-stone-400">
+                        #job_{job.job_id.slice(0, 8)}
                       </span>
                       {timeAgo && (
                         <span className="text-xs text-stone-400 font-mono">
@@ -541,12 +552,12 @@ function CommandCenterContent() {
                         </span>
                       )}
                       {job.requires_plan_approval && (
-                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 uppercase">
                           PLAN MODE
                         </span>
                       )}
                       {job.is_dry_run && (
-                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
+                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-sky-50 text-sky-800 border border-sky-200 uppercase">
                           DRY-RUN
                         </span>
                       )}
@@ -559,7 +570,7 @@ function CommandCenterContent() {
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 shadow-2xs transition-all"
+                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 shadow-2xs transition-all"
                         >
                           <GitPullRequest className="w-3 h-3 text-purple-600" />
                           <span>#{job.pr_number || "PR"}</span>
@@ -567,38 +578,38 @@ function CommandCenterContent() {
                       )}
 
                       <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border flex items-center gap-1.5 ${
                           isPlanReview
-                            ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                            ? "text-indigo-800 bg-indigo-50 border-indigo-200"
                             : isWaitingInput
-                            ? "bg-amber-50 text-amber-800 border-amber-200"
+                            ? "text-amber-800 bg-amber-50 border-amber-200"
                             : isRunning
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                            ? "text-emerald-800 bg-emerald-50 border-emerald-200"
                             : isSucceeded
-                            ? "bg-purple-50 text-purple-800 border-purple-200"
+                            ? "text-purple-900 bg-purple-50 border-purple-200"
                             : isCancelled
-                            ? "bg-sand-100 text-stone-600 border-sand-200"
+                            ? "text-stone-600 bg-sand-100 border-sand-200"
                             : isFailed
-                            ? "bg-sand-100 text-stone-700 border-sand-200"
-                            : "bg-amber-50 text-amber-800 border-amber-200"
+                            ? "text-rose-900 bg-rose-50 border-rose-200"
+                            : "text-amber-800 bg-amber-50 border-amber-200"
                         }`}
                       >
                         {isRunning && (
-                          <span className="relative flex h-2 w-2">
+                          <span className="relative flex h-1.5 w-1.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                           </span>
                         )}
                         {isPlanReview && (
-                          <span className="relative flex h-2 w-2">
+                          <span className="relative flex h-1.5 w-1.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-600" />
                           </span>
                         )}
                         {isWaitingInput && (
-                          <span className="relative flex h-2 w-2">
+                          <span className="relative flex h-1.5 w-1.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-600" />
                           </span>
                         )}
                         {isCancelled && <Ban className="w-3 h-3 text-stone-400" />}
@@ -868,7 +879,7 @@ function CommandCenterContent() {
                             e.stopPropagation();
                             setActiveDrawerTaskId(job.job_id);
                           }}
-                          className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
                         >
                           <span>Review & Approve Plan &rarr;</span>
                         </button>
@@ -878,7 +889,7 @@ function CommandCenterContent() {
                             e.stopPropagation();
                             setActiveDrawerTaskId(job.job_id);
                           }}
-                          className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
                         >
                           <span>Provide Input &rarr;</span>
                         </button>
@@ -888,13 +899,13 @@ function CommandCenterContent() {
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
                         >
                           <GitPullRequest className="w-3 h-3 text-purple-200" />
                           <span>View PR &rarr;</span>
                         </a>
                       ) : (
-                        <span className="text-stone-400 group-hover:text-stone-900 font-sans font-semibold text-xs flex items-center gap-1 transition-colors">
+                        <span className="px-2.5 py-1 rounded-lg bg-sand-100 group-hover:bg-sand-200 text-stone-800 font-semibold text-xs transition-all flex items-center gap-1">
                           <span>Inspect</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </span>
