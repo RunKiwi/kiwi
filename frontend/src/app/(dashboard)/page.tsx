@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   FolderGit2,
   GitPullRequest,
@@ -10,22 +10,9 @@ import {
   Server,
   Zap,
   Plus,
-  Compass,
-  Hammer,
-  Check,
-  Search,
-  Sliders,
   Play,
-  RotateCcw,
-  Sparkles,
-  ArrowRight,
-  Activity,
-  Layers,
-  ShieldCheck,
-  AlertCircle,
-  Eye,
 } from "lucide-react";
-import { api, type JobSummary, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
+import { api, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
 import { ThinkingOrb } from "@/components/ThinkingOrb";
@@ -58,7 +45,6 @@ function SegmentedMeter({
 }
 
 function CommandCenterContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { jobs, daemons, loadJobs, loadDaemons } = useFleetStore();
 
@@ -72,13 +58,15 @@ function CommandCenterContent() {
   // Composer drawer/modal state
   const [showComposer, setShowComposer] = useState(searchParams.get("compose") === "true");
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [repoUrl, setRepoUrl] = useState("acme-corp/core-api");
+  const [repoUrl, setRepoUrl] = useState("");
   const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
-  const [architectModel, setArchitectModel] = useState("anthropic/claude-sonnet-5");
-  const [workerModel, setWorkerModel] = useState("anthropic/claude-haiku-4.5");
-  const [spendCap, setSpendCap] = useState(0.50);
-  const [planMode, setPlanMode] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
+  const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
+  const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
+  // Quick-compose keeps the safe defaults; the full controls (plan mode, spend
+  // cap, dry-run) live on the /composer page for anyone who wants to change them.
+  const spendCap = 0.5;
+  const planMode = false;
+  const dryRun = false;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -90,7 +78,13 @@ function CommandCenterContent() {
     loadDaemons().catch(() => {});
 
     api.getUsage().then(setUsage).catch(() => {});
-    api.listGithubRepos().then((r) => setRepos(r.repos || [])).catch(() => {});
+    api.listGithubRepos()
+      .then((r) => {
+        const list = r.repos || [];
+        setRepos(list);
+        setRepoUrl((prev) => prev || list[0]?.full_name || list[0]?.name || "");
+      })
+      .catch(() => {});
     api.getSpend().then(setSpend).catch(() => {});
     api.getSandboxCacheStats().then(setCacheStats).catch(() => {});
   }, [loadJobs, loadDaemons]);
@@ -115,8 +109,8 @@ function CommandCenterContent() {
       setTaskPrompt("");
       setShowComposer(false);
       await loadJobs();
-    } catch (err: any) {
-      setSubmitError(err?.message || "Failed to submit task");
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit task");
     } finally {
       setIsSubmitting(false);
     }
@@ -369,7 +363,11 @@ function CommandCenterContent() {
         </div>
 
         {/* Task Cards List */}
-        {filteredJobs.length === 0 ? (
+        {loading ? (
+          <div className="p-8 rounded-2xl border border-sand-200 bg-sand-50/50 text-center">
+            <ThinkingOrb state="working" size={32} />
+          </div>
+        ) : filteredJobs.length === 0 ? (
           <div className="p-8 rounded-2xl border border-sand-200 bg-sand-50/50 text-center space-y-3">
             <p className="text-xs text-stone-500">No tasks in execution queue for this filter.</p>
             <button
@@ -542,12 +540,29 @@ function CommandCenterContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <label className="block font-semibold text-stone-700 mb-1">Target Repository</label>
-                  <input
-                    type="text"
-                    value={repoUrl}
-                    onChange={(e) => setRepoUrl(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-sand-200 bg-sand-50 font-mono text-xs"
-                  />
+                  {repos.length > 0 ? (
+                    <select
+                      value={repoUrl}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                      className="w-full p-2.5 rounded-xl border border-sand-200 bg-sand-50 font-mono text-xs"
+                    >
+                      {repos.map((r) => {
+                        const name = r.full_name || r.name || "repo";
+                        return (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <a
+                      href="/integrations"
+                      className="block w-full p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 font-medium text-xs hover:bg-amber-100"
+                    >
+                      Connect GitHub to select a repository →
+                    </a>
+                  )}
                 </div>
                 <div>
                   <label className="block font-semibold text-stone-700 mb-1">Verification Guard</label>
@@ -560,28 +575,33 @@ function CommandCenterContent() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-sand-150">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-stone-500">Est: <strong className="text-kiwi-700">$0.18</strong></span>
-                </div>
+              <ModelSelector
+                architectModel={architectModel}
+                workerModel={workerModel}
+                onArchitectChange={setArchitectModel}
+                onWorkerChange={setWorkerModel}
+              />
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowComposer(false)}
-                    className="px-4 py-2 rounded-xl border border-sand-200 bg-white hover:bg-sand-100 text-xs font-semibold text-stone-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || !taskPrompt.trim()}
-                    className="px-5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current text-kiwi-400" />
-                    <span>Launch Task</span>
-                  </button>
-                </div>
+              {submitError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">{submitError}</div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-sand-150">
+                <button
+                  type="button"
+                  onClick={() => setShowComposer(false)}
+                  className="px-4 py-2 rounded-xl border border-sand-200 bg-white hover:bg-sand-100 text-xs font-semibold text-stone-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !taskPrompt.trim() || !repoUrl}
+                  className="px-5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current text-kiwi-400" />
+                  <span>Launch Task</span>
+                </button>
               </div>
             </form>
           </div>

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { KiwiCoreSpinner, KiwiASTWave, KiwiTestOrbit, KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { ThinkingOrb } from "@/components/ThinkingOrb";
+import { Logo } from "@/components/Logo";
 import type { OrbState } from "@/lib/orbState";
 
 export function CustomLoadersStudio({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -15,8 +16,8 @@ export function CustomLoadersStudio({ isOpen, onClose }: { isOpen: boolean; onCl
       <div className="bg-white border border-sand-200 rounded-3xl w-full max-w-3xl shadow-popover overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b border-sand-200 bg-sand-50/70 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-kiwi-600 text-white flex items-center justify-center font-bold text-sm shadow-2xs">
-              🥝
+            <div className="w-8 h-8 rounded-xl bg-kiwi-600 text-white flex items-center justify-center shadow-2xs">
+              <Logo className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
