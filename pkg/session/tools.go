@@ -309,10 +309,18 @@ func (t *FileTools) Call(ctx context.Context, call provider.ToolCall) (provider.
 		if err := json.Unmarshal(call.Input, &args); err != nil {
 			return res(fmt.Sprintf("could not parse arguments: %v", err), true), nil
 		}
+		abs, rerr := t.resolve(args.Path)
+		oldContent := ""
+		if rerr == nil {
+			if b, err := os.ReadFile(abs); err == nil {
+				oldContent = string(b)
+			}
+		}
 		if err := t.write(args.Path, args.Content); err != nil {
 			return res(err.Error(), true), nil
 		}
-		return res(fmt.Sprintf("wrote %s (%d bytes)", args.Path, len(args.Content)), false), nil
+		diff := unifiedEdit(args.Path, oldContent, args.Content)
+		return res(editSummary(args.Path, 1, diff), false), nil
 
 	case ToolRun:
 		if t.Exec == nil {

@@ -63,7 +63,38 @@ type restGitHub struct {
 	api   string // default: "https://api.github.com"
 }
 
+func (c *restGitHub) getDefaultBranch(ctx context.Context, owner, repo string) string {
+	api := c.api
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	u := fmt.Sprintf("%s/repos/%s/%s", api, owner, repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "main"
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "main"
+	}
+	defer resp.Body.Close()
+	var res struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && res.DefaultBranch != "" {
+		return res.DefaultBranch
+	}
+	return "main"
+}
+
 func (c *restGitHub) CreatePR(ctx context.Context, owner, repo, base, head, title, body string) (string, error) {
+	if base == "" || base == "HEAD" {
+		base = c.getDefaultBranch(ctx, owner, repo)
+	}
 	api := c.api
 	if api == "" {
 		api = "https://api.github.com"
@@ -389,8 +420,16 @@ func publishResultFrom(ctx context.Context, worktreePath string, spec agent.Work
 	}
 
 	base := spec.Ref
-	if base == "" {
-		base = "main"
+	if base == "" || base == "HEAD" {
+		if symRef, err := runGit("rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
+			trimmed := strings.TrimPrefix(strings.TrimSpace(symRef), "origin/")
+			if trimmed != "" && trimmed != "HEAD" {
+				base = trimmed
+			}
+		}
+		if base == "" || base == "HEAD" {
+			base = "main"
+		}
 	}
 	title, body := prTitleAndBody(spec.Task)
 

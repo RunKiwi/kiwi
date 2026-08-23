@@ -21,6 +21,7 @@ export interface ToolArgs {
   pattern?: string;
   oldString?: string;
   newString?: string;
+  content?: string;
 }
 
 /**
@@ -41,6 +42,7 @@ export function parseToolArgs(input?: string): ToolArgs {
       pattern: str("pattern"),
       oldString: str("old_string"),
       newString: str("new_string"),
+      content: str("content"),
     };
   } catch {
     return {};
@@ -220,9 +222,17 @@ function repairHunkCounts(body: string): string {
   return out.join("\n");
 }
 
+export interface DiffHunk {
+  hunkHeader?: string;
+  oldStart?: number;
+  newStart?: number;
+  lines: DiffLine[];
+}
+
 export interface ParsedDiff {
   path?: string;
   lines: DiffLine[];
+  hunks?: DiffHunk[];
   /** The daemon bounded the diff; what is shown is not the whole change. */
   truncated: boolean;
 }
@@ -257,21 +267,37 @@ export function parseUnifiedDiff(detail: string): ParsedDiff | null {
 
   const patch = patches[0];
   const lines: DiffLine[] = [];
+  const hunks: DiffHunk[] = [];
 
   for (const hunk of patch.hunks) {
     let oldNo = hunk.oldStart;
     let newNo = hunk.newStart;
+    const hunkLines: DiffLine[] = [];
     for (const raw of hunk.lines) {
       const marker = raw[0];
       const text = raw.slice(1);
       if (marker === "+") {
-        lines.push({ kind: "add", text, newNo: newNo++ });
+        const dl: DiffLine = { kind: "add", text, newNo: newNo++ };
+        lines.push(dl);
+        hunkLines.push(dl);
       } else if (marker === "-") {
-        lines.push({ kind: "del", text, oldNo: oldNo++ });
+        const dl: DiffLine = { kind: "del", text, oldNo: oldNo++ };
+        lines.push(dl);
+        hunkLines.push(dl);
       } else if (marker === " ") {
-        lines.push({ kind: "ctx", text, oldNo: oldNo++, newNo: newNo++ });
+        const dl: DiffLine = { kind: "ctx", text, oldNo: oldNo++, newNo: newNo++ };
+        lines.push(dl);
+        hunkLines.push(dl);
       }
       // "\\ No newline at end of file" carries no line and is skipped.
+    }
+    if (hunkLines.length > 0) {
+      hunks.push({
+        hunkHeader: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+        oldStart: hunk.oldStart,
+        newStart: hunk.newStart,
+        lines: hunkLines,
+      });
     }
   }
 
@@ -279,6 +305,96 @@ export function parseUnifiedDiff(detail: string): ParsedDiff | null {
   return {
     path: patch.newFileName?.replace(/^b\//, "") ?? patch.oldFileName?.replace(/^a\//, ""),
     lines,
+    hunks,
     truncated: detail.includes("(diff truncated)"),
   };
+}
+
+export interface FileDiffGroup {
+  path: string;
+  lang: string;
+  hunks: DiffHunk[];
+  additions: number;
+  deletions: number;
+  truncated: boolean;
+}
+
+export interface RawFileEdit {
+  path?: string;
+  lines: DiffLine[];
+  hunks?: DiffHunk[];
+  lang?: string;
+  truncated?: boolean;
+}
+
+/**
+ * groupDiffsByFile aggregates multiple edit operations and diff hunks by file path.
+ *
+ * Rather than creating multiple cards for the same file, this groups changes
+ * cleanly into unified file objects with cumulative addition/deletion counts
+ * and structured hunks.
+ */
+export function groupDiffsByFile(edits: RawFileEdit[]): FileDiffGroup[] {
+  const map = new Map<
+    string,
+    {
+      path: string;
+      lang: string;
+      hunks: DiffHunk[];
+      truncated: boolean;
+    }
+  >();
+
+  for (const edit of edits) {
+    const p = edit.path || "unnamed file";
+    const lang = edit.lang || languageOf(p);
+    let existing = map.get(p);
+    if (!existing) {
+      existing = {
+        path: p,
+        lang,
+        hunks: [],
+        truncated: false,
+      };
+      map.set(p, existing);
+    }
+
+    if (edit.truncated) {
+      existing.truncated = true;
+    }
+
+    if (edit.hunks && edit.hunks.length > 0) {
+      existing.hunks.push(...edit.hunks);
+    } else if (edit.lines.length > 0) {
+      const oldStart = edit.lines.find((l) => l.oldNo !== undefined)?.oldNo;
+      const newStart = edit.lines.find((l) => l.newNo !== undefined)?.newNo;
+      existing.hunks.push({
+        oldStart,
+        newStart,
+        lines: edit.lines,
+      });
+    }
+  }
+
+  const results: FileDiffGroup[] = [];
+  for (const item of map.values()) {
+    let additions = 0;
+    let deletions = 0;
+    for (const h of item.hunks) {
+      for (const l of h.lines) {
+        if (l.kind === "add") additions++;
+        else if (l.kind === "del") deletions++;
+      }
+    }
+    results.push({
+      path: item.path,
+      lang: item.lang,
+      hunks: item.hunks,
+      additions,
+      deletions,
+      truncated: item.truncated,
+    });
+  }
+
+  return results;
 }

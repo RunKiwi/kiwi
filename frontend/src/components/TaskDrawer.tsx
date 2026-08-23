@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
 import { durationBetween, formatCost, formatTokens } from "@/lib/datetime";
@@ -35,8 +36,8 @@ import {
 import { JobGraph } from "@/components/JobGraph";
 import { PlanApprovalCard } from "@/components/PlanApprovalCard";
 import { api, type JobPlan } from "@/lib/api";
-import { DiffView } from "@/components/CodeView";
-import { parseToolArgs, languageOf, editDiff, parseUnifiedDiff } from "@/lib/toolContent";
+import { GroupedDiffViewer } from "@/components/CodeView";
+import { parseToolArgs, languageOf, editDiff, parseUnifiedDiff, groupDiffsByFile } from "@/lib/toolContent";
 
 /**
  * How each blocked reason is presented. The split that matters is severity:
@@ -200,43 +201,43 @@ function CodeDiffTab({
   const recordSteps = recordWorkers.flatMap((w) => w.steps ?? []);
   const steps: RecordStep[] = liveSteps.length > 0 ? liveSteps : recordSteps;
 
-  const diffs = steps
-    .map((row, i) => {
+  const rawEdits = steps
+    .map((row) => {
       const toolArgs = parseToolArgs(row.input);
       const lang = languageOf(toolArgs.path);
       const reported = row.detail ? parseUnifiedDiff(row.detail) : null;
-      const edit = reported
-        ? { path: reported.path ?? toolArgs.path, lines: reported.lines, lang: languageOf(reported.path ?? toolArgs.path), truncated: reported.truncated }
-        : toolArgs.oldString !== undefined && toolArgs.newString !== undefined
-          ? { path: toolArgs.path, lines: editDiff(toolArgs.oldString, toolArgs.newString), lang, truncated: false }
-          : null;
-      return edit ? { key: `diff-${i}`, ...edit } : null;
+      if (reported) {
+        return {
+          path: reported.path ?? toolArgs.path,
+          lines: reported.lines,
+          hunks: reported.hunks,
+          lang: languageOf(reported.path ?? toolArgs.path),
+          truncated: reported.truncated,
+        };
+      }
+      if (toolArgs.oldString !== undefined && toolArgs.newString !== undefined) {
+        return {
+          path: toolArgs.path,
+          lines: editDiff(toolArgs.oldString, toolArgs.newString),
+          lang,
+          truncated: false,
+        };
+      }
+      if (toolArgs.content !== undefined && toolArgs.path) {
+        return {
+          path: toolArgs.path,
+          lines: editDiff("", toolArgs.content),
+          lang,
+          truncated: false,
+        };
+      }
+      return null;
     })
     .filter((d): d is NonNullable<typeof d> => d !== null);
 
-  if (diffs.length === 0) {
-    return (
-      <div className="p-8 rounded-2xl border border-sand-200 bg-white shadow-2xs text-center text-xs text-stone-400">
-        No file edits recorded yet.
-      </div>
-    );
-  }
+  const fileGroups = groupDiffsByFile(rawEdits);
 
-  return (
-    <div className="flex flex-col gap-4">
-      {diffs.map((d) => (
-        <div key={d.key} className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-stone-900 font-bold bg-white px-2 py-1 rounded-lg border border-sand-200">{d.path || "edit"}</span>
-          </div>
-          <DiffView lines={d.lines} lang={d.lang} />
-          {d.truncated && (
-            <p className="text-[10px] text-stone-400">Diff truncated — the change is larger than what is recorded here.</p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+  return <GroupedDiffViewer files={fileGroups} />;
 }
 
 interface TaskDrawerProps {
@@ -249,13 +250,61 @@ interface TaskDrawerProps {
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 
 export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProps) {
-  const { currentJob: storeJob, loadJob } = useFleetStore();
+  const router = useRouter();
+  const { currentJob: storeJob, loadJob, jobs } = useFleetStore();
   const currentJob = storeJob?.job_id === taskId ? storeJob : null;
+  const summaryJob = jobs.find((j) => j.job_id === taskId);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [jobPlan, setJobPlan] = useState<JobPlan | null>(null);
+
+  const handleRerunWithEdits = () => {
+    if (!currentJob && !summaryJob) return;
+    const j = currentJob || summaryJob;
+    if (onRerunWithEdits && currentJob) {
+      onRerunWithEdits(currentJob);
+      onClose();
+      return;
+    }
+    const params = new URLSearchParams();
+    const taskPrompt = j?.task || currentJob?.tasks?.[0]?.task || summaryJob?.task || "";
+    if (taskPrompt) params.set("task", taskPrompt);
+
+    const repoName = j?.repo || summaryJob?.repo || "";
+    if (repoName) params.set("repo", repoName);
+
+    const archModel =
+      j?.architect_model ||
+      summaryJob?.architect_model ||
+      jobPlan?.architect_model ||
+      currentJob?.tasks?.[0]?.architect_model ||
+      "claude-sonnet-5";
+    params.set("architect_model", archModel);
+
+    const workerModel =
+      j?.worker_model ||
+      summaryJob?.worker_model ||
+      currentJob?.tasks?.[0]?.model ||
+      "claude-haiku-4-5-20251001";
+    params.set("worker_model", workerModel);
+
+    const spendCap = j?.spend_cap_usd ?? summaryJob?.spend_cap_usd;
+    if (spendCap != null) params.set("spend_cap", String(spendCap));
+
+    const isDryRun = j?.is_dry_run ?? summaryJob?.is_dry_run;
+    if (isDryRun) params.set("dry_run", "true");
+
+    const requiresPlan = j?.requires_plan_approval || j?.plan_status || summaryJob?.requires_plan_approval || summaryJob?.plan_status;
+    if (requiresPlan) params.set("strategy", "plan");
+
+    const jid = j?.job_id || summaryJob?.job_id || taskId;
+    if (jid) params.set("job_id", jid);
+
+    router.push(`/composer?${params.toString()}`);
+    onClose();
+  };
 
   useEffect(() => {
     if (!taskId) return;
@@ -779,13 +828,8 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
 
             <button
               type="button"
-              onClick={() => {
-                if (onRerunWithEdits && currentJob) {
-                  onRerunWithEdits(currentJob);
-                  onClose();
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-sand-200 text-stone-700 hover:bg-sand-100 transition-colors"
+              onClick={handleRerunWithEdits}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-sand-200 text-stone-700 hover:bg-sand-100 cursor-pointer transition-colors"
             >
               <Copy className="w-3.5 h-3.5 text-kiwi-600" /> Re-run with edits
             </button>

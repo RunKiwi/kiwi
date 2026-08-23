@@ -98,6 +98,33 @@ function ModelPicker({
     };
   });
 
+  // Ensure current selected value is always in options even if tierFilter or custom
+  if (value && !options.some((o) => o.value === value)) {
+    const known = models.find((m) => m.model_id === value);
+    if (known) {
+      const prov = getProviderMeta(known.provider);
+      const tier = TIER_META[known.tier as keyof typeof TIER_META] || TIER_META.economy;
+      options.unshift({
+        value: known.model_id,
+        label: known.display_name || known.model_id,
+        sublabel: `${prov.name} · ${known.tier}`,
+        icon: <span className="text-xs font-bold leading-none">{prov.icon}</span>,
+        badge: (
+          <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border shadow-2xs ${tier.badge}`}>
+            {known.tier.toUpperCase()}
+          </span>
+        ),
+      });
+    } else {
+      options.unshift({
+        value: value,
+        label: value,
+        sublabel: "Selected Model",
+        icon: <span className="text-xs font-bold leading-none">⚙️</span>,
+      });
+    }
+  }
+
   const selectedModel = models.find((m) => m.model_id === value);
   const selectedTier = selectedModel?.tier && TIER_META[selectedModel.tier as keyof typeof TIER_META];
   const selectedStatus = selectedModel ? getModelAllowanceStatus(selectedModel.model_id, models, allowance) : null;

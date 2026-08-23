@@ -65,7 +65,7 @@ function CommandCenterContent() {
   const [showComposer, setShowComposer] = useState(searchParams.get("compose") === "true");
   const [taskPrompt, setTaskPrompt] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
-  const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
+  const [testCmd, setTestCmd] = useState("");
   const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
   // Quick-compose keeps the safe defaults; the full controls (plan mode, spend
@@ -88,7 +88,9 @@ function CommandCenterContent() {
       .then((r) => {
         const list = r.repos || [];
         setRepos(list);
-        setRepoUrl((prev) => prev || list[0]?.full_name || list[0]?.name || "");
+        if (list.length > 0) {
+          setRepoUrl((prev) => prev || list[0].url || `https://github.com/${list[0].full_name || list[0].name}`);
+        }
       })
       .catch(() => {});
     api.getSpend().then(setSpend).catch(() => {});
@@ -101,11 +103,24 @@ function CommandCenterContent() {
 
     setIsSubmitting(true);
     setSubmitError(null);
+
+    const selectedRepo = repos.find(
+      (r) =>
+        r.url === repoUrl ||
+        (r.full_name && r.full_name === repoUrl) ||
+        (r.name && r.name === repoUrl)
+    );
+    const targetUrl =
+      selectedRepo?.url ||
+      (repoUrl.includes("://") || repoUrl.includes("@")
+        ? repoUrl
+        : `https://github.com/${repoUrl}`);
+
     try {
       await api.submitPlan({
         task: taskPrompt.trim(),
-        repo_url: repoUrl,
-        test_cmd: testCmd,
+        repo_url: targetUrl,
+        test_cmd: testCmd.trim() || undefined,
         architect_model: architectModel,
         model: workerModel,
         plan_mode: planMode,
@@ -930,8 +945,9 @@ function CommandCenterContent() {
                     >
                       {repos.map((r) => {
                         const name = r.full_name || r.name || "repo";
+                        const url = r.url || `https://github.com/${name}`;
                         return (
-                          <option key={name} value={name}>
+                          <option key={name} value={url}>
                             {name}
                           </option>
                         );
@@ -952,6 +968,7 @@ function CommandCenterContent() {
                     type="text"
                     value={testCmd}
                     onChange={(e) => setTestCmd(e.target.value)}
+                    placeholder="e.g. npm test, pytest, go test ./... (auto-detected if blank)"
                     className="w-full p-2.5 rounded-xl border border-sand-200 bg-sand-50 font-mono text-xs"
                   />
                 </div>
