@@ -108,9 +108,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const limitMinutes = usage?.agent_minutes_limit ?? 500;
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
-  const planReviewsCount = (jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.status === "AWAITING_PLAN_APPROVAL" || j.requires_plan_approval).length;
-  const awaitingInputCount = (jobs || []).filter((j) => j.status === "WAITING_USER").length;
-  const needsAttentionCount = planReviewsCount + awaitingInputCount;
+  const planReviewsCount = (jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.requires_plan_approval).length;
+  const needsAttentionCount = planReviewsCount;
   const activeTasksCount = (jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
   const runnersCount = (daemons || []).length;
 
@@ -257,7 +256,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   {repos.map((r) => {
                     const repoName = r.full_name || r.name || "repo";
                     const repoJobs = (jobs || []).filter((j) => j.repo === repoName);
-                    const hasAction = repoJobs.some((j) => j.status === "PLAN_REVIEW" || j.status === "WAITING_USER");
+                    const hasAction = repoJobs.some((j) => j.status === "PLAN_REVIEW");
                     const isRunning = repoJobs.some((j) => j.status === "LEASED" || j.status === "RUNNING");
                     const prCount = repoJobs.filter((j) => j.pr_urls && j.pr_urls.length > 0).length;
 
@@ -383,20 +382,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <span className="truncate">Plan Reviews</span>
                   </span>
                   <span className="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-100 border border-indigo-200 px-1.5 py-0.2 rounded-full">{planReviewsCount}</span>
-                </Link>
-
-                <Link
-                  href="/?filter=waiting"
-                  className="w-full flex items-center justify-between px-2 py-1 rounded-xl text-[11px] font-bold text-amber-950 hover:bg-amber-50/90 transition-all text-left group"
-                >
-                  <span className="flex items-center gap-1.5 truncate">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600" />
-                    </span>
-                    <span className="truncate">Awaiting Input</span>
-                  </span>
-                  <span className="text-[10px] font-mono font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.2 rounded-full">{awaitingInputCount}</span>
                 </Link>
               </div>
             </div>

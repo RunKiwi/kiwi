@@ -25,8 +25,8 @@ export function PlanApprovalCard({
     try {
       await api.approveJobPlan(plan.job_id);
       onApproved();
-    } catch (err: any) {
-      setError(err?.message || "Failed to approve plan");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to approve plan");
     } finally {
       setSubmitting(false);
     }
@@ -39,8 +39,8 @@ export function PlanApprovalCard({
     try {
       await api.rejectJobPlan(plan.job_id, feedback.trim());
       onRejected();
-    } catch (err: any) {
-      setError(err?.message || "Failed to submit revision feedback");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit revision feedback");
     } finally {
       setSubmitting(false);
     }
