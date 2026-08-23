@@ -40,8 +40,8 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col text-white">
-      <Link href="/admin" className="text-sm text-zinc-400 hover:text-white flex items-center gap-1 mb-4 w-fit">
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">
+      <Link href="/admin" className="text-sm text-stone-500 hover:text-stone-900 flex items-center gap-1 mb-4 w-fit">
         <ArrowLeft className="w-4 h-4" /> Back to Admin
       </Link>
       <OrgManagementPanel org={org} onOrgUpdate={setOrg} />
