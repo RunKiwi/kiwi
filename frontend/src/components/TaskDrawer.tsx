@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep } from "@/lib/api";
+import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
 import { durationBetween, formatDuration, formatCost, formatTokens } from "@/lib/datetime";
 import { ThinkingOrb } from "thinking-orbs";
 import { RunTimeline } from "@/components/RunTimeline";
@@ -33,6 +33,8 @@ import {
 import { JobGraph } from "@/components/JobGraph";
 import { PlanApprovalCard } from "@/components/PlanApprovalCard";
 import { api, type JobPlan } from "@/lib/api";
+import { DiffView } from "@/components/CodeView";
+import { parseToolArgs, languageOf, editDiff, parseUnifiedDiff } from "@/lib/toolContent";
 
 /**
  * How each blocked reason is presented. The split that matters is severity:
@@ -173,8 +175,8 @@ function RunFacts({
     <dl className="mt-2 flex items-center gap-x-4 gap-y-1 flex-wrap text-[11px]">
       {facts.map(([k, v]) => (
         <div key={k} className="flex items-baseline gap-1.5">
-          <dt className="text-zinc-600 uppercase tracking-wider">{k}</dt>
-          <dd className="text-zinc-300 font-mono tabular-nums">{v}</dd>
+          <dt className="text-stone-400 uppercase tracking-wider">{k}</dt>
+          <dd className="text-stone-700 font-mono tabular-nums">{v}</dd>
         </div>
       ))}
     </dl>
@@ -191,27 +193,146 @@ function BlockedBanner({ task }: { task: JobTask }) {
 
   return (
     <div
-      className={`mt-1 flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+      className={`mt-1 flex items-start gap-2.5 rounded-xl border px-3 py-2 ${
         problem
-          ? "border-red-500/30 bg-red-500/10"
-          : "border-amber-500/25 bg-amber-500/5"
+          ? "border-rose-200 bg-rose-50"
+          : "border-amber-200 bg-amber-50"
       }`}
     >
       {problem ? (
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
       ) : (
-        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
       )}
       <div className="min-w-0">
         <div
-          className={`text-xs font-medium ${problem ? "text-red-300" : "text-amber-300"}`}
+          className={`text-xs font-medium ${problem ? "text-rose-800" : "text-amber-800"}`}
         >
           {label}
         </div>
         {task.blocked_detail && (
-          <div className="mt-0.5 text-xs text-zinc-400">{task.blocked_detail}</div>
+          <div className="mt-0.5 text-xs text-stone-500">{task.blocked_detail}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+function shorten(s: string, n: number): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > n ? flat.slice(0, n) + "…" : flat;
+}
+
+const LOG_TONE_CLASS: Record<string, string> = {
+  info: "text-stone-300",
+  pass: "text-emerald-400",
+  fail: "text-rose-400",
+  warn: "text-amber-400",
+};
+
+/** Every step's phase/outcome, plus whatever raw output a running task has
+ * reported, read straight off the same JobProgressTask data LiveRun already
+ * renders — this is a plain-text reformat of real data, not a second feed. */
+function LiveLogsTab({ progress }: { progress: JobProgressTask[] }) {
+  const lines: { key: string; text: string; tone: keyof typeof LOG_TONE_CLASS }[] = [];
+  progress.forEach((t) => {
+    (t.steps ?? []).forEach((s, i) => {
+      const tone: keyof typeof LOG_TONE_CLASS =
+        s.outcome === "fail" || s.outcome === "error" ? "fail"
+        : s.outcome === "pass" || s.outcome === "approved" ? "pass"
+        : s.outcome === "rejected" ? "warn"
+        : "info";
+      const detail = s.detail || s.reasons;
+      lines.push({
+        key: `${t.task_id}-step-${i}`,
+        text: `[step ${s.step}] ${s.phase}${s.outcome ? ` → ${s.outcome}` : ""}${detail ? `: ${shorten(detail, 200)}` : ""}`,
+        tone,
+      });
+    });
+    if (t.output_tail) {
+      lines.push({ key: `${t.task_id}-tail`, text: t.output_tail, tone: "info" });
+    }
+  });
+
+  if (lines.length === 0) {
+    return (
+      <div className="p-8 rounded-2xl border border-sand-200 bg-white shadow-2xs text-center text-xs text-stone-400">
+        No log output yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden border border-stone-800 shadow-sm">
+      <div className="px-3 py-2 bg-stone-900 border-b border-stone-800 text-[11px] font-mono text-stone-400 flex items-center justify-between">
+        <span>Runner output</span>
+        <span className="flex items-center gap-1.5 text-emerald-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          live
+        </span>
+      </div>
+      <div className="bg-stone-950 font-mono text-[11px] leading-relaxed p-4 max-h-[420px] overflow-y-auto whitespace-pre-wrap break-words">
+        {lines.map((l) => (
+          <div key={l.key} className={LOG_TONE_CLASS[l.tone]}>{l.text}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Every edit_file call's diff, pulled out of the same steps RunTimeline shows
+ * inline — a filtered view onto real diffs, not a second diffing pipeline. */
+function CodeDiffTab({
+  progress,
+  record,
+  jobFinished,
+}: {
+  progress: JobProgressTask[];
+  record: ExecutionRecordResponse | null;
+  jobFinished: boolean;
+}) {
+  const liveSteps = progress.flatMap((t) => t.steps ?? []);
+  const recordWorkers: RecordWorker[] = jobFinished && record
+    ? ((record.data as ExecutionRecordBody | undefined)?.execution?.workers ?? [])
+    : [];
+  const recordSteps = recordWorkers.flatMap((w) => w.steps ?? []);
+  const steps: RecordStep[] = liveSteps.length > 0 ? liveSteps : recordSteps;
+
+  const diffs = steps
+    .map((row, i) => {
+      const toolArgs = parseToolArgs(row.input);
+      const lang = languageOf(toolArgs.path);
+      const reported = row.detail ? parseUnifiedDiff(row.detail) : null;
+      const edit = reported
+        ? { path: reported.path ?? toolArgs.path, lines: reported.lines, lang: languageOf(reported.path ?? toolArgs.path), truncated: reported.truncated }
+        : toolArgs.oldString !== undefined && toolArgs.newString !== undefined
+          ? { path: toolArgs.path, lines: editDiff(toolArgs.oldString, toolArgs.newString), lang, truncated: false }
+          : null;
+      return edit ? { key: `diff-${i}`, ...edit } : null;
+    })
+    .filter((d): d is NonNullable<typeof d> => d !== null);
+
+  if (diffs.length === 0) {
+    return (
+      <div className="p-8 rounded-2xl border border-sand-200 bg-white shadow-2xs text-center text-xs text-stone-400">
+        No file edits recorded yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {diffs.map((d) => (
+        <div key={d.key} className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-stone-900 font-bold bg-white px-2 py-1 rounded-lg border border-sand-200">{d.path || "edit"}</span>
+          </div>
+          <DiffView lines={d.lines} lang={d.lang} />
+          {d.truncated && (
+            <p className="text-[10px] text-stone-400">Diff truncated — the change is larger than what is recorded here.</p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -235,11 +356,8 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const [jobPlan, setJobPlan] = useState<JobPlan | null>(null);
 
   useEffect(() => {
-    if (taskId) {
-      api.getJobPlan(taskId).then(setJobPlan).catch(() => setJobPlan(null));
-    } else {
-      setJobPlan(null);
-    }
+    if (!taskId) return;
+    api.getJobPlan(taskId).then(setJobPlan).catch(() => setJobPlan(null));
   }, [taskId]);
 
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -323,6 +441,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const [recordError, setRecordError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<"timeline" | "logs" | "diff" | "verification">("timeline");
 
   // A record is only assembled once a job reaches a terminal state, so asking
   // for one mid-run just buys a guaranteed 404 on every drawer open. Wait until
@@ -378,6 +497,8 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     setCopiedHash(false);
     setProgress([]);
     setFinalProgress(false);
+    setDrawerTab("timeline");
+    setJobPlan(null);
   }
 
   usePolling(
@@ -482,7 +603,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
       {/* Backdrop */}
       {taskId && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 transition-opacity"
+          className="fixed inset-0 bg-stone-900/30 backdrop-blur-xs z-40 transition-opacity"
           onClick={onClose}
           aria-hidden="true"
         />
@@ -494,10 +615,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         aria-modal="true"
         aria-labelledby="drawer-heading"
         tabIndex={-1}
-        className={`fixed inset-y-0 right-0 w-full sm:w-[800px] max-w-full bg-[#0A1017]/95 backdrop-blur-2xl border-l border-white/10 shadow-[-20px_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 w-full sm:w-[800px] max-w-full bg-white border-l border-sand-200 shadow-popover transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Drawer Header */}
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-white/5 bg-black/40">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-sand-200 bg-sand-50/60">
           <div className="flex items-center gap-4">
             {/* Present only while a task is genuinely executing — a queued or
                 finished job must not look like it is thinking. jobOrbState
@@ -519,13 +640,13 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                   the run itself below the fold. The full text is one click
                   away; see lib/taskTitle.ts for where the short form comes
                   from and why nothing calls a model to get it. */}
-              <h2 id="drawer-heading" className="text-lg font-medium text-white flex items-start gap-3">
+              <h2 id="drawer-heading" className="text-lg font-bold text-stone-900 flex items-start gap-3">
                 {/* Stays clamped when expanded: the full text renders below,
                     and unclamping the title too would show the same words
                     twice. */}
                 <span className="line-clamp-2">{heading.title}</span>
                 {currentJob && (
-                  <span className="px-2 py-0.5 mt-1 rounded-full text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white shrink-0">
+                  <span className="px-2 py-0.5 mt-1 rounded-full text-[10px] uppercase font-bold tracking-wider bg-sand-150 text-stone-700 border border-sand-200 shrink-0">
                     {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                 )}
@@ -535,7 +656,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                   type="button"
                   onClick={() => setExpandedFor(titleExpanded ? null : taskId ?? null)}
                   aria-expanded={titleExpanded}
-                  className="mt-1 inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] text-stone-500 hover:text-stone-900 transition-colors"
                 >
                   {titleExpanded ? "Show less" : "Show full task"}
                   {/* Says where the title came from. A model-written summary
@@ -543,17 +664,17 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                       one — silently showing a paraphrase of their own words
                       back to them is how they stop trusting the page. */}
                   {heading.fromArchitect && !titleExpanded && (
-                    <span className="text-zinc-600">· summarised by the Architect</span>
+                    <span className="text-stone-400">· summarised by the Architect</span>
                   )}
                 </button>
               )}
               {titleExpanded && (
-                <p className="mt-2 text-sm text-zinc-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                <p className="mt-2 text-sm text-stone-700 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
                   {currentJob?.task}
                 </p>
               )}
-            <p className="text-sm text-zinc-400 font-mono mt-1">
-              {currentJob?.repo && <span className="text-zinc-300">{currentJob.repo} · </span>}
+            <p className="text-sm text-stone-500 font-mono mt-1">
+              {currentJob?.repo && <span className="text-stone-700">{currentJob.repo} · </span>}
               {taskId}
             </p>
             {/* A review comment on this job's pull request continues it, so a
@@ -563,7 +684,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
             {(currentJob?.tasks.some(t => t.origin === "pr_comment") ?? false) && taskId && (
               <Link
                 href={`/tasks/${taskId}`}
-                className="mt-1 inline-block text-[11px] text-blue-400 hover:underline"
+                className="mt-1 inline-block text-[11px] text-sky-700 hover:underline"
               >
                 View thread →
               </Link>
@@ -571,14 +692,14 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
             <RunFacts job={currentJob} progress={progress} record={record} />
           </div>
         </div>
-        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
+        <button onClick={onClose} className="p-2 hover:bg-sand-150 rounded-full transition-colors text-stone-400 hover:text-stone-800">
           <X className="w-6 h-6" />
         </button>
       </div>
 
       {/* Job actions */}
       {currentJob && (
-        <div className="flex items-center gap-2 px-6 py-3 border-b border-white/5 bg-black/20">
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-sand-200 bg-sand-50/40">
           <button
             onClick={() => {
               if (!confirmCancel) {
@@ -589,10 +710,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
             }}
             onBlur={() => setConfirmCancel(false)}
             disabled={!canCancel || busy !== null}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               confirmCancel
-                ? "border-amber-500/50 bg-amber-500/20 text-amber-300"
-                : "border-white/10 text-zinc-300 hover:bg-white/10"
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : "border-sand-200 text-stone-700 hover:bg-sand-100"
             }`}
           >
             <Ban className="w-3.5 h-3.5" />
@@ -601,7 +722,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
           <button
             onClick={() => act("Retried", () => client.retryJob(currentJob.job_id))}
             disabled={!canRetry || busy !== null}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border border-sand-200 text-stone-700 hover:bg-sand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Retry
           </button>
@@ -614,9 +735,9 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                 onClose();
               }
             }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 text-zinc-300 hover:bg-white/10 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border border-sand-200 text-stone-700 hover:bg-sand-100 transition-colors"
           >
-            <Copy className="w-3.5 h-3.5 text-[#93C645]" /> Re-run with edits
+            <Copy className="w-3.5 h-3.5 text-kiwi-600" /> Re-run with edits
           </button>
 
           <div className="flex-1" />
@@ -633,27 +754,27 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
             }}
             onBlur={() => setConfirmDelete(false)}
             disabled={busy !== null}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors disabled:opacity-40 ${
               confirmDelete
-                ? "border-red-500/50 bg-red-500/20 text-red-300"
-                : "border-white/10 text-zinc-400 hover:bg-red-500/10 hover:text-red-300"
+                ? "border-rose-300 bg-rose-50 text-rose-700"
+                : "border-sand-200 text-stone-500 hover:bg-rose-50 hover:text-rose-700"
             }`}
           >
             <Trash2 className="w-3.5 h-3.5" />
             {confirmDelete ? "Click again to confirm" : "Delete"}
           </button>
 
-          {busy && <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />}
+          {busy && <Loader2 className="w-4 h-4 animate-spin text-stone-400" />}
         </div>
       )}
 
       {notice && (() => {
         const err = parseActionableError(notice);
         return (
-          <div className="px-6 py-2 text-xs text-zinc-300 bg-white/5 border-b border-white/5 flex items-center justify-between gap-2">
+          <div className="px-6 py-2 text-xs text-stone-700 bg-sand-50 border-b border-sand-200 flex items-center justify-between gap-2">
             <span>{err.message}</span>
             {err.actionHref && err.actionLabel && (
-              <Link href={err.actionHref} className="underline font-semibold text-amber-300 hover:text-white shrink-0">
+              <Link href={err.actionHref} className="underline font-semibold text-amber-700 hover:text-stone-900 shrink-0">
                 {err.actionLabel} →
               </Link>
             )}
@@ -661,9 +782,16 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         );
       })()}
 
-      <div className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 text-white gap-6">
+      <div className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 bg-sand-50/30 gap-6">
         {/* Plan Mode Review Card */}
-        {jobPlan && (jobPlan.requires_approval || jobPlan.plan_status === "AWAITING_APPROVAL" || currentJob?.status === "PLAN_REVIEW" || currentJob?.status === "AWAITING_PLAN_APPROVAL") && (
+        {/* requires_approval is a static "this job opted into plan mode" flag set
+            once at submit and never cleared — gating on it kept the approval
+            card (and its "Awaiting Approval" copy) rendering for the rest of
+            the job's life, including after the plan was already approved or
+            rejected. plan_status is the one field the approve/reject
+            handlers actually update (pkg/store/postgres.go), so it is the
+            only reliable signal that a plan is still waiting on a human. */}
+        {jobPlan && jobPlan.plan_status === "pending_review" && (
           <PlanApprovalCard
             plan={jobPlan}
             onApproved={() => {
@@ -677,189 +805,251 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
           />
         )}
 
-        {/* What is happening right now — and, when a finished job produced no
-            record, what happened at all.
-
-            The second case used to render nothing. Not every finished job has a
-            record, and the record panel below is the only other thing that
-            draws a timeline, so a run that ended without one had no account of
-            itself anywhere despite its phases being loaded and in hand. */}
-        {progress.length > 0 && (!jobFinished || !record) && (
-          <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Activity className={`w-4 h-4 ${jobFinished ? "text-zinc-400" : "text-sky-400"}`} />
-              <h3 className="text-sm font-semibold text-white">
-                {jobFinished ? "What happened" : "Running now"}
-              </h3>
-            </div>
-            <LiveRun tasks={progress} />
+        {/* A rejected plan turns the job FAILED (RejectJobPlan in
+            pkg/store/postgres.go) with no separate "why" surfaced by the API
+            yet — this at least states plainly that a human rejected the plan,
+            rather than leaving a FAILED job that looks like an execution
+            failure indistinguishable from any other. */}
+        {jobPlan?.plan_status === "rejected" && (
+          <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200">
+            This plan was rejected during review, so the job did not run.
           </div>
-        )}
-
-        {/* Execution record. A record exists only for a finished job, and not
-            every finished job has one, so the panel appears when there is
-            something to show rather than advertising an absence. */}
-        {jobFinished && (recordPending || record) && (
-        <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-green-400" />
-              <h3 className="text-sm font-semibold text-white">Execution Record (Verified Receipt)</h3>
-            </div>
-            {record?.recordHash && (
-              <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 px-2 py-0.5 rounded-md text-[11px] font-mono text-zinc-300">
-                <span className="text-zinc-500">Hash:</span>
-                <span className="truncate max-w-[120px]" title={record.recordHash}>{record.recordHash}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (record.recordHash) {
-                      navigator.clipboard?.writeText(record.recordHash);
-                      setCopiedHash(true);
-                      setTimeout(() => setCopiedHash(false), 2000);
-                    }
-                  }}
-                  className="hover:text-white text-zinc-400 p-0.5 transition-colors"
-                  title="Copy hash"
-                >
-                  {copiedHash ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {recordPending ? (
-            <div className="flex items-center gap-2 text-xs text-zinc-500 py-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
-            </div>
-          ) : record ? (
-            <div className="flex flex-col gap-2.5">
-              {/* What the record actually says. Every cell is read from the
-                  record itself — the panel reports the chain, it does not
-                  validate it, and must not imply otherwise. */}
-              {(() => {
-                const body = (record.data ?? {}) as ExecutionRecordBody;
-                const signed = body.attestation === "signed";
-                const cells: [string, string, string?][] = [
-                  ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
-                  [
-                    "Previous hash",
-                    body.prev_record_hash ? body.prev_record_hash : "genesis — first record for this org",
-                    body.prev_record_hash,
-                  ],
-                  ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", body.attestation],
-                  ["Signing key", body.record_signature?.key ?? "—", body.record_signature?.key],
-                ];
-                return (
-                  <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-lg bg-black/30 border border-white/5 font-mono">
-                    {cells.map(([label, value, full]) => (
-                      <div key={label} className="min-w-0">
-                        <dt className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</dt>
-                        <dd
-                          className={`truncate ${label === "Attestation" && signed ? "text-green-400" : "text-zinc-300"}`}
-                          title={full ?? value}
-                        >
-                          {value.length > 14 ? value.slice(0, 12) + "…" : value}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                );
-              })()}
-
-              <p className="text-[11px] text-zinc-500 leading-relaxed">
-                A tamper-evident record of what ran: the plan, the commit, the test command
-                and its outcome, linked to the previous record in your organization&apos;s
-                chain. It attests to the execution, not to the correctness of the resulting
-                code — the tests confirm the change did not break the suite, not that it
-                does what you asked. Review the pull request.
-              </p>
-
-              {/* The run, phase by phase. Until this existed, a failed job's
-                  entire account of itself was one line of result text — so a
-                  ten-minute run that the Critic rejected three times reported
-                  only "reached max steps without passing", and the reason lived
-                  in a daemon log on a machine the user cannot reach. */}
-              {(() => {
-                const body = (record.data ?? {}) as ExecutionRecordBody;
-                const recordWorkers = body.execution?.workers ?? [];
-                // The live feed wins where it exists, because it is strictly
-                // richer for the same rows: it carries `detail`, `input` and
-                // per-step cost, where the record carries hashes. The record is
-                // authoritative about WHAT happened — and the panel above
-                // reports its chain and signature from the record alone — but
-                // it is deliberately not a transcript, so rendering the
-                // timeline from it loses the account of the run.
-                const liveWorkers = progress
-                  .filter(t => (t.steps?.length ?? 0) > 0)
-                  .map(t => ({
-                    worker_id: t.task_id,
-                    actor_model: t.actor_model,
-                    steps: t.steps ?? [],
-                  }));
-                const workers = liveWorkers.length > 0 ? liveWorkers : recordWorkers;
-                return workers.length > 0 ? <RunTimeline workers={workers} /> : null;
-              })()}
-
-              {/* Disclosure JSON toggle */}
-              <button
-                type="button"
-                onClick={() => setShowJson(v => !v)}
-                aria-expanded={showJson}
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors w-fit pt-0.5"
-              >
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
-                <span>{showJson ? "Hide raw record" : "View raw record"}</span>
-              </button>
-
-              {showJson && (
-                <pre className="text-[11px] font-mono p-3 rounded-lg bg-black/60 border border-white/10 text-zinc-300 overflow-x-auto max-h-64 leading-relaxed">
-                  {JSON.stringify(record.data, null, 2)}
-                </pre>
-              )}
-            </div>
-          ) : null}
-        </div>
         )}
 
         {currentJob ? (
-          <div className="w-full flex flex-col gap-4">
-            <JobGraph jobId={currentJob.job_id} tasks={currentJob.tasks} />
-            <h3 className="text-lg font-semibold">Tasks</h3>
-            {currentJob.tasks.map(task => (
-              <div key={task.id} id={`task-${task.id}`} className="p-4 glass-panel flex flex-col gap-2 border border-white/10 rounded-xl scroll-mt-24 target:ring-2 target:ring-white/20 target:bg-white/5 transition-all">
-                <div className="flex justify-between gap-4">
-                  <div className="min-w-0">
-                    {/* Clamped for the same reason as the header: a task card
-                        that reprints a whole issue report buries the status,
-                        the id and the timing that the card exists to show. The
-                        header above already offers the full text. */}
-                    {task.task && (
-                      <div className="text-sm text-white line-clamp-2" title={task.task}>
-                        {task.task}
-                      </div>
-                    )}
-                    <span className="font-mono text-xs text-zinc-500 break-all">{task.id}</span>
+          <>
+            {/* Drawer Tabs */}
+            <div className="flex items-center gap-4 border-b border-sand-200 -mt-2 text-xs font-semibold shrink-0">
+              {([
+                ["timeline", "Execution Plan"],
+                ["logs", "Live Logs"],
+                ["diff", "Code Diff"],
+                ["verification", "Verification"],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setDrawerTab(id)}
+                  className={`py-2.5 border-b-2 transition-colors ${
+                    drawerTab === id
+                      ? "text-stone-900 border-stone-900"
+                      : "text-stone-500 hover:text-stone-800 border-transparent"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab: Execution Plan — the task queue plus what the run is doing or
+                did, phase by phase (inline diffs and code included). This is the
+                same account the drawer always showed; it's just under a tab now. */}
+            {drawerTab === "timeline" && (
+              <div className="flex flex-col gap-4">
+                {/* What is happening right now — and, when a finished job produced no
+                    record, what happened at all.
+
+                    The second case used to render nothing. Not every finished job has a
+                    record, and the record panel below is the only other thing that
+                    draws a timeline, so a run that ended without one had no account of
+                    itself anywhere despite its phases being loaded and in hand. */}
+                {progress.length > 0 && (!jobFinished || !record) && (
+                  <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <Activity className={`w-4 h-4 ${jobFinished ? "text-stone-400" : "text-sky-600"}`} />
+                      <h3 className="text-sm font-bold text-stone-900">
+                        {jobFinished ? "What happened" : "Running now"}
+                      </h3>
+                    </div>
+                    <LiveRun tasks={progress} />
                   </div>
-                  <span className="text-xs px-2 py-1 bg-white/10 rounded-md flex items-center gap-2 h-fit shrink-0">
-                    {getPhaseIcon(task)} {task.status}
-                  </span>
+                )}
+
+                {/* Once a record exists, its phases (with the record's own totals)
+                    replace the live feed's — same reasoning as before, just no
+                    longer bundled with the hash/receipt cells, which moved to
+                    Verification. */}
+                {jobFinished && record && (() => {
+                  const body = (record.data ?? {}) as ExecutionRecordBody;
+                  const recordWorkers = body.execution?.workers ?? [];
+                  const liveWorkers = progress
+                    .filter(t => (t.steps?.length ?? 0) > 0)
+                    .map(t => ({
+                      worker_id: t.task_id,
+                      actor_model: t.actor_model,
+                      steps: t.steps ?? [],
+                    }));
+                  const workers = liveWorkers.length > 0 ? liveWorkers : recordWorkers;
+                  return workers.length > 0 ? (
+                    <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
+                      <RunTimeline workers={workers} />
+                    </div>
+                  ) : null;
+                })()}
+
+                <div className="w-full flex flex-col gap-4">
+                  <JobGraph jobId={currentJob.job_id} tasks={currentJob.tasks} />
+                  <h3 className="text-sm font-bold text-stone-900">Tasks</h3>
+                  {currentJob.tasks.map(task => (
+                    <div key={task.id} id={`task-${task.id}`} className="p-4 bg-white flex flex-col gap-2 border border-sand-200 rounded-2xl shadow-2xs scroll-mt-24 target:ring-2 target:ring-kiwi-300 transition-all">
+                      <div className="flex justify-between gap-4">
+                        <div className="min-w-0">
+                          {/* Clamped for the same reason as the header: a task card
+                              that reprints a whole issue report buries the status,
+                              the id and the timing that the card exists to show. The
+                              header above already offers the full text. */}
+                          {task.task && (
+                            <div className="text-sm text-stone-900 line-clamp-2" title={task.task}>
+                              {task.task}
+                            </div>
+                          )}
+                          <span className="font-mono text-xs text-stone-400 break-all">{task.id}</span>
+                        </div>
+                        <span className="text-xs px-2 py-1 bg-sand-100 border border-sand-200 rounded-md flex items-center gap-2 h-fit shrink-0 text-stone-700">
+                          {getPhaseIcon(task)} {task.status}
+                        </span>
+                      </div>
+                      {timingLabel(task) && (
+                        <div className="text-xs text-stone-400 font-mono">{timingLabel(task)}</div>
+                      )}
+                      <BlockedBanner task={task} />
+                      {task.result_url && (
+                        <a href={task.result_url} target="_blank" rel="noreferrer" className="text-sky-700 text-sm hover:underline flex items-center gap-2 mt-2">
+                          <GitPullRequest className="w-4 h-4" /> View PR
+                        </a>
+                      )}
+                      {task.result_detail && (
+                        <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-rose-600' : 'text-stone-500'}`}>{task.result_detail}</div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                {timingLabel(task) && (
-                  <div className="text-xs text-zinc-500 font-mono">{timingLabel(task)}</div>
-                )}
-                <BlockedBanner task={task} />
-                {task.result_url && (
-                  <a href={task.result_url} target="_blank" rel="noreferrer" className="text-blue-400 text-sm hover:underline flex items-center gap-2 mt-2">
-                    <GitPullRequest className="w-4 h-4" /> View PR
-                  </a>
-                )}
-                {task.result_detail && (
-                  <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-red-400' : 'text-zinc-400'}`}>{task.result_detail}</div>
+              </div>
+            )}
+
+            {/* Tab: Live Logs — the raw output tail from each running/finished
+                task, terminal-style. Real data (JobProgressTask.output_tail),
+                not a fabricated stream; a task with nothing reported yet just
+                shows nothing rather than a fake "connecting…" line. */}
+            {drawerTab === "logs" && <LiveLogsTab progress={progress} />}
+
+            {/* Tab: Code Diff — every edit_file call across the run, pulled
+                straight out of the same steps RunTimeline renders inline. This
+                is a filtered view onto real diffs, not a separate feature. */}
+            {drawerTab === "diff" && (
+              <CodeDiffTab
+                progress={progress}
+                record={record}
+                jobFinished={jobFinished}
+              />
+            )}
+
+            {/* Tab: Verification — the signed execution record: hash chain,
+                attestation, and the raw JSON disclosure. Exists only once a
+                finished job has produced a record. */}
+            {drawerTab === "verification" && (
+              <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <h3 className="text-sm font-bold text-stone-900">Execution Record (Verified Receipt)</h3>
+                  </div>
+                  {record?.recordHash && (
+                    <div className="flex items-center gap-1.5 bg-sand-50 border border-sand-200 px-2 py-0.5 rounded-md text-[11px] font-mono text-stone-700">
+                      <span className="text-stone-400">Hash:</span>
+                      <span className="truncate max-w-[120px]" title={record.recordHash}>{record.recordHash}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (record.recordHash) {
+                            navigator.clipboard?.writeText(record.recordHash);
+                            setCopiedHash(true);
+                            setTimeout(() => setCopiedHash(false), 2000);
+                          }
+                        }}
+                        className="hover:text-stone-900 text-stone-400 p-0.5 transition-colors"
+                        title="Copy hash"
+                      >
+                        {copiedHash ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {!jobFinished ? (
+                  <p className="text-xs text-stone-500 py-1">
+                    A verification record is assembled once this job finishes.
+                  </p>
+                ) : recordPending ? (
+                  <div className="flex items-center gap-2 text-xs text-stone-500 py-1">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
+                  </div>
+                ) : record ? (
+                  <div className="flex flex-col gap-2.5">
+                    {/* What the record actually says. Every cell is read from the
+                        record itself — the panel reports the chain, it does not
+                        validate it, and must not imply otherwise. */}
+                    {(() => {
+                      const body = (record.data ?? {}) as ExecutionRecordBody;
+                      const signed = body.attestation === "signed";
+                      const cells: [string, string, string?][] = [
+                        ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
+                        [
+                          "Previous hash",
+                          body.prev_record_hash ? body.prev_record_hash : "genesis — first record for this org",
+                          body.prev_record_hash,
+                        ],
+                        ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", body.attestation],
+                        ["Signing key", body.record_signature?.key ?? "—", body.record_signature?.key],
+                      ];
+                      return (
+                        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-xl bg-sand-50 border border-sand-200 font-mono">
+                          {cells.map(([label, value, full]) => (
+                            <div key={label} className="min-w-0">
+                              <dt className="text-[10px] text-stone-400 uppercase tracking-wider">{label}</dt>
+                              <dd
+                                className={`truncate ${label === "Attestation" && signed ? "text-emerald-700 font-semibold" : "text-stone-700"}`}
+                                title={full ?? value}
+                              >
+                                {value.length > 14 ? value.slice(0, 12) + "…" : value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      );
+                    })()}
+
+                    <p className="text-[11px] text-stone-500 leading-relaxed">
+                      A tamper-evident record of what ran: the plan, the commit, the test command
+                      and its outcome, linked to the previous record in your organization&apos;s
+                      chain. It attests to the execution, not to the correctness of the resulting
+                      code — the tests confirm the change did not break the suite, not that it
+                      does what you asked. Review the pull request.
+                    </p>
+
+                    {/* Disclosure JSON toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setShowJson(v => !v)}
+                      aria-expanded={showJson}
+                      className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-900 transition-colors w-fit pt-0.5"
+                    >
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
+                      <span>{showJson ? "Hide raw record" : "View raw record"}</span>
+                    </button>
+
+                    {showJson && (
+                      <pre className="text-[11px] font-mono p-3 rounded-lg bg-stone-900 border border-stone-800 text-stone-200 overflow-x-auto max-h-64 leading-relaxed">
+                        {JSON.stringify(record.data, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-stone-500 py-1">No verification record for this job.</p>
                 )}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         ) : (
           <LoadingState label="Loading job details…" state="connecting" />
         )}

@@ -334,15 +334,6 @@ function CommandCenterContent() {
               Running ({(jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length})
             </button>
             <button
-              onClick={() => setStatusFilter("waiting")}
-              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1 ${
-                statusFilter === "waiting" ? "bg-amber-600 text-white shadow-2xs" : "text-amber-800 bg-amber-50 hover:bg-amber-100"
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              <span>Needs Input ({(jobs || []).filter((j) => j.status === "WAITING_USER").length})</span>
-            </button>
-            <button
               onClick={() => setStatusFilter("plan")}
               className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1 border border-indigo-200/80 ${
                 statusFilter === "plan" ? "bg-indigo-600 text-white shadow-2xs" : "text-indigo-900 bg-indigo-50 hover:bg-indigo-100"
