@@ -7,6 +7,9 @@ export interface SelectOption {
   value: string;
   label: string;
   hint?: string; // optional muted trailing text (e.g. "private", "BYOC")
+  badge?: React.ReactNode;
+  icon?: React.ReactNode;
+  sublabel?: string;
 }
 
 interface SelectProps {
@@ -27,17 +30,12 @@ interface SelectProps {
    * Renders a detail panel under the list for whichever option is currently
    * highlighted — by hover, by arrow key, or by being the current selection
    * when the menu opens.
-   *
-   * A callback rather than a field on SelectOption so the caller only builds
-   * the panel for the one row being looked at. With a hundred-odd models that
-   * is the difference between one node and a hundred.
    */
   renderDetail?: (option: SelectOption) => React.ReactNode;
 }
 
-// A single custom dropdown used across the dashboard: sand/white popover menu,
-// kiwi accent, keyboard nav, and optional type-to-filter search. Replaces
-// native <select> so the menu matches the product design and can be searched.
+// A custom dropdown used across the dashboard: frosted popover menu,
+// kiwi accent, keyboard nav, and optional type-to-filter search.
 export function Select({
   value,
   onChange,
@@ -66,7 +64,12 @@ export function Select({
   const filtered = useMemo(() => {
     if (!searchable || !query.trim()) return options;
     const q = query.toLowerCase();
-    return options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
+    return options.filter(
+      (o) =>
+        o.label.toLowerCase().includes(q) ||
+        o.value.toLowerCase().includes(q) ||
+        (o.sublabel && o.sublabel.toLowerCase().includes(q))
+    );
   }, [options, query, searchable]);
 
   // Close on outside click / Escape; focus the search field on open.
@@ -133,11 +136,11 @@ export function Select({
   };
 
   const chevron = (
-    <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+    <ChevronDown className={`w-4 h-4 text-stone-400 shrink-0 transition-transform duration-200 ${open ? "rotate-180 text-kiwi-600" : ""}`} />
   );
 
   return (
-    <div ref={rootRef} className={`relative ${variant === "field" ? "w-full" : "inline-flex"}`}>
+    <div ref={rootRef} className={`relative ${variant === "field" ? "w-full" : "inline-flex"} ${open ? "z-50" : ""}`}>
       {variant === "chip" ? (
         <button
           ref={triggerRef}
@@ -149,11 +152,11 @@ export function Select({
           aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-sand-50 border border-sand-200 text-xs font-medium text-stone-700 shadow-2xs transition-all cursor-pointer ${className}`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-sand-50 border border-sand-200 text-xs font-medium text-stone-800 shadow-2xs hover:border-kiwi-300 transition-all cursor-pointer ${className}`}
         >
           {icon}
           {label && <span className="text-[10px] font-mono uppercase text-stone-400 font-bold">{label}</span>}
-          <span className={`truncate max-w-[170px] ${selected ? "text-stone-900" : "text-stone-400"}`}>{display}</span>
+          <span className={`truncate max-w-[170px] ${selected ? "text-stone-900 font-semibold" : "text-stone-400"}`}>{display}</span>
           {chevron}
         </button>
       ) : (
@@ -167,13 +170,16 @@ export function Select({
           aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
-          className={`w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white hover:border-sand-300 border border-sand-200 text-left flex items-center justify-between gap-2 shadow-xs transition-all ${className}`}
+          className={`w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white hover:border-kiwi-300 focus:bg-white focus:border-kiwi-500 focus:ring-2 focus:ring-kiwi-100 border border-sand-200 text-left flex items-center justify-between gap-2 shadow-2xs transition-all cursor-pointer group ${className}`}
         >
-          <span className="flex items-center gap-2 min-w-0">
-            {icon}
-            <span className={`truncate text-sm ${selected ? "text-stone-900 font-medium" : "text-stone-400"}`}>{display}</span>
+          <span className="flex items-center gap-2.5 min-w-0">
+            {selected?.icon || icon}
+            <span className={`truncate text-xs ${selected ? "text-stone-900 font-bold" : "text-stone-400 font-medium"}`}>{display}</span>
           </span>
-          {chevron}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {selected?.badge}
+            {chevron}
+          </div>
         </button>
       )}
 
@@ -183,10 +189,12 @@ export function Select({
           role="listbox"
           aria-label={ariaLabel || label || placeholder}
           onKeyDown={onListKey}
-          className="absolute top-full left-0 mt-1.5 z-50 min-w-[240px] w-max max-w-[340px] rounded-2xl border border-sand-200 bg-white shadow-popover p-1.5"
+          className={`absolute top-full left-0 mt-1.5 z-[999] rounded-2xl border border-sand-300 bg-white shadow-2xl p-2 space-y-2 ring-1 ring-black/10 animate-in fade-in zoom-in-95 duration-150 ${
+            variant === "field" ? "w-full min-w-0" : "min-w-[280px] w-max max-w-[380px]"
+          }`}
         >
           {searchable && (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 mb-1 rounded-xl bg-sand-50/60 border border-sand-200">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sand-50 border border-sand-200 focus-within:border-kiwi-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-kiwi-100 transition-all">
               <Search className="w-3.5 h-3.5 text-stone-400 shrink-0" />
               <input
                 ref={searchRef}
@@ -195,17 +203,21 @@ export function Select({
                   setQuery(e.target.value);
                   setActive(0);
                 }}
-                placeholder="Search…"
-                className="bg-transparent outline-none border-0 text-sm text-stone-900 placeholder:text-stone-400 w-full"
+                placeholder="Search by name or provider…"
+                className="bg-transparent outline-none border-0 text-xs text-stone-900 placeholder:text-stone-400 w-full font-medium"
               />
             </div>
           )}
-          <div ref={listRef} className="flex flex-col gap-0.5 max-h-64 overflow-y-auto">
+
+          <div ref={listRef} className="flex flex-col gap-1 h-44 overflow-y-auto pr-1">
             {filtered.length === 0 ? (
-              <div className="px-2.5 py-3 text-xs text-stone-400 text-center">No matches</div>
+              <div className="flex items-center justify-center h-full text-xs text-stone-400 font-mono bg-sand-50/50 rounded-xl border border-sand-150 p-4">
+                No matching models found.
+              </div>
             ) : (
               filtered.map((o, i) => {
                 const isSel = o.value === value;
+                const isHover = i === active;
                 return (
                   <button
                     key={o.value || "__empty"}
@@ -215,20 +227,56 @@ export function Select({
                     data-idx={i}
                     onMouseEnter={() => setActive(i)}
                     onClick={() => pick(o.value)}
-                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-left transition-colors ${
-                      i === active ? "bg-sand-100" : ""
+                    className={`flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                      isSel
+                        ? "bg-kiwi-50/90 text-kiwi-950 font-bold border-kiwi-300 shadow-2xs"
+                        : isHover
+                        ? "bg-sand-100/90 text-stone-900 border-sand-200"
+                        : "bg-transparent text-stone-700 border-transparent hover:bg-sand-50"
                     }`}
                   >
-                    <Check className={`w-3.5 h-3.5 shrink-0 ${isSel ? "text-kiwi-600" : "text-transparent"}`} />
-                    <span className={`truncate flex-1 ${isSel ? "text-stone-900 font-semibold" : "text-stone-700"}`}>{o.label}</span>
-                    {o.hint && <span className="text-[11px] text-stone-400 shrink-0">{o.hint}</span>}
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                        {isSel ? (
+                          <Check className="w-3.5 h-3.5 text-kiwi-700 stroke-[3]" />
+                        ) : (
+                          o.icon || <div className="w-1.5 h-1.5 rounded-full bg-sand-300" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className={`truncate ${isSel ? "text-kiwi-950 font-bold" : "text-stone-900 font-semibold"}`}>
+                          {o.label}
+                        </div>
+                        {o.sublabel && (
+                          <div className="text-[10px] text-stone-400 font-mono truncate leading-none mt-0.5">{o.sublabel}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {o.badge}
+                      {o.hint && (
+                        <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-sand-100 text-stone-600 border border-sand-200">
+                          {o.hint}
+                        </span>
+                      )}
+                    </div>
                   </button>
                 );
               })
             )}
           </div>
-          {renderDetail && filtered[active] && (
-            <div className="mt-1 pt-2.5 border-t border-sand-200">{renderDetail(filtered[active])}</div>
+
+          {renderDetail && (
+            <div className="pt-2 border-t border-sand-200 bg-sand-50/80 -mx-2 -mb-2 p-2.5 rounded-b-2xl">
+              {filtered[active] ? (
+                renderDetail(filtered[active])
+              ) : (
+                <div className="text-[10px] text-stone-400 font-mono text-center py-1">
+                  Select a model to view capabilities
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

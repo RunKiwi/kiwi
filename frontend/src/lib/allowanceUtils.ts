@@ -205,7 +205,7 @@ export function getOverallAllowanceHealth(
   return {
     status: "healthy",
     summaryText: usage && usage.agent_minutes_limit > 0
-      ? `${usage.agent_minutes_used.toFixed(0)}/${usage.agent_minutes_limit}m`
+      ? `${usage.agent_minutes_used.toFixed(1)}/${usage.agent_minutes_limit}m`
       : "Allowances healthy",
     dotColorClass: "bg-[#93C645]",
     badgeClass: "border-white/10 text-zinc-300 bg-black/40",

@@ -29,9 +29,10 @@ type JobTaskResponse struct {
 	// DependsOn lists the sibling worker ids this task waits on, as the planner
 	// recorded them. Bare worker ids, not task ids: the caller knows the job id
 	// and prefixing here would only make it strip the prefix back off.
-	DependsOn []string `json:"depends_on,omitempty"`
-	Model     string   `json:"model,omitempty"`
-	Files     []string `json:"files,omitempty"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	ArchitectModel string   `json:"architect_model,omitempty"`
+	Files          []string `json:"files,omitempty"`
 
 	// Timing, so a caller can say "queued 4m" / "running 2m, attempt 2" rather
 	// than showing an ageless spinner. StartedAt is set once at lease.
@@ -72,12 +73,12 @@ type JobTaskResponse struct {
 }
 
 type JobStatusResponse struct {
-	JobID string `json:"job_id"`
-	// Task is the overall goal that produced this job (the planner stamps it on
-	// every worker spec as job_task), so the drawer can name what it is showing.
-	Task  string            `json:"task,omitempty"`
-	Repo  string            `json:"repo,omitempty"`
-	Tasks []JobTaskResponse `json:"tasks"`
+	JobID          string            `json:"job_id"`
+	Task           string            `json:"task,omitempty"`
+	Repo           string            `json:"repo,omitempty"`
+	ArchitectModel string            `json:"architect_model,omitempty"`
+	WorkerModel    string            `json:"worker_model,omitempty"`
+	Tasks          []JobTaskResponse `json:"tasks"`
 }
 
 type JobsListResponse struct {
@@ -197,21 +198,22 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 			leasedBy = &val
 		}
 		resp.Tasks[i] = JobTaskResponse{
-			ID:           t.ID,
-			Status:       t.Status,
-			Task:         specString(t.Spec, "task"),
-			ResultURL:    resultURL,
-			ResultDetail: resultDetail,
-			DependsOn:    specStrings(t.Spec, "depends_on"),
-			Model:        specString(t.Spec, "model"),
-			Files:        specStrings(t.Spec, "files"),
-			QueuedAt:     t.CreatedAt,
-			StartedAt:    t.StartedAt,
-			UpdatedAt:    t.UpdatedAt,
-			Attempts:     t.Attempts,
-			LeasedBy:     leasedBy,
-			RootTaskID:   t.RootTaskID,
-			Origin:       t.Origin,
+			ID:             t.ID,
+			Status:         t.Status,
+			Task:           specString(t.Spec, "task"),
+			ResultURL:      resultURL,
+			ResultDetail:   resultDetail,
+			DependsOn:      specStrings(t.Spec, "depends_on"),
+			Model:          specString(t.Spec, "model"),
+			ArchitectModel: specString(t.Spec, "architect_model"),
+			Files:          specStrings(t.Spec, "files"),
+			QueuedAt:       t.CreatedAt,
+			StartedAt:      t.StartedAt,
+			UpdatedAt:      t.UpdatedAt,
+			Attempts:       t.Attempts,
+			LeasedBy:       leasedBy,
+			RootTaskID:     t.RootTaskID,
+			Origin:         t.Origin,
 		}
 		if t.ParentTaskID != nil {
 			resp.Tasks[i].ParentTaskID = *t.ParentTaskID
@@ -223,6 +225,12 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if resp.Repo == "" {
 			resp.Repo = store.ShortRepo(specString(t.Spec, "repo_url"))
+		}
+		if resp.ArchitectModel == "" {
+			resp.ArchitectModel = specString(t.Spec, "architect_model")
+		}
+		if resp.WorkerModel == "" {
+			resp.WorkerModel = specString(t.Spec, "model")
 		}
 		if d, ok := diagnoses[t.ID]; ok {
 			resp.Tasks[i].BlockedReason = d.Reason

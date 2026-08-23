@@ -55,15 +55,19 @@
   background: #A8A08E;
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Ambient Warm Canvas with gentle organic grain */
 body {
   background-color: #F4F3EE;
   color: #1C1917;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Plus Jakarta Sans", "Segoe UI", Roboto, sans-serif;
-  background-image: 
-    radial-gradient(at 90% 10%, rgba(147, 198, 69, 0.08) 0px, transparent 40%),
-    radial-gradient(at 10% 20%, rgba(249, 115, 22, 0.05) 0px, transparent 35%),
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }
@@ -139,6 +143,50 @@ body {
   50% { stroke-dasharray: 85, 150; stroke-dashoffset: -30; }
   100% { stroke-dasharray: 85, 150; stroke-dashoffset: -120; }
 }
+
+/* Kiwi Animated Mascot Keyframes */
+@keyframes kiwi-bob {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes kiwi-float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-4px) rotate(2deg); }
+}
+@keyframes kiwi-dance-hop {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(-4deg); }
+  75% { transform: translateY(-3px) rotate(4deg); }
+}
+@keyframes kiwi-flame-flicker {
+  0%, 100% { opacity: 0.95; transform: scaleY(1); }
+  50% { opacity: 0.55; transform: scaleY(0.75); }
+}
+@keyframes kiwi-shield-glow {
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(79, 180, 119, 0.4)); }
+  50% { filter: drop-shadow(0 0 5px rgba(79, 180, 119, 0.8)); }
+}
+@keyframes kiwi-visor-pulse {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 1.5px rgba(0, 229, 255, 0.5)); }
+  50% { opacity: 0.8; filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.9)); }
+}
+@keyframes kiwi-hack-beam {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(1.1); }
+}
+@keyframes kiwi-sleep-breath {
+  0%, 100% { transform: scale(0.97); }
+  50% { transform: scale(1.02); }
+}
+
+.animate-kiwi-bob { animation: kiwi-bob 2.5s ease-in-out infinite; }
+.animate-kiwi-float { animation: kiwi-float 3s ease-in-out infinite; }
+.animate-kiwi-dance { animation: kiwi-dance-hop 0.8s ease-in-out infinite; }
+.animate-kiwi-flame { animation: kiwi-flame-flicker 0.35s ease-in-out infinite; transform-origin: top; }
+.animate-kiwi-shield { animation: kiwi-shield-glow 2s ease-in-out infinite; }
+.animate-kiwi-visor { animation: kiwi-visor-pulse 1.8s ease-in-out infinite; }
+.animate-kiwi-hack { animation: kiwi-hack-beam 1.2s ease-in-out infinite; transform-origin: center; }
+.animate-kiwi-sleep { animation: kiwi-sleep-breath 3s ease-in-out infinite; transform-origin: center; }
 
 /* Bespoke Kiwi Custom Loaders — the keyframes above existed but the classes
    that actually apply them to an element never did, so KiwiLoaders.tsx had

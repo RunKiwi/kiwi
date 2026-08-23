@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -15,9 +15,9 @@ import {
   Plus,
   Search,
   LogOut,
-  PanelLeft,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  HelpCircle,
   Activity,
   Sparkles,
   Cpu,
@@ -26,19 +26,43 @@ import {
   CreditCard,
   ShieldCheck,
   Server,
+  GitPullRequest,
 } from "lucide-react";
 import { api, type UsageResponse, type ValidateResponse, type GithubRepo } from "@/lib/api";
-import { CustomLoadersStudio } from "@/components/CustomLoadersStudio";
+import { SiGithub, SiDatadog, SiPrometheus } from "react-icons/si";
+import { FaSlack } from "react-icons/fa6";
 import { Logo } from "@/components/Logo";
+import { UpgradeButton } from "@/components/UpgradeButton";
 import { useFleetStore } from "@/store/useFleetStore";
+import Fuse from "fuse.js";
 
-interface NavCommand {
-  label: string;
+interface SearchItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  category: "Navigation" | "Integrations" | "Repositories" | "Tasks" | "Team & Org" | "Actions";
   href?: string;
   action?: () => void;
   icon: React.ReactNode;
   hint?: string;
   keywords?: string;
+}
+
+function getAvatarInitials(email?: string, name?: string): string {
+  if (email && email.trim()) {
+    const localPart = email.split("@")[0].trim();
+    if (localPart.length >= 2) {
+      return localPart.slice(0, 2).toUpperCase();
+    }
+  }
+  if (name && name.trim()) {
+    const parts = name.trim().split(/[\s_.-]+/);
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  }
+  return "KW";
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -50,10 +74,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [org, setOrg] = useState<ValidateResponse | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [repoSearchQuery, setRepoSearchQuery] = useState("");
   const [primaryCollapsed, setPrimaryCollapsed] = useState(false);
-  const [showLoadersModal, setShowLoadersModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
     loadJobs().catch(() => {});
@@ -70,7 +95,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         setPrimaryCollapsed((prev) => !prev);
       } else if (e.key === "Escape") {
         setShowCommandPalette(false);
-        setShowLoadersModal(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -113,51 +137,441 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const activeTasksCount = (jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
   const runnersCount = (daemons || []).length;
 
+  // Group repos by organization / owner
+  const reposByOrg = useMemo(() => {
+    const q = repoSearchQuery.trim().toLowerCase();
+    const filtered = repos.filter((r) => {
+      const fn = (r.full_name || r.name || "").toLowerCase();
+      return fn.includes(q);
+    });
+
+    const groups: Record<string, GithubRepo[]> = {};
+    for (const r of filtered) {
+      const parts = (r.full_name || r.name || "").split("/");
+      const orgKey = parts.length > 1 ? parts[0] : "Repositories";
+      if (!groups[orgKey]) groups[orgKey] = [];
+      groups[orgKey].push(r);
+    }
+    return groups;
+  }, [repos, repoSearchQuery]);
+
+  const orgKeys = Object.keys(reposByOrg);
+
+  // Universal Fuzzy Search Index across Navigation, Integrations, Repositories, Tasks, and Actions
+  const allSearchItems = useMemo<SearchItem[]>(() => {
+    const items: SearchItem[] = [
+      // 1. Navigation Pages
+      {
+        id: "nav-composer",
+        title: "Create New Task",
+        subtitle: "Launch autonomous multi-agent coding task",
+        category: "Navigation",
+        href: "/composer",
+        icon: <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />,
+        hint: "/composer",
+        keywords: "create task new prompt assign architect implementer coding build plan agent composer",
+      },
+      {
+        id: "nav-dashboard",
+        title: "Task Dashboard",
+        subtitle: "Kanban pipeline of all running and completed tasks",
+        category: "Navigation",
+        href: "/",
+        icon: <LayoutGrid className="w-3.5 h-3.5 text-stone-600" />,
+        hint: "/",
+        keywords: "tasks jobs active execution board list kanban pipeline dashboard home",
+      },
+      {
+        id: "nav-monitors",
+        title: "PR Watchdogs",
+        subtitle: "Continuous telemetry verification after pull request merge",
+        category: "Navigation",
+        href: "/monitors",
+        icon: <Radar className="w-3.5 h-3.5 text-sky-600" />,
+        hint: "/monitors",
+        keywords: "canary telemetry p99 error rate latency post-merge watchdog release pull request pr monitors",
+      },
+      {
+        id: "nav-activity",
+        title: "Live Fleet Activity Log",
+        subtitle: "Real-time Gantt timeline of daemon execution traces",
+        category: "Navigation",
+        href: "/activity",
+        icon: <Activity className="w-3.5 h-3.5 text-indigo-600" />,
+        hint: "/activity",
+        keywords: "activity log live stream execution gantt traces timeline fleet daemons runners",
+      },
+      {
+        id: "nav-spend",
+        title: "Cost & Velocity Analytics",
+        subtitle: "Token utilization, execution time, and model spend metrics",
+        category: "Navigation",
+        href: "/spend",
+        icon: <Receipt className="w-3.5 h-3.5 text-stone-600" />,
+        hint: "/spend",
+        keywords: "spend analytics cost tokens latency graphs metrics velocity billing tokens usage",
+      },
+      {
+        id: "nav-fleet",
+        title: "Private Runners & Fleet",
+        subtitle: "Manage private self-hosted daemons and BYOC clusters",
+        category: "Navigation",
+        href: "/fleet",
+        icon: <Server className="w-3.5 h-3.5 text-emerald-600" />,
+        hint: "/fleet",
+        keywords: "fleet daemons runners byoc nodes compute private hosting self-hosted cluster",
+      },
+      {
+        id: "nav-models",
+        title: "AI Models & Providers",
+        subtitle: "Configure Claude, Gemini, GPT, and custom model endpoints",
+        category: "Navigation",
+        href: "/models",
+        icon: <Cpu className="w-3.5 h-3.5 text-purple-600" />,
+        hint: "/models",
+        keywords: "models claude gemini openai anthropic frontier economy custom llm tokens providers",
+      },
+      {
+        id: "nav-integrations",
+        title: "Integrations Hub",
+        subtitle: "Connect GitHub, Slack, Datadog, Prometheus, and API keys",
+        category: "Navigation",
+        href: "/integrations",
+        icon: <Link2 className="w-3.5 h-3.5 text-stone-700" />,
+        hint: "/integrations",
+        keywords: "integrations catalog slack github datadog prometheus git tokens seal webhooks connections",
+      },
+      {
+        id: "nav-slack",
+        title: "Slack Channel Bindings",
+        subtitle: "Map repository triggers and team alert channels",
+        category: "Navigation",
+        href: "/integrations/slack",
+        icon: <FaSlack className="w-3.5 h-3.5 text-[#ECB22E]" />,
+        hint: "/integrations/slack",
+        keywords: "slack bot channel mapping workspace alerts triggers notifications chat bindings",
+      },
+      {
+        id: "nav-team",
+        title: "Team Members & Roles",
+        subtitle: "Manage organization seats, developer roles, and invites",
+        category: "Navigation",
+        href: "/team",
+        icon: <Users className="w-3.5 h-3.5 text-stone-600" />,
+        hint: "/team",
+        keywords: "team users members invite seats roles admin billing developer email collaborators",
+      },
+      {
+        id: "nav-settings",
+        title: "Plans & Billing",
+        subtitle: "Subscription tier, pooled agent-minutes quota, and invoices",
+        category: "Navigation",
+        href: "/settings",
+        icon: <CreditCard className="w-3.5 h-3.5 text-amber-600" />,
+        hint: "/settings",
+        keywords: "plans billing quota upgrade pro subscription invoices agent-minutes stripe pricing settings",
+      },
+      {
+        id: "nav-records",
+        title: "Cryptographic Audit Records",
+        subtitle: "Verifiable tamper-evident execution logs and task receipts",
+        category: "Navigation",
+        href: "/records",
+        icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />,
+        hint: "/records",
+        keywords: "records audit verifiable receipts cryptographic hashes ledger compliance security logs",
+      },
+      {
+        id: "nav-design-lab",
+        title: "Design Lab & Card Options",
+        subtitle: "Review card accents, mesh gradients, obsidian dark mode, and mascot styles",
+        category: "Navigation",
+        href: "/design-lab",
+        icon: <Sparkles className="w-3.5 h-3.5 text-purple-600" />,
+        hint: "/design-lab",
+        keywords: "design lab styles card accents gradients grains review options ui theme",
+      },
+      ...(isSuperAdmin
+        ? [
+            {
+              id: "nav-admin",
+              title: "Staff Super Admin Console",
+              subtitle: "Cluster-wide organization, daemon, and tenant control plane",
+              category: "Navigation" as const,
+              href: "/admin",
+              icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />,
+              hint: "/admin",
+              keywords: "super admin staff orgs backend server control plane tenants internal system",
+            },
+          ]
+        : []),
+
+      // 2. Integrations & Third-party Services
+      {
+        id: "int-github",
+        title: "GitHub App & VCS",
+        subtitle: "Pull requests, review watchdogs, and code repository webhooks",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <SiGithub className="w-3.5 h-3.5 text-stone-900" />,
+        hint: "VCS Hub",
+        keywords: "github source control pull request webhook git token repos app version control",
+      },
+      {
+        id: "int-slack",
+        title: "Slack Bot & Notifications",
+        subtitle: "Interactive trigger commands and team alert routing",
+        category: "Integrations",
+        href: "/integrations/slack",
+        icon: <FaSlack className="w-3.5 h-3.5 text-[#ECB22E]" />,
+        hint: "Team Chat",
+        keywords: "slack bot notifications channels workspace team chat triggers alerts messaging",
+      },
+      {
+        id: "int-anthropic",
+        title: "Anthropic Claude Key",
+        subtitle: "Claude 3.7 Sonnet, Opus 3, and Haiku frontier models",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <Cpu className="w-3.5 h-3.5 text-[#D97757]" />,
+        hint: "AI Provider",
+        keywords: "anthropic claude sonnet opus 3.7 haiku api key provider frontier intelligence",
+      },
+      {
+        id: "int-gemini",
+        title: "Google Gemini Key",
+        subtitle: "Gemini 2.5 Flash, Thinking, and Pro multi-modal models",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <Cpu className="w-3.5 h-3.5 text-[#4C8DF6]" />,
+        hint: "AI Provider",
+        keywords: "gemini 2.5 flash thinking pro google ai api key provider multi-modal",
+      },
+      {
+        id: "int-openai",
+        title: "OpenAI GPT Key",
+        subtitle: "GPT-4o, o3-mini, and reasoning models",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <Cpu className="w-3.5 h-3.5 text-[#10A37F]" />,
+        hint: "AI Provider",
+        keywords: "openai gpt-4o o3 reasoning chatgpt api key provider models",
+      },
+      {
+        id: "int-datadog",
+        title: "Datadog Telemetry",
+        subtitle: "Continuous APM, latency traces, and canary monitors",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <SiDatadog className="w-3.5 h-3.5 text-[#632CA6]" />,
+        hint: "Telemetry",
+        keywords: "datadog dd_api_key apm metrics traces alerts logs canary observability",
+      },
+      {
+        id: "int-prometheus",
+        title: "Prometheus PromQL",
+        subtitle: "Custom timeseries metrics query and regression alerts",
+        category: "Integrations",
+        href: "/integrations",
+        icon: <SiPrometheus className="w-3.5 h-3.5 text-[#E6522C]" />,
+        hint: "Metrics",
+        keywords: "prometheus promql canary alerts timeseries metrics endpoint server",
+      },
+
+      // 3. Connected Repositories
+      ...repos.map((r) => {
+        const repoName = r.full_name || r.name || "Repository";
+        return {
+          id: `repo-${repoName}`,
+          title: repoName,
+          subtitle: r.default_branch ? `Branch: ${r.default_branch}` : "Connected Git Repository",
+          category: "Repositories" as const,
+          href: `/composer?repo=${encodeURIComponent(repoName)}`,
+          icon: <SiGithub className="w-3.5 h-3.5 text-stone-700" />,
+          hint: "New Task",
+          keywords: `repo repository github git codebase ${repoName}`,
+        };
+      }),
+
+      // 4. Tasks & Jobs
+      ...(jobs || []).slice(0, 30).map((j) => {
+        const jobTitle = j.task ? (j.task.length > 55 ? j.task.slice(0, 55) + "…" : j.task) : (j.job_id || "Task Run");
+        return {
+          id: `job-${j.job_id}`,
+          title: jobTitle,
+          subtitle: `ID: ${(j.job_id || "").slice(0, 10)} • Status: ${j.status || "UNKNOWN"}${j.repo ? ` • ${j.repo}` : ""}`,
+          category: "Tasks" as const,
+          href: `/?job=${j.job_id}`,
+          icon: <Sparkles className="w-3.5 h-3.5 text-sky-600" />,
+          hint: j.status || "RUN",
+          keywords: `task job execution prompt ${j.job_id || ""} ${j.task || ""} ${j.repo || ""} ${j.status || ""}`,
+        };
+      }),
+
+      // 5. Team & Workspace
+      {
+        id: "workspace-org",
+        title: org?.org_name || "Workspace Profile",
+        subtitle: `Org ID: ${org?.org_id || "—"} • ${plan.toUpperCase()} TIER`,
+        category: "Team & Org",
+        href: "/settings",
+        icon: <Users className="w-3.5 h-3.5 text-emerald-600" />,
+        hint: "Workspace",
+        keywords: `org organization workspace company ${org?.org_name || ""} ${org?.org_id || ""} ${org?.user_email || ""}`,
+      },
+
+      // 6. Quick Actions
+      {
+        id: "action-upgrade",
+        title: "Upgrade to Kiwi Pro",
+        subtitle: "Unlock 2,000 pooled minutes / seat, BYOC runners & priority",
+        category: "Actions",
+        href: "/settings",
+        icon: <Zap className="w-3.5 h-3.5 text-amber-500 fill-current" />,
+        hint: "Upgrade",
+        keywords: "upgrade pro subscription payment tiers quota agent-minutes billing",
+      },
+      {
+        id: "action-support",
+        title: "Contact Kiwi Support",
+        subtitle: "Reach out to support@runkiwi.dev for assistance",
+        category: "Actions",
+        action: () => {
+          if (typeof window !== "undefined") {
+            window.location.href = "mailto:support@runkiwi.dev?subject=Kiwi%20Support%20Inquiry";
+          }
+        },
+        icon: <HelpCircle className="w-3.5 h-3.5 text-stone-500" />,
+        hint: "Email",
+        keywords: "support help email contact issue question bug assistance",
+      },
+      {
+        id: "action-plans-filter",
+        title: "Filter by Plan Reviews (Needs Attention)",
+        subtitle: "View all tasks waiting for human plan approval",
+        category: "Actions",
+        href: "/?filter=plan",
+        icon: <Sparkles className="w-3.5 h-3.5 text-indigo-600" />,
+        hint: "Filter",
+        keywords: "plan reviews approve critic architect attention pending review",
+      },
+    ];
+
+    return items;
+  }, [repos, jobs, org, plan, isSuperAdmin]);
+
+  // Configure Fuse for super-fuzzy, loose multi-key matching
+  const fuse = useMemo(() => {
+    return new Fuse(allSearchItems, {
+      keys: [
+        { name: "title", weight: 2.5 },
+        { name: "keywords", weight: 2.0 },
+        { name: "subtitle", weight: 1.2 },
+        { name: "category", weight: 1.0 },
+        { name: "id", weight: 1.0 },
+      ],
+      threshold: 0.45, // Super loose tolerance for typos, partial tokens, and fragmented phrases
+      ignoreLocation: true,
+      minMatchCharLength: 1,
+      shouldSort: true,
+    });
+  }, [allSearchItems]);
+
+  // Compute matched items
+  const searchResults = useMemo(() => {
+    const q = cmdQuery.trim();
+    if (!q) {
+      // Default view: All navigation + top integrations + top actions
+      return allSearchItems.filter(
+        (i) => i.category === "Navigation" || i.id === "int-github" || i.id === "int-slack" || i.category === "Actions"
+      );
+    }
+    return fuse.search(q).map((res) => res.item);
+  }, [cmdQuery, fuse, allSearchItems]);
+
+  // Reset selected index when results change
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIndex(0);
+  }, [cmdQuery, showCommandPalette]);
+
   return (
     <div className="h-screen max-h-screen overflow-hidden p-3 md:p-4 flex flex-col font-sans bg-[#F4F3EE] text-stone-900 selection:bg-kiwi-200">
       
-      {/* ================= TOP FIXED NAVBAR & SIMULATION BAR ================= */}
-      <header className="shrink-0 mb-2.5 px-3 py-1.5 flex flex-wrap items-center justify-between gap-3 text-xs bg-sand-50/70 backdrop-blur-md rounded-2xl border border-sand-200/70 shadow-2xs z-30">
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => setPrimaryCollapsed(!primaryCollapsed)}
-            className="p-1 rounded-lg hover:bg-sand-150 text-stone-600 hover:text-stone-900 transition-all flex items-center gap-1 font-mono text-[11px]"
-            title="Toggle Left Sidebar (⌘B)"
+      {/* ================= TOP COMPACT NAVBAR ================= */}
+      <header className="shrink-0 mb-2 px-3 py-1.5 flex items-center justify-between gap-3 text-xs bg-sand-50/70 backdrop-blur-md rounded-2xl border border-sand-200/70 shadow-2xs z-30 font-sans">
+        <div className="flex items-center gap-3">
+          {/* Kiwi Brand Identity */}
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-1 py-0.5 rounded-xl hover:bg-sand-150 transition-all group shrink-0 select-none"
+            title="Kiwi Platform Dashboard"
           >
-            <PanelLeft className="w-4 h-4 text-stone-700" />
-            <span className="hidden sm:inline text-stone-500 font-medium">Sidebar</span>
+            <div className="w-7 h-7 rounded-xl bg-white border border-sand-200/90 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+              <Logo variant="full-color" className="w-4.5 h-4.5" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-stone-900 text-xs tracking-tight">Kiwi</span>
+              <span className="text-[9px] font-mono font-bold bg-amber-100/90 text-amber-900 px-1.5 py-0.2 rounded-md border border-amber-200 uppercase">
+                {plan}
+              </span>
+            </div>
+          </Link>
+
+          <div className="h-4 w-px bg-sand-200/80 hidden sm:block" />
+
+          {/* Global Search / Command Palette Trigger */}
+          <button
+            onClick={() => setShowCommandPalette(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-500 hover:text-stone-800 text-xs shadow-2xs transition-all group min-w-[200px] sm:min-w-[260px]"
+          >
+            <Search className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-600" />
+            <span className="text-stone-500 font-medium truncate">Search tasks, repos, or jump to...</span>
+            <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono bg-sand-100 text-stone-500 px-1.5 py-0.5 rounded border border-sand-200 ml-auto">
+              ⌘K
+            </kbd>
           </button>
-
-          <div className="flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-white border border-sand-200 text-stone-700 font-mono font-semibold text-[11px] shadow-2xs">
-            <span className="w-2 h-2 rounded-full bg-kiwi-400 inline-block badge-pulse" />
-            <span>KIWI PLATFORM</span>
-          </div>
-
-          <span className="text-stone-500 hidden md:inline font-medium">
-            Org: <strong className="text-stone-800">{org?.org_name || "Acme Global"}</strong> • Active Plan:{" "}
-            <span className="font-bold text-stone-800 bg-sand-200 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase">
-              {plan} PLAN
-            </span>
-          </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowLoadersModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-kiwi-50 hover:bg-kiwi-100 border border-kiwi-300 text-kiwi-900 text-[11px] font-bold shadow-2xs transition-all"
-            title="View & Test Bespoke Loaders Design Suite"
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Live Agent Compute Minutes Meter Pill */}
+          <Link
+            href="/settings"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-[11px] font-mono text-stone-700 shadow-2xs transition-all"
+            title="Agent Compute Minutes Used (Click to view Plans & Usage)"
           >
-            <span>✦ Custom Loaders Studio</span>
-          </button>
+            <Zap className="w-3 h-3 text-amber-500 fill-current" />
+            <span>
+              {usedMinutes.toFixed(1)} <span className="text-stone-400">/ {limitMinutes}m</span>
+            </span>
+          </Link>
 
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-rose-50 hover:text-rose-700 border border-sand-200 text-stone-600 text-[11px] font-medium shadow-2xs transition-all"
-            title="Sign Out of Kiwi"
+          {/* Current Plan & Upgrade CTA */}
+          {plan === "free" ? (
+            <div className="flex items-center gap-1.5">
+              <span className="hidden md:inline-block px-2 py-0.5 rounded-lg bg-sand-100 border border-sand-200 text-[10px] font-mono font-bold uppercase text-stone-700">
+                Free Tier
+              </span>
+              <UpgradeButton variant="compact" label="Upgrade to Pro" />
+            </div>
+          ) : (
+            <span className="px-2.5 py-1 rounded-xl bg-kiwi-50 border border-kiwi-200 text-[11px] font-mono font-bold text-kiwi-900 shadow-2xs flex items-center gap-1.5">
+              <Zap className="w-3 h-3 text-kiwi-600 fill-current" />
+              <span>Pro Active</span>
+            </span>
+          )}
+
+          <div className="h-4 w-px bg-sand-200 hidden sm:block" />
+
+          {/* Quick Help & Support */}
+          <a
+            href="mailto:support@runkiwi.dev?subject=Kiwi%20Support%20Request"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-600 hover:text-stone-900 text-xs font-semibold shadow-2xs transition-all"
+            title="Support & Docs (support@runkiwi.dev)"
           >
-            <LogOut className="w-3.5 h-3.5 text-rose-500" />
-            <span>Sign Out</span>
-          </button>
+            <HelpCircle className="w-3.5 h-3.5 text-stone-500" />
+            <span className="hidden md:inline">Support</span>
+          </a>
         </div>
       </header>
 
@@ -170,33 +584,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             primaryCollapsed ? "w-14 items-center" : "w-48"
           }`}
         >
-          {/* Brand & Org Header */}
-          <div className="shrink-0 flex items-center justify-between px-1 mb-3 w-full">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-kiwi-100 border border-kiwi-200 flex items-center justify-center text-kiwi-700 shrink-0 shadow-2xs">
-                <Logo className="w-4 h-4" />
-              </div>
-              {!primaryCollapsed && (
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1">
-                    <span className="font-bold text-stone-900 text-xs tracking-tight">Kiwi</span>
-                    <span className="text-[9px] font-mono font-bold bg-amber-100 text-amber-800 px-1 py-0.2 rounded border border-amber-200 uppercase">
-                      {plan}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-stone-500 font-medium truncate">{org?.org_name || "Acme Global"}</p>
-                </div>
-              )}
+          {/* Workspace Context Header */}
+          {primaryCollapsed ? (
+            <div className="shrink-0 flex flex-col items-center gap-2 mb-3 w-full">
+              <button
+                onClick={() => setPrimaryCollapsed(false)}
+                className="w-8 h-8 rounded-xl bg-white hover:bg-sand-100 text-stone-700 hover:text-stone-950 border border-sand-200 shadow-2xs flex items-center justify-center transition-all cursor-pointer group"
+                title="Expand Sidebar (⌘B)"
+              >
+                <PanelLeftOpen className="w-4 h-4 text-stone-600 group-hover:text-stone-900" />
+              </button>
             </div>
+          ) : (
+            <div className="shrink-0 flex items-center justify-between px-1 mb-3 w-full">
+              <div className="min-w-0 pr-1">
+                <p className="text-[11px] font-bold text-stone-900 truncate leading-tight">
+                  {org?.org_name || "Harsh KiwiWorks"}
+                </p>
+                <p className="text-[9px] font-mono text-stone-400 truncate mt-0.5">
+                  #{org?.org_id ? org.org_id.slice(0, 10) : "org_default"}
+                </p>
+              </div>
 
-            <button
-              onClick={() => setPrimaryCollapsed(!primaryCollapsed)}
-              className="text-stone-400 hover:text-stone-700 p-1"
-              title="Collapse / Expand Sidebar"
-            >
-              {primaryCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-            </button>
-          </div>
+              <button
+                onClick={() => setPrimaryCollapsed(true)}
+                className="p-1.5 rounded-lg bg-sand-100 hover:bg-sand-200 text-stone-600 hover:text-stone-900 border border-sand-200 shadow-2xs transition-all cursor-pointer shrink-0"
+                title="Collapse Sidebar (⌘B)"
+              >
+                <PanelLeftClose className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Quick Action Icons Row */}
           {!primaryCollapsed && (
@@ -232,15 +650,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
           </div>
 
-          {/* Scrollable Workspace Folder Tree */}
-          <div className="flex-1 overflow-y-auto space-y-3 px-0.5 text-xs min-h-0 w-full">
+          {/* Workspace Folder Tree & Search (Capped at ~36vh) */}
+          <div className="shrink-0 space-y-2 px-0.5 text-xs w-full">
             {!primaryCollapsed ? (
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold px-1 mb-1.5 flex items-center justify-between">
                   <span>Repositories</span>
                   <Link href="/integrations" className="text-kiwi-700 hover:underline normal-case text-[10px]">+ Add</Link>
                 </div>
-                <div className="space-y-0.5 text-stone-600">
+
+                {/* Compact Search Bar */}
+                <div className="relative mb-2">
+                  <Search className="w-3 h-3 text-stone-400 absolute left-2 top-2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={repoSearchQuery}
+                    onChange={(e) => setRepoSearchQuery(e.target.value)}
+                    placeholder="Search repos..."
+                    className="w-full bg-sand-100/70 border border-sand-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-mono placeholder:text-stone-400 focus:outline-none focus:border-stone-400 focus:bg-white transition-all"
+                  />
+                </div>
+
+                {/* Capped Repo List (~36% max height) */}
+                <div className="max-h-[34vh] overflow-y-auto space-y-2 pr-0.5 custom-scrollbar">
                   <Link
                     href="/"
                     className="w-full flex items-center justify-between p-1.5 rounded-lg font-semibold bg-sand-150 text-stone-900 transition-all text-left"
@@ -253,42 +685,60 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <span className="text-[10px] font-mono text-stone-400">{repos.length}</span>
                   </Link>
 
-                  {repos.map((r) => {
-                    const repoName = r.full_name || r.name || "repo";
-                    const repoJobs = (jobs || []).filter((j) => j.repo === repoName);
-                    const hasAction = repoJobs.some((j) => j.status === "PLAN_REVIEW");
-                    const isRunning = repoJobs.some((j) => j.status === "LEASED" || j.status === "RUNNING");
-                    const prCount = repoJobs.filter((j) => j.pr_urls && j.pr_urls.length > 0).length;
+                  {orgKeys.length === 0 ? (
+                    <p className="text-[10px] text-stone-400 px-1 py-2 text-center font-mono">No matching repos</p>
+                  ) : (
+                    orgKeys.map((orgName) => {
+                      const orgRepos = reposByOrg[orgName];
+                      return (
+                        <div key={orgName} className="space-y-0.5 pt-1">
+                          <div className="text-[9px] font-mono font-bold text-stone-400 uppercase tracking-wider px-1 flex items-center justify-between">
+                            <span>{orgName}</span>
+                            <span className="font-normal text-[9px]">{orgRepos.length}</span>
+                          </div>
 
-                    return (
-                      <Link
-                        key={repoName}
-                        href={`/?repo=${encodeURIComponent(repoName)}`}
-                        className="w-full flex items-center justify-between p-1.5 rounded-lg hover:bg-sand-150 hover:text-stone-900 transition-all text-left"
-                        title={repoName}
-                      >
-                        <span className="flex items-center gap-1.5 truncate">
-                          <Folder className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-                          <span className="truncate">{repoName.split("/").pop() || repoName}</span>
-                        </span>
-                        {hasAction ? (
-                          <span className="text-[9px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-rose-500" /> action
-                          </span>
-                        ) : isRunning ? (
-                          <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-emerald-500" /> run
-                          </span>
-                        ) : prCount > 0 ? (
-                          <span className="text-[9px] font-mono font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-purple-500" /> {prCount} PR
-                          </span>
-                        ) : (
-                          <span className="text-[9px] font-mono text-stone-400">idle</span>
-                        )}
-                      </Link>
-                    );
-                  })}
+                          {orgRepos.map((r) => {
+                            const repoName = r.full_name || r.name || "repo";
+                            const shortName = r.full_name.includes("/") ? r.full_name.split("/")[1] : (r.name || r.full_name);
+                            const repoJobs = (jobs || []).filter((j) => j.repo === repoName);
+                            const hasAction = repoJobs.some((j) => j.status === "PLAN_REVIEW");
+                            const isRunning = repoJobs.some((j) => j.status === "LEASED" || j.status === "RUNNING");
+                            const prCount = repoJobs.filter((j) => j.pr_urls && j.pr_urls.length > 0).length;
+
+                            return (
+                              <Link
+                                key={repoName}
+                                href={`/composer?repo=${encodeURIComponent(repoName)}`}
+                                className="w-full flex items-center justify-between p-1.5 rounded-lg hover:bg-sand-150 hover:text-stone-900 transition-all text-left group"
+                                title={`Create task for ${repoName}`}
+                              >
+                                <span className="flex items-center gap-1.5 min-w-0 pr-1 truncate">
+                                  <Folder className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700 shrink-0 transition-colors" />
+                                  <span className="truncate text-stone-700 group-hover:text-stone-900 font-medium">{shortName}</span>
+                                </span>
+                                {hasAction ? (
+                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> action
+                                  </span>
+                                ) : isRunning ? (
+                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> run
+                                  </span>
+                                ) : prCount > 0 ? (
+                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-purple-700 bg-purple-50 border border-purple-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
+                                    <GitPullRequest className="w-2.5 h-2.5 text-purple-600 shrink-0" />
+                                    <span>{prCount} PR</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-mono text-stone-400 shrink-0 whitespace-nowrap px-1">idle</span>
+                                )}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             ) : (
@@ -298,34 +748,51 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             )}
           </div>
 
+          {/* Spacer to keep middle half spacious for future features */}
+          <div className="flex-1 min-h-0" />
+
           {/* COMPUTE QUOTA & UPGRADE CARD */}
           {!primaryCollapsed && (
-            <div className="shrink-0 my-2 p-2.5 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-2 text-xs w-full">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[11px] text-stone-900 flex items-center gap-1">
-                  <Zap className="w-3 h-3 text-amber-500 fill-current" />
-                  Agent Compute
-                </span>
-                <span className="text-[9px] font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
-                  {usedMinutes} / {limitMinutes}m
+            <div className="shrink-0 my-2 p-3 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-2.5 text-xs w-full">
+              {/* Row 1: Header */}
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Zap className="w-3.5 h-3.5 text-amber-500 fill-current shrink-0" />
+                  <span className="font-bold text-xs text-stone-900 truncate">Agent Compute</span>
+                </div>
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-500 bg-sand-100 px-1.5 py-0.5 rounded border border-sand-200">
+                  {plan}
                 </span>
               </div>
+
+              {/* Row 2: Minutes counter and percentage used */}
+              <div className="flex items-baseline justify-between font-mono">
+                <span className="text-sm font-bold text-stone-900">
+                  {usedMinutes.toFixed(1)} <span className="text-[11px] text-stone-400 font-normal">/ {limitMinutes}m</span>
+                </span>
+                <span className="text-[11px] text-amber-700 font-medium">
+                  {percentUsed}% used
+                </span>
+              </div>
+
+              {/* Row 3: Progress Bar */}
               <div className="w-full h-1.5 bg-sand-200 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }} />
               </div>
-              <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono">
-                <span>{percentUsed}% consumed</span>
-                <Link href="/spend" className="text-kiwi-700 font-bold hover:underline">+ Boost Tier</Link>
+
+              {/* Row 4: Full-width Upgrade Button */}
+              <div className="pt-0.5">
+                <UpgradeButton variant="full" className="w-full justify-center py-1.5 text-[11px]" />
               </div>
             </div>
           )}
 
-          {/* PINNED USER PROFILE & LOGOUT FOOTER */}
-          <div className="shrink-0 pt-2.5 border-t border-sand-200 space-y-1.5 w-full">
+          {/* PINNED USER PROFILE (Single Logout Action) */}
+          <div className="shrink-0 pt-2 border-t border-sand-200 w-full">
             <div className="flex items-center justify-between p-1.5 rounded-xl bg-white border border-sand-200 shadow-2xs">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-6 h-6 rounded-full bg-stone-800 text-white font-bold flex items-center justify-center text-[10px] shrink-0 uppercase">
-                  {org?.user_email ? org.user_email.slice(0, 2).toUpperCase() : org?.role ? org.role.slice(0, 2).toUpperCase() : "KW"}
+                  {getAvatarInitials(org?.user_email, org?.org_name)}
                 </div>
                 {!primaryCollapsed && (
                   <div className="min-w-0">
@@ -342,16 +809,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </button>
               )}
             </div>
-
-            {!primaryCollapsed && (
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-stone-500 hover:text-rose-700 hover:bg-rose-50/80 border border-sand-200/60 hover:border-rose-200 font-medium text-[11px] transition-all bg-white/40"
-              >
-                <LogOut className="w-3.5 h-3.5 text-rose-500" />
-                <span>Sign Out</span>
-              </button>
-            )}
           </div>
         </aside>
 
@@ -359,32 +816,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <aside className="w-44 py-1.5 hidden md:flex flex-col shrink-0 text-xs select-none h-full overflow-hidden transition-all duration-200">
           <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 min-h-0">
             
-            {/* Group 0: ACTION REQUIRED */}
-            <div className="p-2 rounded-2xl bg-sand-50 border border-sand-200 shadow-2xs space-y-1">
-              <div className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-500 px-1 flex items-center justify-between">
-                <span className="flex items-center gap-1 text-stone-700">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                  <span>Needs Attention</span>
-                </span>
-                <span className="bg-stone-900 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">{needsAttentionCount}</span>
-              </div>
-
-              <div className="space-y-0.5 pt-0.5">
-                <Link
-                  href="/?filter=plan"
-                  className="w-full flex items-center justify-between px-2 py-1 rounded-xl text-[11px] font-bold text-indigo-950 hover:bg-indigo-50/90 transition-all text-left group"
-                >
-                  <span className="flex items-center gap-1.5 truncate">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600" />
-                    </span>
-                    <span className="truncate">Plan Reviews</span>
+            {/* Group 0: ACTION REQUIRED (Only show when > 0) */}
+            {needsAttentionCount > 0 && (
+              <div className="p-2 rounded-2xl bg-amber-50/70 border border-amber-200 shadow-2xs space-y-1 animate-in fade-in duration-200">
+                <div className="text-[9px] font-mono font-bold uppercase tracking-wider text-amber-900 px-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-amber-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    <span>Needs Attention</span>
                   </span>
-                  <span className="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-100 border border-indigo-200 px-1.5 py-0.2 rounded-full">{planReviewsCount}</span>
-                </Link>
+                  <span className="bg-amber-800 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">{needsAttentionCount}</span>
+                </div>
+
+                <div className="space-y-0.5 pt-0.5">
+                  <Link
+                    href="/?filter=plan"
+                    className="w-full flex items-center justify-between px-2 py-1 rounded-xl text-[11px] font-bold text-indigo-950 hover:bg-indigo-100/80 transition-all text-left group"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="relative flex h-2 w-2 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600" />
+                      </span>
+                      <span className="truncate">Plan Reviews</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-100 border border-indigo-200 px-1.5 py-0.2 rounded-full">{planReviewsCount}</span>
+                  </Link>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Group 1: Tasks & Pipelines */}
             <div>
@@ -423,22 +882,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="space-y-0.5">
                 <Link
                   href="/monitors"
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
-                    pathname === "/monitors" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/monitors" || pathname.startsWith("/monitors/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
                   }`}
                 >
                   <span className="flex items-center gap-1.5 truncate">
-                    <Radar className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                    <Radar className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/monitors") ? "text-sky-700" : "text-sky-600"}`} />
                     <span className="truncate">PR Watchdogs</span>
                   </span>
                 </Link>
-                <Link href="/activity" className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
-                  <Activity className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                <Link
+                  href="/activity"
+                  className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/activity" || pathname.startsWith("/activity/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
+                  <Activity className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/activity") ? "text-stone-900" : "text-stone-400"}`} />
                   <span className="truncate">Activity Log</span>
                 </Link>
-                <Link href="/records" className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
+                <Link
+                  href="/records"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/records" || pathname.startsWith("/records/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
                   <span className="flex items-center gap-1.5 truncate">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <ShieldCheck className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/records") ? "text-emerald-700" : "text-emerald-600"}`} />
                     <span className="truncate">Audit Receipts</span>
                   </span>
                 </Link>
@@ -451,25 +926,41 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="space-y-0.5">
                 <Link
                   href="/spend"
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
-                    pathname === "/spend" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/spend" || pathname.startsWith("/spend/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
                   }`}
                 >
                   <span className="flex items-center gap-1.5 truncate">
-                    <Receipt className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                    <Receipt className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/spend") ? "text-stone-900" : "text-stone-400"}`} />
                     <span className="truncate">Cost & Usage</span>
                   </span>
                 </Link>
-                <Link href="/fleet" className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
+                <Link
+                  href="/fleet"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/fleet" || pathname.startsWith("/fleet/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
                   <span className="flex items-center gap-1.5 truncate">
-                    <Server className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                    <Server className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/fleet") ? "text-stone-900" : "text-stone-400"}`} />
                     <span className="truncate">Private Runners</span>
                   </span>
                   <span className="text-[9px] font-mono text-stone-400 font-bold">{runnersCount}</span>
                 </Link>
-                <Link href="/models" className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
+                <Link
+                  href="/models"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/models" || pathname.startsWith("/models/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
                   <span className="flex items-center gap-1.5 truncate">
-                    <Cpu className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                    <Cpu className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/models") ? "text-stone-900" : "text-stone-400"}`} />
                     <span className="truncate">Models</span>
                   </span>
                 </Link>
@@ -480,25 +971,68 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div>
               <div className="text-[10px] font-semibold text-stone-400 px-2 mb-1">Settings</div>
               <div className="space-y-0.5">
-                <Link href="/integrations" className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
-                  <span className="flex items-center gap-1.5 truncate">
-                    <Link2 className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-                    <span className="truncate">GitHub & Slack</span>
+                <Link
+                  href="/integrations"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left group ${
+                    pathname === "/integrations" || pathname.startsWith("/integrations/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 min-w-0 pr-1">
+                    <Link2 className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/integrations") ? "text-stone-900" : "text-stone-400"}`} />
+                    <span className="truncate">Integration</span>
                   </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+
+                  {/* Horizontally stacked micro-avatars that expand on hover */}
+                  <div className="flex items-center -space-x-1.5 group-hover:space-x-1 group-hover:-space-x-0 transition-all duration-300 ease-out shrink-0">
+                    <div
+                      title="GitHub"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                    >
+                      <SiGithub className="w-2.5 h-2.5 text-stone-900" />
+                    </div>
+                    <div
+                      title="Datadog"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                    >
+                      <SiDatadog className="w-2.5 h-2.5 text-[#632CA6]" />
+                    </div>
+                    <div
+                      title="Slack"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                    >
+                      <FaSlack className="w-2.5 h-2.5 text-[#ECB22E]" />
+                    </div>
+                    <div
+                      title="Prometheus"
+                      className="w-4 h-4 rounded-full bg-white ring-1 ring-sand-300 shadow-2xs flex items-center justify-center p-0.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                    >
+                      <SiPrometheus className="w-2.5 h-2.5 text-[#E6522C]" />
+                    </div>
+                  </div>
                 </Link>
-                <Link href="/team" className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left">
-                  <Users className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                <Link
+                  href="/team"
+                  className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/team" || pathname.startsWith("/team/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
+                  <Users className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/team") ? "text-stone-900" : "text-stone-400"}`} />
                   <span className="truncate">Team Members</span>
                 </Link>
                 <Link
                   href="/settings"
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
-                    pathname === "/settings" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/settings" || pathname.startsWith("/settings/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
                   }`}
                 >
                   <span className="flex items-center gap-1.5 truncate">
-                    <CreditCard className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                    <CreditCard className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/settings") ? "text-stone-900" : "text-stone-400"}`} />
                     <span className="truncate">Plans & Billing</span>
                   </span>
                   {plan === "free" && (
@@ -508,10 +1042,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </div>
             </div>
 
-            {/* Group 5: Staff Super Admin Console — hidden unless the account is
-                actually a super admin; the API rejects non-admins anyway, but a
-                visible nav item promising staff tooling to every org is its own
-                leak of what the platform can do. */}
+            {/* Group 5: Staff Super Admin Console */}
             {isSuperAdmin && (
               <div className="pt-2">
                 <div className="text-[10px] font-semibold text-stone-400 px-2 mb-1 flex items-center justify-between">
@@ -522,7 +1053,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Link
                     href="/admin"
                     className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
-                      pathname === "/admin" ? "bg-rose-100 text-rose-900 border border-rose-200 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                      pathname === "/admin" || pathname.startsWith("/admin/")
+                        ? "bg-rose-100 text-rose-900 border border-rose-200 shadow-2xs font-semibold"
+                        : "text-stone-600 hover:bg-sand-150"
                     }`}
                   >
                     <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
@@ -533,124 +1066,133 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             )}
 
           </div>
-
-          {/* Static Sign Out inside Sub-rail Footer */}
-          <div className="shrink-0 pt-2 border-t border-sand-200/60 mt-1">
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl font-medium text-stone-500 hover:text-rose-700 hover:bg-rose-50/80 transition-all text-left cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5 text-rose-500" />
-              <span>Log Out</span>
-            </button>
-          </div>
         </aside>
 
         {/* COLUMN 3: MAIN CONTENT SHEET */}
-        <main className="flex-1 floating-island p-6 overflow-y-auto h-full min-h-0">
+        <main className="flex-1 floating-island p-6 overflow-y-auto overflow-x-hidden h-full min-h-0">
           {children}
         </main>
       </div>
 
-      {/* UNIVERSAL COMMAND PALETTE (⌘K) */}
+      {/* UNIVERSAL FUZZY COMMAND PALETTE (⌘K) */}
       {showCommandPalette && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 bg-stone-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center pt-20 sm:pt-24 bg-stone-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => setShowCommandPalette(false)}
+        >
           <div
-            className="w-full max-w-xl bg-white border border-sand-200 rounded-2xl shadow-popover overflow-hidden animate-in zoom-in-95 duration-150"
+            className="w-full max-w-xl bg-white border border-sand-200 rounded-2xl shadow-popover overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[520px]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-3 border-b border-sand-200 flex items-center gap-3">
+            {/* Input Bar */}
+            <div className="p-3.5 border-b border-sand-200 flex items-center gap-3 bg-sand-50/40">
               <Search className="w-4 h-4 text-stone-400 shrink-0" />
               <input
                 type="text"
                 autoFocus
                 value={cmdQuery}
                 onChange={(e) => setCmdQuery(e.target.value)}
-                placeholder="Type a command, search tasks, or navigate..."
-                className="w-full text-sm font-medium bg-transparent outline-none placeholder:text-stone-400"
-              />
-              <span className="text-[10px] font-mono bg-sand-150 px-1.5 py-0.5 rounded text-stone-500">ESC</span>
-            </div>
-            <div className="max-h-80 overflow-y-auto p-2 space-y-1 text-xs">
-              {(() => {
-                const navigation: NavCommand[] = [
-                  { label: "Create New Task", href: "/composer", icon: <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />, hint: "/composer" },
-                  { label: "Task Dashboard", href: "/", icon: <LayoutGrid className="w-3.5 h-3.5 text-stone-600" />, hint: "/" },
-                  { label: "PR Watchdogs", href: "/monitors", icon: <Radar className="w-3.5 h-3.5 text-sky-600" />, hint: "/monitors" },
-                  { label: "Cost & Velocity Analytics", href: "/spend", icon: <Receipt className="w-3.5 h-3.5 text-stone-600" />, hint: "/spend" },
-                  { label: "Private Runners & Fleet", href: "/fleet", icon: <Server className="w-3.5 h-3.5 text-stone-600" />, hint: "/fleet" },
-                  ...(isSuperAdmin ? [{ label: "Super Admin", href: "/admin", icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />, hint: "/admin" }] : []),
-                ];
-                const actions: NavCommand[] = [
-                  { label: "Compare & Upgrade Plans", href: "/settings", icon: <CreditCard className="w-3.5 h-3.5 text-amber-600" />, hint: "/settings" },
-                  { label: "Open Custom Loaders Studio", action: () => setShowLoadersModal(true), icon: <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />, hint: "Studio" },
-                ];
-
-                const q = cmdQuery.trim().toLowerCase();
-                const matches = (c: NavCommand) => !q || c.label.toLowerCase().includes(q) || (c.keywords ?? "").toLowerCase().includes(q);
-                const filteredNav = navigation.filter(matches);
-                const filteredActions = actions.filter(matches);
-
-                const renderCommand = (c: NavCommand) => {
-                  const content = (
-                    <>
-                      <span className="flex items-center gap-2">
-                        {c.icon}
-                        <span className="font-medium">{c.label}</span>
-                      </span>
-                      {c.hint && <span className="text-[10px] font-mono text-stone-400">{c.hint}</span>}
-                    </>
-                  );
-                  const className = "w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all text-left";
-                  if (c.href) {
-                    return (
-                      <Link key={c.label} href={c.href} onClick={() => setShowCommandPalette(false)} className={className}>
-                        {content}
-                      </Link>
-                    );
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (searchResults.length > 0) {
+                      setSelectedIndex((prev) => (prev + 1) % searchResults.length);
+                    }
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (searchResults.length > 0) {
+                      setSelectedIndex((prev) => (prev - 1 + searchResults.length) % searchResults.length);
+                    }
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const activeItem = searchResults[selectedIndex];
+                    if (activeItem) {
+                      setShowCommandPalette(false);
+                      if (activeItem.action) {
+                        activeItem.action();
+                      } else if (activeItem.href) {
+                        router.push(activeItem.href);
+                      }
+                    }
+                  } else if (e.key === "Escape") {
+                    setShowCommandPalette(false);
                   }
+                }}
+                placeholder="Search everything: tasks, repos, integrations, tools, users..."
+                className="w-full text-sm font-medium bg-transparent outline-none placeholder:text-stone-400 font-sans"
+              />
+              <span className="text-[10px] font-mono bg-sand-150 px-2 py-0.5 rounded text-stone-500 font-bold">ESC</span>
+            </div>
+
+            {/* Results List */}
+            <div className="overflow-y-auto p-2 space-y-1 text-xs no-scrollbar flex-1">
+              {searchResults.length === 0 ? (
+                <div className="py-12 text-center text-stone-400 font-mono text-xs space-y-1">
+                  <div>No matching resources or commands for &ldquo;{cmdQuery}&rdquo;</div>
+                  <div className="text-[11px] text-stone-400">Try searching for a repo, job prompt, tool, or integration</div>
+                </div>
+              ) : (
+                searchResults.map((item, idx) => {
+                  const isSelected = idx === selectedIndex;
                   return (
-                    <button
-                      key={c.label}
+                    <div
+                      key={item.id}
+                      onMouseEnter={() => setSelectedIndex(idx)}
                       onClick={() => {
                         setShowCommandPalette(false);
-                        c.action?.();
+                        if (item.action) {
+                          item.action();
+                        } else if (item.href) {
+                          router.push(item.href);
+                        }
                       }}
-                      className={className}
+                      className={`w-full flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all text-left ${
+                        isSelected
+                          ? "bg-sand-200/90 text-stone-950 shadow-2xs font-semibold"
+                          : "hover:bg-sand-100 text-stone-800"
+                      }`}
                     >
-                      {content}
-                    </button>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`p-1.5 rounded-lg border flex items-center justify-center shrink-0 ${
+                          isSelected ? "bg-white border-sand-300" : "bg-sand-50 border-sand-200"
+                        }`}>
+                          {item.icon}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-stone-900 truncate text-xs">{item.title}</span>
+                            <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-600 bg-sand-100 px-1.5 py-0.2 rounded border border-sand-200">
+                              {item.category}
+                            </span>
+                          </div>
+                          {item.subtitle && (
+                            <p className="text-[11px] text-stone-500 font-normal truncate mt-0.5 font-mono">
+                              {item.subtitle}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {item.hint && (
+                        <span className="text-[10px] font-mono text-stone-400 shrink-0 ml-2 font-semibold">
+                          {item.hint}
+                        </span>
+                      )}
+                    </div>
                   );
-                };
+                })
+              )}
+            </div>
 
-                if (filteredNav.length === 0 && filteredActions.length === 0) {
-                  return <div className="px-2 py-6 text-center text-stone-400">No matches for &ldquo;{cmdQuery}&rdquo;</div>;
-                }
-
-                return (
-                  <>
-                    {filteredNav.length > 0 && (
-                      <>
-                        <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">Quick Navigation</div>
-                        {filteredNav.map(renderCommand)}
-                      </>
-                    )}
-                    {filteredActions.length > 0 && (
-                      <>
-                        <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold mt-2">Actions</div>
-                        {filteredActions.map(renderCommand)}
-                      </>
-                    )}
-                  </>
-                );
-              })()}
+            {/* Footer Tip */}
+            <div className="px-3.5 py-2 border-t border-sand-150 bg-sand-50/70 text-[10px] font-mono text-stone-500 flex items-center justify-between">
+              <span>Super-fuzzy search across tasks, integrations &amp; repos</span>
+              <span>↑↓ to navigate • ↵ to select</span>
             </div>
           </div>
         </div>
       )}
-
-      {/* CUSTOM LOADERS STUDIO MODAL */}
-      <CustomLoadersStudio isOpen={showLoadersModal} onClose={() => setShowLoadersModal(false)} />
     </div>
   );
 }

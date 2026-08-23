@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { client, type Integration, type GithubInstallation, type SlackInstallation } from "@/lib/api";
 import {
   CheckCircle2,
-  AlertCircle,
   Search,
   SlidersHorizontal,
   ShieldCheck,
-  Sparkles,
   ArrowRight,
   RefreshCw,
+  ExternalLink,
+  Layers,
+  Hash,
 } from "lucide-react";
 import { SiGithub, SiGit, SiAnthropic, SiGooglegemini, SiDatadog, SiPrometheus } from "react-icons/si";
 import { RiOpenaiFill } from "react-icons/ri";
 import { FaSlack } from "react-icons/fa6";
 import { IntegrationDrawer, type CatalogIntegration } from "@/components/IntegrationDrawer";
+import Link from "next/link";
 
 const CATALOG: CatalogIntegration[] = [
   {
@@ -27,7 +29,7 @@ const CATALOG: CatalogIntegration[] = [
     icon: SiGithub,
     iconBg: "bg-sand-100",
     iconColor: "text-stone-900",
-    brandAccent: "#ffffff",
+    brandAccent: "#18181B",
     docUrl: "https://github.com/settings/installations",
     docLabel: "GitHub Installations",
     isGithubHybrid: true,
@@ -43,24 +45,26 @@ const CATALOG: CatalogIntegration[] = [
     ],
   },
   {
-    id: "git",
-    name: "Git Push Token",
-    category: "scm",
-    categoryLabel: "Source Control",
-    description: "Dedicated token used by daemon runners to authenticate and push branches to your git repos.",
-    icon: SiGit,
-    iconBg: "bg-[#F05032]/10",
-    iconColor: "text-[#F05032]",
-    brandAccent: "#F05032",
-    docUrl: "https://github.com/settings/tokens",
-    docLabel: "GitHub PAT Settings",
+    id: "slack",
+    name: "Slack",
+    category: "notifications",
+    categoryLabel: "Team Chat & Triggers",
+    description: "Trigger Kiwi agent tasks by @mentioning the bot in a channel, stream live logs, and receive verdict notifications.",
+    icon: FaSlack,
+    iconBg: "bg-[#ECB22E]/10",
+    iconColor: "text-[#ECB22E]",
+    brandAccent: "#ECB22E",
+    docUrl: "https://api.slack.com/messaging/webhooks",
+    docLabel: "Slack Webhooks Guide",
+    isSlackHybrid: true,
     fields: [
       {
-        key: "git",
-        label: "Git Push Token",
-        credName: "GIT_TOKEN",
-        kind: "git",
-        placeholder: "github_pat_… (workflow/repo scope)",
+        key: "slack",
+        label: "Notification Webhook URL",
+        credName: "SLACK_WEBHOOK_URL",
+        kind: "webhook",
+        placeholder: "https://hooks.slack.com/services/…",
+        helpText: "Optional — posts monitor verdicts to a channel independent of the app install above.",
       },
     ],
   },
@@ -69,7 +73,7 @@ const CATALOG: CatalogIntegration[] = [
     name: "Anthropic",
     category: "llm",
     categoryLabel: "AI & Models",
-    description: "Powers Claude 3.7 Sonnet, Claude 3.5 Sonnet, and Opus models for reasoning and code generation.",
+    description: "Powers Claude 3.7 Sonnet, Claude 3.5 Sonnet, and Opus models for high-reasoning planning and code generation.",
     icon: SiAnthropic,
     iconBg: "bg-[#D97757]/10",
     iconColor: "text-[#D97757]",
@@ -91,7 +95,7 @@ const CATALOG: CatalogIntegration[] = [
     name: "Google Gemini",
     category: "llm",
     categoryLabel: "AI & Models",
-    description: "Powers Google Gemini 2.5 Pro and Flash models for high-throughput code execution.",
+    description: "Powers Google Gemini 2.5 Pro and Gemini 2.0 Flash models for high-throughput code execution and analysis.",
     icon: SiGooglegemini,
     iconBg: "bg-[#4C8DF6]/10",
     iconColor: "text-[#4C8DF6]",
@@ -113,7 +117,7 @@ const CATALOG: CatalogIntegration[] = [
     name: "OpenAI",
     category: "llm",
     categoryLabel: "AI & Models",
-    description: "Powers GPT-4o, GPT-4.1, and o1/o3 reasoning models for task implementation.",
+    description: "Powers GPT-4o, GPT-4.1, and o1/o3 reasoning models for complex refactoring and task implementation.",
     icon: RiOpenaiFill,
     iconBg: "bg-[#10A37F]/10",
     iconColor: "text-[#10A37F]",
@@ -131,26 +135,24 @@ const CATALOG: CatalogIntegration[] = [
     ],
   },
   {
-    id: "slack",
-    name: "Slack",
-    category: "notifications",
-    categoryLabel: "Notifications",
-    description: "Trigger Kiwi tasks by @mentioning the bot in a channel or thread, and get status updates and notifications back.",
-    icon: FaSlack,
-    iconBg: "bg-[#ECB22E]/10",
-    iconColor: "text-[#ECB22E]",
-    brandAccent: "#ECB22E",
-    docUrl: "https://api.slack.com/messaging/webhooks",
-    docLabel: "Slack Webhooks Guide",
-    isSlackHybrid: true,
+    id: "git",
+    name: "Git Push Token",
+    category: "scm",
+    categoryLabel: "Source Control",
+    description: "Dedicated token used by daemon runners to authenticate and push branches to your git repositories.",
+    icon: SiGit,
+    iconBg: "bg-[#F05032]/10",
+    iconColor: "text-[#F05032]",
+    brandAccent: "#F05032",
+    docUrl: "https://github.com/settings/tokens",
+    docLabel: "GitHub PAT Settings",
     fields: [
       {
-        key: "slack",
-        label: "Notification Webhook URL",
-        credName: "SLACK_WEBHOOK_URL",
-        kind: "webhook",
-        placeholder: "https://hooks.slack.com/services/…",
-        helpText: "Optional — posts monitor verdicts to a channel independent of the app install above.",
+        key: "git",
+        label: "Git Push Token",
+        credName: "GIT_TOKEN",
+        kind: "git",
+        placeholder: "github_pat_… (workflow/repo scope)",
       },
     ],
   },
@@ -159,7 +161,7 @@ const CATALOG: CatalogIntegration[] = [
     name: "Datadog",
     category: "telemetry",
     categoryLabel: "Telemetry & Metrics",
-    description: "Allows post-merge canary verification to pull latency & error metrics directly from Datadog.",
+    description: "Allows post-merge canary verification to pull latency & error metrics directly from your Datadog dashboards.",
     icon: SiDatadog,
     iconBg: "bg-[#632CA6]/10",
     iconColor: "text-[#a464f7]",
@@ -188,7 +190,7 @@ const CATALOG: CatalogIntegration[] = [
     name: "Prometheus",
     category: "telemetry",
     categoryLabel: "Telemetry & Metrics",
-    description: "Enables post-merge canary monitors to query Prometheus PromQL endpoints for regression signals.",
+    description: "Enables post-merge canary monitors to query PromQL endpoints for runtime regression signals.",
     icon: SiPrometheus,
     iconBg: "bg-[#E6522C]/10",
     iconColor: "text-[#E6522C]",
@@ -228,14 +230,14 @@ function deriveIntegrationState(
     if (githubInstalls.length > 0) {
       return {
         status: "connected" as const,
-        label: `${githubInstalls.length} account${githubInstalls.length > 1 ? "s" : ""} (App)`,
-        summary: `${githubInstalls.map((g) => g.account_login).join(", ")}`,
+        label: `${githubInstalls.length} Org${githubInstalls.length > 1 ? "s" : ""} (App)`,
+        summary: `Connected: ${githubInstalls.map((g) => g.account_login).join(", ")}`,
       };
     }
     if (status["github"]) {
       return {
         status: "connected" as const,
-        label: "Personal Access Token Active",
+        label: "PAT Token Active",
         summary: "Connected via fallback PAT",
       };
     }
@@ -250,21 +252,21 @@ function deriveIntegrationState(
     if (slackInstalls.length > 0) {
       return {
         status: "connected" as const,
-        label: `${slackInstalls.length} workspace${slackInstalls.length > 1 ? "s" : ""}`,
+        label: `${slackInstalls.length} Workspace${slackInstalls.length > 1 ? "s" : ""}`,
         summary: slackInstalls.map((s) => s.team_name || s.team_id).join(", "),
       };
     }
     if (status["slack"]) {
       return {
         status: "connected" as const,
-        label: "Notifications only",
-        summary: "Webhook set, but no workspace installed for triggers",
+        label: "Webhook Active",
+        summary: "Verdict notifications enabled",
       };
     }
     return {
       status: "unconnected" as const,
       label: "Not connected",
-      summary: "Add to Slack to trigger tasks from a channel",
+      summary: "Connect Slack App to trigger tasks",
     };
   }
 
@@ -273,7 +275,7 @@ function deriveIntegrationState(
     return {
       status: connected ? ("connected" as const) : ("unconnected" as const),
       label: connected ? "Connected" : "Not configured",
-      summary: connected ? "API Key active and verified" : "No credentials added",
+      summary: connected ? "Encrypted credential verified" : "No credentials added",
     };
   }
 
@@ -410,169 +412,310 @@ export default function IntegrationsPage() {
       count: CATALOG.filter((c) => c.category === "scm").length,
     },
     {
+      id: "notifications",
+      label: "Team Chat & Triggers",
+      count: CATALOG.filter((c) => c.category === "notifications").length,
+    },
+    {
       id: "llm",
       label: "AI & Models",
       count: CATALOG.filter((c) => c.category === "llm").length,
     },
     {
-      id: "notifications",
-      label: "Notifications",
-      count: CATALOG.filter((c) => c.category === "notifications").length,
-    },
-    {
       id: "telemetry",
-      label: "Telemetry",
+      label: "Telemetry & Observability",
       count: CATALOG.filter((c) => c.category === "telemetry").length,
     },
   ];
 
+  const githubIntegration = CATALOG.find((c) => c.id === "github")!;
+  const slackIntegration = CATALOG.find((c) => c.id === "slack")!;
+  const githubState = deriveIntegrationState(githubIntegration, status, githubInstalls, slackInstalls);
+  const slackState = deriveIntegrationState(slackIntegration, status, githubInstalls, slackInstalls);
+
   return (
-    <div className="p-8 max-w-6xl mx-auto h-full flex flex-col text-stone-900">
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 w-full font-sans text-stone-900">
+      {/* ================= HERO HEADER ================= */}
+      <div className="flex flex-wrap items-start justify-between gap-4 pb-2 border-b border-sand-200">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-light tracking-tight">Integrations</h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+          <h1 className="text-2xl font-bold tracking-tight text-stone-900 flex items-center gap-2.5">
+            <span>Integrations</span>
+            <span className="text-xs font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               {stats.connected} of {stats.total} Active
             </span>
-          </div>
-          <p className="text-sm text-stone-500 mt-1.5 max-w-2xl">
-            Connect your source control, AI provider keys, alerting webhooks, and telemetry endpoints.
-            Credentials are encrypted at rest and sealed to daemon runtimes.
+          </h1>
+          <p className="text-xs text-stone-500 mt-1 max-w-2xl leading-relaxed">
+            Connect source control (GitHub), collaboration hubs (Slack), custom LLM provider keys, and telemetry metrics. All credentials are KMS-sealed at rest.
           </p>
         </div>
 
         <button
           onClick={load}
           disabled={isRefreshing}
-          className="btn-ghost self-start md:self-auto text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 text-stone-500 hover:text-stone-900"
-          title="Refresh statuses"
+          className="px-3.5 py-2 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-700 font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
+          title="Refresh Integration Statuses"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-400" : ""}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-600" : "text-stone-500"}`} />
           <span>Refresh</span>
         </button>
       </div>
 
-      {/* Connectivity Overview Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
-        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+      {/* ================= TOP 4 KPI TILES ================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
+            <span>Active Integrations</span>
+            <Layers className="w-4 h-4 text-stone-400" />
           </div>
-          <div>
-            <div className="text-xl font-light text-stone-900">{stats.connected}</div>
-            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Connected</div>
-          </div>
-        </div>
-
-        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-5 h-5 text-amber-400" />
-          </div>
-          <div>
-            <div className="text-xl font-light text-stone-900">{stats.incomplete}</div>
-            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Partially Set</div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold font-mono text-stone-900">
+              {stats.connected} <span className="text-sm font-normal text-stone-400">/ {stats.total}</span>
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              {stats.unconnected} available to connect
+            </div>
           </div>
         </div>
 
-        <div className="bg-white shadow-2xs p-4 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-sand-50 border border-sand-200 flex items-center justify-center shrink-0">
-            <Sparkles className="w-5 h-5 text-stone-500" />
+        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
+            <span>GitHub VCS Status</span>
+            <SiGithub className="w-4 h-4 text-stone-900" />
           </div>
-          <div>
-            <div className="text-xl font-light text-stone-900">{stats.unconnected}</div>
-            <div className="text-[11px] text-stone-500 uppercase tracking-wider font-medium">Available to Add</div>
+          <div className="mt-2">
+            <div className="text-base font-bold font-mono text-stone-900 truncate">
+              {githubInstalls.length > 0 ? `${githubInstalls.length} Org Connected` : status["github"] ? "PAT Active" : "Not Connected"}
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5 truncate">
+              {githubInstalls[0]?.account_login || "Repo sync & PR dispatch"}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
+            <span>Slack Collaboration</span>
+            <FaSlack className="w-4 h-4 text-[#ECB22E]" />
+          </div>
+          <div className="mt-2">
+            <div className="text-base font-bold font-mono text-stone-900 truncate">
+              {slackInstalls.length > 0 ? `${slackInstalls.length} Workspace` : status["slack"] ? "Webhook Active" : "Not Connected"}
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              <Link href="/integrations/slack" className="text-kiwi-700 font-semibold hover:underline">
+                Channel Bindings &rarr;
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
+            <span>Secret Storage</span>
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="mt-2">
+            <div className="text-base font-bold font-mono text-stone-900">KMS Sealed</div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              AES-256 GCM Envelope Encryption
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 mb-6">
-        {/* Category Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {categories.map((cat) => {
-            const active = selectedCategory === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 ${
-                  active
-                    ? "bg-white text-black font-semibold shadow-sm"
-                    : "bg-sand-50 text-stone-500 hover:text-stone-900 hover:bg-sand-100 border border-sand-150"
+      {/* ================= FEATURED HUBS: GITHUB & SLACK ================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* GITHUB HUB CARD */}
+        <div className="p-5 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between space-y-4 hover:border-sand-300 transition-all">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-stone-900 text-white flex items-center justify-center shadow-2xs">
+                  <SiGithub className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">GitHub Hub</h3>
+                  <p className="text-[11px] text-stone-500 font-mono">Source Control & Automated PR Workflow</p>
+                </div>
+              </div>
+
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                  githubState.status === "connected"
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-sand-100 text-stone-600 border-sand-200"
                 }`}
               >
-                <span>{cat.label}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    active ? "bg-black/15 text-black font-bold" : "bg-sand-100 text-stone-500"
-                  }`}
-                >
-                  {cat.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                {githubState.label}
+              </span>
+            </div>
 
-        {/* Search & Status Controls */}
-        <div className="flex items-center gap-2.5">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search integrations…"
-              className="w-full field text-xs pl-8.5 pr-3 py-1.5 rounded-xl"
-            />
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Connect your repositories for automated pull requests, review watchdogs, background linting, and branch generation.
+            </p>
+
+            {githubInstalls.length > 0 && (
+              <div className="p-2.5 rounded-xl bg-sand-50/80 border border-sand-200 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-mono text-[11px] text-stone-700 truncate">
+                  Installed on: <span className="font-bold text-stone-900">{githubInstalls.map((g) => g.account_login).join(", ")}</span>
+                </span>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center bg-sand-50 border border-sand-200 rounded-xl p-0.5 shrink-0">
-            <button
-              onClick={() => setStatusFilter("all")}
-              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                statusFilter === "all" ? "bg-white/15 text-stone-900 font-semibold" : "text-stone-500 hover:text-stone-900"
-              }`}
+          <div className="pt-3 border-t border-sand-150 flex items-center justify-between">
+            <a
+              href="https://github.com/settings/installations"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-semibold text-stone-500 hover:text-stone-900 flex items-center gap-1 transition-colors"
             >
-              All
+              <span>GitHub App Settings</span>
+              <ExternalLink className="w-3 h-3 text-stone-400" />
+            </a>
+
+            <button
+              onClick={() => setActiveIntegration(githubIntegration)}
+              className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
+            >
+              <span>Configure GitHub</span>
+              <ArrowRight className="w-3.5 h-3.5 text-kiwi-400" />
             </button>
-            <button
-              onClick={() => setStatusFilter("connected")}
-              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                statusFilter === "connected"
-                  ? "bg-white/15 text-emerald-400 font-semibold"
-                  : "text-stone-500 hover:text-stone-900"
-              }`}
+          </div>
+        </div>
+
+        {/* SLACK HUB CARD */}
+        <div className="p-5 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between space-y-4 hover:border-sand-300 transition-all">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#ECB22E]/15 text-[#ECB22E] flex items-center justify-center border border-[#ECB22E]/30 shadow-2xs">
+                  <FaSlack className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">Slack Collaboration Hub</h3>
+                  <p className="text-[11px] text-stone-500 font-mono">Team Chat, @kiwi Mentions & Verdicts</p>
+                </div>
+              </div>
+
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                  slackState.status === "connected"
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-sand-100 text-stone-600 border-sand-200"
+                }`}
+              >
+                {slackState.label}
+              </span>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Trigger Kiwi tasks by @mentioning the bot in any Slack channel. Stream live execution status, task results, and canary alerts.
+            </p>
+
+            <div className="p-2.5 rounded-xl bg-sand-50/80 border border-sand-200 text-xs flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <Hash className="w-4 h-4 text-stone-500 shrink-0" />
+                <span className="font-mono text-[11px] text-stone-700 truncate">
+                  Map channels to code repositories
+                </span>
+              </div>
+              <Link
+                href="/integrations/slack"
+                className="text-[11px] font-bold text-kiwi-700 hover:underline shrink-0"
+              >
+                Manage Channel Bindings &rarr;
+              </Link>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-sand-150 flex items-center justify-between">
+            <Link
+              href="/integrations/slack"
+              className="text-[11px] font-semibold text-stone-600 hover:text-stone-900 flex items-center gap-1 transition-colors"
             >
-              Connected
+              <Hash className="w-3 h-3 text-stone-400" />
+              <span>Channel Bindings Page</span>
+            </Link>
+
+            <button
+              onClick={() => setActiveIntegration(slackIntegration)}
+              className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
+            >
+              <span>Configure Slack</span>
+              <ArrowRight className="w-3.5 h-3.5 text-kiwi-400" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Integrations Grid */}
-      {filteredCatalog.length === 0 ? (
-        <div className="bg-white shadow-2xs p-12 text-center rounded-2xl border border-sand-200 my-6">
-          <SlidersHorizontal className="w-8 h-8 text-stone-400 mx-auto mb-3" />
-          <h3 className="text-sm font-medium text-stone-900 mb-1">No integrations match your filters</h3>
-          <p className="text-xs text-stone-400 mb-4 max-w-sm mx-auto">
-            Try adjusting your search keywords or switching category filters to find the integration you need.
-          </p>
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setSelectedCategory("all");
-              setStatusFilter("all");
-            }}
-            className="btn-ghost text-xs px-3.5 py-1.5 rounded-xl text-stone-700"
-          >
-            Clear all filters
-          </button>
+      {/* ================= ALL INTEGRATIONS DIRECTORY ================= */}
+      <div className="space-y-4">
+        {/* Search & Filter Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-sand-200 shadow-2xs text-xs">
+          <div className="flex items-center gap-2.5 flex-1 min-w-[220px]">
+            <div className="relative flex-1">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search integrations by service, name, or credential key..."
+                className="w-full bg-sand-50/70 border border-sand-200 rounded-xl pl-8 pr-3 py-1.5 text-xs placeholder:text-stone-400 focus:outline-none focus:border-stone-400 focus:bg-white transition-all font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Category Filter */}
+            <div className="flex items-center gap-1 bg-sand-100 p-0.5 rounded-xl border border-sand-200 overflow-x-auto no-scrollbar">
+              {categories.map((cat) => {
+                const active = selectedCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                      active
+                        ? "bg-white text-stone-900 shadow-2xs"
+                        : "text-stone-600 hover:text-stone-900"
+                    }`}
+                  >
+                    <span>{cat.label}</span>
+                    <span className={`ml-1.5 text-[10px] font-mono px-1 rounded-full ${active ? "bg-sand-200 text-stone-800" : "text-stone-400"}`}>
+                      {cat.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Status Filter */}
+            <div className="flex items-center gap-1 bg-sand-100 p-0.5 rounded-xl border border-sand-200">
+              <button
+                onClick={() => setStatusFilter("all")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  statusFilter === "all" ? "bg-white text-stone-900 shadow-2xs" : "text-stone-600 hover:text-stone-900"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setStatusFilter("connected")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  statusFilter === "connected" ? "bg-white text-stone-900 shadow-2xs text-emerald-800" : "text-stone-600 hover:text-stone-900"
+                }`}
+              >
+                Connected
+              </button>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+
+        {/* Catalog Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {filteredCatalog.map((item) => {
             const Icon = item.icon;
             const state = deriveIntegrationState(item, status, githubInstalls, slackInstalls);
@@ -582,153 +725,63 @@ export default function IntegrationsPage() {
             return (
               <div
                 key={item.id}
-                className={`bg-white shadow-2xs border rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:border-sand-200 group relative overflow-hidden ${
-                  isConnected
-                    ? "border-emerald-500/20 bg-gradient-to-b from-[#10202C] to-[#0E1A24]"
-                    : isIncomplete
-                    ? "border-amber-500/20"
-                    : "border-sand-200"
-                }`}
+                onClick={() => setActiveIntegration(item)}
+                className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between space-y-3 hover:border-sand-300 hover:shadow-island-hover transition-all cursor-pointer group"
               >
-                <div>
-                  {/* Top row: Icon, Title, Status */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div
-                        className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-sand-200 transition-transform group-hover:scale-105 duration-200 ${item.iconBg}`}
-                      >
-                        <Icon className={`w-5 h-5 ${item.iconColor}`} />
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border border-sand-200 shadow-2xs ${item.iconBg}`}>
+                        <Icon className={`w-4 h-4 ${item.iconColor}`} />
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium text-stone-900 tracking-tight text-base truncate">
-                            {item.name}
-                          </h3>
-                        </div>
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400">
-                          {item.categoryLabel}
-                        </span>
+                      <div>
+                        <h4 className="text-xs font-bold text-stone-900 group-hover:text-stone-950 transition-colors">
+                          {item.name}
+                        </h4>
+                        <span className="text-[10px] font-mono text-stone-400">{item.categoryLabel}</span>
                       </div>
                     </div>
 
-                    {/* Status Badge */}
-                    <div className="shrink-0">
-                      {isConnected ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{state.label}</span>
-                        </span>
-                      ) : isIncomplete ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          <AlertCircle className="w-3.5 h-3.5" />
-                          <span>{state.label}</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sand-50 text-stone-400 border border-sand-150">
-                          <span>Not set</span>
-                        </span>
-                      )}
-                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border shrink-0 ${
+                        isConnected
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                          : isIncomplete
+                          ? "bg-amber-50 text-amber-800 border-amber-200"
+                          : "bg-sand-100 text-stone-600 border-sand-200"
+                      }`}
+                    >
+                      {state.label}
+                    </span>
                   </div>
 
-                  {/* Blurb */}
-                  <p className="text-xs text-stone-500 leading-relaxed mb-4 line-clamp-2">
-                    {item.description}
-                  </p>
-
-                  {/* GitHub Specific Connected Orgs Pill Preview */}
-                  {item.isGithubHybrid && githubInstalls.length > 0 && (
-                    <div className="mb-4 flex flex-wrap gap-1.5">
-                      {githubInstalls.slice(0, 3).map((g) => (
-                        <span
-                          key={g.installation_id}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-sand-50 border border-sand-200 text-stone-700"
-                        >
-                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          <span className="truncate max-w-[120px]">{g.account_login}</span>
-                        </span>
-                      ))}
-                      {githubInstalls.length > 3 && (
-                        <span className="text-[10px] text-stone-400 self-center">
-                          +{githubInstalls.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Slack Specific Connected Workspaces Pill Preview */}
-                  {item.isSlackHybrid && slackInstalls.length > 0 && (
-                    <div className="mb-4 flex flex-wrap gap-1.5">
-                      {slackInstalls.slice(0, 3).map((s) => (
-                        <span
-                          key={s.team_id}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-sand-50 border border-sand-200 text-stone-700"
-                        >
-                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          <span className="truncate max-w-[120px]">{s.team_name || s.team_id}</span>
-                        </span>
-                      ))}
-                      {slackInstalls.length > 3 && (
-                        <span className="text-[10px] text-stone-400 self-center">
-                          +{slackInstalls.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Multi-field parameters preview for Datadog / Prometheus */}
-                  {item.fields.length > 1 && (
-                    <div className="mb-4 flex flex-wrap gap-1.5 text-[10px]">
-                      {item.fields.map((f) => {
-                        const isFieldConnected = !!status[f.key];
-                        return (
-                          <span
-                            key={f.key}
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono ${
-                              isFieldConnected
-                                ? "bg-emerald-500/5 text-emerald-300 border-emerald-500/20"
-                                : "bg-sand-50 text-stone-400 border-sand-200"
-                            }`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                isFieldConnected ? "bg-emerald-400" : "bg-stone-300"
-                              }`}
-                            />
-                            {f.label}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{item.description}</p>
                 </div>
 
-                {/* Bottom Row: Actions */}
-                <div className="flex items-center justify-between pt-3 border-t border-sand-150 mt-auto">
-                  <span className="text-[11px] text-stone-400 truncate max-w-[200px]">
-                    {state.summary}
+                <div className="pt-2.5 border-t border-sand-150 flex items-center justify-between text-[11px]">
+                  <span className="font-mono text-[10px] text-stone-400">
+                    {item.fields.length} credential{item.fields.length > 1 ? "s" : ""}
                   </span>
 
-                  <button
-                    type="button"
-                    onClick={() => setActiveIntegration(item)}
-                    className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-xl transition-all ${
-                      isConnected
-                        ? "bg-sand-100 hover:bg-white/15 text-stone-900 border border-sand-200"
-                        : "btn-primary text-black"
-                    }`}
-                  >
-                    <span>{isConnected ? "Configure" : "Connect"}</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
+                  <span className="font-bold text-stone-800 group-hover:text-stone-950 flex items-center gap-1 text-xs transition-colors">
+                    <span>{isConnected ? "Manage" : "Configure"}</span>
+                    <ArrowRight className="w-3 h-3 text-stone-400 group-hover:translate-x-0.5 transition-transform" />
+                  </span>
                 </div>
               </div>
             );
           })}
         </div>
-      )}
 
-      {/* Slide-Over Drawer for Selected Integration */}
+        {filteredCatalog.length === 0 && (
+          <div className="p-12 text-center text-stone-400 font-mono bg-white border border-sand-200 rounded-2xl shadow-2xs space-y-2">
+            <SlidersHorizontal className="w-8 h-8 text-stone-300 mx-auto" />
+            <p>No integrations match your search criteria.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Slide-over Drawer for Credential Entry & OAuth Setup */}
       <IntegrationDrawer
         integration={activeIntegration}
         status={status}

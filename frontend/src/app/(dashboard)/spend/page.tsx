@@ -21,13 +21,17 @@ import {
 } from "lucide-react";
 import {
   api,
+  formatTokens,
+  modelClassLabel,
+  MODEL_CLASS_BLURB,
+  CLASS_ORDER,
   type UsageResponse,
   type VelocityMetrics,
   type CachingAnalytics,
   type SandboxCacheStats,
   type SpendResponse,
 } from "@/lib/api";
-import { KiwiCoreSpinner } from "@/components/KiwiLoaders";
+import { LoadingState } from "@/components/LoadingState";
 
 export default function SpendPage() {
   const [subTab, setSubTab] = useState<"spend" | "velocity">("spend");
@@ -107,20 +111,19 @@ export default function SpendPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <KiwiCoreSpinner size="lg" />
-        <p className="text-xs font-mono text-stone-500">Loading Telemetry & Spend Suite...</p>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <LoadingState state="weaving" label="Loading Telemetry & Spend Suite..." />
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-sand-200 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-stone-900">Compute, Cost & Velocity Analytics</h1>
-          <p className="text-xs text-stone-500">Track dual-metering quotas, LLM provider invoices, test pass rate breakdown, and AST prompt caching.</p>
+          <h1 className="text-xl font-bold text-stone-900">Compute, Cost &amp; Velocity Analytics</h1>
+          <p className="text-xs text-stone-500">Track dual-metering quotas, Kiwi platform token allowances, LLM provider invoices, and AST prompt caching.</p>
         </div>
 
         {/* Subtab Toggle */}
@@ -134,7 +137,7 @@ export default function SpendPage() {
             }`}
           >
             <Receipt className="w-3.5 h-3.5 text-stone-700" />
-            <span>Cost & Quotas</span>
+            <span>Cost &amp; Quotas</span>
           </button>
 
           <button
@@ -160,13 +163,13 @@ export default function SpendPage() {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                   <Zap className="w-4 h-4 text-amber-500 fill-current" />
-                  Track 1: Free Tier Platform Quota
+                  Track 1: Compute Agent-Minutes Quota
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   Monthly Reset
                 </span>
               </div>
-              <div className="text-2xl font-bold font-mono text-stone-900">{usedMinutes} / {limitMinutes}m</div>
+              <div className="text-2xl font-bold font-mono text-stone-900">{usedMinutes.toFixed(1)} / {limitMinutes}m</div>
               <div className="w-full h-2 bg-sand-200 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }} />
               </div>
@@ -191,6 +194,100 @@ export default function SpendPage() {
               <p className="text-[11px] text-stone-500 font-mono">{providerBreakdown}</p>
             </div>
           </div>
+
+          {/* ================= KIWI-FUNDED PLATFORM TOKEN ALLOWANCES ================= */}
+          {spend?.allowance && spend.allowance.length > 0 && (
+            <div className="p-5 rounded-3xl bg-white border border-sand-200 shadow-2xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-150 pb-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-stone-900 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-kiwi-600" />
+                    <span>Monthly Platform Token Quota (Kiwi-Funded)</span>
+                    <span className="text-[10px] font-mono font-bold bg-kiwi-100 text-kiwi-900 px-2 py-0.5 rounded-full border border-kiwi-200">
+                      INCLUDED IN PLAN
+                    </span>
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Platform tokens granted every billing cycle. Tasks using your own connected provider keys consume 0 platform tokens.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {CLASS_ORDER.map((tierKey) => {
+                  const a = spend.allowance?.find((x) => x.tier === tierKey);
+                  if (!a) return null;
+                  const unlimited = a.granted < 0;
+                  const exhausted = !unlimited && (a.remaining <= 0 || a.used >= a.granted);
+                  const pct = unlimited ? 0 : Math.min(100, (a.used / Math.max(a.granted, 1)) * 100);
+
+                  return (
+                    <div
+                      key={a.tier}
+                      className={`p-4 rounded-2xl border flex flex-col justify-between space-y-3 transition-all ${
+                        exhausted
+                          ? "bg-rose-50/70 border-rose-200"
+                          : "bg-sand-50/70 border-sand-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              a.tier === "frontier"
+                                ? "bg-amber-500"
+                                : a.tier === "economy"
+                                ? "bg-emerald-500"
+                                : "bg-sky-500"
+                            }`}
+                          />
+                          {modelClassLabel(a.tier)}
+                        </span>
+                        <span
+                          className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full border text-[10px] ${
+                            unlimited
+                              ? "bg-sky-50 text-sky-800 border-sky-200"
+                              : exhausted
+                              ? "bg-rose-100 text-rose-800 border-rose-300"
+                              : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                          }`}
+                        >
+                          {unlimited ? "Unlimited" : exhausted ? "⛔ Exhausted" : `${formatTokens(a.remaining)} left`}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-mono text-stone-500">
+                          <span>Usage</span>
+                          <span>{unlimited ? "Free tier" : `${formatTokens(a.used)} / ${formatTokens(a.granted)}`}</span>
+                        </div>
+                        <div className="w-full bg-sand-200 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              exhausted
+                                ? "bg-rose-500"
+                                : pct > 80
+                                ? "bg-amber-500"
+                                : a.tier === "frontier"
+                                ? "bg-amber-500"
+                                : a.tier === "economy"
+                                ? "bg-emerald-500"
+                                : "bg-sky-500"
+                            }`}
+                            style={{ width: `${unlimited ? 100 : pct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-stone-400 font-mono">
+                        {MODEL_CLASS_BLURB[a.tier] || "Kiwi platform token allowance"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="p-5 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-4">

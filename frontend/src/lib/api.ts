@@ -156,6 +156,7 @@ export interface JobTask {
   task?: string;
   depends_on?: string[];
   model?: string;
+  architect_model?: string;
   files?: string[];
   result_url?: string;
   result_detail?: string;

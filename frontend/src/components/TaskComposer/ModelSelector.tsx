@@ -1,15 +1,51 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Compass, Hammer } from "lucide-react";
-import { api, providerLabel, type CatalogModel } from "@/lib/api";
+import { Compass, Hammer, Sparkles, Cpu, DollarSign, Layers, AlertTriangle, AlertCircle } from "lucide-react";
+import { api, providerLabel, type CatalogModel, type AllowanceBucket } from "@/lib/api";
+import { getModelAllowanceStatus } from "@/lib/allowanceUtils";
 import { Select, type SelectOption } from "@/components/Select";
 
-const TIER_LABEL: Record<string, string> = {
-  frontier: "👑 Frontier",
-  economy: "🌿 Economy",
-  free: "⚡ Free",
+const TIER_META = {
+  frontier: {
+    label: "👑 Frontier",
+    badge: "bg-gradient-to-r from-amber-100 to-orange-100 text-amber-900 border-amber-300 font-bold",
+    pill: "from-amber-500 to-orange-500 text-white shadow-xs",
+  },
+  economy: {
+    label: "🌿 Economy",
+    badge: "bg-emerald-50 text-emerald-900 border-emerald-300 font-semibold",
+    pill: "from-emerald-600 to-kiwi-700 text-white shadow-xs",
+  },
+  free: {
+    label: "⚡ Free",
+    badge: "bg-sky-50 text-sky-900 border-sky-300 font-semibold",
+    pill: "from-sky-500 to-blue-600 text-white shadow-xs",
+  },
 };
+
+function getProviderMeta(provider: string) {
+  const p = (provider || "").toLowerCase();
+  if (p.includes("anthropic") || p.includes("claude")) {
+    return { name: "Anthropic", icon: "✦", bg: "bg-amber-50 text-amber-900 border-amber-200" };
+  }
+  if (p.includes("openai") || p.includes("gpt")) {
+    return { name: "OpenAI", icon: "✻", bg: "bg-emerald-50 text-emerald-900 border-emerald-200" };
+  }
+  if (p.includes("google") || p.includes("gemini")) {
+    return { name: "Google", icon: "✧", bg: "bg-blue-50 text-blue-900 border-blue-200" };
+  }
+  if (p.includes("deepseek")) {
+    return { name: "DeepSeek", icon: "🐋", bg: "bg-cyan-50 text-cyan-900 border-cyan-200" };
+  }
+  if (p.includes("meta") || p.includes("llama")) {
+    return { name: "Meta", icon: "♾️", bg: "bg-purple-50 text-purple-900 border-purple-200" };
+  }
+  if (p.includes("mistral")) {
+    return { name: "Mistral", icon: "🌪️", bg: "bg-orange-50 text-orange-900 border-orange-200" };
+  }
+  return { name: providerLabel(provider), icon: "⚙️", bg: "bg-sand-100 text-stone-800 border-sand-200" };
+}
 
 function formatCost(model: CatalogModel): string | null {
   if (model.input_cost_per_m == null && model.output_cost_per_m == null) return null;
@@ -18,76 +54,124 @@ function formatCost(model: CatalogModel): string | null {
   return `${inCost} · ${outCost}`;
 }
 
-/**
- * One dropdown, backed by the org's real model catalog
- * (`GET /api/v1/catalog/models`) instead of a hand-typed list — the previous
- * version shipped ids like `claude-3-7-sonnet` that don't exist in
- * `provider.PricingMap` and would fail on submit, and it listed DeepSeek,
- * which isn't one of Kiwi's three providers.
- */
 function ModelPicker({
   role,
   value,
   onChange,
   models,
+  allowance,
   loading,
 }: {
   role: "architect" | "worker";
   value: string;
   onChange: (model: string) => void;
   models: CatalogModel[];
+  allowance: AllowanceBucket[];
   loading: boolean;
 }) {
   const [tierFilter, setTierFilter] = useState<"all" | "frontier" | "economy" | "free">("all");
 
   const filtered = tierFilter === "all" ? models : models.filter((m) => m.tier === tierFilter);
-  const options: SelectOption[] = filtered.map((m) => ({
-    value: m.model_id,
-    label: m.display_name || m.model_id,
-    hint: TIER_LABEL[m.tier]?.replace(/^\S+\s/, "") ?? m.tier,
-  }));
+
+  const options: SelectOption[] = filtered.map((m) => {
+    const prov = getProviderMeta(m.provider);
+    const tier = TIER_META[m.tier as keyof typeof TIER_META] || TIER_META.economy;
+    const status = getModelAllowanceStatus(m.model_id, models, allowance);
+    const isExhausted = allowance.length > 0 && status.isExhausted && !status.isBYOK;
+
+    return {
+      value: m.model_id,
+      label: m.display_name || m.model_id,
+      sublabel: isExhausted
+        ? `${prov.name} · ⛔ Quota Exhausted`
+        : `${prov.name} · ${m.context_length ? `${Math.round(m.context_length / 1000)}k ctx` : "Standard context"}`,
+      icon: <span className="text-xs font-bold leading-none">{prov.icon}</span>,
+      badge: isExhausted ? (
+        <span className="text-[9px] font-mono px-2 py-0.5 rounded-full border shadow-2xs bg-rose-50 text-rose-800 border-rose-300 font-bold">
+          ⛔ EXHAUSTED
+        </span>
+      ) : (
+        <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border shadow-2xs ${tier.badge}`}>
+          {m.tier.toUpperCase()}
+        </span>
+      ),
+    };
+  });
+
   const selectedModel = models.find((m) => m.model_id === value);
+  const selectedTier = selectedModel?.tier && TIER_META[selectedModel.tier as keyof typeof TIER_META];
+  const selectedStatus = selectedModel ? getModelAllowanceStatus(selectedModel.model_id, models, allowance) : null;
+  const isSelectedExhausted = allowance.length > 0 && selectedStatus?.isExhausted && !selectedStatus.isBYOK;
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="font-bold text-stone-800 flex items-center gap-1.5 text-xs">
           {role === "architect" ? (
-            <Compass className="w-3.5 h-3.5 text-indigo-600" />
+            <div className="w-5 h-5 rounded-md bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700">
+              <Compass className="w-3.5 h-3.5" />
+            </div>
           ) : (
-            <Hammer className="w-3.5 h-3.5 text-emerald-600" />
+            <div className="w-5 h-5 rounded-md bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
+              <Hammer className="w-3.5 h-3.5" />
+            </div>
           )}
           <span>{role === "architect" ? "Architect Model (Planning & Strategy)" : "Worker Model (Code Edits & Test Fixes)"}</span>
         </label>
+
         {selectedModel && (
-          <span className="text-[9px] font-mono font-bold bg-sand-100 text-stone-700 px-1.5 py-0.2 rounded border border-sand-200 uppercase">
-            {selectedModel.tier}
-          </span>
+          <div className="flex items-center gap-1">
+            {isSelectedExhausted ? (
+              <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border bg-rose-50 text-rose-800 border-rose-300">
+                ⛔ QUOTA EXHAUSTED
+              </span>
+            ) : (
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${selectedTier?.badge || "bg-sand-100 text-stone-700 border-sand-200"}`}>
+                {selectedModel.tier.toUpperCase()}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="flex items-center gap-1 text-[10px]">
-        {(["all", "frontier", "economy", "free"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTierFilter(t)}
-            className={`px-2 py-0.5 rounded-lg font-semibold transition-all ${
-              tierFilter === t ? "bg-stone-900 text-white" : "bg-sand-100 text-stone-600 hover:bg-sand-200"
-            }`}
-          >
-            {t === "all" ? "All" : TIER_LABEL[t]}
-          </button>
-        ))}
+      {/* Tier Category Filters */}
+      <div className="flex items-center gap-1.5 text-[11px]">
+        {(["all", "frontier", "economy", "free"] as const).map((t) => {
+          const isSelected = tierFilter === t;
+          const tierAllowance = allowance.find((a) => a.tier === t);
+          const isTierExhausted = allowance.length > 0 && tierAllowance && tierAllowance.granted >= 0 && (tierAllowance.remaining <= 0 || tierAllowance.used >= tierAllowance.granted);
+
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTierFilter(t)}
+              className={`px-2.5 py-1 rounded-xl font-semibold transition-all cursor-pointer border text-xs flex items-center gap-1 ${
+                isSelected
+                  ? t === "frontier"
+                    ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-transparent shadow-xs"
+                    : t === "economy"
+                    ? "bg-gradient-to-r from-emerald-600 to-kiwi-700 text-white border-transparent shadow-xs"
+                    : t === "free"
+                    ? "bg-gradient-to-r from-sky-500 to-blue-600 text-white border-transparent shadow-xs"
+                    : "bg-stone-900 text-white border-stone-900 shadow-xs"
+                  : "bg-sand-100/90 text-stone-600 hover:text-stone-900 hover:bg-sand-200/80 border-sand-200"
+              }`}
+            >
+              <span>{t === "all" ? "All Models" : TIER_META[t]?.label || t}</span>
+              {isTierExhausted && <span className="text-[10px] font-bold text-rose-500">⛔</span>}
+            </button>
+          );
+        })}
       </div>
 
       {loading ? (
-        <div className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400">
-          Loading models…
+        <div className="w-full px-4 py-3 rounded-2xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400 font-mono animate-pulse">
+          Fetching available models…
         </div>
       ) : options.length === 0 ? (
-        <div className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400">
-          No models available in this tier.
+        <div className="w-full px-4 py-3 rounded-2xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400 font-mono">
+          No models currently selectable in this tier.
         </div>
       ) : (
         <Select
@@ -100,25 +184,101 @@ function ModelPicker({
           renderDetail={(opt) => {
             const m = models.find((mm) => mm.model_id === opt.value);
             if (!m) return null;
+            const prov = getProviderMeta(m.provider);
             const cost = formatCost(m);
+            const isArchitect = role === "architect";
+            const status = getModelAllowanceStatus(m.model_id, models, allowance);
+            const isExhausted = allowance.length > 0 && status.isExhausted && !status.isBYOK;
+
             return (
-              <div className="space-y-1.5 px-1 pb-0.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border bg-sand-100 text-stone-700 border-sand-200 uppercase">
-                    {m.tier}
-                  </span>
-                  <span className="text-[9px] font-mono text-stone-400 uppercase font-semibold">{providerLabel(m.provider)}</span>
+              <div className="space-y-2 text-xs text-stone-800">
+                {/* Header info */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm">{prov.icon}</span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-stone-950 truncate text-xs">{m.display_name || m.model_id}</div>
+                      <div className="text-[10px] font-mono text-stone-400 truncate leading-none">{m.model_id}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${prov.bg}`}>
+                      {prov.name}
+                    </span>
+                    {isExhausted ? (
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border bg-rose-50 text-rose-800 border-rose-300">
+                        ⛔ EXHAUSTED
+                      </span>
+                    ) : (
+                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${TIER_META[m.tier as keyof typeof TIER_META]?.badge || "bg-sand-100 text-stone-700"}`}>
+                        {m.tier.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {m.description && <p className="text-[11px] text-stone-600 leading-snug">{m.description}</p>}
-                <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono pt-1 border-t border-sand-150">
-                  <span>{cost ?? "Pricing not available"}</span>
-                  <span>{m.context_length ? `${Math.round(m.context_length / 1000)}k context` : ""}</span>
-                </div>
-                {m.kiwi_provided && (
-                  <span className="inline-block text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
-                    Kiwi-funded
-                  </span>
+
+                {/* Quota Exhausted Warning Banner */}
+                {isExhausted ? (
+                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-start gap-2 text-[11px] font-medium leading-tight">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>Monthly {status.tierLabel} quota is exhausted. Switch to an Economy model or connect your own provider key.</span>
+                  </div>
+                ) : status.isWarning ? (
+                  <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2 text-[11px] leading-tight">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>{status.hint}</span>
+                  </div>
+                ) : null}
+
+                {/* Description */}
+                {m.description ? (
+                  <p className="text-[11px] text-stone-600 leading-snug line-clamp-2 bg-white/90 p-2 rounded-xl border border-sand-200">
+                    {m.description}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-stone-500 italic bg-white/90 p-2 rounded-xl border border-sand-200">
+                    {isArchitect
+                      ? "Calibrated for deep planning, architectural reasoning, and task decomposition."
+                      : "Tuned for low-latency code generation, test fixing, and pinpoint diff verification."}
+                  </p>
                 )}
+
+                {/* Capabilities & Token Economics Grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-1.5 rounded-xl bg-white border border-sand-200 space-y-0.5">
+                    <div className="text-[9px] text-stone-400 font-mono flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-indigo-500" />
+                      <span>Context Window</span>
+                    </div>
+                    <div className="font-mono font-bold text-stone-900 text-xs">
+                      {m.context_length ? `${Math.round(m.context_length / 1000).toLocaleString()}k Tokens` : "Standard Limit"}
+                    </div>
+                  </div>
+
+                  <div className="p-1.5 rounded-xl bg-white border border-sand-200 space-y-0.5">
+                    <div className="text-[9px] text-stone-400 font-mono flex items-center gap-1">
+                      <DollarSign className="w-3 h-3 text-emerald-600" />
+                      <span>Token Rate</span>
+                    </div>
+                    <div className="font-mono font-bold text-stone-900 text-xs truncate">
+                      {cost || "Subscription Rate"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Role recommendation banner */}
+                <div className="flex items-center justify-between text-[10px] font-mono text-stone-500">
+                  <span className="flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-500" />
+                    <span className="truncate">{isArchitect ? "Role: Strategy & Plan Synthesis" : "Role: Code Generation"}</span>
+                  </span>
+                  {m.kiwi_provided && (
+                    <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded text-[9px]">
+                      ✨ Kiwi-Funded
+                    </span>
+                  )}
+                </div>
               </div>
             );
           }}
@@ -140,21 +300,52 @@ export function ModelSelector({
   onWorkerChange: (model: string) => void;
 }) {
   const [models, setModels] = useState<CatalogModel[]>([]);
+  const [allowance, setAllowance] = useState<AllowanceBucket[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .listCatalogModels()
-      .then((res) => setModels((res.models || []).filter((m) => m.selectable)))
-      .catch(() => setModels([]))
+    Promise.all([
+      api.listCatalogModels().catch(() => ({ models: [] })),
+      api.getSpend().catch(() => null),
+    ])
+      .then(([modelsRes, spendRes]) => {
+        setModels((modelsRes.models || []).filter((m) => m.selectable));
+        setAllowance(spendRes?.allowance || []);
+      })
       .finally(() => setLoading(false));
   }, []);
 
   return (
-    <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-xs space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <ModelPicker role="architect" value={architectModel} onChange={onArchitectChange} models={models} loading={loading} />
-        <ModelPicker role="worker" value={workerModel} onChange={onWorkerChange} models={models} loading={loading} />
+    <div className="relative z-30 p-5 rounded-3xl bg-white/90 backdrop-blur-xl border border-sand-200 shadow-2xs space-y-4">
+      <div className="flex items-center justify-between border-b border-sand-150 pb-2.5">
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-indigo-600" />
+          <span className="text-xs font-bold text-stone-900 uppercase tracking-wider">Dual AI Model Engine</span>
+        </div>
+        <span className="text-[11px] text-stone-400 font-mono">Specialized Architect &amp; Worker Pair</span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="relative z-20">
+          <ModelPicker
+            role="architect"
+            value={architectModel}
+            onChange={onArchitectChange}
+            models={models}
+            allowance={allowance}
+            loading={loading}
+          />
+        </div>
+        <div className="relative z-10">
+          <ModelPicker
+            role="worker"
+            value={workerModel}
+            onChange={onWorkerChange}
+            models={models}
+            allowance={allowance}
+            loading={loading}
+          />
+        </div>
       </div>
     </div>
   );

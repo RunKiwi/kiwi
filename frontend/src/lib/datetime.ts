@@ -103,3 +103,10 @@ export function formatTokens(n: number): string {
   }
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
+
+/** Format agent minutes rounded to 1 decimal place. E.g. 49.666686 -> "49.7" */
+export function formatAgentMinutes(mins: number): string {
+  if (!Number.isFinite(mins) || mins <= 0) return "0.0";
+  return mins.toFixed(1);
+}
+

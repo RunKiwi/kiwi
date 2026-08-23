@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiwi Budget & Allowance UX Showcase</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            kiwi: {
+              DEFAULT: '#93C645',
+              dark: '#6E9B33',
+              glow: 'rgba(147, 198, 69, 0.35)',
+              bg: '#0B141D',
+              surface: '#0E1A24',
+              card: '#12202D',
+              border: 'rgba(255, 255, 255, 0.08)',
+            }
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #0B141D;
+      color: #E2E8F0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      overflow-x: hidden;
+    }
+    .glass-panel {
+      background: linear-gradient(180deg, rgba(18, 32, 45, 0.85) 0%, rgba(14, 26, 36, 0.85) 100%);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 1rem;
+    }
+    .glow-kiwi {
+      box-shadow: 0 0 24px -4px rgba(147, 198, 69, 0.25);
+    }
+    .glow-amber {
+      box-shadow: 0 0 24px -4px rgba(245, 158, 11, 0.25);
+    }
+    .glow-red {
+      box-shadow: 0 0 24px -4px rgba(239, 68, 68, 0.25);
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="min-h-screen custom-scroll pb-20">
+
+  <!-- Top Sticky Navigation & Simulation Bar -->
+  <header class="sticky top-0 z-50 border-b border-white/10 bg-[#0B141D]/90 backdrop-blur-xl px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-[#0E1A24] border border-[#93C645]/30 shadow-[0_0_16px_rgba(147,198,69,0.3)] flex items-center justify-center font-bold text-[#93C645] text-lg">
+          🥝
+        </div>
+        <div>
+          <h1 class="text-sm font-bold tracking-tight text-white flex items-center gap-2">
+            Kiwi Tasks UX <span class="text-xs px-2 py-0.5 rounded-full bg-[#93C645]/15 text-[#93C645] font-mono font-medium">Interactive Prototype</span>
+          </h1>
+          <p class="text-[11px] text-zinc-400">Budget, Token Allowance & Quota Awareness Designs</p>
+        </div>
+      </div>
+
+      <!-- State Presets Simulator -->
+      <div class="flex flex-wrap items-center gap-2 bg-black/40 p-1.5 rounded-2xl border border-white/10 text-xs">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-400 px-2 flex items-center gap-1">
+          <svg class="w-3 h-3 text-[#93C645]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Simulate State:
+        </span>
+        <button onclick="setPreset('healthy')" id="btn-healthy" class="preset-btn px-3 py-1.5 rounded-xl font-medium transition-all bg-white/10 text-white shadow">
+          🟢 Healthy (20%)
+        </button>
+        <button onclick="setPreset('warning')" id="btn-warning" class="preset-btn px-3 py-1.5 rounded-xl font-medium transition-all text-zinc-400 hover:text-white hover:bg-white/5">
+          🟡 Warning (85% Economy)
+        </button>
+        <button onclick="setPreset('exhausted')" id="btn-exhausted" class="preset-btn px-3 py-1.5 rounded-xl font-medium transition-all text-zinc-400 hover:text-white hover:bg-white/5">
+          🔴 Exhausted (Free Plan Limit)
+        </button>
+        <button onclick="setPreset('byok')" id="btn-byok" class="preset-btn px-3 py-1.5 rounded-xl font-medium transition-all text-zinc-400 hover:text-white hover:bg-white/5">
+          🔑 BYOK (Your Own Key)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 py-8 space-y-12">
+
+    <!-- Hero / Concept Intro -->
+    <div class="text-center max-w-3xl mx-auto space-y-3">
+      <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#93C645]/10 border border-[#93C645]/20 text-[#93C645] text-xs font-medium">
+        <span>✨ UX Design Explorations</span>
+      </div>
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-white">
+        Proactive Budget Awareness without Visual Clutter
+      </h2>
+      <p class="text-zinc-400 text-sm md:text-base leading-relaxed">
+        Keep the Kiwi composer fast and clean while making token allowance thresholds legible before a run fails. Explore each proposed design below.
+      </p>
+    </div>
+
+    <!-- Live Interactive Demo Section: Complete Hybrid Solution -->
+    <section class="glass-panel p-6 md:p-8 space-y-6 relative overflow-hidden border-[#93C645]/20">
+      <div class="absolute top-0 right-0 w-96 h-96 bg-[#93C645]/5 rounded-full blur-3xl pointer-events-none"></div>
+
+      <div class="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+        <div>
+          <span class="text-[10px] font-mono font-bold uppercase tracking-wider text-[#93C645]">RECOMMENDED SYNTHESIS</span>
+          <h3 class="text-xl font-bold text-white">Interactive Composer with Model-Aware Health</h3>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-zinc-400">Current Plan:</span>
+          <span class="px-2 py-0.5 rounded bg-white/10 font-mono text-zinc-200">Free Tier</span>
+          <span class="text-zinc-500">·</span>
+          <span class="text-zinc-400">Cycle:</span>
+          <span class="text-zinc-300 font-mono">Aug 1 – Sep 1</span>
+        </div>
+      </div>
+
+      <!-- Task Composer Mockup -->
+      <div class="bg-[#0E1A24] rounded-2xl border border-white/10 p-4 md:p-5 shadow-2xl relative space-y-4">
+        
+        <!-- Task Textarea -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-xs text-zinc-500">
+            <span class="font-mono">TASK OBJECTIVE</span>
+            <span class="text-[11px] text-zinc-500">Plain English instructions for Architect & Implementer</span>
+          </div>
+          <textarea 
+            class="w-full bg-black/30 border border-white/10 rounded-xl p-3.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-[#93C645]/50 transition-colors resize-none font-sans"
+            rows="3"
+            placeholder="e.g. Optimize SQL query performance on lease dequeue and add regression benchmarks..."
+          >Investigate memory leak in websocket event streaming and add stress tests</textarea>
+        </div>
+
+        <!-- Dynamic Threshold Smart Banner (Approach 3) -->
+        <div id="smart-banner" class="hidden transition-all duration-300">
+          <!-- Populated by JS based on state -->
+        </div>
+
+        <!-- Composer Control Rail -->
+        <div class="flex flex-wrap items-center gap-2.5 pt-3 border-t border-white/10">
+          
+          <!-- Repo Selector Chip -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-zinc-300">
+            <svg class="w-3.5 h-3.5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span class="text-zinc-500 font-mono">Repo</span>
+            <span class="font-semibold text-white">runkiwi/kiwi</span>
+          </div>
+
+          <!-- Model Selector Chip (Approach 1: Contextual Awareness) -->
+          <div class="relative group">
+            <button 
+              id="model-chip"
+              onclick="toggleModelDropdown()"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs transition-all hover:bg-white/[0.08]"
+            >
+              <span id="model-dot" class="w-2 h-2 rounded-full bg-[#E8A153]"></span>
+              <span class="text-zinc-500 font-mono">Work</span>
+              <span id="model-name" class="font-semibold text-white">claude-3-5-haiku</span>
+              <span id="model-tier-badge" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                Economy
+              </span>
+              <svg class="w-3 h-3 text-zinc-500 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <!-- Model Dropdown Menu -->
+            <div id="model-dropdown" class="hidden absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0E1A24] border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 p-2 space-y-1">
+              <div class="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-zinc-500 border-b border-white/5">
+                Select Worker Model
+              </div>
+
+              <!-- Option 1: No-cost -->
+              <button onclick="selectModel('gemini-2.0-flash', 'free')" class="w-full text-left p-2.5 rounded-xl hover:bg-white/5 transition-colors flex items-start justify-between gap-2 group/opt">
+                <div>
+                  <div class="text-xs font-semibold text-white group-hover/opt:text-[#93C645] flex items-center gap-1.5">
+                    gemini-2.0-flash
+                    <span class="text-[9px] uppercase px-1 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">No-Cost</span>
+                  </div>
+                  <div class="text-[11px] text-zinc-500 mt-0.5">Fast &amp; cost-free · 9.9M tokens remaining</div>
+                </div>
+                <span class="text-[10px] text-green-400 font-mono mt-0.5">Available</span>
+              </button>
+
+              <!-- Option 2: Economy -->
+              <button onclick="selectModel('claude-3-5-haiku', 'economy')" class="w-full text-left p-2.5 rounded-xl hover:bg-white/5 transition-colors flex items-start justify-between gap-2 group/opt">
+                <div>
+                  <div class="text-xs font-semibold text-white group-hover/opt:text-[#93C645] flex items-center gap-1.5">
+                    claude-3-5-haiku
+                    <span class="text-[9px] uppercase px-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">Economy</span>
+                  </div>
+                  <div id="opt-economy-sub" class="text-[11px] text-zinc-500 mt-0.5">Cheap default · 800k tokens left</div>
+                </div>
+                <span id="opt-economy-status" class="text-[10px] text-green-400 font-mono mt-0.5">Available</span>
+              </button>
+
+              <!-- Option 3: Frontier -->
+              <button onclick="selectModel('claude-3-5-sonnet', 'frontier')" class="w-full text-left p-2.5 rounded-xl hover:bg-white/5 transition-colors flex items-start justify-between gap-2 group/opt">
+                <div>
+                  <div class="text-xs font-semibold text-white group-hover/opt:text-[#93C645] flex items-center gap-1.5">
+                    claude-3-5-sonnet
+                    <span class="text-[9px] uppercase px-1 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">Frontier</span>
+                  </div>
+                  <div id="opt-frontier-sub" class="text-[11px] text-zinc-500 mt-0.5">High capability · 40k tokens left</div>
+                </div>
+                <span id="opt-frontier-status" class="text-[10px] text-zinc-400 font-mono mt-0.5">Available</span>
+              </button>
+
+              <!-- Option 4: BYOK -->
+              <button onclick="selectModel('gpt-4o (Your Key)', 'byok')" class="w-full text-left p-2.5 rounded-xl hover:bg-white/5 transition-colors flex items-start justify-between gap-2 group/opt border-t border-white/5">
+                <div>
+                  <div class="text-xs font-semibold text-white group-hover/opt:text-[#93C645] flex items-center gap-1.5">
+                    gpt-4o
+                    <span class="text-[9px] uppercase px-1 rounded bg-white/10 text-zinc-300 border border-white/15">Your Key</span>
+                  </div>
+                  <div class="text-[11px] text-zinc-500 mt-0.5">Billed to your provider · Unlimited</div>
+                </div>
+                <span class="text-[10px] text-blue-400 font-mono mt-0.5">BYOK</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Advanced Toggle -->
+          <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-zinc-400 hover:text-white bg-transparent border border-white/5 hover:border-white/15 transition-all">
+            <span>Advanced</span>
+            <svg class="w-3.5 h-3.5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+
+          <div class="flex-1"></div>
+
+          <!-- Unified Allowance Status Pill (Approach 2: Popover) -->
+          <div class="relative">
+            <button 
+              id="quota-pill"
+              onclick="toggleQuotaPopover()"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs font-mono text-zinc-300 hover:border-white/20 transition-all cursor-pointer"
+            >
+              <span id="quota-pill-dot" class="w-2 h-2 rounded-full bg-[#93C645] animate-pulse"></span>
+              <span id="quota-pill-text">Allowances Healthy</span>
+              <div class="w-8 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div id="quota-pill-bar" class="h-full bg-[#93C645] transition-all" style="width: 20%"></div>
+              </div>
+            </button>
+
+            <!-- Quota Popover Dropdown Card -->
+            <div id="quota-popover" class="hidden absolute right-0 bottom-full mb-3 w-84 rounded-2xl bg-[#0E1A24] border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.85)] z-50 p-4 space-y-4">
+              <div class="flex items-center justify-between border-b border-white/5 pb-2">
+                <div class="flex items-center gap-2">
+                  <svg class="w-4 h-4 text-[#93C645]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  <span class="text-xs font-bold uppercase tracking-wider text-white">Monthly Allowance</span>
+                </div>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-zinc-400">Resets Sep 1</span>
+              </div>
+
+              <!-- Tier Bars inside Popover -->
+              <div class="space-y-3 text-xs">
+                
+                <!-- No-Cost -->
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-400 flex items-center gap-1.5">
+                      <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> No-cost
+                    </span>
+                    <span class="font-mono text-zinc-300 text-[11px]" id="popover-free-val">9.9M / 10M</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div id="popover-free-bar" class="bg-blue-400 h-full transition-all" style="width: 1%"></div>
+                  </div>
+                </div>
+
+                <!-- Economy -->
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-400 flex items-center gap-1.5">
+                      <span id="pop-dot-economy" class="w-1.5 h-1.5 rounded-full bg-[#93C645]"></span> Economy
+                    </span>
+                    <span class="font-mono text-zinc-300 text-[11px]" id="popover-economy-val">800k / 1.0M</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div id="popover-economy-bar" class="bg-[#93C645] h-full transition-all" style="width: 20%"></div>
+                  </div>
+                </div>
+
+                <!-- Frontier -->
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-400 flex items-center gap-1.5">
+                      <span id="pop-dot-frontier" class="w-1.5 h-1.5 rounded-full bg-[#93C645]"></span> Frontier
+                    </span>
+                    <span class="font-mono text-zinc-300 text-[11px]" id="popover-frontier-val">40k / 50k</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div id="popover-frontier-bar" class="bg-[#93C645] h-full transition-all" style="width: 20%"></div>
+                  </div>
+                </div>
+
+                <!-- Agent-Minutes -->
+                <div class="space-y-1 pt-1 border-t border-white/5">
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-400 flex items-center gap-1.5">
+                      <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span> Agent-Minutes
+                    </span>
+                    <span class="font-mono text-zinc-300 text-[11px]" id="popover-minutes-val">120m / 500m</span>
+                  </div>
+                  <div class="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                    <div id="popover-minutes-bar" class="bg-purple-400 h-full transition-all" style="width: 24%"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer advice -->
+              <div class="p-2.5 rounded-xl bg-black/40 border border-white/5 text-[11px] text-zinc-400 flex items-start gap-2">
+                <span class="text-amber-400 text-sm">💡</span>
+                <span>Connect your own provider API keys to bypass Kiwi token allowances completely.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Launch Button -->
+          <button 
+            id="launch-btn"
+            class="flex items-center gap-2 px-5 py-2 rounded-xl bg-[#93C645] text-[#0B141D] font-semibold text-xs transition-all hover:bg-[#a5db4f] shadow-[0_0_20px_rgba(147,198,69,0.3)] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span id="launch-btn-text">Launch</span>
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Deep Dive into the 4 Design Approaches -->
+    <div class="space-y-8">
+      <div class="border-b border-white/10 pb-2">
+        <h3 class="text-xl font-bold text-white">4 Individual Design Strategies Detailed</h3>
+        <p class="text-xs text-zinc-400">Each approach solves a specific aspect of the UX problem.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Strategy 1: Model-Aware Contextual Pill -->
+        <div class="glass-panel p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-mono font-medium">Strategy 1</span>
+            <span class="text-xs text-zinc-500">Just-in-time</span>
+          </div>
+          <h4 class="text-base font-semibold text-white">Contextual Model Chip Feedback</h4>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            Instead of forcing the user to monitor 4 different progress bars, the Model selector chip dynamically changes style based on whether <em>that specific model's</em> tier has quota.
+          </p>
+
+          <!-- Mini visual comparison -->
+          <div class="p-3 bg-black/40 rounded-xl space-y-2 border border-white/5 text-xs font-mono">
+            <div class="flex items-center justify-between p-2 rounded-lg bg-white/5">
+              <span class="text-zinc-400">Healthy (< 75%):</span>
+              <span class="px-2 py-0.5 rounded bg-white/5 text-zinc-300 border border-white/10">[ Work: Haiku · Economy ]</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <span class="text-amber-300">Constrained (85%):</span>
+              <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200">[ Work: Haiku · ⚠️ 150k left ]</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+              <span class="text-red-300">Exhausted (100%):</span>
+              <span class="px-2 py-0.5 rounded bg-red-500/20 text-red-200">[ Work: Haiku · ⛔ Exhausted ]</span>
+            </div>
+          </div>
+          <div class="text-[11px] text-[#93C645] flex items-center gap-1.5">
+            <span>✓ Advantage: Zero visual noise until the moment the user selects a constrained model.</span>
+          </div>
+        </div>
+
+        <!-- Strategy 2: Unified Allowance Popover Pill -->
+        <div class="glass-panel p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs font-mono font-medium">Strategy 2</span>
+            <span class="text-xs text-zinc-500">Progressive Disclosure</span>
+          </div>
+          <h4 class="text-base font-semibold text-white">Unified Allowance Health Pill</h4>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            Replaces the single agent-minutes gauge with an aggregate status pill. It stays calm when everything has quota, and shows the bottleneck when a limit nears. Hover/click gives the breakdown.
+          </p>
+
+          <!-- Mini visual comparison -->
+          <div class="p-3 bg-black/40 rounded-xl space-y-2 border border-white/5 text-xs font-mono">
+            <div class="flex items-center gap-2 p-2 rounded-lg bg-white/5 text-zinc-300">
+              <span class="w-2 h-2 rounded-full bg-[#93C645]"></span>
+              <span>Allowances Healthy · 12/500m</span>
+            </div>
+            <div class="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span>Economy 85% · 120/500m</span>
+            </div>
+            <div class="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 text-red-300 border border-red-500/20">
+              <span class="w-2 h-2 rounded-full bg-red-400"></span>
+              <span>Economy Exhausted · 120/500m</span>
+            </div>
+          </div>
+          <div class="text-[11px] text-[#93C645] flex items-center gap-1.5">
+            <span>✓ Advantage: One click provides full transparency across all 3 token tiers and minutes.</span>
+          </div>
+        </div>
+
+        <!-- Strategy 3: Actionable Threshold Alert Banner -->
+        <div class="glass-panel p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-mono font-medium">Strategy 3</span>
+            <span class="text-xs text-zinc-500">Threshold Triggered</span>
+          </div>
+          <h4 class="text-base font-semibold text-white">Actionable 1-Click Fallback Banners</h4>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            When an allowance is exhausted, a plain error message causes frustration. This pattern pairs the alert with instant recovery buttons: <em>"Switch to No-Cost"</em> or <em>"Add Key"</em>.
+          </p>
+
+          <!-- Mini visual comparison -->
+          <div class="p-3 bg-red-950/20 border border-red-500/30 rounded-xl space-y-2 text-xs">
+            <div class="text-red-300 font-medium flex items-center gap-1.5">
+              <span>⛔ Economy allowance exhausted until Sep 1</span>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-1">
+              <button class="px-2.5 py-1 rounded bg-[#93C645] text-black font-semibold text-[11px]">
+                ⚡ Switch to Gemini Flash (Free)
+              </button>
+              <button class="px-2.5 py-1 rounded bg-white/10 text-white text-[11px]">
+                🔑 Connect API Key
+              </button>
+            </div>
+          </div>
+          <div class="text-[11px] text-[#93C645] flex items-center gap-1.5">
+            <span>✓ Advantage: Unblocks the user in 1 click without navigating to settings.</span>
+          </div>
+        </div>
+
+        <!-- Strategy 4: Task Grid Transparency Badges -->
+        <div class="glass-panel p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-medium">Strategy 4</span>
+            <span class="text-xs text-zinc-500">Post-Run Transparency</span>
+          </div>
+          <h4 class="text-base font-semibold text-white">Task Card Quota Badges</h4>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            Task cards on the board can display subtle consumption tags, letting users understand what each task actually burned in tokens or minutes.
+          </p>
+
+          <!-- Mini visual card representation -->
+          <div class="p-3 bg-[#0E1A24] border border-white/10 rounded-xl space-y-2 text-xs">
+            <div class="flex justify-between items-center">
+              <span class="font-mono text-[10px] text-zinc-500">job_7a8f9c2</span>
+              <span class="px-1.5 py-0.5 rounded bg-green-500/10 text-green-300 text-[10px] font-bold">SUCCEEDED</span>
+            </div>
+            <div class="text-zinc-200 font-medium">Add PostgreSQL connection pool metrics</div>
+            <div class="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+              <span class="flex items-center gap-1 text-amber-300/90">⚡ 12.4k tokens (Economy)</span>
+              <span>⏱️ 1.2m</span>
+            </div>
+          </div>
+          <div class="text-[11px] text-[#93C645] flex items-center gap-1.5">
+            <span>✓ Advantage: Gives clarity into which tasks consume larger token allowances.</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Comparative Summary Table -->
+    <section class="glass-panel p-6 space-y-4">
+      <h3 class="text-base font-bold text-white">UX Comparison &amp; Trade-offs</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left text-zinc-300 border-collapse">
+          <thead>
+            <tr class="border-b border-white/10 text-[10px] font-mono uppercase text-zinc-500">
+              <th class="py-2.5 px-3">Approach</th>
+              <th class="py-2.5 px-3">Visual Noise</th>
+              <th class="py-2.5 px-3">Proactivity</th>
+              <th class="py-2.5 px-3">Actionability</th>
+              <th class="py-2.5 px-3">Best Used For</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            <tr class="hover:bg-white/[0.02]">
+              <td class="py-3 px-3 font-semibold text-white">1. Contextual Model Badge</td>
+              <td class="py-3 px-3 text-green-400">Minimal (0 noise until selected)</td>
+              <td class="py-3 px-3 text-amber-400">At selection time</td>
+              <td class="py-3 px-3 text-green-400">High (prevents invalid runs)</td>
+              <td class="py-3 px-3 text-zinc-400">Preventing submit failures</td>
+            </tr>
+            <tr class="hover:bg-white/[0.02]">
+              <td class="py-3 px-3 font-semibold text-white">2. Unified Health Pill</td>
+              <td class="py-3 px-3 text-green-400">Compact (single status pill)</td>
+              <td class="py-3 px-3 text-green-400">Continuous background awareness</td>
+              <td class="py-3 px-3 text-amber-400">Medium (on hover/click)</td>
+              <td class="py-3 px-3 text-zinc-400">Overall account health visibility</td>
+            </tr>
+            <tr class="hover:bg-white/[0.02]">
+              <td class="py-3 px-3 font-semibold text-white">3. Threshold Smart Banner</td>
+              <td class="py-3 px-3 text-amber-400">Medium (only when constrained)</td>
+              <td class="py-3 px-3 text-green-400">Immediate warning</td>
+              <td class="py-3 px-3 text-green-400">Very High (1-click fixes)</td>
+              <td class="py-3 px-3 text-zinc-400">Exhausted & near-cap accounts</td>
+            </tr>
+            <tr class="hover:bg-white/[0.02]">
+              <td class="py-3 px-3 font-semibold text-white">4. Task Card Badges</td>
+              <td class="py-3 px-3 text-green-400">Low (integrated in card footer)</td>
+              <td class="py-3 px-3 text-zinc-400">Historical / Post-run</td>
+              <td class="py-3 px-3 text-zinc-400">Informational</td>
+              <td class="py-3 px-3 text-zinc-400">Auditing task consumption</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Interactive Logic JavaScript -->
+  <script>
+    // State management
+    const state = {
+      preset: 'healthy', // 'healthy', 'warning', 'exhausted', 'byok'
+      selectedModel: 'claude-3-5-haiku',
+      selectedTier: 'economy',
+      isModelDropdownOpen: false,
+      isQuotaPopoverOpen: false,
+    };
+
+    const allowances = {
+      healthy: {
+        free: { used: 100000, granted: 10000000, pct: 1 },
+        economy: { used: 200000, granted: 1000000, pct: 20 },
+        frontier: { used: 10000, granted: 50000, pct: 20 },
+        minutes: { used: 120, limit: 500, pct: 24 }
+      },
+      warning: {
+        free: { used: 500000, granted: 10000000, pct: 5 },
+        economy: { used: 850000, granted: 1000000, pct: 85 }, // Near limit
+        frontier: { used: 15000, granted: 50000, pct: 30 },
+        minutes: { used: 210, limit: 500, pct: 42 }
+      },
+      exhausted: {
+        free: { used: 100000, granted: 10000000, pct: 1 },
+        economy: { used: 1000000, granted: 1000000, pct: 100 }, // Exhausted
+        frontier: { used: 50000, granted: 50000, pct: 100 }, // Exhausted
+        minutes: { used: 340, limit: 500, pct: 68 }
+      },
+      byok: {
+        free: { used: 0, granted: 10000000, pct: 0 },
+        economy: { used: 0, granted: 1000000, pct: 0 },
+        frontier: { used: 0, granted: 50000, pct: 0 },
+        minutes: { used: 50, limit: 500, pct: 10 }
+      }
+    };
+
+    function setPreset(p) {
+      state.preset = p;
+      if (p === 'byok') {
+        state.selectedModel = 'gpt-4o (Your Key)';
+        state.selectedTier = 'byok';
+      } else if (state.selectedTier === 'byok') {
+        state.selectedModel = 'claude-3-5-haiku';
+        state.selectedTier = 'economy';
+      }
+
+      // Update preset buttons
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList.remove('bg-white/10', 'text-white', 'shadow');
+        btn.classList.add('text-zinc-400');
+      });
+      const activeBtn = document.getElementById('btn-' + p);
+      if (activeBtn) {
+        activeBtn.classList.add('bg-white/10', 'text-white', 'shadow');
+        activeBtn.classList.remove('text-zinc-400');
+      }
+
+      render();
+    }
+
+    function toggleModelDropdown() {
+      state.isModelDropdownOpen = !state.isModelDropdownOpen;
+      document.getElementById('model-dropdown').classList.toggle('hidden', !state.isModelDropdownOpen);
+    }
+
+    function toggleQuotaPopover() {
+      state.isQuotaPopoverOpen = !state.isQuotaPopoverOpen;
+      document.getElementById('quota-popover').classList.toggle('hidden', !state.isQuotaPopoverOpen);
+    }
+
+    function selectModel(model, tier) {
+      state.selectedModel = model;
+      state.selectedTier = tier;
+      state.isModelDropdownOpen = false;
+      document.getElementById('model-dropdown').classList.add('hidden');
+      render();
+    }
+
+    function render() {
+      const data = allowances[state.preset];
+      const economyExhausted = data.economy.pct >= 100;
+      const frontierExhausted = data.frontier.pct >= 100;
+      const economyNear = data.economy.pct >= 75 && !economyExhausted;
+
+      // Update Dropdown Options
+      document.getElementById('opt-economy-sub').textContent = economyExhausted 
+        ? 'Exhausted until Sep 1' 
+        : economyNear 
+        ? '150k tokens left (85% used)' 
+        : 'Cheap default · 800k tokens left';
+      document.getElementById('opt-economy-status').textContent = economyExhausted ? 'Exhausted ⛔' : 'Available';
+      document.getElementById('opt-economy-status').className = `text-[10px] font-mono mt-0.5 ${economyExhausted ? 'text-red-400' : 'text-green-400'}`;
+
+      document.getElementById('opt-frontier-sub').textContent = frontierExhausted 
+        ? 'Exhausted until Sep 1' 
+        : 'High capability · 40k tokens left';
+      document.getElementById('opt-frontier-status').textContent = frontierExhausted ? 'Exhausted ⛔' : 'Available';
+      document.getElementById('opt-frontier-status').className = `text-[10px] font-mono mt-0.5 ${frontierExhausted ? 'text-red-400' : 'text-zinc-400'}`;
+
+      // Update Model Chip
+      const modelChip = document.getElementById('model-chip');
+      const modelDot = document.getElementById('model-dot');
+      const modelName = document.getElementById('model-name');
+      const modelBadge = document.getElementById('model-tier-badge');
+      const launchBtn = document.getElementById('launch-btn');
+      const launchText = document.getElementById('launch-btn-text');
+
+      modelName.textContent = state.selectedModel;
+
+      let isCurrentModelBlocked = false;
+
+      if (state.selectedTier === 'byok') {
+        modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs hover:bg-white/[0.08]';
+        modelDot.className = 'w-2 h-2 rounded-full bg-blue-400';
+        modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-white/10 text-zinc-300 border border-white/15';
+        modelBadge.textContent = 'Your Key · Unlimited';
+      } else if (state.selectedTier === 'free') {
+        modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs hover:bg-white/[0.08]';
+        modelDot.className = 'w-2 h-2 rounded-full bg-blue-400';
+        modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20';
+        modelBadge.textContent = 'No-Cost (9.9M left)';
+      } else if (state.selectedTier === 'economy') {
+        if (economyExhausted) {
+          isCurrentModelBlocked = true;
+          modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-950/40 border border-red-500/50 text-xs hover:bg-red-950/60 shadow-[0_0_12px_rgba(239,68,68,0.2)]';
+          modelDot.className = 'w-2 h-2 rounded-full bg-red-400';
+          modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-red-500/20 text-red-300 border border-red-500/40';
+          modelBadge.textContent = 'Economy · ⛔ Exhausted';
+        } else if (economyNear) {
+          modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-xs hover:bg-amber-950/50';
+          modelDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+          modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          modelBadge.textContent = 'Economy · ⚠️ 150k left';
+        } else {
+          modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs hover:bg-white/[0.08]';
+          modelDot.className = 'w-2 h-2 rounded-full bg-[#E8A153]';
+          modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20';
+          modelBadge.textContent = 'Economy';
+        }
+      } else if (state.selectedTier === 'frontier') {
+        if (frontierExhausted) {
+          isCurrentModelBlocked = true;
+          modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-950/40 border border-red-500/50 text-xs hover:bg-red-950/60';
+          modelDot.className = 'w-2 h-2 rounded-full bg-red-400';
+          modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-red-500/20 text-red-300 border border-red-500/40';
+          modelBadge.textContent = 'Frontier · ⛔ Exhausted';
+        } else {
+          modelChip.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs hover:bg-white/[0.08]';
+          modelDot.className = 'w-2 h-2 rounded-full bg-purple-400';
+          modelBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20';
+          modelBadge.textContent = 'Frontier';
+        }
+      }
+
+      // Update Launch Button
+      if (isCurrentModelBlocked) {
+        launchBtn.disabled = true;
+        launchText.textContent = 'Allowance Exhausted';
+      } else {
+        launchBtn.disabled = false;
+        launchText.textContent = 'Launch';
+      }
+
+      // Update Popover & Quota Pill
+      const pill = document.getElementById('quota-pill');
+      const pillDot = document.getElementById('quota-pill-dot');
+      const pillText = document.getElementById('quota-pill-text');
+      const pillBar = document.getElementById('quota-pill-bar');
+
+      if (economyExhausted || frontierExhausted) {
+        pill.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-950/30 border border-red-500/40 text-xs font-mono text-red-200 hover:border-red-500/60 transition-all cursor-pointer';
+        pillDot.className = 'w-2 h-2 rounded-full bg-red-400';
+        pillText.textContent = 'Economy & Frontier Exhausted';
+        pillBar.className = 'h-full bg-red-500 transition-all';
+        pillBar.style.width = '100%';
+      } else if (economyNear) {
+        pill.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-xs font-mono text-amber-200 hover:border-amber-500/60 transition-all cursor-pointer';
+        pillDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+        pillText.textContent = 'Economy 85% spent';
+        pillBar.className = 'h-full bg-amber-400 transition-all';
+        pillBar.style.width = '85%';
+      } else {
+        pill.className = 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs font-mono text-zinc-300 hover:border-white/20 transition-all cursor-pointer';
+        pillDot.className = 'w-2 h-2 rounded-full bg-[#93C645]';
+        pillText.textContent = 'Allowances Healthy';
+        pillBar.className = 'h-full bg-[#93C645] transition-all';
+        pillBar.style.width = '20%';
+      }
+
+      // Popover details
+      document.getElementById('popover-free-val').textContent = `${(data.free.granted - data.free.used) / 1000000}M / ${data.free.granted / 1000000}M`;
+      document.getElementById('popover-free-bar').style.width = `${data.free.pct}%`;
+
+      document.getElementById('popover-economy-val').textContent = economyExhausted ? '0 left of 1.0M' : `${(data.economy.granted - data.economy.used) / 1000}k / 1.0M`;
+      document.getElementById('popover-economy-bar').style.width = `${data.economy.pct}%`;
+      document.getElementById('popover-economy-bar').className = `h-full transition-all ${economyExhausted ? 'bg-red-400' : economyNear ? 'bg-amber-400' : 'bg-[#93C645]'}`;
+      document.getElementById('pop-dot-economy').className = `w-1.5 h-1.5 rounded-full ${economyExhausted ? 'bg-red-400' : economyNear ? 'bg-amber-400' : 'bg-[#93C645]'}`;
+
+      document.getElementById('popover-frontier-val').textContent = frontierExhausted ? '0 left of 50k' : `${(data.frontier.granted - data.frontier.used) / 1000}k / 50k`;
+      document.getElementById('popover-frontier-bar').style.width = `${data.frontier.pct}%`;
+      document.getElementById('popover-frontier-bar').className = `h-full transition-all ${frontierExhausted ? 'bg-red-400' : 'bg-[#93C645]'}`;
+      document.getElementById('pop-dot-frontier').className = `w-1.5 h-1.5 rounded-full ${frontierExhausted ? 'bg-red-400' : 'bg-[#93C645]'}`;
+
+      document.getElementById('popover-minutes-val').textContent = `${data.minutes.used}m / ${data.minutes.limit}m`;
+      document.getElementById('popover-minutes-bar').style.width = `${data.minutes.pct}%`;
+
+      // Smart Banner logic
+      const banner = document.getElementById('smart-banner');
+      if (economyExhausted || frontierExhausted) {
+        banner.classList.remove('hidden');
+        banner.innerHTML = `
+          <div class="p-3.5 rounded-xl bg-red-950/20 border border-red-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2.5 text-red-300">
+              <svg class="w-4 h-4 shrink-0 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <span><strong>Economy &amp; Frontier token allowances are exhausted</strong> until Sep 1. You can continue running unlimited tasks using No-cost models or your own provider keys.</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="selectModel('gemini-2.0-flash', 'free')" class="px-3 py-1.5 rounded-lg bg-[#93C645] text-black font-semibold hover:bg-[#a5db4f] transition-colors">
+                ⚡ Switch to Gemini Flash (No-Cost)
+              </button>
+              <button onclick="selectModel('gpt-4o (Your Key)', 'byok')" class="px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/15 transition-colors">
+                🔑 Use Your API Key
+              </button>
+            </div>
+          </div>
+        `;
+      } else if (economyNear && state.selectedTier === 'economy') {
+        banner.classList.remove('hidden');
+        banner.innerHTML = `
+          <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2.5 text-amber-300">
+              <svg class="w-4 h-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span><strong>Economy tier is at 85% capacity</strong> (~150k tokens left this month). Consider No-cost models for exploratory work.</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="selectModel('gemini-2.0-flash', 'free')" class="px-2.5 py-1 rounded-lg bg-white/10 text-amber-200 hover:bg-white/15 transition-colors">
+                Switch to No-Cost
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+
+    // Close popovers on click outside
+    document.addEventListener('click', (e) => {
+      const modelChip = document.getElementById('model-chip');
+      const modelDropdown = document.getElementById('model-dropdown');
+      if (modelChip && modelDropdown && !modelChip.contains(e.target) && !modelDropdown.contains(e.target)) {
+        state.isModelDropdownOpen = false;
+        modelDropdown.classList.add('hidden');
+      }
+
+      const quotaPill = document.getElementById('quota-pill');
+      const quotaPopover = document.getElementById('quota-popover');
+      if (quotaPill && quotaPopover && !quotaPill.contains(e.target) && !quotaPopover.contains(e.target)) {
+        state.isQuotaPopoverOpen = false;
+        quotaPopover.classList.add('hidden');
+      }
+    });
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>

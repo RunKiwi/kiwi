@@ -9,6 +9,7 @@ export interface ThinkingOrbProps {
   size?: number;
   className?: string;
   theme?: "kiwi" | "mono" | "default";
+  glow?: boolean;
   "aria-hidden"?: boolean;
 }
 
@@ -17,6 +18,7 @@ export function ThinkingOrb({
   size = 64,
   className = "",
   theme = "kiwi",
+  glow = true,
   "aria-hidden": ariaHidden = true,
 }: ThinkingOrbProps) {
   const basePreset = size <= 32 ? 20 : 64;
@@ -48,13 +50,26 @@ export function ThinkingOrb({
     }
   }, [theme]);
 
+  const showGlow = glow && theme !== "mono";
+
   return (
-    <div
-      className={`inline-flex shrink-0 items-center justify-center ${themeClass} ${className}`}
-      style={style}
-      aria-hidden={ariaHidden}
-    >
-      <BaseThinkingOrb state={state} size={basePreset} aria-hidden={ariaHidden} />
+    <div className={`relative inline-flex items-center justify-center ${className}`}>
+      {showGlow && (
+        <div
+          className="absolute rounded-full bg-lime-400/25 blur-xl pointer-events-none animate-pulse"
+          style={{
+            width: size * 1.5,
+            height: size * 1.5,
+          }}
+        />
+      )}
+      <div
+        className={`relative z-10 inline-flex shrink-0 items-center justify-center ${themeClass}`}
+        style={style}
+        aria-hidden={ariaHidden}
+      >
+        <BaseThinkingOrb state={state} size={basePreset} aria-hidden={ariaHidden} />
+      </div>
     </div>
   );
 }

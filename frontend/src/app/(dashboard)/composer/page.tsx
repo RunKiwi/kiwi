@@ -1,25 +1,37 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Sparkles,
   ShieldCheck,
   Play,
   Sliders,
   FolderGit2,
+  Zap,
 } from "lucide-react";
-import { api, DEFAULT_WORKER_MODEL, type GithubRepo } from "@/lib/api";
+import {
+  api,
+  DEFAULT_WORKER_MODEL,
+  formatTokens,
+  modelClassLabel,
+  CLASS_ORDER,
+  type GithubRepo,
+  type SpendResponse,
+} from "@/lib/api";
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
+import { Logo } from "@/components/Logo";
+import { Select } from "@/components/Select";
 
-export default function ComposerPage() {
+function ComposerContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetRepoParam = searchParams.get("repo");
 
   const [prompt, setPrompt] = useState("");
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState(targetRepoParam || "");
   const [branch, setBranch] = useState("");
   const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
   const [strategy, setStrategy] = useState<"direct" | "plan">("direct");
@@ -27,28 +39,30 @@ export default function ComposerPage() {
   const [mode, setMode] = useState<"pr" | "dryrun">("pr");
   const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
+  const [spend, setSpend] = useState<SpendResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
+    api.getSpend().then(setSpend).catch(() => {});
     api.listGithubRepos()
       .then((r) => {
         const list = r.repos || [];
         setRepos(list);
-        if (list.length > 0) {
-          setRepo(list[0].full_name || list[0].name || "");
+        if (targetRepoParam) {
+          const match = list.find((item) => (item.full_name || item.name) === targetRepoParam);
+          if (match) {
+            setRepo(match.full_name || match.name || targetRepoParam);
+          } else {
+            setRepo(targetRepoParam);
+          }
+        } else if (list.length > 0) {
+          setRepo((prev) => prev || (list[0].full_name || list[0].name || ""));
         }
       })
       .catch(() => {})
       .finally(() => setReposLoaded(true));
-  }, []);
-
-  const templates = [
-    { title: "🛡️ Fix Vulnerability", desc: "Patch CVE & add race test", p: "Fix CVE-2026-4182 JWT algorithm confusion vulnerability in pkg/auth/jwt.go and add negative test guards." },
-    { title: "⚡ Async Refactor", desc: "Convert sync loops to worker pools", p: "Refactor synchronous report generation loops in pkg/reports to use bounded goroutine worker pool with errgroup." },
-    { title: "🧪 Fix Flaky Test", desc: "Eliminate timing race conditions", p: "Diagnose and fix intermittent race conditions in pkg/queue/broker_test.go under high concurrency." },
-    { title: "📈 Add Test Coverage", desc: "Generate table-driven tests", p: "Generate comprehensive table-driven unit tests for billing calculation logic in pkg/billing/calculator.go with 100% branch coverage." },
-  ];
+  }, [targetRepoParam]);
 
   const handleStart = async () => {
     if (!prompt.trim() || !repo) return;
@@ -76,45 +90,95 @@ export default function ComposerPage() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto font-sans text-stone-900">
-      {/* Header */}
-      <div className="border-b border-sand-150 pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold bg-kiwi-100 text-kiwi-800 px-2 py-0.5 rounded">NEW TASK</span>
-            <h1 className="text-lg font-bold text-stone-900 tracking-tight">Assign Work to AI Agent</h1>
+      {/* Header with Hybrid Light Aura & Animated Hacking Mascot */}
+      <div className="relative overflow-hidden p-6 rounded-3xl border border-sand-200 bg-gradient-to-r from-sand-100/90 via-white to-kiwi-50/70 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-2xs group">
+        <div
+          className="absolute inset-0 opacity-[0.035] pointer-events-none"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+          }}
+        />
+        <div className="absolute -top-12 -right-12 w-36 h-36 bg-kiwi-400/20 rounded-full blur-3xl group-hover:scale-110 transition-transform" />
+
+        <div className="relative z-10 flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-sand-200/90 shadow-2xs flex items-center justify-center shrink-0">
+            <Logo variant="full-color" pose="hacking" animated={true} className="w-8 h-8" />
           </div>
-          <button onClick={() => setPrompt("")} className="text-xs text-stone-400 hover:text-stone-700 font-medium">
-            Reset Form
-          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono font-bold bg-kiwi-100 text-kiwi-900 px-2 py-0.5 rounded-full border border-kiwi-200">TASK COMPOSER</span>
+              <h1 className="text-lg font-bold text-stone-900 tracking-tight">Assign Work to AI Agent</h1>
+            </div>
+            <p className="text-xs text-stone-600 mt-0.5">
+              Kiwi writes the code, verifies tests in an isolated container, and opens a ready-to-merge Pull Request.
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-stone-500 mt-1">
-          Describe what needs to be built or fixed. Kiwi writes the code, verifies tests in an isolated container, and opens a ready-to-merge Pull Request.
-        </p>
+
+        <button onClick={() => setPrompt("")} className="relative z-10 text-xs text-stone-400 hover:text-stone-700 font-medium cursor-pointer">
+          Reset Form
+        </button>
       </div>
 
-      {/* 1-Click Starter Presets */}
-      <div className="space-y-2">
-        <span className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-kiwi-700" />
-          Quick-Start Templates:
-        </span>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
-          {templates.map((tpl, i) => (
-            <button
-              key={i}
-              onClick={() => setPrompt(tpl.p)}
-              className="p-2.5 rounded-xl border border-sand-200 bg-sand-50/60 hover:bg-white hover:border-sand-300 text-left transition-all group shadow-2xs"
-            >
-              <span className="font-bold text-stone-800 block group-hover:text-kiwi-800">{tpl.title}</span>
-              <span className="text-[11px] text-stone-500">{tpl.desc}</span>
-            </button>
-          ))}
+      {/* Platform Token Quota Health Strip */}
+      {spend?.allowance && spend.allowance.length > 0 && (
+        <div className="p-3.5 rounded-2xl bg-white/90 backdrop-blur-xl border border-sand-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-kiwi-600" />
+            <span className="font-bold text-stone-900">Kiwi Platform Quota:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {CLASS_ORDER.map((tierKey) => {
+              const a = spend.allowance?.find((x) => x.tier === tierKey);
+              if (!a) return null;
+              const unlimited = a.granted < 0;
+              const exhausted = !unlimited && (a.remaining <= 0 || a.used >= a.granted);
+
+              return (
+                <div
+                  key={a.tier}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 ${
+                    exhausted
+                      ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
+                      : "bg-sand-50/80 border-sand-200 text-stone-700"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      exhausted
+                        ? "bg-rose-500"
+                        : a.tier === "frontier"
+                        ? "bg-amber-500"
+                        : a.tier === "economy"
+                        ? "bg-emerald-500"
+                        : "bg-sky-500"
+                    }`}
+                  />
+                  <span className="font-sans font-semibold text-stone-900">{modelClassLabel(a.tier)}:</span>
+                  <span>{unlimited ? "Unlimited" : exhausted ? "⛔ Exhausted" : `${formatTokens(a.remaining)} left`}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <a href="/models" className="text-[11px] text-kiwi-700 font-semibold hover:underline">
+            View All Models &rarr;
+          </a>
         </div>
-      </div>
+      )}
 
       {/* Task Prompt Box */}
-      <div className="p-5 rounded-2xl border border-sand-200 bg-sand-50/50 shadow-sm space-y-4">
-        <div>
+      <div className="relative p-6 rounded-3xl border border-sand-200 bg-white/90 backdrop-blur-xl shadow-2xs space-y-4 group">
+        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+          <div
+            className="absolute inset-0 opacity-[0.03]"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+        </div>
+        <div className="relative z-10">
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-bold text-stone-800">Task Objective</label>
             <span className="text-xs text-kiwi-700 hover:underline font-medium cursor-pointer">
@@ -152,24 +216,24 @@ export default function ComposerPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div>
-              <label className="block font-semibold text-stone-700 mb-1">Target Repository & Branch</label>
+              <label className="block font-semibold text-stone-700 mb-1">Target Repository &amp; Branch</label>
               <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-2 rounded-xl bg-sand-50/90 border border-sand-200 text-stone-900 font-medium flex items-center gap-2 shadow-2xs min-w-0">
-                  <FolderGit2 className="w-3.5 h-3.5 text-stone-500 shrink-0" />
-                  <select
+                <div className="flex-1 min-w-0">
+                  <Select
                     value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                    className="w-full bg-transparent font-mono text-xs font-bold text-stone-900 outline-none cursor-pointer truncate"
-                  >
-                    {repos.map((r) => {
+                    onChange={setRepo}
+                    options={repos.map((r) => {
                       const repoName = r.full_name || r.name || "repo";
-                      return (
-                        <option key={repoName} value={repoName}>
-                          {repoName}
-                        </option>
-                      );
+                      return {
+                        value: repoName,
+                        label: repoName,
+                        hint: r.private ? "private" : "public",
+                      };
                     })}
-                  </select>
+                    searchable
+                    placeholder="Select repository…"
+                    icon={<FolderGit2 className="w-4 h-4 text-stone-500 shrink-0" />}
+                  />
                 </div>
                 <input
                   type="text"
@@ -177,7 +241,7 @@ export default function ComposerPage() {
                   onChange={(e) => setBranch(e.target.value)}
                   placeholder="main"
                   title="Branch (defaults to the repo's default branch)"
-                  className="w-24 px-2.5 py-2 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shrink-0"
+                  className="w-24 px-3 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shrink-0 shadow-xs"
                 />
               </div>
             </div>
@@ -191,7 +255,7 @@ export default function ComposerPage() {
                 type="text"
                 value={testCmd}
                 onChange={(e) => setTestCmd(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shadow-xs"
               />
             </div>
           </div>
@@ -206,7 +270,7 @@ export default function ComposerPage() {
         />
 
         {/* Configuration Grid 3: Execution Strategy, Spend Cap, Timeout & Mode */}
-        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs space-y-3">
+        <div className="relative z-10 p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs space-y-3">
           <div className="flex items-center justify-between border-b border-sand-150 pb-2">
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-kiwi-700" />
@@ -272,7 +336,7 @@ export default function ComposerPage() {
         </div>
 
         {/* Pre-Flight Bar & Start Button */}
-        <div className="pt-3 border-t border-sand-200 space-y-3">
+        <div className="relative z-10 pt-3 border-t border-sand-200 space-y-3">
           {submitError && (
             <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
               <span>{submitError}</span>
@@ -301,3 +365,12 @@ export default function ComposerPage() {
     </div>
   );
 }
+
+export default function ComposerPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center text-xs text-stone-400 font-mono">Loading composer...</div>}>
+      <ComposerContent />
+    </Suspense>
+  );
+}
+

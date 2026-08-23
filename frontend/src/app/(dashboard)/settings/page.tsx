@@ -1,214 +1,400 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Key, CheckCircle2, Building2, Server, Layers, Boxes, Cpu, ShieldCheck, XCircle, Bell, BellOff } from "lucide-react";
-import { client, type Integration } from "@/lib/api";
+import {
+  CreditCard,
+  Building2,
+  Server,
+  Layers,
+  ShieldCheck,
+  Bell,
+  BellOff,
+  Receipt,
+  ExternalLink,
+  Copy,
+  Check,
+  Gauge,
+} from "lucide-react";
+import { client, type ValidateResponse } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
 import { PlanComparison } from "@/components/PlanComparison";
-import { isNotificationEnabled, setNotificationEnabled, requestNotificationPermission, getNotificationPermission } from "@/lib/notifications";
-
-// Mirrors the Integrations catalog. Listed here for status only — Settings does
-// not write credentials.
-const PROVIDER_CREDENTIALS = [
-  { key: "anthropic", label: "Anthropic", name: "ANTHROPIC_API_KEY" },
-  { key: "gemini", label: "Gemini", name: "GEMINI_API_KEY" },
-  { key: "openai", label: "OpenAI", name: "OPENAI_API_KEY" },
-  { key: "git", label: "Git push token", name: "GIT_TOKEN" },
-];
+import { UpgradeButton } from "@/components/UpgradeButton";
+import { Logo } from "@/components/Logo";
+import {
+  isNotificationEnabled,
+  setNotificationEnabled,
+  requestNotificationPermission,
+  getNotificationPermission,
+} from "@/lib/notifications";
 
 export default function SettingsPage() {
-  const [org, setOrg] = useState<{ org_name: string; org_id: string; user_id: string; activation_state?: string; plan?: string } | null>(null);
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [org, setOrg] = useState<ValidateResponse | null>(null);
+  const [copiedOrgId, setCopiedOrgId] = useState(false);
   const [stats, setStats] = useState({ fleets: 0, daemons: 0, daemonsOnline: 0, jobs: 0, models: 0 });
-  // Notification state is read after mount: Notification.permission does not
-  // exist during prerender, so reading it in render would disagree with the
-  // server-rendered markup and hydrate wrong.
+
+  // Notification state
   const [notifyOn, setNotifyOn] = useState(false);
   const [permission, setPermission] = useState<string>("default");
 
-
   useEffect(() => {
-    // Browser-only values, so they can only be read once mounted — the same
-    // reason the dashboard layout reads its org name this way.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNotifyOn(isNotificationEnabled());
     setPermission(getNotificationPermission());
     client.validate().then(setOrg).catch(() => {});
-    client.listIntegrations().then(r => setIntegrations(r.integrations)).catch(() => {});
     Promise.all([
-      client.listFleets().then(r => r.fleets.length).catch(() => 0),
-      client.listDaemons().then(d => ({ total: d.length, online: d.filter(x => x.online).length })).catch(() => ({ total: 0, online: 0 })),
-      client.listJobs().then(r => r.jobs.length).catch(() => 0),
-      client.listModels().then(r => r.models.length).catch(() => 0),
+      client.listFleets().then((r) => r.fleets.length).catch(() => 0),
+      client.listDaemons().then((d) => ({ total: d.length, online: d.filter((x) => x.online).length })).catch(() => ({ total: 0, online: 0 })),
+      client.listJobs().then((r) => r.jobs.length).catch(() => 0),
+      client.listModels().then((r) => r.models.length).catch(() => 0),
     ]).then(([fleets, daemons, jobs, models]) =>
-      setStats({ fleets, daemons: daemons.total, daemonsOnline: daemons.online, jobs, models }));
+      setStats({ fleets, daemons: daemons.total, daemonsOnline: daemons.online, jobs, models })
+    );
   }, []);
 
-  const statCards = [
-    { label: "Fleets", value: stats.fleets, icon: Layers },
-    { label: "Daemons", value: `${stats.daemonsOnline}/${stats.daemons}`, sub: "online", icon: Server },
-    { label: "Jobs", value: stats.jobs, icon: Boxes },
-    { label: "Models", value: stats.models, sub: "custom", icon: Cpu },
-  ];
+  const handleToggleNotify = async () => {
+    if (!notifyOn) {
+      const granted = await requestNotificationPermission();
+      setNotifyOn(granted);
+      setPermission(getNotificationPermission());
+    } else {
+      setNotificationEnabled(false);
+      setNotifyOn(false);
+    }
+  };
+
+  const copyOrgId = () => {
+    if (!org?.org_id) return;
+    navigator.clipboard.writeText(org.org_id);
+    setCopiedOrgId(true);
+    setTimeout(() => setCopiedOrgId(false), 2000);
+  };
+
+  const isSuspended = org?.activation_state === "suspended";
+  const planName = (org?.plan || "free").toUpperCase();
 
   return (
-    <div className="p-8 max-w-5xl mx-auto flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-stone-900 mb-2">Settings</h1>
-        <p className="text-stone-500">Your organization, connections, and provider credentials.</p>
-      </div>
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 w-full font-sans text-stone-900">
+      {/* ================= HERO HEADER WITH ANIMATED MASCOT ================= */}
+      <div className="relative overflow-hidden p-6 rounded-3xl border border-sand-200 bg-gradient-to-r from-sand-100/90 via-white to-amber-50/70 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-2xs group">
+        <div
+          className="absolute inset-0 opacity-[0.035] pointer-events-none"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+          }}
+        />
+        <div className="absolute -top-12 -right-12 w-36 h-36 bg-amber-400/20 rounded-full blur-3xl group-hover:scale-110 transition-transform" />
 
-      {/* Organization */}
-      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-6">
-        <h2 className="text-lg font-bold text-stone-900 flex items-center gap-2 mb-4"><Building2 className="w-5 h-5 text-stone-500" /> Organization</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
-          <div><div className="text-xs text-stone-400 uppercase tracking-widest mb-1">Name</div><div className="text-stone-900 font-medium">{org?.org_name || "—"}</div></div>
-          <div><div className="text-xs text-stone-400 uppercase tracking-widest mb-1">Org ID</div><div className="font-mono text-stone-700">{org?.org_id || "—"}</div></div>
-          <div><div className="text-xs text-stone-400 uppercase tracking-widest mb-1">Auth</div><div className="text-stone-900 flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-emerald-600" /> API Key</div></div>
+        <div className="relative z-10 flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-sand-200/90 shadow-2xs flex items-center justify-center shrink-0">
+            <Logo variant="full-color" pose={org?.plan === "pro" ? "flying" : "vibing"} animated={true} className="w-8 h-8" />
+          </div>
           <div>
-            <div className="text-xs text-stone-400 uppercase tracking-widest mb-1">Status</div>
-            <div className="flex items-center gap-2">
-              {(() => {
-                // "Active" here means "can run tasks", not the paid activation step.
-                // A Free org is created activation_state=inactive but runs fine on the
-                // shared fleet — only a suspended org is actually blocked, so we show
-                // ACTIVE for anything that isn't suspended (and isn't a paid org still
-                // awaiting activation).
-                const suspended = org?.activation_state === 'suspended';
-                const inactivePaid = org?.activation_state !== 'active' && org?.plan !== 'free';
-                const label = suspended ? 'SUSPENDED' : inactivePaid ? 'INACTIVE' : 'ACTIVE';
-                const cls = suspended ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                  : inactivePaid ? 'bg-sand-100 text-stone-500 border border-sand-200'
-                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-                return (
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${cls}`}>
-                    {org ? label : '—'}
-                  </span>
-                );
-              })()}
-            </div>
+            <h1 className="text-xl font-bold tracking-tight text-stone-900 flex items-center gap-2.5">
+              <span>Plans &amp; Billing</span>
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md border ${
+                org?.plan === "pro"
+                  ? "bg-amber-100 text-amber-900 border-amber-200"
+                  : org?.plan === "enterprise"
+                  ? "bg-purple-100 text-purple-900 border-purple-200"
+                  : "bg-sand-100 text-stone-700 border-sand-200"
+              }`}>
+                {planName} TIER
+              </span>
+            </h1>
+            <p className="text-xs text-stone-600 mt-0.5 max-w-2xl leading-relaxed">
+              Manage your workspace subscription tier, monthly agent-minutes quota, concurrent task runner limits, and invoice records.
+            </p>
           </div>
         </div>
 
-        {org?.activation_state === 'suspended' && (
-          <div id="activation" className="mt-4 p-4 rounded-xl border border-rose-200 bg-rose-50 scroll-mt-8">
-            <h3 className="text-rose-800 font-bold text-sm">Organization suspended</h3>
-            <p className="text-rose-700 text-sm mt-1">
-              Running tasks is disabled. This can follow repeated abuse signals or exhausting your plan&apos;s limits.
-              Contact{" "}
-              <a href={`mailto:support@runkiwi.dev?subject=${encodeURIComponent(`Suspended org ${org?.org_id ?? ""}`)}`} className="underline hover:text-rose-900">support</a>
-              {" "}if you think this is a mistake.
-            </p>
+        {org?.plan === "free" ? (
+          <div className="relative z-10">
+            <UpgradeButton variant="full" label="Upgrade to Pro" />
+          </div>
+        ) : (
+          <div className="relative z-10 flex items-center gap-2">
+            <a
+              href="mailto:support@runkiwi.dev?subject=Billing%20Inquiry"
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-700 font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>Contact Billing</span>
+            </a>
           </div>
         )}
       </div>
 
-      {/* Plan & usage */}
+      {/* ================= TOP 4 KPI TILES (HYBRID FROSTED + LIGHT AURA + SPARKLINES) ================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* KPI 1 */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/85 backdrop-blur-xl border border-sand-200 shadow-2xs hover:border-sand-300 hover:shadow-island transition-all group flex flex-col justify-between">
+          <div
+            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+          <div className="absolute -top-8 -right-8 w-20 h-20 bg-amber-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+          <div className="relative z-10 flex items-center justify-between text-xs text-stone-600 font-medium">
+            <span>Subscription Tier</span>
+            <CreditCard className="w-4 h-4 text-stone-400" />
+          </div>
+          <div className="relative z-10 mt-2">
+            <div className="text-2xl font-bold font-mono text-stone-900">{planName}</div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              {org?.plan === "free" ? "Shared Managed Fleet" : "Dedicated Runners Enabled"}
+            </div>
+          </div>
+          <div className="relative z-10 mt-2 flex items-end gap-1 h-3.5">
+            {[40, 50, 60, 70, 75, 85, org?.plan === "pro" ? 100 : 40].map((h, i) => (
+              <div key={i} className="flex-1 bg-amber-200 rounded-2xs" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+
+        {/* KPI 2 */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/85 backdrop-blur-xl border border-sand-200 shadow-2xs hover:border-kiwi-300 hover:shadow-island transition-all group flex flex-col justify-between">
+          <div
+            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+          <div className="absolute -top-8 -right-8 w-20 h-20 bg-kiwi-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+          <div className="relative z-10 flex items-center justify-between text-xs text-stone-600 font-medium">
+            <span>Monthly Quota</span>
+            <Gauge className="w-4 h-4 text-kiwi-600" />
+          </div>
+          <div className="relative z-10 mt-2">
+            <div className="text-2xl font-bold font-mono text-stone-900">
+              {org?.plan === "free" ? "200 min" : "2,000 min"}
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              {org?.plan === "free" ? "Pooled workspace allowance" : "Per seat / pooled allowance"}
+            </div>
+          </div>
+          <div className="relative z-10 mt-2 flex items-end gap-1 h-3.5">
+            {[60, 70, 75, 80, 85, 90, 95].map((h, i) => (
+              <div key={i} className="flex-1 bg-kiwi-200 rounded-2xs" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+
+        {/* KPI 3 */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/85 backdrop-blur-xl border border-sand-200 shadow-2xs hover:border-indigo-300 hover:shadow-island transition-all group flex flex-col justify-between">
+          <div
+            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+          <div className="absolute -top-8 -right-8 w-20 h-20 bg-indigo-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+          <div className="relative z-10 flex items-center justify-between text-xs text-stone-600 font-medium">
+            <span>Concurrency Limit</span>
+            <Layers className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="relative z-10 mt-2">
+            <div className="text-2xl font-bold font-mono text-stone-900">
+              {org?.plan === "free" ? "1 Task" : "20 Tasks"}
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              Parallel execution capacity
+            </div>
+          </div>
+          <div className="relative z-10 mt-2 flex items-end gap-1 h-3.5">
+            {[30, 45, 60, 75, 80, 90, 100].map((h, i) => (
+              <div key={i} className="flex-1 bg-indigo-200 rounded-2xs" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+
+        {/* KPI 4 */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/85 backdrop-blur-xl border border-sand-200 shadow-2xs hover:border-emerald-300 hover:shadow-island transition-all group flex flex-col justify-between">
+          <div
+            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
+          <div className="absolute -top-8 -right-8 w-20 h-20 bg-emerald-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+          <div className="relative z-10 flex items-center justify-between text-xs text-stone-600 font-medium">
+            <span>Private Runners</span>
+            <Server className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="relative z-10 mt-2">
+            <div className="text-2xl font-bold font-mono text-stone-900">
+              {stats.daemonsOnline} <span className="text-sm font-normal text-stone-400">/ {stats.daemons}</span>
+            </div>
+            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+              <Link href="/fleet" className="text-kiwi-700 font-semibold hover:underline">
+                View Private Fleet &rarr;
+              </Link>
+            </div>
+          </div>
+          <div className="relative z-10 mt-2 flex items-end gap-1 h-3.5">
+            {[40, 50, 60, 60, 80, 80, stats.daemonsOnline > 0 ? 100 : 50].map((h, i) => (
+              <div key={i} className="flex-1 bg-emerald-200 rounded-2xs" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ================= CURRENT PLAN USAGE CARD ================= */}
       <PlanUsage />
+
+      {/* ================= PLAN COMPARISON & PRICING TIERS ================= */}
       <PlanComparison currentPlan={org?.plan} />
 
-      {/* Overview stats (real data) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map(s => (
-          <div key={s.label} className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 flex flex-col gap-2">
-            <s.icon className="w-5 h-5 text-stone-400" />
-            <div className="text-2xl font-bold text-stone-900">{s.value} {s.sub && <span className="text-xs text-stone-400 font-normal">{s.sub}</span>}</div>
-            <div className="text-xs text-stone-400 uppercase tracking-widest">{s.label}</div>
-          </div>
-        ))}
-      </div>
+      {/* ================= ORGANIZATION BILLING PROFILE & INVOICES ================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Organization Details Card */}
+        <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-stone-600" />
+              <span>Workspace Profile</span>
+            </h2>
 
-      {/* Integrations status */}
-      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-6">
-        <h2 className="text-lg font-bold text-stone-900 mb-4">Connections</h2>
-        <div className="flex flex-wrap gap-2">
-          {integrations.map(i => (
-            <span key={i.key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${i.connected ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-sand-50 border-sand-200 text-stone-400"}`}>
-              {i.connected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}{i.key}
+            <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+              <span>Verified Account</span>
             </span>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Provider credentials — read-only here. Integrations owns the one write
-          path, so the same key is not enterable from three different screens
-          with three different forms. */}
-      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-6">
-        <h2 className="text-lg font-bold text-stone-900 flex items-center gap-2 mb-5"><Key className="w-5 h-5 text-sky-600" /> Provider credentials</h2>
-        <div className="space-y-3">
-          {PROVIDER_CREDENTIALS.map(row => {
-            const isConnected = integrations.some(i => i.key === row.key && i.connected);
-            return (
-              <div key={row.key} className="flex items-center justify-between gap-4 py-2 border-b border-sand-150 last:border-0">
-                <div className="min-w-0">
-                  <div className="text-sm text-stone-800">{row.label}</div>
-                  <div className="font-mono text-[11px] text-stone-400">{row.name}</div>
-                </div>
-                <span className={`flex items-center gap-1.5 text-xs font-medium shrink-0 ${isConnected ? "text-emerald-700" : "text-stone-400"}`}>
-                  {isConnected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                  {isConnected ? "Connected" : "Not connected"}
+          <div className="space-y-3 text-xs pt-1">
+            <div className="flex items-center justify-between py-2 border-b border-sand-150">
+              <span className="text-stone-500 font-medium">Workspace Name</span>
+              <span className="font-bold text-stone-900">{org?.org_name || "—"}</span>
+            </div>
+
+            <div className="flex items-center justify-between py-2 border-b border-sand-150">
+              <span className="text-stone-500 font-medium">Organization ID</span>
+              <button
+                onClick={copyOrgId}
+                className="font-mono text-xs text-stone-700 hover:text-stone-950 flex items-center gap-1 bg-sand-50 hover:bg-sand-100 border border-sand-200 px-2 py-0.5 rounded-md transition-colors"
+                title="Copy Org ID"
+              >
+                <span>{org?.org_id || "—"}</span>
+                {copiedOrgId ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-stone-400" />}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between py-2 border-b border-sand-150">
+              <span className="text-stone-500 font-medium">Primary Domain</span>
+              <span className="font-mono text-stone-800">{org?.primary_domain || "runkiwi.dev"}</span>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <span className="text-stone-500 font-medium">Team Management</span>
+              <Link href="/team" className="text-kiwi-700 font-bold hover:underline">
+                Manage Team Members &rarr;
+              </Link>
+            </div>
+          </div>
+
+          {isSuspended && (
+            <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50 text-xs text-rose-800 space-y-1">
+              <div className="font-bold flex items-center gap-1.5">
+                <span>Organization Suspended</span>
+              </div>
+              <p className="text-rose-700">
+                Task execution is paused. Please contact{" "}
+                <a href="mailto:support@runkiwi.dev" className="underline font-semibold hover:text-rose-900">
+                  support@runkiwi.dev
+                </a>{" "}
+                to reactivate compute limits.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Invoices & Receipts Card */}
+        <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 sm:p-6 space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-stone-600" />
+                <span>Invoices &amp; Receipts</span>
+              </h2>
+
+              <span className="text-[10px] font-mono text-stone-500 bg-sand-100 px-2 py-0.5 rounded-md border border-sand-200">
+                Stripe Billing
+              </span>
+            </div>
+
+            <p className="text-xs text-stone-500 leading-relaxed">
+              Kiwi generates verifiable cryptographic receipts for every execution task and automated pull request. Invoices are dispatched monthly to your billing email.
+            </p>
+
+            <div className="p-3 rounded-xl bg-sand-50/70 border border-sand-200 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Payment Method:</span>
+                <span className="font-mono text-stone-900 font-semibold">
+                  {org?.plan === "free" ? "Free Community Tier" : "Invoiced (Stripe)"}
                 </span>
               </div>
-            );
-          })}
-        </div>
-        <p className="text-xs text-stone-400 mt-4">
-          Keys are encrypted at rest and never shown again.
-          <Link href="/integrations" className="underline ml-1 hover:text-stone-700">Add or replace a key in Integrations</Link>.
-        </p>
-      </div>
-
-      {/* Desktop notifications */}
-      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-6">
-        <h2 className="text-lg font-bold text-stone-900 flex items-center gap-2 mb-2">
-          <Bell className="w-5 h-5 text-amber-500" /> Job notifications
-        </h2>
-        <p className="text-sm text-stone-500 mb-4">
-          Get a desktop notification when a job finishes, so you do not have to watch the tab.
-        </p>
-
-        <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-sand-200 bg-sand-50/60">
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm font-medium text-stone-900">Notify me when a job finishes</span>
-            {permission === "denied" ? (
-              <span className="text-xs text-amber-700">
-                Blocked by your browser. Allow notifications for this site in the address bar, then switch this on.
-              </span>
-            ) : permission === "unsupported" ? (
-              <span className="text-xs text-stone-400">This browser does not support notifications.</span>
-            ) : (
-              <span className="text-xs text-stone-400">
-                {notifyOn ? "On — sent once per job, when it reaches a final state." : "Off"}
-              </span>
-            )}
+              <div className="flex items-center justify-between">
+                <span className="text-stone-600">Billing Support:</span>
+                <a
+                  href="mailto:support@runkiwi.dev?subject=Invoice%20Request"
+                  className="font-mono text-kiwi-700 hover:underline font-semibold"
+                >
+                  support@runkiwi.dev
+                </a>
+              </div>
+            </div>
           </div>
 
-          <button
-            type="button"
-            role="switch"
-            aria-checked={notifyOn}
-            disabled={permission === "denied" || permission === "unsupported"}
-            onClick={async () => {
-              if (notifyOn) {
-                setNotificationEnabled(false);
-                setNotifyOn(false);
-                return;
-              }
-              const granted = await requestNotificationPermission();
-              setNotifyOn(granted);
-              setPermission(getNotificationPermission());
-            }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
-              notifyOn
-                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                : "border-sand-200 bg-white text-stone-500 hover:text-stone-800 hover:bg-sand-50"
-            }`}
-          >
-            {notifyOn ? <Bell className="w-4 h-4 text-emerald-600" /> : <BellOff className="w-4 h-4 text-stone-400" />}
-            <span>{notifyOn ? "On" : "Turn on"}</span>
-          </button>
+          <div className="pt-2 border-t border-sand-150 flex items-center justify-between">
+            <Link
+              href="/records"
+              className="text-xs font-semibold text-stone-600 hover:text-stone-900 flex items-center gap-1 transition-colors"
+            >
+              <span>View Audit Receipts Log</span>
+              <ExternalLink className="w-3 h-3 text-stone-400" />
+            </Link>
+
+            <a
+              href="mailto:support@runkiwi.dev?subject=Billing%20Support"
+              className="px-3 py-1.5 rounded-xl bg-sand-100 hover:bg-sand-200 text-stone-800 font-semibold text-xs border border-sand-200 transition-colors"
+            >
+              Request Invoice PDF
+            </a>
+          </div>
         </div>
+      </div>
+
+      {/* ================= DESKTOP NOTIFICATIONS SETTING ================= */}
+      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 sm:p-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-bold text-stone-900">Task Completion Notifications</h3>
+          </div>
+          <p className="text-xs text-stone-500 max-w-xl">
+            Receive native desktop notifications when tasks and review watchdogs complete so you don&apos;t have to keep the tab focused.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={notifyOn}
+          disabled={permission === "denied" || permission === "unsupported"}
+          onClick={handleToggleNotify}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all shadow-2xs shrink-0 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+            notifyOn
+              ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+              : "border-sand-200 bg-white text-stone-600 hover:text-stone-900 hover:bg-sand-50"
+          }`}
+        >
+          {notifyOn ? <Bell className="w-3.5 h-3.5 text-emerald-600 fill-current" /> : <BellOff className="w-3.5 h-3.5 text-stone-400" />}
+          <span>{notifyOn ? "Notifications Active" : "Enable Notifications"}</span>
+        </button>
       </div>
     </div>
   );

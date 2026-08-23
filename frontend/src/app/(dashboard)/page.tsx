@@ -1,22 +1,28 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   FolderGit2,
   GitPullRequest,
   CheckCircle2,
   Server,
-  Zap,
   Plus,
   Play,
+  Folder,
+  Compass,
+  Hammer,
+  Ban,
+  ChevronRight,
 } from "lucide-react";
 import { api, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
+import { shortTime, formatCost, formatTokens } from "@/lib/datetime";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
 import { ThinkingOrb } from "@/components/ThinkingOrb";
+import { UpgradeButton } from "@/components/UpgradeButton";
 import { useFleetStore } from "@/store/useFleetStore";
+import { Logo } from "@/components/Logo";
 
 function SegmentedMeter({
   totalTicks = 36,
@@ -160,43 +166,47 @@ function CommandCenterContent() {
   return (
     <div className="p-6 space-y-7 max-w-6xl mx-auto font-sans text-stone-900">
       
-      {/* 1. ONBOARDING / PLAN BANNER WITH DYNAMIC UPGRADE CTA */}
-      <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/80 flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-stone-900 text-white flex items-center justify-center font-bold shadow-2xs">
-            ⚡
+      {/* 1. ONBOARDING / PLAN BANNER WITH DYNAMIC UPGRADE CTA & ANIMATED MASCOT */}
+      <div className="relative overflow-hidden p-5 rounded-3xl border border-sand-200/90 bg-gradient-to-r from-sand-100/90 via-white to-kiwi-50/70 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 text-xs shadow-2xs group">
+        {/* Grain texture */}
+        <div
+          className="absolute inset-0 opacity-[0.035] pointer-events-none"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+          }}
+        />
+        {/* Corner light aura */}
+        <div className="absolute -top-12 -right-12 w-36 h-36 bg-kiwi-400/20 rounded-full blur-3xl group-hover:scale-110 transition-transform" />
+
+        <div className="relative z-10 flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-white border border-sand-200/90 shadow-2xs flex items-center justify-center shrink-0">
+            <Logo variant="full-color" pose="vibing" animated={true} className="w-7 h-7" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <p className="font-bold text-stone-900 capitalize">{usage?.plan || "Free"} Tier Active ({limitMinutes} Mins Cap)</p>
+              <p className="font-bold text-stone-900 capitalize text-sm">{usage?.plan || "Free"} Tier Active ({limitMinutes} Mins Cap)</p>
               <span className="text-[9px] font-mono font-bold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200 uppercase">
                 {limitMinutes} MINS CAP
               </span>
             </div>
-            <p className="text-stone-600 text-[11px]">
-              {usedMinutes} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {usage?.plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
+            <p className="text-stone-600 text-[11px] mt-0.5">
+              {usedMinutes.toFixed(1)} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {usage?.plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link
-            href="/spend"
-            className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
-          >
-            <Zap className="w-3.5 h-3.5 text-kiwi-400 fill-current" />
-            <span>Upgrade to Pro</span>
-          </Link>
+        <div className="relative z-10 flex items-center gap-2">
+          <UpgradeButton variant="full" />
           <button
             onClick={() => setShowComposer(true)}
-            className="px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-300 text-stone-800 font-semibold text-xs shadow-2xs transition-all"
+            className="px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-300 text-stone-800 font-semibold text-xs shadow-2xs transition-all cursor-pointer"
           >
             + Assign Task
           </button>
         </div>
       </div>
 
-      {/* 2. ACTIVE WORK & CAPACITY TILES */}
+      {/* 2. ACTIVE WORK & CAPACITY TILES (HYBRID FROSTED + LIGHT AURA + SPARKLINES) */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -205,7 +215,7 @@ function CommandCenterContent() {
           </div>
           <button
             onClick={() => setShowComposer(true)}
-            className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all"
+            className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5 text-kiwi-400" />
             <span>New Task</span>
@@ -213,36 +223,101 @@ function CommandCenterContent() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
-            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
-              <FolderGit2 className="w-3.5 h-3.5 text-stone-400" />
-              <span>Connected Repos</span>
+          {/* Tile 1: Connected Repos */}
+          <div className="relative overflow-hidden p-4 rounded-2xl border border-sand-200 bg-white/85 backdrop-blur-xl hover:border-kiwi-300 hover:shadow-island transition-all shadow-2xs group">
+            <div
+              className="absolute inset-0 opacity-[0.03] pointer-events-none"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              }}
+            />
+            <div className="absolute -top-8 -right-8 w-20 h-20 bg-kiwi-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+            <div className="relative z-10 flex items-center justify-between text-stone-600 text-xs font-medium mb-1">
+              <span className="flex items-center gap-1.5">
+                <FolderGit2 className="w-3.5 h-3.5 text-stone-500" />
+                Connected Repos
+              </span>
             </div>
-            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{repos.length}</p>
+            <p className="relative z-10 text-2xl font-bold text-stone-900 tracking-tight font-mono">{repos.length}</p>
+            {/* Sparkline track */}
+            <div className="relative z-10 mt-2.5 flex items-end gap-1 h-3.5">
+              {[40, 55, 45, 70, 60, 85, 80].map((h, i) => (
+                <div key={i} className="flex-1 bg-kiwi-200 rounded-2xs" style={{ height: `${h}%` }} />
+              ))}
+            </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
-            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
-              <GitPullRequest className="w-3.5 h-3.5 text-stone-400" />
-              <span>PRs Delivered</span>
+          {/* Tile 2: PRs Delivered */}
+          <div className="relative overflow-hidden p-4 rounded-2xl border border-sand-200 bg-white/85 backdrop-blur-xl hover:border-amber-300 hover:shadow-island transition-all shadow-2xs group">
+            <div
+              className="absolute inset-0 opacity-[0.03] pointer-events-none"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              }}
+            />
+            <div className="absolute -top-8 -right-8 w-20 h-20 bg-amber-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+            <div className="relative z-10 flex items-center justify-between text-stone-600 text-xs font-medium mb-1">
+              <span className="flex items-center gap-1.5">
+                <GitPullRequest className="w-3.5 h-3.5 text-amber-600" />
+                PRs Delivered
+              </span>
             </div>
-            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{prsDeliveredCount}</p>
+            <p className="relative z-10 text-2xl font-bold text-stone-900 tracking-tight font-mono">{prsDeliveredCount}</p>
+            <div className="relative z-10 mt-2.5 flex items-end gap-1 h-3.5">
+              {[30, 45, 60, 40, 75, 90, 85].map((h, i) => (
+                <div key={i} className="flex-1 bg-amber-200 rounded-2xs" style={{ height: `${h}%` }} />
+              ))}
+            </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
-            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Verified Passed</span>
+          {/* Tile 3: Verified Passed */}
+          <div className="relative overflow-hidden p-4 rounded-2xl border border-sand-200 bg-white/85 backdrop-blur-xl hover:border-emerald-300 hover:shadow-island transition-all shadow-2xs group">
+            <div
+              className="absolute inset-0 opacity-[0.03] pointer-events-none"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              }}
+            />
+            <div className="absolute -top-8 -right-8 w-20 h-20 bg-emerald-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+            <div className="relative z-10 flex items-center justify-between text-stone-600 text-xs font-medium mb-1">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Verified Passed
+              </span>
             </div>
-            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{verifiedPassedCount}</p>
+            <p className="relative z-10 text-2xl font-bold text-stone-900 tracking-tight font-mono">{verifiedPassedCount}</p>
+            <div className="relative z-10 mt-2.5 flex items-end gap-1 h-3.5">
+              {[70, 80, 85, 90, 95, 98, 100].map((h, i) => (
+                <div key={i} className="flex-1 bg-emerald-200 rounded-2xs" style={{ height: `${h}%` }} />
+              ))}
+            </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/50 hover:bg-white transition-all shadow-2xs">
-            <div className="flex items-center gap-1.5 text-stone-500 text-xs font-medium mb-1">
-              <Server className="w-3.5 h-3.5 text-stone-400" />
-              <span>Private Runners</span>
+          {/* Tile 4: Private Runners */}
+          <div className="relative overflow-hidden p-4 rounded-2xl border border-sand-200 bg-white/85 backdrop-blur-xl hover:border-purple-300 hover:shadow-island transition-all shadow-2xs group">
+            <div
+              className="absolute inset-0 opacity-[0.03] pointer-events-none"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              }}
+            />
+            <div className="absolute -top-8 -right-8 w-20 h-20 bg-purple-400/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+
+            <div className="relative z-10 flex items-center justify-between text-stone-600 text-xs font-medium mb-1">
+              <span className="flex items-center gap-1.5">
+                <Server className="w-3.5 h-3.5 text-purple-600" />
+                Private Runners
+              </span>
             </div>
-            <p className="text-2xl font-bold text-stone-900 tracking-tight font-mono">{privateRunnersCount}</p>
+            <p className="relative z-10 text-2xl font-bold text-stone-900 tracking-tight font-mono">{privateRunnersCount}</p>
+            <div className="relative z-10 mt-2.5 flex items-end gap-1 h-3.5">
+              {[50, 50, 60, 60, 80, 80, 100].map((h, i) => (
+                <div key={i} className="flex-1 bg-purple-200 rounded-2xs" style={{ height: `${h}%` }} />
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -257,13 +332,7 @@ function CommandCenterContent() {
             <p className="text-xs text-stone-500 mt-0.5">Current usage across parallel agent workers, monthly AI tokens, and workspace cache.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/spend"
-              className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1"
-            >
-              <Zap className="w-3 h-3 fill-current" />
-              <span>Upgrade to Pro</span>
-            </Link>
+            <UpgradeButton variant="compact" />
             <span className="px-2.5 py-1 rounded-lg bg-sand-150 text-stone-800 text-[11px] font-mono font-bold uppercase">
               PLAN: {usage?.plan || "FREE"} ({maxWorkers} WORKERS CAP)
             </span>
@@ -359,51 +428,131 @@ function CommandCenterContent() {
             <ThinkingOrb state="working" size={32} />
           </div>
         ) : filteredJobs.length === 0 ? (
-          <div className="p-8 rounded-2xl border border-sand-200 bg-sand-50/50 text-center space-y-3">
-            <p className="text-xs text-stone-500">No tasks in execution queue for this filter.</p>
-            <button
-              onClick={() => setShowComposer(true)}
-              className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs"
-            >
-              + Create New Task
-            </button>
+          <div className="relative overflow-hidden p-10 rounded-3xl border border-sand-200 bg-white/80 backdrop-blur-xl text-center space-y-3.5 shadow-2xs group">
+            <div
+              className="absolute inset-0 opacity-[0.035] pointer-events-none"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+              }}
+            />
+            <div className="absolute -top-10 -right-10 w-28 h-28 bg-kiwi-400/15 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="relative z-10 w-14 h-14 mx-auto rounded-2xl bg-sand-50 border border-sand-200/80 shadow-2xs flex items-center justify-center">
+              <Logo variant="full-color" pose="sleeping" animated={true} className="w-8 h-8" />
+            </div>
+            <div className="relative z-10 space-y-1">
+              <p className="text-xs font-bold text-stone-800">Queue is quiet and resting</p>
+              <p className="text-[11px] text-stone-500 max-w-sm mx-auto">
+                No active tasks match this filter. Assign a new programming objective or run an automated refactor.
+              </p>
+            </div>
+            <div className="relative z-10 pt-1">
+              <button
+                onClick={() => setShowComposer(true)}
+                className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5 text-kiwi-400" />
+                <span>Assign New Task</span>
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {filteredJobs.map((job) => {
-              const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval;
+              const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval || job.plan_status === "pending_review";
               const isWaitingInput = job.status === "WAITING_USER";
               const isRunning = job.status === "LEASED" || job.status === "RUNNING";
-              const isSucceeded = job.status === "SUCCEEDED";
+              const isSucceeded = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+              const isCancelled = job.status === "CANCELLED";
+              const isFailed = job.status === "FAILED" || job.plan_status === "rejected";
+
+              const prLink = (job.pr_urls && job.pr_urls.length > 0 ? job.pr_urls[0] : null) ||
+                (job.repo && job.pr_number ? `https://github.com/${job.repo}/pull/${job.pr_number}` : null);
+
+              const architectModel = job.architect_model ? job.architect_model.split("/").pop() : null;
+              const workerModel = job.worker_model ? job.worker_model.split("/").pop() : null;
+              const totalTokens = (job.tokens_in ?? 0) + (job.tokens_out ?? 0);
+              const timeAgo = job.created_at ? shortTime(job.created_at) : "";
+
+              // Compute stage
+              let stage = 1;
+              if (isSucceeded) stage = 4;
+              else if (isRunning) stage = 3;
+              else if (isPlanReview || isWaitingInput) stage = 2;
 
               return (
                 <div
                   key={job.job_id}
                   onClick={() => setActiveDrawerTaskId(job.job_id)}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs group bg-white ${
+                  className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer shadow-2xs group bg-white ${
                     isPlanReview
-                      ? "border-sand-200 border-l-4 border-l-indigo-600 bg-gradient-to-r from-indigo-50/35 via-white to-white hover:border-indigo-300"
+                      ? "border-indigo-200/80 bg-gradient-to-r from-indigo-50/20 via-white to-white hover:border-indigo-300 hover:shadow-xs"
                       : isWaitingInput
-                      ? "border-sand-200 border-l-4 border-l-amber-500 bg-gradient-to-r from-amber-50/35 via-white to-white hover:border-amber-300"
+                      ? "border-amber-200/80 bg-gradient-to-r from-amber-50/20 via-white to-white hover:border-amber-300 hover:shadow-xs"
                       : isRunning
-                      ? "border-sand-200 border-l-4 border-l-emerald-500 hover:border-emerald-300"
-                      : "border-sand-200 hover:border-sand-300"
+                      ? "border-sand-200 hover:border-emerald-300 hover:shadow-xs"
+                      : "border-sand-200 hover:border-sand-300 hover:shadow-xs"
                   }`}
                 >
                   {/* Header Row */}
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-stone-900 bg-sand-100 px-2 py-0.5 rounded-md border border-sand-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md border shadow-2xs transition-colors ${
+                          isPlanReview
+                            ? "bg-indigo-50 text-indigo-900 border-indigo-200"
+                            : isWaitingInput
+                            ? "bg-amber-50 text-amber-900 border-amber-200"
+                            : isRunning
+                            ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                            : isSucceeded
+                            ? "bg-purple-50 text-purple-900 border-purple-200"
+                            : isFailed
+                            ? "bg-rose-50/80 text-rose-900 border-rose-200"
+                            : isCancelled
+                            ? "bg-sand-100 text-stone-500 border-sand-200"
+                            : "bg-sand-100 text-stone-800 border-sand-200"
+                        }`}
+                      >
                         #{job.job_id.slice(0, 8)}
                       </span>
-                      <span className="text-xs font-mono text-stone-600">
-                        {job.repo || "acme-corp/core-api"}
+                      <span className="text-xs font-mono text-stone-600 flex items-center gap-1">
+                        <Folder className="w-3.5 h-3.5 text-stone-400" />
+                        <span>{job.repo || "RunKiwi/website"}</span>
                       </span>
+                      {timeAgo && (
+                        <span className="text-xs text-stone-400 font-mono">
+                          • {timeAgo}
+                        </span>
+                      )}
+                      {job.requires_plan_approval && (
+                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                          PLAN MODE
+                        </span>
+                      )}
+                      {job.is_dry_run && (
+                        <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
+                          DRY-RUN
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {prLink && (
+                        <a
+                          href={prLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 shadow-2xs transition-all"
+                        >
+                          <GitPullRequest className="w-3 h-3 text-purple-600" />
+                          <span>#{job.pr_number || "PR"}</span>
+                        </a>
+                      )}
+
                       <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 ${
                           isPlanReview
                             ? "bg-indigo-50 text-indigo-800 border-indigo-200"
                             : isWaitingInput
@@ -411,89 +560,331 @@ function CommandCenterContent() {
                             : isRunning
                             ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                             : isSucceeded
-                            ? "bg-kiwi-50 text-kiwi-800 border-kiwi-200"
-                            : "bg-rose-50 text-rose-700 border-rose-200"
+                            ? "bg-purple-50 text-purple-800 border-purple-200"
+                            : isCancelled
+                            ? "bg-sand-100 text-stone-600 border-sand-200"
+                            : isFailed
+                            ? "bg-sand-100 text-stone-700 border-sand-200"
+                            : "bg-amber-50 text-amber-800 border-amber-200"
                         }`}
                       >
-                        {job.status}
+                        {isRunning && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                          </span>
+                        )}
+                        {isPlanReview && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600" />
+                          </span>
+                        )}
+                        {isWaitingInput && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600" />
+                          </span>
+                        )}
+                        {isCancelled && <Ban className="w-3 h-3 text-stone-400" />}
+                        {isFailed && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
+                        {isSucceeded && <CheckCircle2 className="w-3 h-3 text-purple-600" />}
+                        <span>
+                          {isPlanReview
+                            ? "ACTION: PLAN READY"
+                            : isWaitingInput
+                            ? "ACTION: INPUT NEEDED"
+                            : isRunning
+                            ? "RUNNING"
+                            : isSucceeded
+                            ? "PR READY"
+                            : isCancelled
+                            ? "CANCELLED"
+                            : isFailed
+                            ? "FAILED"
+                            : job.status || "QUEUED"}
+                        </span>
                       </span>
                     </div>
                   </div>
 
-                  {/* Title */}
-                  <h3 className="text-xs font-bold text-stone-900 mb-2.5 leading-snug">
+                  {/* Task Prompt / Title */}
+                  <h3 className="text-sm font-bold text-stone-900 group-hover:text-kiwi-800 transition-colors mb-3 leading-snug">
                     {job.task || "Autonomous execution task"}
                   </h3>
 
-                  {/* 4-Stage Balanced Pipeline */}
-                  <div className="grid grid-cols-4 gap-1.5 p-1 bg-sand-50 rounded-xl border border-sand-200 text-[10px] font-mono mb-3">
-                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                      isPlanReview || isWaitingInput || isRunning || isSucceeded
-                        ? "bg-white border-sand-200 text-emerald-800 font-semibold"
-                        : "text-stone-400 border-transparent"
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isPlanReview || isWaitingInput || isRunning || isSucceeded ? "bg-emerald-500" : "bg-stone-300"
-                      }`} />
-                      <span>1. Plan ✓</span>
+                  {/* Actionable Callout Banners */}
+                  {isPlanReview && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-indigo-50/90 border border-indigo-200 flex items-center justify-between text-xs text-indigo-950 shadow-2xs">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                        <span className="text-[11px]">
+                          <strong>Architect execution plan ready:</strong> Requires your review & sign-off before code execution.
+                        </span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-800 bg-white px-2 py-0.5 rounded-md border border-indigo-200 shrink-0">
+                        Awaiting Sign-off
+                      </span>
+                    </div>
+                  )}
+
+                  {isWaitingInput && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 flex items-center justify-between text-xs text-amber-950 shadow-2xs">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-600 shrink-0" />
+                        <span className="text-[11px]">
+                          <strong>Worker paused for clarification:</strong> Human confirmation needed to proceed.
+                        </span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-amber-800 bg-white px-2 py-0.5 rounded-md border border-amber-200 shrink-0">
+                        Input Required
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Universal 4-Stage Lifecycle & Pass/Fail Pipeline Strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-sand-50/80 rounded-xl border border-sand-200 text-[10px] font-mono mb-3 shadow-2xs">
+                    {/* 1. Plan */}
+                    <div
+                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
+                        stage >= 1
+                          ? isRunning && stage === 1
+                            ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
+                            : "bg-white border-sand-200 text-stone-800 font-semibold"
+                          : "text-stone-400 border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            stage >= 1 ? "bg-emerald-500" : "bg-stone-300"
+                          }`}
+                        />
+                        <span className="truncate">1. Plan</span>
+                      </div>
+                      <span className="text-[10px] shrink-0 font-bold">
+                        {stage > 1 || isSucceeded || isFailed ? (
+                          <span className="text-emerald-600">✓</span>
+                        ) : isRunning && stage === 1 ? (
+                          <span className="text-indigo-600">⟳</span>
+                        ) : (
+                          <span className="text-stone-300 font-normal">—</span>
+                        )}
+                      </span>
                     </div>
 
-                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                      isPlanReview
-                        ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
-                        : isWaitingInput || isRunning || isSucceeded
-                        ? "bg-white border-sand-200 text-emerald-800 font-semibold"
-                        : "text-stone-400 border-transparent"
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isPlanReview ? "bg-indigo-600 animate-ping" : isWaitingInput || isRunning || isSucceeded ? "bg-emerald-500" : "bg-stone-300"
-                      }`} />
-                      <span>2. Review</span>
+                    {/* 2. Review / Env Prep */}
+                    <div
+                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
+                        isPlanReview
+                          ? "bg-indigo-100 border-indigo-300 text-indigo-950 font-bold shadow-2xs"
+                          : isFailed && job.plan_status === "rejected"
+                          ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
+                          : stage >= 2
+                          ? isRunning && stage === 2
+                            ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
+                            : "bg-white border-sand-200 text-stone-800 font-semibold"
+                          : "text-stone-400 border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isPlanReview
+                              ? "bg-indigo-600"
+                              : isFailed && job.plan_status === "rejected"
+                              ? "bg-rose-500"
+                              : stage > 2 || isSucceeded
+                              ? "bg-emerald-500"
+                              : stage === 2
+                              ? "bg-indigo-500"
+                              : "bg-stone-300"
+                          }`}
+                        />
+                        <span className="truncate">
+                          {job.requires_plan_approval ? "2. Review" : "2. Env Prep"}
+                        </span>
+                      </div>
+                      <span className="text-[10px] shrink-0 font-bold">
+                        {isFailed && job.plan_status === "rejected" ? (
+                          <span className="text-rose-600">✕</span>
+                        ) : isPlanReview ? (
+                          <span className="text-indigo-600 text-[9px] font-bold">Action</span>
+                        ) : stage > 2 || isSucceeded || (isFailed && job.plan_status !== "rejected") ? (
+                          <span className="text-emerald-600">✓</span>
+                        ) : isRunning && stage === 2 ? (
+                          <span className="text-indigo-600">⟳</span>
+                        ) : (
+                          <span className="text-stone-300 font-normal">—</span>
+                        )}
+                      </span>
                     </div>
 
-                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                      isRunning || isWaitingInput
-                        ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-bold"
-                        : isSucceeded
-                        ? "bg-white border-sand-200 text-emerald-800"
-                        : "text-stone-400 border-transparent"
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isRunning ? "bg-emerald-500 animate-pulse" : isSucceeded ? "bg-emerald-500" : "bg-stone-300"
-                      }`} />
-                      <span>3. Code & Test</span>
+                    {/* 3. Code & Test */}
+                    <div
+                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
+                        isWaitingInput
+                          ? "bg-amber-100 border-amber-300 text-amber-950 font-bold shadow-2xs"
+                          : isFailed && job.plan_status !== "rejected"
+                          ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
+                          : isRunning && stage === 3
+                          ? "bg-emerald-50 border-emerald-300 text-emerald-950 font-bold animate-pulse"
+                          : stage >= 3
+                          ? isSucceeded
+                            ? "bg-white border-sand-200 text-stone-800 font-semibold"
+                            : "bg-white border-sand-200 text-stone-800 font-semibold"
+                          : isCancelled
+                          ? "bg-sand-100/60 border-sand-200 text-stone-500"
+                          : "text-stone-400 border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isWaitingInput
+                              ? "bg-amber-600"
+                              : isFailed && job.plan_status !== "rejected"
+                              ? "bg-rose-500"
+                              : isRunning && stage === 3
+                              ? "bg-emerald-600"
+                              : isSucceeded || stage > 3
+                              ? "bg-emerald-500"
+                              : isCancelled
+                              ? "bg-stone-400"
+                              : "bg-stone-300"
+                          }`}
+                        />
+                        <span className="truncate">3. Code & Test</span>
+                      </div>
+                      <span className="text-[10px] shrink-0 font-bold">
+                        {isFailed && job.plan_status !== "rejected" ? (
+                          <span className="text-rose-600">✕</span>
+                        ) : isWaitingInput ? (
+                          <span className="text-amber-700 text-[9px]">Input</span>
+                        ) : isSucceeded ? (
+                          <span className="text-emerald-600">✓</span>
+                        ) : isRunning && stage === 3 ? (
+                          <span className="text-emerald-600">⟳</span>
+                        ) : isCancelled ? (
+                          <span className="text-stone-400 font-normal">⊘</span>
+                        ) : (
+                          <span className="text-stone-300 font-normal">—</span>
+                        )}
+                      </span>
                     </div>
 
-                    <div className={`px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                      isSucceeded
-                        ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-bold"
-                        : "text-stone-400 border-transparent"
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isSucceeded ? "bg-emerald-500" : "bg-stone-300"
-                      }`} />
-                      <span>4. PR Ready</span>
+                    {/* 4. Delivery */}
+                    <div
+                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
+                        isSucceeded
+                          ? "bg-purple-50 border-purple-200 text-purple-900 font-bold"
+                          : "text-stone-400 border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isSucceeded ? "bg-purple-600" : "bg-stone-300"
+                          }`}
+                        />
+                        <span className="truncate">{job.is_dry_run ? "4. Dry-Run" : "4. PR Ready"}</span>
+                      </div>
+                      <span className="text-[10px] shrink-0 font-bold">
+                        {isSucceeded ? (
+                          <span className="text-purple-700">✓</span>
+                        ) : isCancelled ? (
+                          <span className="text-stone-300 font-normal">⊘</span>
+                        ) : (
+                          <span className="text-stone-300 font-normal">—</span>
+                        )}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Footer */}
-                  <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono pt-1">
-                    <div className="flex items-center gap-2">
-                      <span>{job.architect_model ? job.architect_model.split("/").pop() : "Claude Sonnet"} + {job.worker_model ? job.worker_model.split("/").pop() : "Claude Haiku"}</span>
+                  {/* Telemetry & Action Footer Row */}
+                  <div className="flex flex-wrap items-center justify-between text-[11px] text-stone-500 font-mono pt-1">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      {architectModel && workerModel && architectModel !== workerModel ? (
+                        <>
+                          <span className="text-stone-700 font-medium flex items-center gap-1">
+                            <Compass className="w-3 h-3 text-indigo-500" />
+                            <span>{architectModel}</span>
+                          </span>
+                          <span>+</span>
+                          <span className="text-stone-700 font-medium flex items-center gap-1">
+                            <Hammer className="w-3 h-3 text-emerald-500" />
+                            <span>{workerModel}</span>
+                          </span>
+                        </>
+                      ) : workerModel ? (
+                        <span className="text-stone-700 font-medium flex items-center gap-1">
+                          <Hammer className="w-3 h-3 text-emerald-500" />
+                          <span>{workerModel}</span>
+                        </span>
+                      ) : architectModel ? (
+                        <span className="text-stone-700 font-medium flex items-center gap-1">
+                          <Compass className="w-3 h-3 text-indigo-500" />
+                          <span>{architectModel}</span>
+                        </span>
+                      ) : (
+                        <span className="text-stone-600 font-mono">
+                          {job.task_count ?? 1} {job.task_count === 1 ? "task" : "tasks"}
+                        </span>
+                      )}
                       <span>•</span>
-                      <span className="text-kiwi-700 font-bold">{job.cost_usd ? `$${job.cost_usd.toFixed(2)}` : "$0.00"}</span>
+                      <span className="text-kiwi-700 font-bold">{formatCost(job.cost_usd ?? 0)}</span>
                       {job.spend_cap_usd && (
                         <>
+                          <span className="text-stone-400">(Cap: ${job.spend_cap_usd.toFixed(2)})</span>
+                        </>
+                      )}
+                      {totalTokens > 0 && (
+                        <>
                           <span>•</span>
-                          <span className="text-stone-400">${job.spend_cap_usd.toFixed(2)} cap</span>
+                          <span className="text-stone-500">{formatTokens(totalTokens)} tok</span>
                         </>
                       )}
                     </div>
 
-                    <span className="text-stone-400 group-hover:text-stone-800 font-sans font-semibold text-xs flex items-center gap-1">
-                      <span>{isPlanReview ? "Review Plan" : isWaitingInput ? "Provide Input" : "Inspect"}</span>
-                      <span>&rarr;</span>
-                    </span>
+                    <div>
+                      {isPlanReview ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveDrawerTaskId(job.job_id);
+                          }}
+                          className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                        >
+                          <span>Review & Approve Plan &rarr;</span>
+                        </button>
+                      ) : isWaitingInput ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveDrawerTaskId(job.job_id);
+                          }}
+                          className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                        >
+                          <span>Provide Input &rarr;</span>
+                        </button>
+                      ) : isSucceeded && prLink ? (
+                        <a
+                          href={prLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-sans font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                        >
+                          <GitPullRequest className="w-3 h-3 text-purple-200" />
+                          <span>View PR &rarr;</span>
+                        </a>
+                      ) : (
+                        <span className="text-stone-400 group-hover:text-stone-900 font-sans font-semibold text-xs flex items-center gap-1 transition-colors">
+                          <span>Inspect</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

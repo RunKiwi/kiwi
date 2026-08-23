@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
-import { durationBetween, formatDuration, formatCost, formatTokens } from "@/lib/datetime";
-import { ThinkingOrb } from "thinking-orbs";
+import { durationBetween, formatCost, formatTokens } from "@/lib/datetime";
+import { ThinkingOrb } from "@/components/ThinkingOrb";
 import { RunTimeline } from "@/components/RunTimeline";
 import { LiveRun } from "@/components/LiveRun";
 import { LoadingState } from "@/components/LoadingState";
@@ -29,6 +29,8 @@ import {
   Copy,
   Check,
   ChevronDown,
+  Compass,
+  Hammer,
 } from "lucide-react";
 import { JobGraph } from "@/components/JobGraph";
 import { PlanApprovalCard } from "@/components/PlanApprovalCard";
@@ -81,106 +83,6 @@ function timingLabel(task: JobTask): string {
   if (task.attempts > 1) parts.push(`attempt ${task.attempts}`);
   if (task.leased_by) parts.push(task.leased_by);
   return parts.join(" · ");
-}
-
-/**
- * The facts about a run that were previously nowhere in the UI: which models
- * ran it, what it cost, how many tokens it burned, and how long it took.
- *
- * All of this was already arriving — per step on the live progress feed, and as
- * per-worker totals on the signed record — and nothing rendered any of it. The
- * two sources are read in that order of preference: the record is authoritative
- * once a run finishes, the live feed is all there is before then.
- *
- * Every field is omitted when absent rather than shown as a zero. A drawer that
- * says "$0.00 · 0 tok" on a queued job states something false; one that says
- * nothing yet is merely quiet.
- */
-function RunFacts({
-  job,
-  progress,
-  record,
-}: {
-  job: Job | null;
-  progress: JobProgressTask[];
-  record: ExecutionRecordResponse | null;
-}) {
-  const body = (record?.data ?? {}) as ExecutionRecordBody;
-  const workers = body.execution?.workers ?? [];
-
-  // Models: the record names actor and critic per worker; before it exists the
-  // progress feed carries the actor, and the job's tasks carry the requested
-  // model even before anything has run.
-  const models = new Set<string>();
-  for (const w of workers) {
-    if (w.actor_model) models.add(w.actor_model);
-    if (w.critic_model) models.add(w.critic_model);
-  }
-  for (const p of progress) if (p.actor_model) models.add(p.actor_model);
-  for (const t of job?.tasks ?? []) if (t.model) models.add(t.model);
-
-  const sumSteps = (pick: (s: RecordStep) => number | undefined) =>
-    progress.reduce((n, p) => n + (p.steps ?? []).reduce((m, s) => m + (pick(s) ?? 0), 0), 0);
-
-  const recordTokens = workers.reduce(
-    (n, w) => n + (w.input_tokens ?? 0) + (w.output_tokens ?? 0), 0);
-  const tokens = recordTokens > 0
-    ? recordTokens
-    : sumSteps(s => s.input_tokens) + sumSteps(s => s.output_tokens);
-
-  const recordCost = workers.reduce((n, w) => n + (w.cost_usd ?? 0), 0);
-  const cost = recordCost > 0 ? recordCost : sumSteps(s => s.cost_usd);
-
-  // Two different clocks, and conflating them hid a real bug.
-  //
-  // This read verification.duration_ms, which is how long the TEST COMMAND ran
-  // — a sub-measurement sitting next to test_cmd and output_hash in the record.
-  // Labelling it "took" reported two minutes for a task that occupied thirteen.
-  // The giveaway was a flicker on open: the real elapsed rendered first, then
-  // the record loaded and overwrote it with the smaller number.
-  //
-  // `waited` is the gap before work began. It is usually seconds, and when it is
-  // not, it is the whole story — an orphaned lease is ten minutes of nothing,
-  // and a drawer that only showed run time made that invisible.
-  const tasks = job?.tasks ?? [];
-  const queuedAts = tasks.map(t => t.queued_at).filter(Boolean).sort() as string[];
-  const startedAts = tasks.map(t => t.started_at).filter(Boolean).sort() as string[];
-  const submitted = queuedAts[0];
-  const started = startedAts[0];
-
-  const terminal = tasks.length > 0 &&
-    tasks.every(t => ["SUCCEEDED", "FAILED", "CANCELLED"].includes(t.status));
-  // No completion timestamp is exposed, so a finished run measures to its last
-  // update and a live one measures to now.
-  const endpoint = terminal ? (tasks.map(t => t.updated_at).filter(Boolean).sort().pop()) : new Date().toISOString();
-
-  const waited = durationBetween(submitted, started);
-  const ran = durationBetween(started, endpoint);
-  const testTook = body.verification?.duration_ms
-    ? formatDuration(body.verification.duration_ms)
-    : "";
-
-  const facts: Array<[string, string]> = [];
-  if (models.size > 0) facts.push(["model", [...models].join(", ")]);
-  // Shown whenever it is non-trivial, because a long wait is the single most
-  // useful thing the drawer can tell you and it is not the agent's fault.
-  if (waited && waited !== "0s" && !/^\d+ms$/.test(waited)) facts.push(["waited", waited]);
-  if (ran) facts.push([terminal ? "ran" : "running for", ran]);
-  if (testTook) facts.push(["tests", testTook]);
-  if (tokens > 0) facts.push(["tokens", formatTokens(tokens)]);
-  if (cost > 0) facts.push(["cost", formatCost(cost)]);
-  if (facts.length === 0) return null;
-
-  return (
-    <dl className="mt-2 flex items-center gap-x-4 gap-y-1 flex-wrap text-[11px]">
-      {facts.map(([k, v]) => (
-        <div key={k} className="flex items-baseline gap-1.5">
-          <dt className="text-stone-400 uppercase tracking-wider">{k}</dt>
-          <dd className="text-stone-700 font-mono tabular-nums">{v}</dd>
-        </div>
-      ))}
-    </dl>
-  );
 }
 
 function BlockedBanner({ task }: { task: JobTask }) {
@@ -598,6 +500,100 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     }
   };
 
+  // Compute top telemetry metrics
+  const recordBody = (record?.data ?? {}) as ExecutionRecordBody;
+  const workers = recordBody.execution?.workers ?? [];
+  const sumSteps = (pick: (s: RecordStep) => number | undefined) =>
+    progress.reduce((n, p) => n + (p.steps ?? []).reduce((m, s) => m + (pick(s) ?? 0), 0), 0);
+
+  const recordTokens = workers.reduce(
+    (n, w) => n + (w.input_tokens ?? 0) + (w.output_tokens ?? 0), 0);
+  const totalTokens = recordTokens > 0
+    ? recordTokens
+    : sumSteps((s) => s.input_tokens) + sumSteps((s) => s.output_tokens);
+
+  const recordCost = workers.reduce((n, w) => n + (w.cost_usd ?? 0), 0);
+  const totalCost = recordCost > 0 ? recordCost : sumSteps((s) => s.cost_usd);
+
+  const tasksList = currentJob?.tasks ?? [];
+  const queuedAts = tasksList.map((t) => t.queued_at).filter(Boolean).sort() as string[];
+  const startedAts = tasksList.map((t) => t.started_at).filter(Boolean).sort() as string[];
+  const submitted = queuedAts[0];
+  const started = startedAts[0];
+  const endpoint = jobFinished
+    ? tasksList.map((t) => t.updated_at).filter(Boolean).sort().pop()
+    : new Date().toISOString();
+
+  const totalRan = durationBetween(started || submitted, endpoint);
+
+  // Overall status classification
+  const isAwaitingApproval = jobPlan?.plan_status === "pending_review";
+  const isFailed = tasksList.some((t) => t.status === "FAILED") || jobPlan?.plan_status === "rejected";
+  const isSucceeded = tasksList.length > 0 && tasksList.every((t) => t.status === "SUCCEEDED");
+  const isCancelled = tasksList.length > 0 && tasksList.every((t) => t.status === "CANCELLED");
+  const isRunning = tasksList.some((t) => t.status === "LEASED" || t.status === "RUNNING");
+  const isQueued = tasksList.some((t) => t.status === "QUEUED");
+
+  let statusBadge = { text: "QUEUED", bg: "bg-sand-100 text-stone-700 border-sand-200" };
+  if (isAwaitingApproval) {
+    statusBadge = { text: "AWAITING APPROVAL", bg: "bg-indigo-50 text-indigo-800 border-indigo-200" };
+  } else if (isRunning) {
+    statusBadge = { text: "RUNNING", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  } else if (isSucceeded) {
+    statusBadge = { text: "SUCCEEDED", bg: "bg-emerald-50 text-emerald-800 border-emerald-200" };
+  } else if (isFailed) {
+    statusBadge = { text: "FAILED", bg: "bg-rose-50 text-rose-700 border-rose-200" };
+  } else if (isCancelled) {
+    statusBadge = { text: "CANCELLED", bg: "bg-sand-100 text-stone-600 border-sand-200" };
+  } else if (isQueued) {
+    statusBadge = { text: "QUEUED", bg: "bg-amber-50 text-amber-800 border-amber-200" };
+  }
+
+  // Verification / sandbox outcome
+  let testOutcome = "—";
+  let testOutcomeClass = "text-stone-500";
+  if (recordBody.verification?.duration_ms || isSucceeded) {
+    testOutcome = "PASSED";
+    testOutcomeClass = "text-emerald-700 font-bold";
+  } else if (isFailed) {
+    testOutcome = "FAILED";
+    testOutcomeClass = "text-rose-600 font-bold";
+  } else if (isRunning) {
+    testOutcome = "TESTING";
+    testOutcomeClass = "text-amber-700 font-bold";
+  }
+
+  // Model names
+  const architectModel =
+    currentJob?.architect_model ||
+    tasksList.find((t) => t.architect_model)?.architect_model ||
+    workers.find((w) => w.critic_model)?.critic_model ||
+    null;
+
+  const workerModel =
+    currentJob?.worker_model ||
+    tasksList.find((t) => t.model)?.model ||
+    workers.find((w) => w.actor_model)?.actor_model ||
+    progress.find((p) => p.actor_model)?.actor_model ||
+    null;
+
+  const modelsUsed = new Set<string>();
+  if (architectModel) modelsUsed.add(architectModel);
+  if (workerModel) modelsUsed.add(workerModel);
+  for (const w of workers) {
+    if (w.actor_model) modelsUsed.add(w.actor_model);
+    if (w.critic_model) modelsUsed.add(w.critic_model);
+  }
+  for (const p of progress) if (p.actor_model) modelsUsed.add(p.actor_model);
+  for (const t of tasksList) {
+    if (t.model) modelsUsed.add(t.model);
+    if (t.architect_model) modelsUsed.add(t.architect_model);
+  }
+
+  // Result PR Link if available
+  const prResultUrl = tasksList.find((t) => t.result_url)?.result_url ||
+    (currentJob?.repo && currentJob?.pr_number ? `https://github.com/${currentJob.repo}/pull/${currentJob.pr_number}` : null);
+
   return (
     <>
       {/* Backdrop */}
@@ -615,446 +611,511 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         aria-modal="true"
         aria-labelledby="drawer-heading"
         tabIndex={-1}
-        className={`fixed inset-y-0 right-0 w-full sm:w-[800px] max-w-full bg-white border-l border-sand-200 shadow-popover transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${taskId ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 w-full sm:w-[800px] max-w-full bg-white border-l border-sand-200 shadow-popover transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 flex flex-col outline-none ${
+          taskId ? "translate-x-0" : "translate-x-full"
+        }`}
       >
-        {/* Drawer Header */}
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-sand-200 bg-sand-50/60">
-          <div className="flex items-center gap-4">
-            {/* Present only while a task is genuinely executing — a queued or
-                finished job must not look like it is thinking. jobOrbState
-                returns null for both, which is what removes the orb. */}
+        {/* ================= DRAWER HEADER ================= */}
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-sand-200 bg-sand-50/60 shrink-0">
+          <div className="flex items-center gap-3.5 min-w-0">
             {headerOrb && (
               <ThinkingOrb
                 state={headerOrb}
-                size={64}
+                size={42}
                 className="shrink-0"
                 aria-label="Job running"
               />
             )}
             <div className="min-w-0">
-              {/* The goal, not the id — an opaque job id says nothing about what
-                  is running, which is the first thing anyone opening this wants.
-
-                  Shortened rather than rendered whole. People paste issue
-                  reports as the task, and several hundred words in an <h2> put
-                  the run itself below the fold. The full text is one click
-                  away; see lib/taskTitle.ts for where the short form comes
-                  from and why nothing calls a model to get it. */}
-              <h2 id="drawer-heading" className="text-lg font-bold text-stone-900 flex items-start gap-3">
-                {/* Stays clamped when expanded: the full text renders below,
-                    and unclamping the title too would show the same words
-                    twice. */}
-                <span className="line-clamp-2">{heading.title}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md border shadow-2xs ${
+                    isAwaitingApproval
+                      ? "bg-indigo-50 text-indigo-900 border-indigo-200"
+                      : isRunning
+                      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                      : isSucceeded
+                      ? "bg-purple-50 text-purple-900 border-purple-200"
+                      : isFailed
+                      ? "bg-rose-50/80 text-rose-900 border-rose-200"
+                      : isCancelled
+                      ? "bg-sand-100 text-stone-500 border-sand-200"
+                      : "bg-sand-100 text-stone-900 border-sand-200"
+                  }`}
+                >
+                  #{taskId?.slice(0, 14)}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${statusBadge.bg}`}>
+                  {statusBadge.text}
+                </span>
                 {currentJob && (
-                  <span className="px-2 py-0.5 mt-1 rounded-full text-[10px] uppercase font-bold tracking-wider bg-sand-150 text-stone-700 border border-sand-200 shrink-0">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-sand-150 text-stone-700 border border-sand-200 shrink-0">
                     {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                 )}
+              </div>
+
+              <h2 id="drawer-heading" className="text-sm font-bold text-stone-900 line-clamp-2 mt-1">
+                {heading.title}
               </h2>
+
               {heading.truncated && (
                 <button
                   type="button"
                   onClick={() => setExpandedFor(titleExpanded ? null : taskId ?? null)}
                   aria-expanded={titleExpanded}
-                  className="mt-1 inline-flex items-center gap-1 text-[11px] text-stone-500 hover:text-stone-900 transition-colors"
+                  className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-stone-500 hover:text-stone-900 transition-colors"
                 >
                   {titleExpanded ? "Show less" : "Show full task"}
-                  {/* Says where the title came from. A model-written summary
-                      standing in for what the user typed has to be labelled as
-                      one — silently showing a paraphrase of their own words
-                      back to them is how they stop trusting the page. */}
                   {heading.fromArchitect && !titleExpanded && (
                     <span className="text-stone-400">· summarised by the Architect</span>
                   )}
                 </button>
               )}
+
               {titleExpanded && (
-                <p className="mt-2 text-sm text-stone-700 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                <p className="mt-2 text-xs text-stone-700 whitespace-pre-wrap break-words max-h-48 overflow-y-auto bg-white p-3 rounded-xl border border-sand-200">
                   {currentJob?.task}
                 </p>
               )}
-            <p className="text-sm text-stone-500 font-mono mt-1">
-              {currentJob?.repo && <span className="text-stone-700">{currentJob.repo} · </span>}
-              {taskId}
-            </p>
-            {/* A review comment on this job's pull request continues it, so a
-                job can be several runs. The drawer shows the job; the thread —
-                which run followed which, and what each was asked to do — needs
-                two panes and lives on its own page. */}
-            {(currentJob?.tasks.some(t => t.origin === "pr_comment") ?? false) && taskId && (
-              <Link
-                href={`/tasks/${taskId}`}
-                className="mt-1 inline-block text-[11px] text-sky-700 hover:underline"
-              >
-                View thread →
-              </Link>
-            )}
-            <RunFacts job={currentJob} progress={progress} record={record} />
-          </div>
-        </div>
-        <button onClick={onClose} className="p-2 hover:bg-sand-150 rounded-full transition-colors text-stone-400 hover:text-stone-800">
-          <X className="w-6 h-6" />
-        </button>
-      </div>
 
-      {/* Job actions */}
-      {currentJob && (
-        <div className="flex items-center gap-2 px-6 py-3 border-b border-sand-200 bg-sand-50/40">
-          <button
-            onClick={() => {
-              if (!confirmCancel) {
-                setConfirmCancel(true);
-                return;
-              }
-              act("Stopped", () => client.cancelJob(currentJob.job_id));
-            }}
-            onBlur={() => setConfirmCancel(false)}
-            disabled={!canCancel || busy !== null}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              confirmCancel
-                ? "border-amber-300 bg-amber-50 text-amber-800"
-                : "border-sand-200 text-stone-700 hover:bg-sand-100"
-            }`}
-          >
-            <Ban className="w-3.5 h-3.5" />
-            {confirmCancel ? "Click again to confirm" : "Stop"}
-          </button>
-          <button
-            onClick={() => act("Retried", () => client.retryJob(currentJob.job_id))}
-            disabled={!canRetry || busy !== null}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border border-sand-200 text-stone-700 hover:bg-sand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Retry
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (onRerunWithEdits && currentJob) {
-                onRerunWithEdits(currentJob);
-                onClose();
-              }
-            }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border border-sand-200 text-stone-700 hover:bg-sand-100 transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5 text-kiwi-600" /> Re-run with edits
-          </button>
-
-          <div className="flex-1" />
-
-          {/* Delete is irreversible, so it takes two clicks rather than a modal:
-              the second click is the confirmation. */}
-          <button
-            onClick={() => {
-              if (!confirmDelete) {
-                setConfirmDelete(true);
-                return;
-              }
-              act("Deleted", () => client.deleteJob(currentJob.job_id)).then(onClose);
-            }}
-            onBlur={() => setConfirmDelete(false)}
-            disabled={busy !== null}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors disabled:opacity-40 ${
-              confirmDelete
-                ? "border-rose-300 bg-rose-50 text-rose-700"
-                : "border-sand-200 text-stone-500 hover:bg-rose-50 hover:text-rose-700"
-            }`}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            {confirmDelete ? "Click again to confirm" : "Delete"}
-          </button>
-
-          {busy && <Loader2 className="w-4 h-4 animate-spin text-stone-400" />}
-        </div>
-      )}
-
-      {notice && (() => {
-        const err = parseActionableError(notice);
-        return (
-          <div className="px-6 py-2 text-xs text-stone-700 bg-sand-50 border-b border-sand-200 flex items-center justify-between gap-2">
-            <span>{err.message}</span>
-            {err.actionHref && err.actionLabel && (
-              <Link href={err.actionHref} className="underline font-semibold text-amber-700 hover:text-stone-900 shrink-0">
-                {err.actionLabel} →
-              </Link>
-            )}
-          </div>
-        );
-      })()}
-
-      <div className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 bg-sand-50/30 gap-6">
-        {/* Plan Mode Review Card */}
-        {/* requires_approval is a static "this job opted into plan mode" flag set
-            once at submit and never cleared — gating on it kept the approval
-            card (and its "Awaiting Approval" copy) rendering for the rest of
-            the job's life, including after the plan was already approved or
-            rejected. plan_status is the one field the approve/reject
-            handlers actually update (pkg/store/postgres.go), so it is the
-            only reliable signal that a plan is still waiting on a human. */}
-        {jobPlan && jobPlan.plan_status === "pending_review" && (
-          <PlanApprovalCard
-            plan={jobPlan}
-            onApproved={() => {
-              loadJob(taskId!);
-              api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
-            }}
-            onRejected={() => {
-              loadJob(taskId!);
-              api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
-            }}
-          />
-        )}
-
-        {/* A rejected plan turns the job FAILED (RejectJobPlan in
-            pkg/store/postgres.go) with no separate "why" surfaced by the API
-            yet — this at least states plainly that a human rejected the plan,
-            rather than leaving a FAILED job that looks like an execution
-            failure indistinguishable from any other. */}
-        {jobPlan?.plan_status === "rejected" && (
-          <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200">
-            This plan was rejected during review, so the job did not run.
-          </div>
-        )}
-
-        {currentJob ? (
-          <>
-            {/* Drawer Tabs */}
-            <div className="flex items-center gap-4 border-b border-sand-200 -mt-2 text-xs font-semibold shrink-0">
-              {([
-                ["timeline", "Execution Plan"],
-                ["logs", "Live Logs"],
-                ["diff", "Code Diff"],
-                ["verification", "Verification"],
-              ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setDrawerTab(id)}
-                  className={`py-2.5 border-b-2 transition-colors ${
-                    drawerTab === id
-                      ? "text-stone-900 border-stone-900"
-                      : "text-stone-500 hover:text-stone-800 border-transparent"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab: Execution Plan — the task queue plus what the run is doing or
-                did, phase by phase (inline diffs and code included). This is the
-                same account the drawer always showed; it's just under a tab now. */}
-            {drawerTab === "timeline" && (
-              <div className="flex flex-col gap-4">
-                {/* What is happening right now — and, when a finished job produced no
-                    record, what happened at all.
-
-                    The second case used to render nothing. Not every finished job has a
-                    record, and the record panel below is the only other thing that
-                    draws a timeline, so a run that ended without one had no account of
-                    itself anywhere despite its phases being loaded and in hand. */}
-                {progress.length > 0 && (!jobFinished || !record) && (
-                  <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
-                    <div className="flex items-center gap-2">
-                      <Activity className={`w-4 h-4 ${jobFinished ? "text-stone-400" : "text-sky-600"}`} />
-                      <h3 className="text-sm font-bold text-stone-900">
-                        {jobFinished ? "What happened" : "Running now"}
-                      </h3>
-                    </div>
-                    <LiveRun tasks={progress} />
+              <div className="flex items-center gap-2 text-xs text-stone-500 font-mono mt-1.5 flex-wrap">
+                {currentJob?.repo && <span className="text-stone-700 font-semibold">{currentJob.repo}</span>}
+                {architectModel && workerModel && architectModel !== workerModel ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-stone-300">•</span>
+                    <span className="flex items-center gap-1 text-stone-700 font-medium bg-sand-100/90 px-2 py-0.5 rounded-md border border-sand-200 text-[11px]">
+                      <Compass className="w-3 h-3 text-indigo-600" />
+                      <span>Architect: {architectModel.split("/").pop()}</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-stone-700 font-medium bg-sand-100/90 px-2 py-0.5 rounded-md border border-sand-200 text-[11px]">
+                      <Hammer className="w-3 h-3 text-emerald-600" />
+                      <span>Worker: {workerModel.split("/").pop()}</span>
+                    </span>
                   </div>
+                ) : workerModel ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-stone-300">•</span>
+                    <span className="flex items-center gap-1 text-stone-700 font-medium bg-sand-100/90 px-2 py-0.5 rounded-md border border-sand-200 text-[11px]">
+                      <Hammer className="w-3 h-3 text-emerald-600" />
+                      <span>Model: {workerModel.split("/").pop()}</span>
+                    </span>
+                  </div>
+                ) : modelsUsed.size > 0 ? (
+                  <span className="text-stone-400">• {[...modelsUsed].map((m) => m.split("/").pop()).join(", ")}</span>
+                ) : null}
+
+                {(currentJob?.tasks.some((t) => t.origin === "pr_comment") ?? false) && taskId && (
+                  <Link
+                    href={`/tasks/${taskId}`}
+                    className="text-sky-700 hover:underline font-sans ml-1"
+                  >
+                    View thread →
+                  </Link>
                 )}
-
-                {/* Once a record exists, its phases (with the record's own totals)
-                    replace the live feed's — same reasoning as before, just no
-                    longer bundled with the hash/receipt cells, which moved to
-                    Verification. */}
-                {jobFinished && record && (() => {
-                  const body = (record.data ?? {}) as ExecutionRecordBody;
-                  const recordWorkers = body.execution?.workers ?? [];
-                  const liveWorkers = progress
-                    .filter(t => (t.steps?.length ?? 0) > 0)
-                    .map(t => ({
-                      worker_id: t.task_id,
-                      actor_model: t.actor_model,
-                      steps: t.steps ?? [],
-                    }));
-                  const workers = liveWorkers.length > 0 ? liveWorkers : recordWorkers;
-                  return workers.length > 0 ? (
-                    <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
-                      <RunTimeline workers={workers} />
-                    </div>
-                  ) : null;
-                })()}
-
-                <div className="w-full flex flex-col gap-4">
-                  <JobGraph jobId={currentJob.job_id} tasks={currentJob.tasks} />
-                  <h3 className="text-sm font-bold text-stone-900">Tasks</h3>
-                  {currentJob.tasks.map(task => (
-                    <div key={task.id} id={`task-${task.id}`} className="p-4 bg-white flex flex-col gap-2 border border-sand-200 rounded-2xl shadow-2xs scroll-mt-24 target:ring-2 target:ring-kiwi-300 transition-all">
-                      <div className="flex justify-between gap-4">
-                        <div className="min-w-0">
-                          {/* Clamped for the same reason as the header: a task card
-                              that reprints a whole issue report buries the status,
-                              the id and the timing that the card exists to show. The
-                              header above already offers the full text. */}
-                          {task.task && (
-                            <div className="text-sm text-stone-900 line-clamp-2" title={task.task}>
-                              {task.task}
-                            </div>
-                          )}
-                          <span className="font-mono text-xs text-stone-400 break-all">{task.id}</span>
-                        </div>
-                        <span className="text-xs px-2 py-1 bg-sand-100 border border-sand-200 rounded-md flex items-center gap-2 h-fit shrink-0 text-stone-700">
-                          {getPhaseIcon(task)} {task.status}
-                        </span>
-                      </div>
-                      {timingLabel(task) && (
-                        <div className="text-xs text-stone-400 font-mono">{timingLabel(task)}</div>
-                      )}
-                      <BlockedBanner task={task} />
-                      {task.result_url && (
-                        <a href={task.result_url} target="_blank" rel="noreferrer" className="text-sky-700 text-sm hover:underline flex items-center gap-2 mt-2">
-                          <GitPullRequest className="w-4 h-4" /> View PR
-                        </a>
-                      )}
-                      {task.result_detail && (
-                        <div className={`text-xs mt-2 ${task.status === 'FAILED' ? 'text-rose-600' : 'text-stone-500'}`}>{task.result_detail}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </div>
-            )}
+            </div>
+          </div>
 
-            {/* Tab: Live Logs — the raw output tail from each running/finished
-                task, terminal-style. Real data (JobProgressTask.output_tail),
-                not a fabricated stream; a task with nothing reported yet just
-                shows nothing rather than a fake "connecting…" line. */}
-            {drawerTab === "logs" && <LiveLogsTab progress={progress} />}
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-sand-150 rounded-xl transition-colors text-stone-400 hover:text-stone-800 shrink-0"
+            aria-label="Close Drawer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-            {/* Tab: Code Diff — every edit_file call across the run, pulled
-                straight out of the same steps RunTimeline renders inline. This
-                is a filtered view onto real diffs, not a separate feature. */}
-            {drawerTab === "diff" && (
-              <CodeDiffTab
-                progress={progress}
-                record={record}
-                jobFinished={jobFinished}
-              />
-            )}
+        {/* ================= 4-COLUMN TELEMETRY SUMMARY STRIP ================= */}
+        <div className="grid grid-cols-4 border-b border-sand-200 bg-sand-50/70 text-center py-2 text-xs font-mono shrink-0">
+          <div className="border-r border-sand-200 px-1">
+            <span className="text-[10px] text-stone-400 block font-semibold uppercase">ELAPSED</span>
+            <span className="text-stone-900 font-bold">{totalRan || "0s"}</span>
+          </div>
+          <div className="border-r border-sand-200 px-1">
+            <span className="text-[10px] text-stone-400 block font-semibold uppercase">COST</span>
+            <span className="text-kiwi-700 font-bold">{formatCost(totalCost)}</span>
+          </div>
+          <div className="border-r border-sand-200 px-1">
+            <span className="text-[10px] text-stone-400 block font-semibold uppercase">TOKENS</span>
+            <span className="text-sky-700 font-bold">{totalTokens > 0 ? formatTokens(totalTokens) : "—"}</span>
+          </div>
+          <div className="px-1">
+            <span className="text-[10px] text-stone-400 block font-semibold uppercase">TEST STATUS</span>
+            <span className={testOutcomeClass}>{testOutcome}</span>
+          </div>
+        </div>
 
-            {/* Tab: Verification — the signed execution record: hash chain,
-                attestation, and the raw JSON disclosure. Exists only once a
-                finished job has produced a record. */}
-            {drawerTab === "verification" && (
-              <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <h3 className="text-sm font-bold text-stone-900">Execution Record (Verified Receipt)</h3>
-                  </div>
-                  {record?.recordHash && (
-                    <div className="flex items-center gap-1.5 bg-sand-50 border border-sand-200 px-2 py-0.5 rounded-md text-[11px] font-mono text-stone-700">
-                      <span className="text-stone-400">Hash:</span>
-                      <span className="truncate max-w-[120px]" title={record.recordHash}>{record.recordHash}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (record.recordHash) {
-                            navigator.clipboard?.writeText(record.recordHash);
-                            setCopiedHash(true);
-                            setTimeout(() => setCopiedHash(false), 2000);
-                          }
-                        }}
-                        className="hover:text-stone-900 text-stone-400 p-0.5 transition-colors"
-                        title="Copy hash"
-                      >
-                        {copiedHash ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                      </button>
+        {/* ================= ACTION TOOLBAR ================= */}
+        {currentJob && (
+          <div className="flex items-center gap-2 px-5 py-2.5 border-b border-sand-200 bg-white shrink-0">
+            <button
+              onClick={() => {
+                if (!confirmCancel) {
+                  setConfirmCancel(true);
+                  return;
+                }
+                act("Stopped", () => client.cancelJob(currentJob.job_id));
+              }}
+              onBlur={() => setConfirmCancel(false)}
+              disabled={!canCancel || busy !== null}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                confirmCancel
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-sand-200 text-stone-700 hover:bg-sand-100"
+              }`}
+            >
+              <Ban className="w-3.5 h-3.5" />
+              {confirmCancel ? "Confirm Stop" : "Stop"}
+            </button>
+
+            <button
+              onClick={() => act("Retried", () => client.retryJob(currentJob.job_id))}
+              disabled={!canRetry || busy !== null}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-sand-200 text-stone-700 hover:bg-sand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Retry
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (onRerunWithEdits && currentJob) {
+                  onRerunWithEdits(currentJob);
+                  onClose();
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-sand-200 text-stone-700 hover:bg-sand-100 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5 text-kiwi-600" /> Re-run with edits
+            </button>
+
+            <div className="flex-1" />
+
+            <button
+              onClick={() => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true);
+                  return;
+                }
+                act("Deleted", () => client.deleteJob(currentJob.job_id)).then(onClose);
+              }}
+              onBlur={() => setConfirmDelete(false)}
+              disabled={busy !== null}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors disabled:opacity-40 ${
+                confirmDelete
+                  ? "border-rose-300 bg-rose-50 text-rose-700"
+                  : "border-sand-200 text-stone-500 hover:bg-rose-50 hover:text-rose-700"
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {confirmDelete ? "Confirm Delete" : "Delete"}
+            </button>
+
+            {busy && <Loader2 className="w-4 h-4 animate-spin text-stone-400" />}
+          </div>
+        )}
+
+        {notice && (() => {
+          const err = parseActionableError(notice);
+          return (
+            <div className="px-5 py-2 text-xs text-stone-700 bg-sand-50 border-b border-sand-200 flex items-center justify-between gap-2 shrink-0">
+              <span>{err.message}</span>
+              {err.actionHref && err.actionLabel && (
+                <Link href={err.actionHref} className="underline font-semibold text-amber-700 hover:text-stone-900 shrink-0">
+                  {err.actionLabel} →
+                </Link>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ================= TAB NAVIGATION ================= */}
+        <div className="flex items-center gap-4 border-b border-sand-200 px-5 text-xs font-semibold bg-white shrink-0">
+          {([
+            ["timeline", "Execution Plan"],
+            ["logs", "Live Logs"],
+            ["diff", "Code Diff"],
+            ["verification", "Verification"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDrawerTab(id)}
+              className={`py-3 border-b-2 transition-colors ${
+                drawerTab === id
+                  ? "text-stone-900 border-stone-900"
+                  : "text-stone-500 hover:text-stone-800 border-transparent"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ================= MAIN CONTENT PANELS ================= */}
+        <div className="flex-1 flex flex-col overflow-y-auto p-5 bg-sand-50/40 gap-5">
+          {/* Plan Mode Review Box */}
+          {jobPlan && jobPlan.plan_status === "pending_review" && (
+            <PlanApprovalCard
+              plan={jobPlan}
+              onApproved={() => {
+                loadJob(taskId!);
+                api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+              }}
+              onRejected={() => {
+                loadJob(taskId!);
+                api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+              }}
+            />
+          )}
+
+          {/* Rejected Plan Notice */}
+          {jobPlan?.plan_status === "rejected" && (
+            <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-xs text-amber-900 font-medium shadow-2xs">
+              This plan was rejected during review, so the job did not run.
+            </div>
+          )}
+
+          {currentJob ? (
+            <>
+              {/* Tab 1: Execution Plan */}
+              {drawerTab === "timeline" && (
+                <div className="flex flex-col gap-4">
+                  {/* Live Progress */}
+                  {progress.length > 0 && (!jobFinished || !record) && (
+                    <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
+                      <div className="flex items-center gap-2">
+                        <Activity className={`w-4 h-4 ${jobFinished ? "text-stone-400" : "text-sky-600"}`} />
+                        <h3 className="text-sm font-bold text-stone-900">
+                          {jobFinished ? "What happened" : "Running now"}
+                        </h3>
+                      </div>
+                      <LiveRun tasks={progress} />
                     </div>
                   )}
-                </div>
 
-                {!jobFinished ? (
-                  <p className="text-xs text-stone-500 py-1">
-                    A verification record is assembled once this job finishes.
-                  </p>
-                ) : recordPending ? (
-                  <div className="flex items-center gap-2 text-xs text-stone-500 py-1">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
+                  {/* Finished Run Timeline */}
+                  {jobFinished && record && (() => {
+                    const recordWorkers = recordBody.execution?.workers ?? [];
+                    const liveWorkers = progress
+                      .filter((t) => (t.steps?.length ?? 0) > 0)
+                      .map((t) => ({
+                        worker_id: t.task_id,
+                        actor_model: t.actor_model,
+                        steps: t.steps ?? [],
+                      }));
+                    const workersList = liveWorkers.length > 0 ? liveWorkers : recordWorkers;
+                    return workersList.length > 0 ? (
+                      <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
+                        <RunTimeline workers={workersList} />
+                      </div>
+                    ) : null;
+                  })()}
+
+                  {/* Task Graph & Sub-tasks */}
+                  <div className="w-full flex flex-col gap-4">
+                    <JobGraph jobId={currentJob.job_id} tasks={currentJob.tasks} />
+                    <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Tasks ({currentJob.tasks.length})</h3>
+                    {currentJob.tasks.map((task) => (
+                      <div
+                        key={task.id}
+                        id={`task-${task.id}`}
+                        className="p-4 bg-white flex flex-col gap-2.5 border border-sand-200 rounded-2xl shadow-2xs scroll-mt-24 target:ring-2 target:ring-kiwi-300 transition-all"
+                      >
+                        <div className="flex justify-between gap-4">
+                          <div className="min-w-0">
+                            {task.task && (
+                              <div className="text-xs font-semibold text-stone-900 line-clamp-2" title={task.task}>
+                                {task.task}
+                              </div>
+                            )}
+                            <span className="font-mono text-[11px] text-stone-400 break-all">{task.id}</span>
+                          </div>
+                          <span className="text-[11px] font-mono px-2 py-0.5 bg-sand-50 border border-sand-200 rounded-lg flex items-center gap-1.5 h-fit shrink-0 text-stone-700">
+                            {getPhaseIcon(task)} {task.status}
+                          </span>
+                        </div>
+                        {timingLabel(task) && (
+                          <div className="text-[11px] text-stone-400 font-mono">{timingLabel(task)}</div>
+                        )}
+                        <BlockedBanner task={task} />
+                        {task.result_url && (
+                          <a
+                            href={task.result_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sky-700 text-xs font-semibold hover:underline flex items-center gap-1.5 mt-1"
+                          >
+                            <GitPullRequest className="w-3.5 h-3.5" /> View PR in GitHub
+                          </a>
+                        )}
+                        {task.result_detail && (
+                          <div className={`text-xs mt-1 font-mono p-2 rounded-lg bg-sand-50 border border-sand-200 ${task.status === "FAILED" ? "text-rose-700" : "text-stone-600"}`}>
+                            {task.result_detail}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ) : record ? (
-                  <div className="flex flex-col gap-2.5">
-                    {/* What the record actually says. Every cell is read from the
-                        record itself — the panel reports the chain, it does not
-                        validate it, and must not imply otherwise. */}
-                    {(() => {
-                      const body = (record.data ?? {}) as ExecutionRecordBody;
-                      const signed = body.attestation === "signed";
-                      const cells: [string, string, string?][] = [
-                        ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
-                        [
-                          "Previous hash",
-                          body.prev_record_hash ? body.prev_record_hash : "genesis — first record for this org",
-                          body.prev_record_hash,
-                        ],
-                        ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", body.attestation],
-                        ["Signing key", body.record_signature?.key ?? "—", body.record_signature?.key],
-                      ];
-                      return (
-                        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-xl bg-sand-50 border border-sand-200 font-mono">
-                          {cells.map(([label, value, full]) => (
-                            <div key={label} className="min-w-0">
-                              <dt className="text-[10px] text-stone-400 uppercase tracking-wider">{label}</dt>
-                              <dd
-                                className={`truncate ${label === "Attestation" && signed ? "text-emerald-700 font-semibold" : "text-stone-700"}`}
-                                title={full ?? value}
-                              >
-                                {value.length > 14 ? value.slice(0, 12) + "…" : value}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      );
-                    })()}
+                </div>
+              )}
 
-                    <p className="text-[11px] text-stone-500 leading-relaxed">
-                      A tamper-evident record of what ran: the plan, the commit, the test command
-                      and its outcome, linked to the previous record in your organization&apos;s
-                      chain. It attests to the execution, not to the correctness of the resulting
-                      code — the tests confirm the change did not break the suite, not that it
-                      does what you asked. Review the pull request.
-                    </p>
+              {/* Tab 2: Live Logs */}
+              {drawerTab === "logs" && <LiveLogsTab progress={progress} />}
 
-                    {/* Disclosure JSON toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setShowJson(v => !v)}
-                      aria-expanded={showJson}
-                      className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-900 transition-colors w-fit pt-0.5"
-                    >
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
-                      <span>{showJson ? "Hide raw record" : "View raw record"}</span>
-                    </button>
+              {/* Tab 3: Code Diff */}
+              {drawerTab === "diff" && (
+                <CodeDiffTab
+                  progress={progress}
+                  record={record}
+                  jobFinished={jobFinished}
+                />
+              )}
 
-                    {showJson && (
-                      <pre className="text-[11px] font-mono p-3 rounded-lg bg-stone-900 border border-stone-800 text-stone-200 overflow-x-auto max-h-64 leading-relaxed">
-                        {JSON.stringify(record.data, null, 2)}
-                      </pre>
+              {/* Tab 4: Verification */}
+              {drawerTab === "verification" && (
+                <div className="p-5 rounded-2xl border border-sand-200 bg-white shadow-2xs flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <h3 className="text-sm font-bold text-stone-900">Execution Record (Verified Receipt)</h3>
+                    </div>
+                    {record?.recordHash && (
+                      <div className="flex items-center gap-1.5 bg-sand-50 border border-sand-200 px-2 py-0.5 rounded-md text-[11px] font-mono text-stone-700">
+                        <span className="text-stone-400">Hash:</span>
+                        <span className="truncate max-w-[120px]" title={record.recordHash}>{record.recordHash}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (record.recordHash) {
+                              navigator.clipboard?.writeText(record.recordHash);
+                              setCopiedHash(true);
+                              setTimeout(() => setCopiedHash(false), 2000);
+                            }
+                          }}
+                          className="hover:text-stone-900 text-stone-400 p-0.5 transition-colors"
+                          title="Copy hash"
+                        >
+                          {copiedHash ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
                     )}
                   </div>
-                ) : (
-                  <p className="text-xs text-stone-500 py-1">No verification record for this job.</p>
-                )}
-              </div>
+
+                  {!jobFinished ? (
+                    <p className="text-xs text-stone-500 py-1">
+                      A verification record is assembled once this job finishes.
+                    </p>
+                  ) : recordPending ? (
+                    <div className="flex items-center gap-2 text-xs text-stone-500 py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading record…
+                    </div>
+                  ) : record ? (
+                    <div className="flex flex-col gap-2.5">
+                      {(() => {
+                        const signed = recordBody.attestation === "signed";
+                        const cells: [string, string, string?][] = [
+                          ["Record hash", record.recordHash ?? "—", record.recordHash ?? undefined],
+                          [
+                            "Previous hash",
+                            recordBody.prev_record_hash ? recordBody.prev_record_hash : "genesis — first record for this org",
+                            recordBody.prev_record_hash,
+                          ],
+                          ["Attestation", signed ? "Signed by Kiwi" : "Unsigned", recordBody.attestation],
+                          ["Signing key", recordBody.record_signature?.key ?? "—", recordBody.record_signature?.key],
+                        ];
+                        return (
+                          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-2.5 rounded-xl bg-sand-50 border border-sand-200 font-mono">
+                            {cells.map(([label, value, full]) => (
+                              <div key={label} className="min-w-0">
+                                <dt className="text-[10px] text-stone-400 uppercase tracking-wider">{label}</dt>
+                                <dd
+                                  className={`truncate ${label === "Attestation" && signed ? "text-emerald-700 font-semibold" : "text-stone-700"}`}
+                                  title={full ?? value}
+                                >
+                                  {value.length > 14 ? value.slice(0, 12) + "…" : value}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        );
+                      })()}
+
+                      <p className="text-[11px] text-stone-500 leading-relaxed">
+                        A tamper-evident record of what ran: the plan, the commit, the test command
+                        and its outcome, linked to the previous record in your organization&apos;s
+                        chain. Review the pull request in GitHub for complete diff audit.
+                      </p>
+
+                      {/* Disclosure JSON toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setShowJson((v) => !v)}
+                        aria-expanded={showJson}
+                        className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-900 transition-colors w-fit pt-0.5"
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showJson ? "rotate-180" : ""}`} />
+                        <span>{showJson ? "Hide raw record" : "View raw record"}</span>
+                      </button>
+
+                      {showJson && (
+                        <pre className="text-[11px] font-mono p-3 rounded-lg bg-stone-900 border border-stone-800 text-stone-200 overflow-x-auto max-h-64 leading-relaxed">
+                          {JSON.stringify(record.data, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-stone-500 py-1">No verification record for this job.</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <LoadingState label="Loading job details…" state="connecting" />
+          )}
+        </div>
+
+        {/* ================= STICKY FOOTER ACTIONS ================= */}
+        <div className="p-4 border-t border-sand-200 bg-white flex items-center justify-between shrink-0">
+          <div>
+            {canCancel ? (
+              <button
+                onClick={() => act("Stopped", () => client.cancelJob(currentJob!.job_id))}
+                disabled={busy !== null}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition-all disabled:opacity-40"
+              >
+                Cancel Task
+              </button>
+            ) : (
+              <span className="text-[11px] font-mono text-stone-400">
+                {isSucceeded ? "Execution finished successfully" : isFailed ? "Execution terminated with errors" : "Idle"}
+              </span>
             )}
-          </>
-        ) : (
-          <LoadingState label="Loading job details…" state="connecting" />
-        )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {prResultUrl ? (
+              <a
+                href={prResultUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs flex items-center gap-1.5 shadow-xs transition-all"
+              >
+                <GitPullRequest className="w-3.5 h-3.5 text-kiwi-400" />
+                <span>Review PR in GitHub</span>
+              </a>
+            ) : (
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-xl bg-sand-100 hover:bg-sand-150 text-stone-700 border border-sand-200 font-semibold text-xs transition-all"
+              >
+                Close
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
-  </>
-);
+    </>
+  );
 }

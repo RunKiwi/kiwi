@@ -41,7 +41,7 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 w-full">
       <OrgManagementPanel org={org} onOrgUpdate={setOrg} />
     </div>
   );

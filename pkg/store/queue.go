@@ -568,6 +568,16 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		Continuations int
 		LatestOrigin  string
 		LatestAt      time.Time
+
+		ArchitectModel       string
+		WorkerModel          string
+		CostUSD              float64
+		TokensIn             int64
+		TokensOut            int64
+		RequiresPlanApproval bool
+		PlanStatus           string
+		SpendCapUSD          float64
+		IsDryRun             bool
 	}
 
 	jobMap := make(map[string]*jobAgg)
@@ -591,6 +601,11 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 			agg.LatestOrigin = t.Origin
 			agg.LatestAt = t.CreatedAt
 		}
+
+		agg.CostUSD += t.CostUSD
+		agg.TokensIn += t.TokensIn
+		agg.TokensOut += t.TokensOut
+
 		// The overall goal + repo live on the task spec. Prefer the job-level
 		// "job_task" the planner stamps; fall back to the worker task text.
 		if agg.Task == "" {
@@ -605,6 +620,40 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 				agg.Repo = shortRepo(ru)
 			}
 		}
+
+		// Model metadata from task spec
+		if agg.WorkerModel == "" {
+			if m, ok := t.Spec["model"].(string); ok && m != "" {
+				agg.WorkerModel = m
+			} else if wm, ok := t.Spec["worker_model"].(string); ok && wm != "" {
+				agg.WorkerModel = wm
+			}
+		}
+		if agg.ArchitectModel == "" {
+			if am, ok := t.Spec["architect_model"].(string); ok && am != "" {
+				agg.ArchitectModel = am
+			}
+		}
+		if agg.SpendCapUSD == 0 {
+			if sc, ok := t.Spec["spend_cap_usd"].(float64); ok && sc > 0 {
+				agg.SpendCapUSD = sc
+			}
+		}
+		if !agg.RequiresPlanApproval {
+			if pm, ok := t.Spec["plan_mode"].(bool); ok && pm {
+				agg.RequiresPlanApproval = true
+			} else if rpa, ok := t.Spec["requires_plan_approval"].(bool); ok && rpa {
+				agg.RequiresPlanApproval = true
+			}
+		}
+		if !agg.IsDryRun {
+			if dr, ok := t.Spec["is_dry_run"].(bool); ok && dr {
+				agg.IsDryRun = true
+			} else if dr, ok := t.Spec["dry_run"].(bool); ok && dr {
+				agg.IsDryRun = true
+			}
+		}
+
 		// Executor linkage: the fleet the work targets, and the daemon that
 		// leased it (retained after completion). First non-empty wins.
 		if agg.FleetID == "" && t.FleetID != "" {
@@ -627,6 +676,39 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		}
 		if t.ResultURL != nil && *t.ResultURL != "" {
 			agg.PRURLs = append(agg.PRURLs, *t.ResultURL)
+		}
+	}
+
+	// Look up corresponding Job records to enrich plan status and model metadata
+	var jobIDs []string
+	for jid := range jobMap {
+		jobIDs = append(jobIDs, jid)
+	}
+	if len(jobIDs) > 0 {
+		var dbJobs []Job
+		if err := s.db.WithContext(ctx).Where("org_id = ? AND id IN ?", orgID, jobIDs).Find(&dbJobs).Error; err == nil {
+			for _, j := range dbJobs {
+				if agg, ok := jobMap[j.ID]; ok {
+					if j.ArchitectModel != "" {
+						agg.ArchitectModel = j.ArchitectModel
+					}
+					if j.WorkerModel != "" {
+						agg.WorkerModel = j.WorkerModel
+					}
+					if j.PlanStatus != "" {
+						agg.PlanStatus = j.PlanStatus
+					}
+					if j.RequiresPlanApproval {
+						agg.RequiresPlanApproval = true
+					}
+					if j.SpendCapUSD > 0 {
+						agg.SpendCapUSD = j.SpendCapUSD
+					}
+					if j.CostUSD > agg.CostUSD {
+						agg.CostUSD = j.CostUSD
+					}
+				}
+			}
 		}
 	}
 
@@ -654,17 +736,26 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		}
 
 		summaries = append(summaries, JobSummary{
-			JobID:             agg.JobID,
-			ContinuationCount: agg.Continuations,
-			LatestOrigin:      agg.LatestOrigin,
-			CreatedAt:         agg.CreatedAt,
-			TaskCount:         agg.TaskCount,
-			Status:            status,
-			PRURLs:            prUrls,
-			Task:              agg.Task,
-			Repo:              agg.Repo,
-			FleetID:           agg.FleetID,
-			DaemonID:          agg.DaemonID,
+			JobID:                agg.JobID,
+			ContinuationCount:    agg.Continuations,
+			LatestOrigin:         agg.LatestOrigin,
+			CreatedAt:            agg.CreatedAt,
+			TaskCount:            agg.TaskCount,
+			Status:               status,
+			PRURLs:               prUrls,
+			Task:                 agg.Task,
+			Repo:                 agg.Repo,
+			FleetID:              agg.FleetID,
+			DaemonID:             agg.DaemonID,
+			ArchitectModel:       agg.ArchitectModel,
+			WorkerModel:          agg.WorkerModel,
+			CostUSD:              agg.CostUSD,
+			TokensIn:             agg.TokensIn,
+			TokensOut:            agg.TokensOut,
+			RequiresPlanApproval: agg.RequiresPlanApproval,
+			PlanStatus:           agg.PlanStatus,
+			SpendCapUSD:          agg.SpendCapUSD,
+			IsDryRun:             agg.IsDryRun,
 		})
 	}
 

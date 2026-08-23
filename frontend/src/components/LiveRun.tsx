@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Terminal } from "lucide-react";
-import { ThinkingOrb } from "thinking-orbs";
+import { ThinkingOrb } from "@/components/ThinkingOrb";
 import { RunTimeline } from "@/components/RunTimeline";
 import { orbStateForPhase } from "@/lib/orbState";
 import { elapsedSince } from "@/lib/progressTime";
@@ -11,24 +11,15 @@ import type { JobProgressTask } from "@/lib/api";
 /**
  * LiveRun shows what a job is doing while it is still doing it.
  *
- * Before this, a running task was a spinner and an elapsed clock. A run that
- * was stuck looked exactly like one working hard, and the only way to tell was
- * to wait ten minutes for the outcome — or to read a daemon log on a machine
- * the user cannot reach.
- *
- * It reuses RunTimeline for the completed phases, so a run does not change
- * appearance the moment it finishes: the same rows stay, and the record panel
- * takes over rendering them.
+ * Updated with Enterprise SaaS light styling, high contrast colors, and ThinkingOrb glow.
  */
 
-/** A phase string is "install: npm ci" or "test: npm test" — split for display. */
 function splitPhase(phase: string): { kind: string; command: string } {
   const i = phase.indexOf(":");
   if (i === -1) return { kind: phase, command: "" };
   return { kind: phase.slice(0, i), command: phase.slice(i + 1).trim() };
 }
 
-/** Seconds since the daemon last reported, or null when it never has. */
 function staleness(progressAt?: string): number | null {
   if (!progressAt) return null;
   const t = Date.parse(progressAt);
@@ -36,7 +27,6 @@ function staleness(progressAt?: string): number | null {
   return Math.max(0, Math.round((Date.now() - t) / 1000));
 }
 
-/** Seconds as "12s" or "4m32s" — short enough for an inline badge. */
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
@@ -49,22 +39,22 @@ function OutputTail({ text }: { text: string }) {
   const lines = text.replace(/\s+$/, "").split("\n");
 
   return (
-    <div className="rounded-md bg-black/40 border border-white/5 overflow-hidden">
+    <div className="rounded-xl bg-stone-950 border border-stone-800 overflow-hidden shadow-inner">
       <button
         type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-mono text-stone-400 hover:text-stone-200 bg-stone-900 border-b border-stone-800 transition-colors"
         aria-expanded={open}
       >
-        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        <Terminal className="w-3 h-3" />
-        <span>Output</span>
-        <span className="text-zinc-600">last {lines.length} line{lines.length === 1 ? "" : "s"}</span>
+        <div className="flex items-center gap-1.5">
+          {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          <Terminal className="w-3.5 h-3.5 text-stone-400" />
+          <span>Live Runner Output</span>
+        </div>
+        <span className="text-stone-500 text-[10px]">last {lines.length} lines</span>
       </button>
       {open && (
-        // Scrolls inside its own box: command output is arbitrarily wide and
-        // must never make the drawer scroll sideways.
-        <pre className="px-2.5 pb-2 text-[11px] leading-relaxed text-zinc-400 font-mono overflow-x-auto whitespace-pre">
+        <pre className="p-3 text-[11px] leading-relaxed text-stone-200 font-mono overflow-x-auto whitespace-pre max-h-60">
           {lines.join("\n")}
         </pre>
       )}
@@ -73,17 +63,16 @@ function OutputTail({ text }: { text: string }) {
 }
 
 export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
-  const running = tasks.filter(t => t.status === "LEASED" || t.status === "RUNNING");
-  const anySteps = tasks.some(t => (t.steps?.length ?? 0) > 0);
+  const running = tasks.filter((t) => t.status === "LEASED" || t.status === "RUNNING");
+  const anySteps = tasks.some((t) => (t.steps?.length ?? 0) > 0);
   if (running.length === 0 && !anySteps) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Phases completed so far. The same component the finished job uses, so
-          nothing shifts when the run ends. */}
+      {/* Phases completed so far */}
       {anySteps && (
         <RunTimeline
-          workers={tasks.map(t => ({
+          workers={tasks.map((t) => ({
             worker_id: t.task_id,
             actor_model: t.actor_model,
             steps: t.steps ?? [],
@@ -91,38 +80,32 @@ export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
         />
       )}
 
-      {running.map(t => {
+      {running.map((t) => {
         const { kind, command } = splitPhase(t.phase ?? "");
         const since = staleness(t.progress_at);
         const elapsed = elapsedSince(t.phase_since);
         return (
-          <div key={t.task_id} className="rounded-lg bg-black/30 border border-white/5 p-2.5 flex flex-col gap-2">
-            <div className="flex items-center gap-2 text-xs">
-              {/* The animation names the phase rather than merely asserting that
-                  one exists: reading the tree does not look like installing
-                  dependencies. Under prefers-reduced-motion the orb paints a
-                  single static frame, and the label beside it carries the same
-                  information either way. */}
+          <div key={t.task_id} className="rounded-2xl bg-white border border-sand-200 p-4 flex flex-col gap-2.5 shadow-2xs">
+            <div className="flex items-center gap-2.5 text-xs">
               <ThinkingOrb
                 state={orbStateForPhase(t.phase)}
-                size={20}
+                size={24}
                 className="shrink-0"
                 aria-label={`${kind || "working"}${command ? `: ${command}` : ""}`}
               />
-              <span className="text-zinc-300">{kind || "working"}</span>
-              {command && <code className="text-[11px] text-zinc-500 font-mono truncate">{command}</code>}
-              {/* How long the CURRENT phase has taken — distinct from the
-                  staleness warning below, which is about whether the feed
-                  itself is still arriving. */}
+              <span className="font-bold text-stone-900">{kind || "working"}</span>
+              {command && (
+                <code className="text-[11px] text-stone-700 bg-sand-100 px-2 py-0.5 rounded-lg border border-sand-200 font-mono truncate max-w-sm">
+                  {command}
+                </code>
+              )}
               {elapsed !== null && (
-                <span className="text-[11px] text-zinc-500 font-mono tabular-nums shrink-0">
+                <span className="text-[11px] text-stone-500 font-mono tabular-nums shrink-0">
                   {formatElapsed(elapsed)}
                 </span>
               )}
-              {/* A timestamp that stops advancing is how a hung run tells itself
-                  apart from a slow one, so it is stated rather than hidden. */}
               {since !== null && since > 30 && (
-                <span className="ml-auto text-[11px] text-amber-400/80 shrink-0">
+                <span className="ml-auto text-[11px] text-amber-700 font-semibold shrink-0 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                   no update for {since}s
                 </span>
               )}
@@ -134,3 +117,4 @@ export function LiveRun({ tasks }: { tasks: JobProgressTask[] }) {
     </div>
   );
 }
+
