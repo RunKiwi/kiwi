@@ -35,9 +35,9 @@ interface SelectProps {
   renderDetail?: (option: SelectOption) => React.ReactNode;
 }
 
-// A single custom dropdown used across the dashboard: navy glass menu, green
-// accent, keyboard nav, and optional type-to-filter search. Replaces native
-// <select> so the menu matches the product design and can be searched.
+// A single custom dropdown used across the dashboard: sand/white popover menu,
+// kiwi accent, keyboard nav, and optional type-to-filter search. Replaces
+// native <select> so the menu matches the product design and can be searched.
 export function Select({
   value,
   onChange,
@@ -133,7 +133,7 @@ export function Select({
   };
 
   const chevron = (
-    <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+    <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
   );
 
   return (
@@ -149,13 +149,11 @@ export function Select({
           aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
-          className={`chip cursor-pointer ${className}`}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white hover:bg-sand-50 border border-sand-200 text-xs font-medium text-stone-700 shadow-2xs transition-all cursor-pointer ${className}`}
         >
           {icon}
-          {label && <span className="k">{label}</span>}
-          <span className="v truncate max-w-[170px]" style={{ color: selected ? undefined : "var(--tx-dim)" }}>
-            {display}
-          </span>
+          {label && <span className="text-[10px] font-mono uppercase text-stone-400 font-bold">{label}</span>}
+          <span className={`truncate max-w-[170px] ${selected ? "text-stone-900" : "text-stone-400"}`}>{display}</span>
           {chevron}
         </button>
       ) : (
@@ -169,11 +167,11 @@ export function Select({
           aria-label={ariaLabel || label || placeholder}
           onClick={toggle}
           onKeyDown={onTriggerKeyDown}
-          className={`field flex items-center justify-between gap-2 text-left ${className}`}
+          className={`w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white hover:border-sand-300 border border-sand-200 text-left flex items-center justify-between gap-2 shadow-xs transition-all ${className}`}
         >
           <span className="flex items-center gap-2 min-w-0">
             {icon}
-            <span className={`truncate ${selected ? "text-[var(--tx)]" : "text-[var(--tx-dim)]"}`}>{display}</span>
+            <span className={`truncate text-sm ${selected ? "text-stone-900 font-medium" : "text-stone-400"}`}>{display}</span>
           </span>
           {chevron}
         </button>
@@ -185,11 +183,11 @@ export function Select({
           role="listbox"
           aria-label={ariaLabel || label || placeholder}
           onKeyDown={onListKey}
-          className="pr-popover absolute top-full left-0 mt-2 z-50 min-w-[240px] w-max max-w-[340px] rounded-xl border border-white/10 bg-[#0E1A24]/95 backdrop-blur-xl shadow-[0_24px_60px_-16px_rgba(0,0,0,0.85)] p-1.5"
+          className="absolute top-full left-0 mt-1.5 z-50 min-w-[240px] w-max max-w-[340px] rounded-2xl border border-sand-200 bg-white shadow-popover p-1.5"
         >
           {searchable && (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 mb-1 rounded-lg bg-black/20 border border-white/5">
-              <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+            <div className="flex items-center gap-2 px-2.5 py-1.5 mb-1 rounded-xl bg-sand-50/60 border border-sand-200">
+              <Search className="w-3.5 h-3.5 text-stone-400 shrink-0" />
               <input
                 ref={searchRef}
                 value={query}
@@ -198,13 +196,13 @@ export function Select({
                   setActive(0);
                 }}
                 placeholder="Search…"
-                className="bg-transparent outline-none border-0 text-sm text-white placeholder:text-zinc-600 w-full"
+                className="bg-transparent outline-none border-0 text-sm text-stone-900 placeholder:text-stone-400 w-full"
               />
             </div>
           )}
           <div ref={listRef} className="flex flex-col gap-0.5 max-h-64 overflow-y-auto">
             {filtered.length === 0 ? (
-              <div className="px-2.5 py-3 text-xs text-zinc-500 text-center">No matches</div>
+              <div className="px-2.5 py-3 text-xs text-stone-400 text-center">No matches</div>
             ) : (
               filtered.map((o, i) => {
                 const isSel = o.value === value;
@@ -217,20 +215,20 @@ export function Select({
                     data-idx={i}
                     onMouseEnter={() => setActive(i)}
                     onClick={() => pick(o.value)}
-                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left transition-colors ${
-                      i === active ? "bg-white/[0.07]" : ""
+                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-left transition-colors ${
+                      i === active ? "bg-sand-100" : ""
                     }`}
                   >
-                    <Check className={`w-3.5 h-3.5 shrink-0 ${isSel ? "text-[var(--green)]" : "text-transparent"}`} />
-                    <span className={`truncate flex-1 ${isSel ? "text-white font-medium" : "text-zinc-200"}`}>{o.label}</span>
-                    {o.hint && <span className="text-[11px] text-zinc-500 shrink-0">{o.hint}</span>}
+                    <Check className={`w-3.5 h-3.5 shrink-0 ${isSel ? "text-kiwi-600" : "text-transparent"}`} />
+                    <span className={`truncate flex-1 ${isSel ? "text-stone-900 font-semibold" : "text-stone-700"}`}>{o.label}</span>
+                    {o.hint && <span className="text-[11px] text-stone-400 shrink-0">{o.hint}</span>}
                   </button>
                 );
               })
             )}
           </div>
           {renderDetail && filtered[active] && (
-            <div className="mt-1 pt-2.5 border-t border-white/10">{renderDetail(filtered[active])}</div>
+            <div className="mt-1 pt-2.5 border-t border-sand-200">{renderDetail(filtered[active])}</div>
           )}
         </div>
       )}

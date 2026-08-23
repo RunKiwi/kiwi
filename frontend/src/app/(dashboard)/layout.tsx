@@ -10,7 +10,6 @@ import {
   ShieldAlert,
   Sliders,
   Zap,
-  Building2,
   Folder,
   FolderOpen,
   Plus,
@@ -19,23 +18,28 @@ import {
   PanelLeft,
   ChevronLeft,
   ChevronRight,
-  GitPullRequest,
   Activity,
-  CheckCircle2,
   Sparkles,
-  Layers,
   Cpu,
   Link2,
   Users,
   CreditCard,
-  RotateCcw,
-  Play,
   ShieldCheck,
   Server,
 } from "lucide-react";
 import { api, type UsageResponse, type ValidateResponse, type GithubRepo } from "@/lib/api";
 import { CustomLoadersStudio } from "@/components/CustomLoadersStudio";
+import { Logo } from "@/components/Logo";
 import { useFleetStore } from "@/store/useFleetStore";
+
+interface NavCommand {
+  label: string;
+  href?: string;
+  action?: () => void;
+  icon: React.ReactNode;
+  hint?: string;
+  keywords?: string;
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -47,10 +51,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [primaryCollapsed, setPrimaryCollapsed] = useState(false);
-  const [simulatedPlan, setSimulatedPlan] = useState<"free" | "pro" | "enterprise">("free");
   const [showLoadersModal, setShowLoadersModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showPlanModal, setShowPlanModal] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
 
   useEffect(() => {
@@ -69,7 +71,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       } else if (e.key === "Escape") {
         setShowCommandPalette(false);
         setShowLoadersModal(false);
-        setShowPlanModal(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -78,12 +79,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     api.validate()
-      .then((v) => {
-        setOrg(v);
-        if (v.plan === "pro" || v.plan === "enterprise") {
-          setSimulatedPlan(v.plan as any);
-        }
-      })
+      .then(setOrg)
       .catch(() => {});
 
     api.getUsage()
@@ -107,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   };
 
-  const plan = simulatedPlan;
+  const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
   const limitMinutes = usage?.agent_minutes_limit ?? 500;
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
@@ -146,44 +142,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </span>
         </div>
 
-        {/* Live Tier Switcher & Simulation Controls */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-white rounded-xl p-0.5 border border-sand-200 shadow-2xs text-[11px]">
-            <span className="text-[10px] font-mono uppercase text-stone-400 font-bold px-2">Simulate Plan:</span>
-            <button
-              onClick={() => setSimulatedPlan("free")}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                simulatedPlan === "free" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              Free
-            </button>
-            <button
-              onClick={() => setSimulatedPlan("pro")}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                simulatedPlan === "pro" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              Pro
-            </button>
-            <button
-              onClick={() => setSimulatedPlan("enterprise")}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                simulatedPlan === "enterprise" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              Enterprise
-            </button>
-          </div>
-
-          <button
-            onClick={() => router.push("/?simulate=true")}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white hover:bg-sand-50 border border-sand-200 text-[11px] font-medium text-stone-700 shadow-2xs transition-all"
-          >
-            <Play className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Simulate Stream</span>
-          </button>
-
           <button
             onClick={() => setShowLoadersModal(true)}
             className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-kiwi-50 hover:bg-kiwi-100 border border-kiwi-300 text-kiwi-900 text-[11px] font-bold shadow-2xs transition-all"
@@ -200,14 +159,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <LogOut className="w-3.5 h-3.5 text-rose-500" />
             <span>Sign Out</span>
           </button>
-
-          <button
-            onClick={() => window.location.reload()}
-            className="p-1.5 rounded-xl bg-white hover:bg-sand-50 border border-sand-200 text-stone-500 hover:text-stone-900 shadow-2xs transition-all"
-            title="Reset Demo Data"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
         </div>
       </header>
 
@@ -223,8 +174,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Brand & Org Header */}
           <div className="shrink-0 flex items-center justify-between px-1 mb-3 w-full">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-kiwi-100 border border-kiwi-200 flex items-center justify-center font-bold text-kiwi-700 text-sm shrink-0 shadow-2xs">
-                🥝
+              <div className="w-7 h-7 rounded-lg bg-kiwi-100 border border-kiwi-200 flex items-center justify-center text-kiwi-700 shrink-0 shadow-2xs">
+                <Logo className="w-4 h-4" />
               </div>
               {!primaryCollapsed && (
                 <div className="min-w-0">
@@ -555,40 +506,46 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Users className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                   <span className="truncate">Team Members</span>
                 </Link>
-                <button
-                  onClick={() => setShowPlanModal(true)}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium text-stone-600 hover:bg-sand-150 transition-all text-left cursor-pointer"
+                <Link
+                  href="/settings"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
+                    pathname === "/settings" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                  }`}
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <CreditCard className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                     <span className="truncate">Plans & Billing</span>
                   </span>
-                  <span className="text-[9px] font-mono font-bold text-amber-800 bg-amber-100 px-1 rounded">Upgrade</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Group 5: Staff Super Admin Console */}
-            <div className="pt-2">
-              <div className="text-[10px] font-semibold text-stone-400 px-2 mb-1 flex items-center justify-between">
-                <span>Kiwi Staff</span>
-                <span className="text-[8px] font-mono font-bold bg-rose-100 text-rose-800 px-1 py-0.2 rounded border border-rose-200">SUPER ADMIN</span>
-              </div>
-              <div className="space-y-0.5">
-                <Link
-                  href="/admin"
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
-                    pathname === "/admin" ? "bg-rose-100 text-rose-900 border border-rose-200 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5 truncate">
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span className="truncate font-semibold text-rose-950">Super Admin</span>
-                  </span>
-                  <span className="text-[9px] font-mono text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded font-bold">142 Orgs</span>
+                  {plan === "free" && (
+                    <span className="text-[9px] font-mono font-bold text-amber-800 bg-amber-100 px-1 rounded">Upgrade</span>
+                  )}
                 </Link>
               </div>
             </div>
+
+            {/* Group 5: Staff Super Admin Console — hidden unless the account is
+                actually a super admin; the API rejects non-admins anyway, but a
+                visible nav item promising staff tooling to every org is its own
+                leak of what the platform can do. */}
+            {isSuperAdmin && (
+              <div className="pt-2">
+                <div className="text-[10px] font-semibold text-stone-400 px-2 mb-1 flex items-center justify-between">
+                  <span>Kiwi Staff</span>
+                  <span className="text-[8px] font-mono font-bold bg-rose-100 text-rose-800 px-1 py-0.2 rounded border border-rose-200">SUPER ADMIN</span>
+                </div>
+                <div className="space-y-0.5">
+                  <Link
+                    href="/admin"
+                    className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-medium transition-all text-left ${
+                      pathname === "/admin" ? "bg-rose-100 text-rose-900 border border-rose-200 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+                    }`}
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span className="truncate font-semibold text-rose-950">Super Admin</span>
+                  </Link>
+                </div>
+              </div>
+            )}
 
           </div>
 
@@ -630,183 +587,78 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="text-[10px] font-mono bg-sand-150 px-1.5 py-0.5 rounded text-stone-500">ESC</span>
             </div>
             <div className="max-h-80 overflow-y-auto p-2 space-y-1 text-xs">
-              <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">Quick Navigation</div>
-              <Link
-                href="/composer"
-                onClick={() => setShowCommandPalette(false)}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />
-                  <span className="font-medium">Create New Task</span>
-                </span>
-                <span className="text-[10px] font-mono text-stone-400">/composer</span>
-              </Link>
-              <Link
-                href="/"
-                onClick={() => setShowCommandPalette(false)}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  <LayoutGrid className="w-3.5 h-3.5 text-stone-600" />
-                  <span className="font-medium">Task Dashboard</span>
-                </span>
-                <span className="text-[10px] font-mono text-stone-400">/</span>
-              </Link>
-              <Link
-                href="/monitors"
-                onClick={() => setShowCommandPalette(false)}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  <Radar className="w-3.5 h-3.5 text-sky-600" />
-                  <span className="font-medium">PR Watchdogs</span>
-                </span>
-                <span className="text-[10px] font-mono text-stone-400">/monitors</span>
-              </Link>
-              <Link
-                href="/spend"
-                onClick={() => setShowCommandPalette(false)}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  <Receipt className="w-3.5 h-3.5 text-stone-600" />
-                  <span className="font-medium">Cost & Velocity Analytics</span>
-                </span>
-                <span className="text-[10px] font-mono text-stone-400">/spend</span>
-              </Link>
-              <Link
-                href="/fleet"
-                onClick={() => setShowCommandPalette(false)}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  <Server className="w-3.5 h-3.5 text-stone-600" />
-                  <span className="font-medium">Private Runners & Fleet</span>
-                </span>
-                <span className="text-[10px] font-mono text-stone-400">/fleet</span>
-              </Link>
-              <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold mt-2">Actions</div>
-              <button
-                onClick={() => {
-                  setShowCommandPalette(false);
-                  setShowPlanModal(true);
-                }}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all text-left"
-              >
-                <span className="flex items-center gap-2">
-                  <CreditCard className="w-3.5 h-3.5 text-amber-600" />
-                  <span className="font-medium">Compare & Upgrade Plans</span>
-                </span>
-                <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">Upgrade</span>
-              </button>
-              <button
-                onClick={() => {
-                  setShowCommandPalette(false);
-                  setShowLoadersModal(true);
-                }}
-                className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all text-left"
-              >
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />
-                  <span className="font-medium">Open Custom Loaders Studio</span>
-                </span>
-                <span className="text-[10px] font-mono text-kiwi-800 bg-kiwi-50 px-1.5 py-0.2 rounded border border-kiwi-200">Studio</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              {(() => {
+                const navigation: NavCommand[] = [
+                  { label: "Create New Task", href: "/composer", icon: <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />, hint: "/composer" },
+                  { label: "Task Dashboard", href: "/", icon: <LayoutGrid className="w-3.5 h-3.5 text-stone-600" />, hint: "/" },
+                  { label: "PR Watchdogs", href: "/monitors", icon: <Radar className="w-3.5 h-3.5 text-sky-600" />, hint: "/monitors" },
+                  { label: "Cost & Velocity Analytics", href: "/spend", icon: <Receipt className="w-3.5 h-3.5 text-stone-600" />, hint: "/spend" },
+                  { label: "Private Runners & Fleet", href: "/fleet", icon: <Server className="w-3.5 h-3.5 text-stone-600" />, hint: "/fleet" },
+                  ...(isSuperAdmin ? [{ label: "Super Admin", href: "/admin", icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />, hint: "/admin" }] : []),
+                ];
+                const actions: NavCommand[] = [
+                  { label: "Compare & Upgrade Plans", href: "/settings", icon: <CreditCard className="w-3.5 h-3.5 text-amber-600" />, hint: "/settings" },
+                  { label: "Open Custom Loaders Studio", action: () => setShowLoadersModal(true), icon: <Sparkles className="w-3.5 h-3.5 text-kiwi-600" />, hint: "Studio" },
+                ];
 
-      {/* PLAN COMPARISON & UPGRADE MODAL */}
-      {showPlanModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-3xl bg-white border border-sand-200 rounded-3xl shadow-popover p-6 space-y-6 animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-stone-900">Kiwi Platform Plans & Compute Tiers</h3>
-                <p className="text-xs text-stone-500">Autonomous software engineering agents for high-velocity teams</p>
-              </div>
-              <button
-                onClick={() => setShowPlanModal(false)}
-                className="p-1.5 rounded-xl hover:bg-sand-150 text-stone-400 hover:text-stone-700"
-              >
-                ✕
-              </button>
-            </div>
+                const q = cmdQuery.trim().toLowerCase();
+                const matches = (c: NavCommand) => !q || c.label.toLowerCase().includes(q) || (c.keywords ?? "").toLowerCase().includes(q);
+                const filteredNav = navigation.filter(matches);
+                const filteredActions = actions.filter(matches);
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Free Plan */}
-              <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50 space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-stone-900">Free Tier</span>
-                    <span className="text-[10px] font-mono bg-stone-200 text-stone-700 px-1.5 py-0.5 rounded font-semibold">Active</span>
-                  </div>
-                  <div className="text-xl font-bold text-stone-900">$0 <span className="text-xs font-normal text-stone-500">/ month</span></div>
-                  <p className="text-xs text-stone-600">Great for evaluating autonomous pull request workflows.</p>
-                  <ul className="text-xs space-y-1.5 text-stone-600 pt-2 border-t border-sand-200">
-                    <li>✓ 500 Compute Mins / mo</li>
-                    <li>✓ 2 Concurrent Workers</li>
-                    <li>✓ Standard PR Generation</li>
-                    <li>✗ BYOC Runners Locked</li>
-                  </ul>
-                </div>
-                <button disabled className="w-full py-2 rounded-xl bg-sand-200 text-stone-500 font-semibold text-xs cursor-default">
-                  Current Tier
-                </button>
-              </div>
+                const renderCommand = (c: NavCommand) => {
+                  const content = (
+                    <>
+                      <span className="flex items-center gap-2">
+                        {c.icon}
+                        <span className="font-medium">{c.label}</span>
+                      </span>
+                      {c.hint && <span className="text-[10px] font-mono text-stone-400">{c.hint}</span>}
+                    </>
+                  );
+                  const className = "w-full flex items-center justify-between p-2 rounded-xl hover:bg-sand-100 text-stone-800 transition-all text-left";
+                  if (c.href) {
+                    return (
+                      <Link key={c.label} href={c.href} onClick={() => setShowCommandPalette(false)} className={className}>
+                        {content}
+                      </Link>
+                    );
+                  }
+                  return (
+                    <button
+                      key={c.label}
+                      onClick={() => {
+                        setShowCommandPalette(false);
+                        c.action?.();
+                      }}
+                      className={className}
+                    >
+                      {content}
+                    </button>
+                  );
+                };
 
-              {/* Pro Plan */}
-              <div className="p-4 rounded-2xl border-2 border-kiwi-400 bg-white shadow-sm space-y-3 flex flex-col justify-between relative">
-                <span className="absolute -top-2.5 right-4 bg-kiwi-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Recommended
-                </span>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-stone-900">Pro</span>
-                    <span className="text-[10px] font-mono text-kiwi-800 bg-kiwi-100 px-1.5 py-0.5 rounded font-semibold">Team</span>
-                  </div>
-                  <div className="text-xl font-bold text-stone-900">$49 <span className="text-xs font-normal text-stone-500">/ seat / mo</span></div>
-                  <p className="text-xs text-stone-600">For fast-moving engineering teams scaling automation.</p>
-                  <ul className="text-xs space-y-1.5 text-stone-600 pt-2 border-t border-sand-200">
-                    <li>✓ 5,000 Compute Mins / mo</li>
-                    <li>✓ 8 Concurrent Workers</li>
-                    <li>✓ BYOC Private Runners</li>
-                    <li>✓ PR Watchdog Auto-Remediate</li>
-                  </ul>
-                </div>
-                <a
-                  href={`mailto:support@runkiwi.dev?subject=${encodeURIComponent("Upgrade to Kiwi Pro")}`}
-                  className="w-full py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs text-center transition-all shadow-xs"
-                >
-                  Upgrade to Pro
-                </a>
-              </div>
+                if (filteredNav.length === 0 && filteredActions.length === 0) {
+                  return <div className="px-2 py-6 text-center text-stone-400">No matches for &ldquo;{cmdQuery}&rdquo;</div>;
+                }
 
-              {/* Enterprise Plan */}
-              <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50 space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-stone-900">Enterprise</span>
-                    <span className="text-[10px] font-mono text-indigo-800 bg-indigo-100 px-1.5 py-0.5 rounded font-semibold">BYOC</span>
-                  </div>
-                  <div className="text-xl font-bold text-stone-900">Custom</div>
-                  <p className="text-xs text-stone-600">VPC isolation, audit trails, and custom LLM routing.</p>
-                  <ul className="text-xs space-y-1.5 text-stone-600 pt-2 border-t border-sand-200">
-                    <li>✓ Unlimited Compute Mins</li>
-                    <li>✓ 16+ Concurrent Workers</li>
-                    <li>✓ Full VPC & Airgap Deploy</li>
-                    <li>✓ Dedicated Slack Support</li>
-                  </ul>
-                </div>
-                <a
-                  href={`mailto:support@runkiwi.dev?subject=${encodeURIComponent("Kiwi Enterprise BYOC Inquiry")}`}
-                  className="w-full py-2 rounded-xl bg-sand-200 hover:bg-sand-300 text-stone-800 font-semibold text-xs text-center transition-all"
-                >
-                  Contact Sales
-                </a>
-              </div>
+                return (
+                  <>
+                    {filteredNav.length > 0 && (
+                      <>
+                        <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">Quick Navigation</div>
+                        {filteredNav.map(renderCommand)}
+                      </>
+                    )}
+                    {filteredActions.length > 0 && (
+                      <>
+                        <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold mt-2">Actions</div>
+                        {filteredActions.map(renderCommand)}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

@@ -1,65 +1,132 @@
 "use client";
 
-import React, { useState } from "react";
-import { Search, Compass, Hammer, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Compass, Hammer } from "lucide-react";
+import { api, providerLabel, type CatalogModel } from "@/lib/api";
+import { Select, type SelectOption } from "@/components/Select";
 
-export interface ModelOption {
-  id: string;
-  name: string;
-  provider: "anthropic" | "openai" | "deepseek" | "google";
-  tier: "FREE" | "ECONOMY" | "FRONTIER";
-  context: string;
-  latency: string;
-  description: string;
+const TIER_LABEL: Record<string, string> = {
+  frontier: "👑 Frontier",
+  economy: "🌿 Economy",
+  free: "⚡ Free",
+};
+
+function formatCost(model: CatalogModel): string | null {
+  if (model.input_cost_per_m == null && model.output_cost_per_m == null) return null;
+  const inCost = model.input_cost_per_m != null ? `$${model.input_cost_per_m.toFixed(2)}/M in` : "—";
+  const outCost = model.output_cost_per_m != null ? `$${model.output_cost_per_m.toFixed(2)}/M out` : "—";
+  return `${inCost} · ${outCost}`;
 }
 
-export const AVAILABLE_MODELS: ModelOption[] = [
-  {
-    id: "claude-3-7-sonnet",
-    name: "Claude 3.7 Sonnet (Hybrid Thought)",
-    provider: "anthropic",
-    tier: "FRONTIER",
-    context: "200k",
-    latency: "Fast",
-    description: "Industry-leading reasoning & code synthesis.",
-  },
-  {
-    id: "claude-3-5-haiku",
-    name: "Claude 3.5 Haiku",
-    provider: "anthropic",
-    tier: "FREE",
-    context: "200k",
-    latency: "Ultra Fast",
-    description: "Lightning-fast, cost-effective implementer.",
-  },
-  {
-    id: "gpt-4.5-preview",
-    name: "GPT-4.5 Preview",
-    provider: "openai",
-    tier: "FRONTIER",
-    context: "128k",
-    latency: "Moderate",
-    description: "Deep architecture planning & debugging.",
-  },
-  {
-    id: "gpt-4o-mini",
-    name: "GPT-4o Mini",
-    provider: "openai",
-    tier: "ECONOMY",
-    context: "128k",
-    latency: "Ultra Fast",
-    description: "High-speed parallel test fix loop.",
-  },
-  {
-    id: "deepseek-v3",
-    name: "DeepSeek-V3",
-    provider: "deepseek",
-    tier: "FREE",
-    context: "64k",
-    latency: "Fast",
-    description: "Exceptional cost efficiency on code generation.",
-  },
-];
+/**
+ * One dropdown, backed by the org's real model catalog
+ * (`GET /api/v1/catalog/models`) instead of a hand-typed list — the previous
+ * version shipped ids like `claude-3-7-sonnet` that don't exist in
+ * `provider.PricingMap` and would fail on submit, and it listed DeepSeek,
+ * which isn't one of Kiwi's three providers.
+ */
+function ModelPicker({
+  role,
+  value,
+  onChange,
+  models,
+  loading,
+}: {
+  role: "architect" | "worker";
+  value: string;
+  onChange: (model: string) => void;
+  models: CatalogModel[];
+  loading: boolean;
+}) {
+  const [tierFilter, setTierFilter] = useState<"all" | "frontier" | "economy" | "free">("all");
+
+  const filtered = tierFilter === "all" ? models : models.filter((m) => m.tier === tierFilter);
+  const options: SelectOption[] = filtered.map((m) => ({
+    value: m.model_id,
+    label: m.display_name || m.model_id,
+    hint: TIER_LABEL[m.tier]?.replace(/^\S+\s/, "") ?? m.tier,
+  }));
+  const selectedModel = models.find((m) => m.model_id === value);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="font-bold text-stone-800 flex items-center gap-1.5 text-xs">
+          {role === "architect" ? (
+            <Compass className="w-3.5 h-3.5 text-indigo-600" />
+          ) : (
+            <Hammer className="w-3.5 h-3.5 text-emerald-600" />
+          )}
+          <span>{role === "architect" ? "Architect Model (Planning & Strategy)" : "Worker Model (Code Edits & Test Fixes)"}</span>
+        </label>
+        {selectedModel && (
+          <span className="text-[9px] font-mono font-bold bg-sand-100 text-stone-700 px-1.5 py-0.2 rounded border border-sand-200 uppercase">
+            {selectedModel.tier}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1 text-[10px]">
+        {(["all", "frontier", "economy", "free"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTierFilter(t)}
+            className={`px-2 py-0.5 rounded-lg font-semibold transition-all ${
+              tierFilter === t ? "bg-stone-900 text-white" : "bg-sand-100 text-stone-600 hover:bg-sand-200"
+            }`}
+          >
+            {t === "all" ? "All" : TIER_LABEL[t]}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400">
+          Loading models…
+        </div>
+      ) : options.length === 0 ? (
+        <div className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 border border-sand-200 text-xs text-stone-400">
+          No models available in this tier.
+        </div>
+      ) : (
+        <Select
+          value={value}
+          onChange={onChange}
+          options={options}
+          searchable
+          placeholder="Select a model…"
+          ariaLabel={`${role} model`}
+          renderDetail={(opt) => {
+            const m = models.find((mm) => mm.model_id === opt.value);
+            if (!m) return null;
+            const cost = formatCost(m);
+            return (
+              <div className="space-y-1.5 px-1 pb-0.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border bg-sand-100 text-stone-700 border-sand-200 uppercase">
+                    {m.tier}
+                  </span>
+                  <span className="text-[9px] font-mono text-stone-400 uppercase font-semibold">{providerLabel(m.provider)}</span>
+                </div>
+                {m.description && <p className="text-[11px] text-stone-600 leading-snug">{m.description}</p>}
+                <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono pt-1 border-t border-sand-150">
+                  <span>{cost ?? "Pricing not available"}</span>
+                  <span>{m.context_length ? `${Math.round(m.context_length / 1000)}k context` : ""}</span>
+                </div>
+                {m.kiwi_provided && (
+                  <span className="inline-block text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                    Kiwi-funded
+                  </span>
+                )}
+              </div>
+            );
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
 export function ModelSelector({
   architectModel,
@@ -72,97 +139,22 @@ export function ModelSelector({
   onArchitectChange: (model: string) => void;
   onWorkerChange: (model: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"architect" | "worker">("architect");
-  const [search, setSearch] = useState("");
+  const [models, setModels] = useState<CatalogModel[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredModels = AVAILABLE_MODELS.filter(
-    (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.id.toLowerCase().includes(search.toLowerCase()) ||
-      m.provider.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const selectedId = activeTab === "architect" ? architectModel : workerModel;
-  const onSelect = activeTab === "architect" ? onArchitectChange : onWorkerChange;
+  useEffect(() => {
+    api
+      .listCatalogModels()
+      .then((res) => setModels((res.models || []).filter((m) => m.selectable)))
+      .catch(() => setModels([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
-    <div className="rounded-2xl border border-sand-200 bg-white p-3 space-y-3 shadow-2xs">
-      <div className="grid grid-cols-2 gap-1 p-1 bg-sand-150 rounded-xl">
-        <button
-          type="button"
-          onClick={() => setActiveTab("architect")}
-          className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-            activeTab === "architect"
-              ? "bg-white text-stone-900 shadow-xs"
-              : "text-stone-600 hover:text-stone-900"
-          }`}
-        >
-          <Compass className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Architect: {AVAILABLE_MODELS.find((m) => m.id === architectModel)?.name.split(" ")[0] || "Sonnet"}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("worker")}
-          className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-            activeTab === "worker"
-              ? "bg-white text-stone-900 shadow-xs"
-              : "text-stone-600 hover:text-stone-900"
-          }`}
-        >
-          <Hammer className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Worker: {AVAILABLE_MODELS.find((m) => m.id === workerModel)?.name.split(" ")[0] || "Haiku"}</span>
-        </button>
-      </div>
-
-      <div className="relative">
-        <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-2.5" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={`Search ${activeTab === "architect" ? "Architect (Planner)" : "Worker (Implementer)"} models...`}
-          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-sand-200 text-xs focus:outline-none focus:ring-1 focus:ring-stone-900"
-        />
-      </div>
-
-      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-        {filteredModels.map((model) => {
-          const isSelected = selectedId === model.id;
-          return (
-            <div
-              key={model.id}
-              onClick={() => onSelect(model.id)}
-              className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                isSelected
-                  ? "border-stone-900 bg-sand-100/80 shadow-2xs"
-                  : "border-sand-200 hover:border-sand-300 hover:bg-sand-50"
-              }`}
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-stone-900 truncate">{model.name}</span>
-                  <span
-                    className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
-                      model.tier === "FRONTIER"
-                        ? "bg-indigo-50 text-indigo-800 border border-indigo-200"
-                        : model.tier === "FREE"
-                        ? "bg-lime-50 text-lime-800 border border-lime-200"
-                        : "bg-stone-100 text-stone-700 border border-sand-200"
-                    }`}
-                  >
-                    {model.tier}
-                  </span>
-                </div>
-                <p className="text-[10px] text-stone-500 truncate">{model.description}</p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] font-mono text-stone-400">{model.context}</span>
-                {isSelected && <Check className="w-4 h-4 text-stone-900" />}
-              </div>
-            </div>
-          );
-        })}
+    <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-xs space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <ModelPicker role="architect" value={architectModel} onChange={onArchitectChange} models={models} loading={loading} />
+        <ModelPicker role="worker" value={workerModel} onChange={onWorkerChange} models={models} loading={loading} />
       </div>
     </div>
   );

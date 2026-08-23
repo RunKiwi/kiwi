@@ -4,17 +4,12 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Sparkles,
-  Compass,
-  Hammer,
   ShieldCheck,
   Play,
-  ChevronsUpDown,
-  Search,
   Sliders,
   FolderGit2,
-  Lock,
 } from "lucide-react";
-import { api, type GithubRepo } from "@/lib/api";
+import { api, DEFAULT_WORKER_MODEL, type GithubRepo } from "@/lib/api";
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
 
@@ -23,16 +18,17 @@ export default function ComposerPage() {
 
   const [prompt, setPrompt] = useState("");
   const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [reposLoaded, setReposLoaded] = useState(false);
   const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState("");
   const [testCmd, setTestCmd] = useState("go test -race ./pkg/auth/...");
   const [strategy, setStrategy] = useState<"direct" | "plan">("direct");
   const [spendCap, setSpendCap] = useState(0.50);
-  const [duration, setDuration] = useState("5m");
   const [mode, setMode] = useState<"pr" | "dryrun">("pr");
-  const [architectModel, setArchitectModel] = useState("claude-3-7-sonnet");
-  const [workerModel, setWorkerModel] = useState("claude-3-5-haiku");
+  const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
+  const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     api.listGithubRepos()
@@ -40,14 +36,11 @@ export default function ComposerPage() {
         const list = r.repos || [];
         setRepos(list);
         if (list.length > 0) {
-          setRepo(list[0].full_name || list[0].name || "acme-corp/core-api");
-        } else {
-          setRepo("acme-corp/core-api");
+          setRepo(list[0].full_name || list[0].name || "");
         }
       })
-      .catch(() => {
-        setRepo("acme-corp/core-api");
-      });
+      .catch(() => {})
+      .finally(() => setReposLoaded(true));
   }, []);
 
   const templates = [
@@ -58,12 +51,14 @@ export default function ComposerPage() {
   ];
 
   const handleStart = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || !repo) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await api.submitPlan({
         task: prompt.trim(),
         repo_url: repo,
+        ref: branch.trim() || undefined,
         test_cmd: testCmd,
         architect_model: architectModel,
         model: workerModel,
@@ -72,8 +67,8 @@ export default function ComposerPage() {
         dry_run: mode === "dryrun",
       });
       router.push("/");
-    } catch {
-      router.push("/");
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit task");
     } finally {
       setIsSubmitting(false);
     }
@@ -140,52 +135,67 @@ export default function ComposerPage() {
               </span>
               <span className="text-[11px] font-mono text-emerald-700 font-semibold flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                Zero credential egress guaranteed
+                Test command runs offline, with no network access
               </span>
             </div>
           </div>
         </div>
 
         {/* Configuration Grid 1: Target Repository & Test Guard */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <label className="block font-semibold text-stone-700 mb-1">Target Repository</label>
-            <div className="w-full px-3 py-2 rounded-xl bg-sand-50/90 border border-sand-200 text-stone-900 font-medium flex items-center gap-2 shadow-2xs">
-              <FolderGit2 className="w-3.5 h-3.5 text-stone-500 shrink-0" />
-              <select
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                className="w-full bg-transparent font-mono text-xs font-bold text-stone-900 outline-none cursor-pointer"
-              >
-                {repos.length > 0 ? (
-                  repos.map((r) => {
-                    const repoName = r.full_name || r.name || "repo";
-                    return (
-                      <option key={repoName} value={repoName}>
-                        {repoName}
-                      </option>
-                    );
-                  })
-                ) : (
-                  <option value={repo || "acme-corp/core-api"}>{repo || "acme-corp/core-api"}</option>
-                )}
-              </select>
+        {reposLoaded && repos.length === 0 ? (
+          <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/60 text-xs text-amber-900 flex items-center justify-between gap-3">
+            <span>No repositories connected yet — connect GitHub to assign a task.</span>
+            <a href="/integrations" className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold shrink-0">
+              Connect GitHub
+            </a>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="block font-semibold text-stone-700 mb-1">Target Repository & Branch</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2 rounded-xl bg-sand-50/90 border border-sand-200 text-stone-900 font-medium flex items-center gap-2 shadow-2xs min-w-0">
+                  <FolderGit2 className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                  <select
+                    value={repo}
+                    onChange={(e) => setRepo(e.target.value)}
+                    className="w-full bg-transparent font-mono text-xs font-bold text-stone-900 outline-none cursor-pointer truncate"
+                  >
+                    {repos.map((r) => {
+                      const repoName = r.full_name || r.name || "repo";
+                      return (
+                        <option key={repoName} value={repoName}>
+                          {repoName}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="main"
+                  title="Branch (defaults to the repo's default branch)"
+                  className="w-24 px-2.5 py-2 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shrink-0"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
+                <span>Automated Verification Guard</span>
+                <span className="text-stone-400 font-normal">Must pass 100%</span>
+              </label>
+              <input
+                type="text"
+                value={testCmd}
+                onChange={(e) => setTestCmd(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium"
+              />
             </div>
           </div>
-
-          <div>
-            <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
-              <span>Automated Verification Guard</span>
-              <span className="text-stone-400 font-normal">Must pass 100%</span>
-            </label>
-            <input
-              type="text"
-              value={testCmd}
-              onChange={(e) => setTestCmd(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium"
-            />
-          </div>
-        </div>
+        )}
 
         {/* Configuration Grid 2: TWO DEDICATED MODEL SELECTORS */}
         <ModelSelector
@@ -205,7 +215,7 @@ export default function ComposerPage() {
             <span className="text-[11px] text-stone-500 font-mono">Plan First vs Direct Loop</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             {/* Strategy */}
             <div>
               <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
@@ -244,26 +254,6 @@ export default function ComposerPage() {
               <p className="text-[10px] text-stone-400 mt-1 font-mono">Pauses safely if reached</p>
             </div>
 
-            {/* Duration */}
-            <div>
-              <label className="block font-semibold text-stone-700 mb-1">Max Loop Duration</label>
-              <div className="flex items-center gap-1">
-                {["5m", "10m", "30m"].map((dur) => (
-                  <button
-                    key={dur}
-                    type="button"
-                    onClick={() => setDuration(dur)}
-                    className={`px-2.5 py-1.5 rounded-lg font-mono font-bold text-[11px] transition-all ${
-                      duration === dur ? "bg-stone-900 text-white" : "bg-sand-100 hover:bg-sand-200 text-stone-700"
-                    }`}
-                  >
-                    {dur}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-stone-400 mt-1 font-mono">{duration} hard timeout</p>
-            </div>
-
             {/* Target Action */}
             <div>
               <label className="block font-semibold text-stone-700 mb-1">Target Action</label>
@@ -281,26 +271,31 @@ export default function ComposerPage() {
           </div>
         </div>
 
-        {/* Pre-Flight Estimation Bar & Start Button */}
-        <div className="pt-3 border-t border-sand-200 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-xs text-stone-500 font-mono">
-            <span>Mode: <strong className="text-indigo-700 font-bold">{strategy === "plan" ? "Plan Mode" : "Direct Autonomous"}</strong></span>
-            <span>•</span>
-            <span>Est. Cost: <strong className="text-kiwi-700 font-bold">~$0.18 USD</strong></span>
-            <span>•</span>
-            <span>Cap: <strong className="text-stone-900 font-bold">${spendCap.toFixed(2)} USD</strong></span>
-            <span>•</span>
-            <span>Target: <strong className="text-stone-900">{mode === "pr" ? "GitHub Pull Request" : "Dry-Run Local"}</strong></span>
-          </div>
+        {/* Pre-Flight Bar & Start Button */}
+        <div className="pt-3 border-t border-sand-200 space-y-3">
+          {submitError && (
+            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+              <span>{submitError}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-xs text-stone-500 font-mono">
+              <span>Mode: <strong className="text-indigo-700 font-bold">{strategy === "plan" ? "Plan Mode" : "Direct Autonomous"}</strong></span>
+              <span>•</span>
+              <span>Cap: <strong className="text-stone-900 font-bold">${spendCap.toFixed(2)} USD</strong></span>
+              <span>•</span>
+              <span>Target: <strong className="text-stone-900">{mode === "pr" ? "GitHub Pull Request" : "Dry-Run Local"}</strong></span>
+            </div>
 
-          <button
-            onClick={handleStart}
-            disabled={isSubmitting || !prompt.trim()}
-            className="px-6 py-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-sm flex items-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            {isSubmitting ? <KiwiMicroButtonLoader /> : <Play className="w-4 h-4 text-kiwi-400 fill-current" />}
-            <span>Start Task</span>
-          </button>
+            <button
+              onClick={handleStart}
+              disabled={isSubmitting || !prompt.trim() || !repo}
+              className="px-6 py-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-sm flex items-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {isSubmitting ? <KiwiMicroButtonLoader /> : <Play className="w-4 h-4 text-kiwi-400 fill-current" />}
+              <span>Start Task</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
