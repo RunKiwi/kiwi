@@ -25,7 +25,11 @@ func seedSelectableOpenRouterEconomyModel(t *testing.T, s *Server, modelID strin
 		InputCostPerM: f64(0.10), OutputCostPerM: f64(outputCostPerM),
 		ContextLength: iPtr(128000), SupportsTools: bPtr(true), Modality: "text->text",
 		Tier: store.TierEconomy, KiwiProvided: true, Selectable: true,
-		Source: "discovered", FirstSeenAt: now, LastSeenAt: now,
+		// Well past CheapestKiwiFundedModel's catalogMaturityWindow
+		// (pkg/store/model_catalog.go) — these tests are about tier/provider
+		// selection, not catalog freshness, so a just-seeded FirstSeenAt would
+		// fail the freshness gate for a reason unrelated to what's under test.
+		Source: "discovered", FirstSeenAt: now.Add(-30 * 24 * time.Hour), LastSeenAt: now,
 	}); err != nil {
 		t.Fatalf("seed catalog model: %v", err)
 	}

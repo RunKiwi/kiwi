@@ -205,14 +205,51 @@ func (s *PostgresStore) ResolveModel(ctx context.Context, orgID, modelID string)
 // with TierEconomy and a nil cost (a caller building a CatalogModel by hand
 // rather than through ApplyDerived) would otherwise sort first — NULL
 // collates before every value in both Postgres ASC and SQLite.
+//
+// catalogMaturityWindow excludes anything first seen more recently than this:
+// picking on price alone handed out qwen/qwen3-coder (failed 4-5 days after
+// FirstSeenAt) and inclusionai/ling-2.6-flash (failed 14 days after) in
+// production — each newly cheapest at the moment it was picked, each
+// unreliable (context-deadline and 429 failures that outlasted every retry).
+//
+// 21 days rather than a tighter number: both incidents' FirstSeenAt values
+// were identical to the microsecond, which means they don't record organic
+// per-model discovery — they record a bulk catalog reseed on 2026-08-08, and
+// every row touched by that reseed reads as "just discovered" regardless of
+// how long the model actually existed before it. FirstSeenAt is contaminated
+// by that history and will be again after the next reseed; 21 days is margin
+// against the 14-day gap already observed, not a principled bound. The
+// catalog has no popularity or uptime signal — FirstSeenAt remains the only
+// real one available, so "not recently (re)seen" stands in for "not thinly
+// provisioned" until a better signal exists.
+const catalogMaturityWindow = 21 * 24 * time.Hour
+
 func (s *PostgresStore) CheapestKiwiFundedModel(ctx context.Context, orgID, providerID, tier string) (string, bool, error) {
-	var m CatalogModel
-	err := s.db.WithContext(ctx).
+	base := s.db.WithContext(ctx).
 		Where("org_id IN ? AND provider = ? AND tier = ? AND kiwi_provided = ? AND selectable = ? AND output_cost_per_m IS NOT NULL",
 			[]string{GlobalCatalogOrg, orgID}, providerID, tier, true, true).
-		Order("output_cost_per_m ASC, model_id ASC").
-		Limit(1).
-		First(&m).Error
+		Order("output_cost_per_m ASC, model_id ASC")
+
+	var m CatalogModel
+	err := base.Session(&gorm.Session{}).
+		Where("first_seen_at <= ?", time.Now().Add(-catalogMaturityWindow)).
+		Limit(1).First(&m).Error
+	if err == nil {
+		return m.ModelID, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, err
+	}
+
+	// No candidate cleared the maturity bar — most likely every row was
+	// (re)seeded together, per catalogMaturityWindow's doc comment, not that
+	// every model is genuinely brand new. Falling through to ok=false here
+	// would silently starve every Kiwi-funded pick for catalogMaturityWindow
+	// after every reseed; defaultWorkerModelFor's only fallback needs a key
+	// the org whose default this is doesn't have. Cost-only ranking is the
+	// pre-maturity-filter behavior, and it is still strictly better than
+	// handing the caller nothing.
+	err = base.Session(&gorm.Session{}).Limit(1).First(&m).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", false, nil

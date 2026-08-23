@@ -78,7 +78,7 @@ func NewSession(ctx context.Context, dir string, cfg *SandboxConfig, opts Sessio
 		image = "golang:1.25-alpine"
 	}
 
-	args := []string{"run", "-d", "--rm", "--name", name}
+	args := []string{"run", "-d", "--rm", "--name", name, "--label", sandboxLabel}
 	args = append(args, "-v", fmt.Sprintf("%s:/workspace", dir), "-w", "/workspace")
 	for _, m := range s.cfg.Mounts {
 		args = append(args, "-v", m)

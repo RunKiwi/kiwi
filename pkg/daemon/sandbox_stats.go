@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// sandboxLabelFilter is the docker label filter matching only sandbox-managed containers.
+// Must match the label applied in pkg/sandbox/exec.go and pkg/sandbox/session.go.
+const sandboxLabelFilter = "io.kiwi.sandbox=true"
+
 // ContainerMemStats records the memory consumption and limit for a single sandbox container.
 type ContainerMemStats struct {
 	ContainerID string `json:"container_id"`
@@ -18,14 +22,42 @@ type ContainerMemStats struct {
 	LimitMB     int64  `json:"limit_mb"`
 }
 
+// dockerStatsRunner is the interface for executing docker stats commands.
+// Abstracted for testing so tests can inject fake output without shelling to real Docker.
+type dockerStatsRunner interface {
+	run(ctx context.Context) ([]byte, error)
+}
+
+type realDockerStatsRunner struct{}
+
+func (realDockerStatsRunner) run(ctx context.Context) ([]byte, error) {
+	// First, query only sandbox-labeled containers to get their IDs.
+	psCmd := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", "label="+sandboxLabelFilter)
+	idsOut, err := psCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w: %s", err, strings.TrimSpace(string(idsOut)))
+	}
+	ids := strings.Fields(strings.TrimSpace(string(idsOut)))
+	if len(ids) == 0 {
+		// No sandbox containers running; return empty output so parseDockerStatsOutput returns nil.
+		return []byte(""), nil
+	}
+	// Now query stats for only those IDs.
+	statsArgs := []string{"stats", "--no-stream", "--format", "{{.ID}} {{.MemUsage}}"}
+	statsArgs = append(statsArgs, ids...)
+	cmd := exec.CommandContext(ctx, "docker", statsArgs...)
+	return cmd.CombinedOutput()
+}
+
+var statsRunner dockerStatsRunner = realDockerStatsRunner{}
+
 // currentSandboxMemStats queries docker for memory usage of all running containers.
 // It executes `docker stats --no-stream --format "{{.ID}} {{.MemUsage}}"` with a 5-second timeout.
 func currentSandboxMemStats(ctx context.Context) ([]ContainerMemStats, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{.ID}} {{.MemUsage}}")
-	out, err := cmd.CombinedOutput()
+	out, err := statsRunner.run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("docker stats: %w: %s", err, strings.TrimSpace(string(out)))
 	}

@@ -10,6 +10,7 @@ import (
 )
 
 var ErrJobNotFound = errors.New("job not found")
+var ErrPlanStatusConflict = errors.New("plan status transition conflict")
 
 // PostgresStore implements the Store interface using a PostgreSQL GORM connection.
 type PostgresStore struct {
@@ -93,31 +94,74 @@ func (s *PostgresStore) UpdateJobCost(ctx context.Context, id string, additional
 }
 
 func (s *PostgresStore) SetJobPlanPendingReview(ctx context.Context, jobID, planMarkdown string) error {
-	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+	res := s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND plan_status = ''", jobID).Updates(map[string]interface{}{
 		"plan_status":   "pending_review",
 		"plan_markdown": planMarkdown,
 		"status":        "PLAN_REVIEW",
 		"updated_at":    time.Now(),
-	}).Error
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrPlanStatusConflict
+	}
+	return nil
 }
 
 func (s *PostgresStore) ApproveJobPlan(ctx context.Context, jobID string) error {
 	now := time.Now()
-	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+	res := s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND plan_status = ?", jobID, "pending_review").Updates(map[string]interface{}{
 		"plan_status":      "approved",
 		"plan_accepted_at": &now,
 		"status":           "RUNNING",
 		"updated_at":       now,
-	}).Error
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrPlanStatusConflict
+	}
+	return nil
+}
+
+func (s *PostgresStore) ApproveJobPlanAndEnqueue(ctx context.Context, jobID string, continuation *QueuedTask) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		res := tx.Model(&Job{}).Where("id = ? AND plan_status = ?", jobID, "pending_review").Updates(map[string]interface{}{
+			"plan_status":      "approved",
+			"plan_accepted_at": &now,
+			"status":           "RUNNING",
+			"updated_at":       now,
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrPlanStatusConflict
+		}
+		if continuation.Status == "" {
+			continuation.Status = TaskQueued
+		}
+		return tx.Create(continuation).Error
+	})
 }
 
 func (s *PostgresStore) RejectJobPlan(ctx context.Context, jobID, reason string) error {
-	return s.db.WithContext(ctx).Model(&Job{}).Where("id = ?", jobID).Updates(map[string]interface{}{
+	res := s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND plan_status = ?", jobID, "pending_review").Updates(map[string]interface{}{
 		"plan_status":          "rejected",
 		"plan_rejected_reason": reason,
 		"status":               "FAILED",
 		"updated_at":           time.Now(),
-	}).Error
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrPlanStatusConflict
+	}
+	return nil
 }
 
 func (s *PostgresStore) SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error {

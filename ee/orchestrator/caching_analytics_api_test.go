@@ -5,6 +5,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -91,7 +92,7 @@ func TestHandleCachingAnalytics(t *testing.T) {
 func TestHandleCachingAnalytics_Unauthorized(t *testing.T) {
 	_, mux := newTestCachingServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/caching", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/analytics/caching", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

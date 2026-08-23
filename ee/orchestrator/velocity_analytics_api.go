@@ -97,20 +97,28 @@ func (s *Server) jobThreadHasHumanContinuation(ctx context.Context, orgID, jobID
 	if err != nil {
 		return false, err
 	}
-	seenRoots := map[string]bool{}
+	// Collect unique root task IDs from this job's tasks.
+	rootSet := make(map[string]struct{})
 	for _, t := range tasks {
-		if t.RootTaskID == "" || seenRoots[t.RootTaskID] {
-			continue
+		if t.RootTaskID != "" {
+			rootSet[t.RootTaskID] = struct{}{}
 		}
-		seenRoots[t.RootTaskID] = true
-		thread, terr := s.storage.ThreadTasks(ctx, orgID, t.RootTaskID)
-		if terr != nil {
-			return false, terr
-		}
-		for _, th := range thread {
-			if th.Origin == store.OriginPRComment {
-				return true, nil
-			}
+	}
+	if len(rootSet) == 0 {
+		return false, nil
+	}
+	// Batch-load all thread tasks for all roots at once instead of N queries.
+	roots := make([]string, 0, len(rootSet))
+	for r := range rootSet {
+		roots = append(roots, r)
+	}
+	allThreadTasks, err := s.storage.BatchThreadTasks(ctx, orgID, roots)
+	if err != nil {
+		return false, err
+	}
+	for _, th := range allThreadTasks {
+		if th.Origin == store.OriginPRComment {
+			return true, nil
 		}
 	}
 	return false, nil

@@ -39,16 +39,16 @@ func TestReportResult_CacheTokenSplit(t *testing.T) {
 	out := taskResult{
 		ok:                 true,
 		detail:             "success",
-		cachedPromptTokens: 450,
-		rawPromptTokens:    120,
+		cachedPromptTokens: int64Ptr(450),
+		rawPromptTokens:    int64Ptr(120),
 	}
 	d.reportResult(context.Background(), "task-1", "lease-1", out)
 
-	if reportedReq.CachedPromptTokens != 450 {
-		t.Fatalf("expected CachedPromptTokens 450, got %d", reportedReq.CachedPromptTokens)
+	if reportedReq.CachedPromptTokens == nil || *reportedReq.CachedPromptTokens != 450 {
+		t.Fatalf("expected CachedPromptTokens 450, got %v", reportedReq.CachedPromptTokens)
 	}
-	if reportedReq.RawPromptTokens != 120 {
-		t.Fatalf("expected RawPromptTokens 120, got %d", reportedReq.RawPromptTokens)
+	if reportedReq.RawPromptTokens == nil || *reportedReq.RawPromptTokens != 120 {
+		t.Fatalf("expected RawPromptTokens 120, got %v", reportedReq.RawPromptTokens)
 	}
 }
 
@@ -67,11 +67,11 @@ func TestInvestigationOutcomePreservesCacheSplit(t *testing.T) {
 	if !matched {
 		t.Fatal("expected match for investigation outcome")
 	}
-	if out.cachedPromptTokens != 350 {
-		t.Fatalf("expected cachedPromptTokens 350, got %d", out.cachedPromptTokens)
+	if out.cachedPromptTokens == nil || *out.cachedPromptTokens != 350 {
+		t.Fatalf("expected cachedPromptTokens 350, got %v", out.cachedPromptTokens)
 	}
-	if out.rawPromptTokens != 100 {
-		t.Fatalf("expected rawPromptTokens 100, got %d", out.rawPromptTokens)
+	if out.rawPromptTokens == nil || *out.rawPromptTokens != 100 {
+		t.Fatalf("expected rawPromptTokens 100, got %v", out.rawPromptTokens)
 	}
 }
 
@@ -167,10 +167,10 @@ func TestExecuteSessionPreservesCacheSplit(t *testing.T) {
 
 	result := d.executeSession(context.Background(), spec, map[string]string{"ANTHROPIC_API_KEY": "test-key"}, prog, deps)
 
-	if result.cachedPromptTokens != 460 {
-		t.Fatalf("expected cachedPromptTokens 460 (400+60), got %d", result.cachedPromptTokens)
+	if result.cachedPromptTokens == nil || *result.cachedPromptTokens != 460 {
+		t.Fatalf("expected cachedPromptTokens 460 (400+60), got %v", result.cachedPromptTokens)
 	}
-	if result.rawPromptTokens != 150 {
-		t.Fatalf("expected rawPromptTokens 150, got %d", result.rawPromptTokens)
+	if result.rawPromptTokens == nil || *result.rawPromptTokens != 150 {
+		t.Fatalf("expected rawPromptTokens 150, got %v", result.rawPromptTokens)
 	}
 }
