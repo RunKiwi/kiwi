@@ -26,6 +26,9 @@ export interface PlanRequest {
   // runs constantly. Omitted lets the Control Plane choose — see
   // DefaultArchitectModel in ee/planner.
   architect_model?: string;
+  plan_mode?: boolean;
+  spend_cap_usd?: number;
+  dry_run?: boolean;
 }
 
 export interface Fleet {
@@ -99,6 +102,7 @@ export interface GithubInstallation {
 
 export interface GithubRepo {
   full_name: string;
+  name?: string;
   url: string;
   private: boolean;
   default_branch: string;
@@ -184,6 +188,18 @@ export interface Job {
   task?: string;
   repo?: string;
   tasks: JobTask[];
+  requires_plan_approval?: boolean;
+  plan_status?: string;
+  plan_markdown?: string;
+  architect_model?: string;
+  worker_model?: string;
+  spend_cap_usd?: number;
+  cost_usd?: number;
+  agent_minutes?: number;
+  pr_number?: number;
+  stage?: number;
+  is_dry_run?: boolean;
+  status?: string;
 }
 
 // Mirrors orchestrator.JobLifecycleResponse. tasks_affected is load-bearing: a
@@ -302,6 +318,19 @@ export interface JobSummary {
   repo?: string;
   fleet_id?: string;
   daemon_id?: string;
+  requires_plan_approval?: boolean;
+  plan_status?: string;
+  plan_markdown?: string;
+  architect_model?: string;
+  worker_model?: string;
+  spend_cap_usd?: number;
+  cost_usd?: number;
+  agent_minutes?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  pr_number?: number;
+  stage?: number;
+  is_dry_run?: boolean;
 }
 
 export interface JobsListResponse {
@@ -341,6 +370,7 @@ export interface CatalogModel {
 
 export interface ValidateResponse {
   user_id: string;
+  user_email?: string;
   org_id: string;
   org_name: string;
   activation_state: string;
@@ -352,15 +382,20 @@ export interface ValidateResponse {
 
 export interface SpendBucket {
   label: string;
+  name?: string;
   planner_usd: number;
   worker_usd: number;
   total_usd: number;
+  cost_usd?: number;
+  job_count?: number;
 }
 
 export interface SpendPoint {
   date: string;
   planner_usd: number;
   worker_usd: number;
+  cost_usd?: number;
+  jobs?: number;
 }
 
 /** Mirrors orchestrator.SpendResponse. */
@@ -447,6 +482,9 @@ export interface UsageResponse {
   agent_minutes_limit: number; // 0 = unlimited
   concurrent_jobs_running: number;
   max_concurrent_jobs: number;
+  concurrent_jobs_limit?: number;
+  tokens_in?: number;
+  tokens_out?: number;
   is_super_admin?: boolean;
 }
 
@@ -484,6 +522,8 @@ export interface AdminOrg {
   // Omitted when an AdminOrg is built from /auth/validate (self-service),
   // which doesn't return it — OrgManagementPanel never displays it.
   created_at?: string;
+  agent_minutes_used?: number;
+  agent_minutes_limit?: number;
 }
 
 export interface AdminJoinRequest {
@@ -574,7 +614,10 @@ export interface AdminOrgModelUsage {
 }
 
 const getBaseUrl = () => {
-  return process.env.NEXT_PUBLIC_KIWI_API_URL || "http://localhost:8080";
+  if (typeof window !== "undefined") {
+    return ""; // Relative path -> Next.js rewrites proxy to API with zero CORS
+  }
+  return process.env.KIWI_BACKEND_URL || process.env.NEXT_PUBLIC_KIWI_API_URL || "https://api.runkiwi.dev";
 };
 
 const getToken = () => {
@@ -656,8 +699,11 @@ export const client = {
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
 
-  getSpend: (from: string, to: string, funding?: string) =>
-    fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${funding ? `&funding=${encodeURIComponent(funding)}` : ""}`),
+  getSpend: (from?: string, to?: string, funding?: string) => {
+    const f = from || new Date(Date.now() - 30 * 86400000).toISOString();
+    const t = to || new Date().toISOString();
+    return fetchApi<SpendResponse>(`/api/v1/spend?from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}${funding ? `&funding=${encodeURIComponent(funding)}` : ""}`);
+  },
 
   // Admin APIs
   getAdminStats: () => fetchApi<AdminStats>("/admin/stats"),
@@ -847,7 +893,228 @@ export const client = {
     }),
   deleteSlackBinding: (id: string) =>
     fetchApi<void>(`/api/v1/integrations/slack/bindings/${id}`, { method: "DELETE" }),
+
+  // Plan Mode & Interactive Checkpoints
+  getJobPlan: (jobId: string) =>
+    fetchApi<JobPlan>(`/api/v1/jobs/${jobId}/plan`),
+  approveJobPlan: (jobId: string, comment?: string) =>
+    fetchApi<{ status: string; resumed_phase: string }>(`/api/v1/jobs/${jobId}/plan/approve`, {
+      method: "POST",
+      body: JSON.stringify({ user_comment: comment || "" }),
+    }),
+  rejectJobPlan: (jobId: string, feedback: string) =>
+    fetchApi<{ status: string; planner_notified: boolean }>(`/api/v1/jobs/${jobId}/plan/reject`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    }),
+  setJobSpendCap: (jobId: string, spend_cap_usd: number) =>
+    fetchApi<{ job_id: string; spend_cap_usd: number }>(`/api/v1/jobs/${jobId}/spend-cap`, {
+      method: "PUT",
+      body: JSON.stringify({ spend_cap_usd }),
+    }),
+
+  // Telemetry, Caching & Engineering Velocity
+  getVelocityMetrics: (range: string = "7d") =>
+    fetchApi<VelocityMetrics>(`/api/v1/analytics/velocity?range=${range}`),
+  getCachingAnalytics: () =>
+    fetchApi<CachingAnalytics>("/api/v1/analytics/caching"),
+  getSandboxCacheStats: () =>
+    fetchApi<SandboxCacheStats>("/api/v1/sandbox/cache/stats"),
+
+  // Staff Super Admin APIs
+  searchAdminUsers: (search: string = "", limit: number = 50, offset: number = 0) =>
+    fetchApi<AdminUsersResponse>(`/admin/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`),
+  getAdminFleetMetrics: () =>
+    fetchApi<AdminFleetStats>("/admin/metrics/fleet"),
 };
+
+export interface JobPlan {
+  job_id: string;
+  plan_status: string;
+  plan_markdown: string;
+  requires_approval: boolean;
+  architect_model: string;
+  created_at: string;
+}
+
+export interface VelocityMetrics {
+  test_pass_metrics: {
+    zero_shot_pct: number;
+    self_healed_pct: number;
+    human_guided_pct: number;
+  };
+  pipeline_stage_latencies?: {
+    clone_and_provision_sec?: number;
+    env_prep_sec?: number;
+    ast_edit_sec?: number;
+    test_guard_sec?: number;
+    review_sec?: number;
+  };
+  plan_acceptance_metrics?: {
+    first_pass_accepted_pct?: number;
+    avg_review_turnaround_sec?: number;
+  };
+  jobs_counted?: number;
+}
+
+export interface CachingAnalytics {
+  cached_prompt_tokens: number;
+  raw_prompt_tokens: number;
+  cache_discount_rate: number;
+  total_dollar_savings_usd: number;
+}
+
+export interface SandboxCacheStats {
+  cache_hit_rate_pct: number;
+  total_cached_trees: number;
+  total_active_worktrees?: number;
+  storage_footprint_mb?: number;
+  ast_index_footprint_mb?: number;
+  bandwidth_saved_mb?: number;
+  avg_clone_latency_ms?: number;
+  daemons_reporting?: number;
+  daemons_total?: number;
+}
+
+export interface AdminUserSearchRow {
+  id: string;
+  email: string;
+  name: string;
+  org_id: string;
+  org_name: string;
+  role: string;
+  auth_provider: string;
+  created_at: string;
+  last_active_at?: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserSearchRow[];
+  total: number;
+}
+
+export interface AdminFleetStats {
+  host_pool: string;
+  active_containers: number;
+  max_capacity: number;
+  queue_depth: number;
+  avg_cold_start_ms: number;
+  imds_blocked_count: number;
+}
+
+export interface RepoCatalogItem {
+  id: string;
+  branch: string;
+  lang: string;
+  stars: string;
+}
+
+export const REPO_CATALOG: RepoCatalogItem[] = [
+  { id: "acme-corp/core-api", branch: "main", lang: "Go", stars: "1.4k" },
+  { id: "acme-corp/analytics-engine", branch: "v2", lang: "Go / Rust", stars: "850" },
+  { id: "acme-corp/db-service", branch: "main", lang: "Go", stars: "420" },
+  { id: "acme-corp/billing-service", branch: "main", lang: "TypeScript", stars: "290" },
+];
+
+export interface CatalogModelInfo {
+  id: string;
+  name: string;
+  displayName: string;
+  tier: "frontier" | "economy" | "free";
+  provider: string;
+  allowance: string;
+  description: string;
+  pricing: string;
+  context: string;
+  recommendedFor: ("architect" | "worker")[];
+}
+
+export const MODELS_CATALOG: CatalogModelInfo[] = [
+  {
+    id: "platform-default",
+    name: "Platform default",
+    displayName: "Platform default (Auto-select)",
+    tier: "frontier",
+    provider: "kiwi / auto",
+    allowance: "Auto-routed optimal reasoning",
+    description: "Kiwi automatically assigns the optimal Frontier model for architecture planning and an ultra-fast Economy model for tight test execution loops.",
+    pricing: "Optimal blended rate",
+    context: "Dynamic context window",
+    recommendedFor: ["architect", "worker"],
+  },
+  {
+    id: "anthropic/claude-sonnet-5",
+    name: "anthropic/claude-sonnet-5",
+    displayName: "Claude Sonnet 5",
+    tier: "frontier",
+    provider: "anthropic",
+    allowance: "1.2M tokens left this month",
+    description: "State of the art reasoning with high-throughput AST refactoring and verification.",
+    pricing: "$3.00 in / $15.00 out per 1M",
+    context: "200k context window",
+    recommendedFor: ["architect", "worker"],
+  },
+  {
+    id: "anthropic/claude-opus-4.8",
+    name: "anthropic/claude-opus-4.8",
+    displayName: "Claude Opus 4.8",
+    tier: "frontier",
+    provider: "anthropic",
+    allowance: "340k tokens left this month",
+    description: "Deep reasoning architect model for large-scale multi-repo refactoring and complex database migrations.",
+    pricing: "$15.00 in / $75.00 out per 1M",
+    context: "200k context window",
+    recommendedFor: ["architect"],
+  },
+  {
+    id: "openai/gpt-5",
+    name: "openai/gpt-5",
+    displayName: "GPT-5 (Flagship Frontier)",
+    tier: "frontier",
+    provider: "openai",
+    allowance: "800k tokens left this month",
+    description: "Multi-step planner with broad cross-language code generation and verification.",
+    pricing: "$5.00 in / $15.00 out per 1M",
+    context: "128k context window",
+    recommendedFor: ["architect"],
+  },
+  {
+    id: "anthropic/claude-haiku-4.5",
+    name: "anthropic/claude-haiku-4.5",
+    displayName: "Claude Haiku 4.5",
+    tier: "economy",
+    provider: "anthropic",
+    allowance: "5.4M tokens left this month",
+    description: "Sub-second token latency for fast iterative file editing and quick test-driven fixes.",
+    pricing: "$0.80 in / $4.00 out per 1M",
+    context: "200k context window",
+    recommendedFor: ["worker"],
+  },
+  {
+    id: "google/gemini-2.0-flash",
+    name: "google/gemini-2.0-flash",
+    displayName: "Gemini 2.0 Flash",
+    tier: "economy",
+    provider: "google",
+    allowance: "12.0M tokens left this month",
+    description: "Ultra high throughput execution model with native AST tool calling.",
+    pricing: "$0.10 in / $0.40 out per 1M",
+    context: "1M context window",
+    recommendedFor: ["worker"],
+  },
+  {
+    id: "deepseek/deepseek-v3",
+    name: "deepseek/deepseek-v3",
+    displayName: "DeepSeek V3",
+    tier: "free",
+    provider: "deepseek",
+    allowance: "Unlimited community tier",
+    description: "Open weights model with strong code benchmark scores on routine fixes.",
+    pricing: "Free on Kiwi shared fleet",
+    context: "64k context window",
+    recommendedFor: ["worker"],
+  },
+];
 
 export const api = client;
 

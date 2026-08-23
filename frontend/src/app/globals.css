@@ -1,209 +1,141 @@
 @import "tailwindcss";
 
-:root {
-  color-scheme: dark;
-
-  /* ---- Night-navy canvas + kiwi-green accent (brand) ---- */
-  --background: #0A1017;
-  --foreground: #EAF0F2;
-
-  --panel: #0E1A24;
-  --panel-2: #10202C;
-  --field: #0C1620;
-  --field-hi: #13222E;
-  --line: rgba(234, 240, 242, 0.08);
-  --line-hi: rgba(234, 240, 242, 0.16);
-
-  --green: #93C645;
-  --green-2: #9ED052;
-  --green-dim: #6FA232;
-  --green-glow: rgba(147, 198, 69, 0.30);
-
-  --tx: #EAF0F2;
-  --tx-mut: #9DB0BC;
-  --tx-dim: #6E8290;
-
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.06);
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@utility glass {
-  background-color: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
-}
-
-/* The shared card — every panel across the app uses this. Gradient fill, a 1px
-   top highlight, hairline border and a soft deep shadow for real elevation. */
-@utility glass-panel {
-  background: linear-gradient(180deg, var(--panel-2), var(--panel));
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 50px -22px rgba(0, 0, 0, 0.75);
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), "Manrope", system-ui, Arial, sans-serif;
-  min-height: 100vh;
-  background-image:
-    radial-gradient(1100px 560px at 50% -10%, rgba(147, 198, 69, 0.06), transparent 60%),
-    radial-gradient(900px 640px at 100% 0%, rgba(46, 92, 130, 0.10), transparent 55%),
-    linear-gradient(180deg, #0B141D 0%, var(--background) 60%);
-  background-attachment: fixed;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ---------- Premium primitives (used across pages) ----------
-   In @layer components so Tailwind utilities (e.g. min-h-*, px-*) still win. */
-@layer components {
-
-/* Text inputs / textareas / selects */
-.field {
-  width: 100%;
-  background: var(--field);
-  border: 1px solid var(--line);
-  border-radius: 0.7rem;
-  color: var(--tx);
-  padding: 0.62rem 0.85rem;
-  font-size: 0.9rem;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-.field::placeholder { color: var(--tx-dim); }
-/* Tiptap placeholder: contenteditable has no native placeholder, so the
-   Placeholder extension exposes the text via data-placeholder on the empty node. */
-.tiptap p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  color: var(--tx-dim);
-  float: left;
-  height: 0;
-  pointer-events: none;
-}
-.field:hover { border-color: var(--line-hi); }
-.field:focus,
-.field:focus-visible {
-  outline: none;
-  border-color: rgba(147, 198, 69, 0.6);
-  background: var(--field-hi);
-  box-shadow: 0 0 0 4px rgba(147, 198, 69, 0.12);
-}
-
-/* Native select wrapper adds a custom chevron */
-.select-wrap { position: relative; }
-.select-wrap select { appearance: none; -webkit-appearance: none; padding-right: 2.1rem; cursor: pointer; }
-.select-wrap::after {
-  content: ""; position: absolute; right: 0.85rem; top: 50%; width: 8px; height: 8px;
-  border-right: 1.6px solid var(--tx-dim); border-bottom: 1.6px solid var(--tx-dim);
-  transform: translateY(-70%) rotate(45deg); pointer-events: none;
-}
-
-/* Primary (green) button */
-.btn-primary {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
-  background: linear-gradient(180deg, var(--green-2), var(--green));
-  color: #0A1017; font-weight: 650; font-size: 0.9rem;
-  padding: 0.6rem 1.15rem; border: none; border-radius: 0.7rem; cursor: pointer;
-  box-shadow: 0 8px 22px -10px var(--green-glow), 0 1px 0 rgba(255, 255, 255, 0.35) inset;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
-}
-.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -10px var(--green-glow), 0 1px 0 rgba(255, 255, 255, 0.4) inset; }
-.btn-primary:active { transform: translateY(0); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-
-/* Ghost / secondary button */
-.btn-ghost {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
-  background: var(--field); color: var(--tx); font-weight: 500; font-size: 0.88rem;
-  padding: 0.55rem 1rem; border: 1px solid var(--line); border-radius: 0.7rem; cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
-}
-.btn-ghost:hover { border-color: var(--line-hi); background: var(--field-hi); }
-
-/* Chips (repo / model, etc.) */
-.chip {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  background: var(--field); border: 1px solid var(--line); color: var(--tx);
-  padding: 0.5rem 0.75rem; border-radius: 0.6rem; font-size: 0.8rem; cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.chip:hover { border-color: var(--line-hi); background: var(--field-hi); }
-.chip .k { color: var(--tx-dim); font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; }
-.chip .v { font-family: var(--font-mono), ui-monospace, monospace; font-size: 0.78rem; }
-
-.pdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.pdot-ant { background: #D97757; }
-.pdot-gem { background: #4C8DF6; }
-
-/* Section eyebrow */
-.eyebrow {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  color: var(--green); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
-}
-.eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green-glow); }
-
-/* Card hover-lift micro-interaction */
-.card-hover { transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease; }
-.card-hover:hover { transform: translateY(-2px); border-color: var(--line-hi); }
-
-/* Status badge — icon-only by default; the label reveals on card/badge hover
-   (colour comes from inline styles per status). */
-.status-badge {
-  display: inline-flex; align-items: center; gap: 0;
-  border: 1px solid; border-radius: 999px; padding: 4px; line-height: 1;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  transition: gap 0.25s ease, padding 0.25s ease;
-}
-.status-label {
-  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
-  transition: max-width 0.28s ease, opacity 0.2s ease;
-}
-.group:hover .status-badge,
-.status-badge:hover { gap: 6px; padding: 4px 10px 4px 6px; }
-.group:hover .status-label,
-.status-badge:hover .status-label { max-width: 110px; opacity: 1; }
-
-} /* @layer components */
-
-/* PR popover — gentle spring-in from the trigger. */
-@keyframes pr-pop-in {
-  from { opacity: 0; transform: translateY(6px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.pr-popover { animation: pr-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom left; }
-
-/* Selection + focus-visible + scrollbar polish */
-::selection { background: rgba(147, 198, 69, 0.28); color: #fff; }
-:focus-visible { outline: 2px solid rgba(147, 198, 69, 0.55); outline-offset: 2px; }
-* { scrollbar-width: thin; scrollbar-color: rgba(234, 240, 242, 0.14) transparent; }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb { background: rgba(234, 240, 242, 0.12); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(234, 240, 242, 0.22); background-clip: padding-box; }
-
-@media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
-}
-
 @theme {
-  --animate-shimmer: shimmer 2s linear infinite;
-  --animate-breathing: breathing 3s ease-in-out infinite;
+  --color-sand-50: #FAF9F6;
+  --color-sand-100: #F5F3EE;
+  --color-sand-150: #EFECE4;
+  --color-sand-200: #E6E2D8;
+  --color-sand-300: #D6D0C2;
+  --color-sand-400: #A8A08E;
+  --color-sand-500: #7D7565;
+  --color-sand-600: #5C5547;
+  --color-sand-700: #423D32;
+  --color-sand-800: #2C2820;
+  --color-sand-900: #1A1813;
 
-  @keyframes shimmer {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
-  }
+  --color-kiwi-50: #F4F9EB;
+  --color-kiwi-100: #E6F3D2;
+  --color-kiwi-200: #CEE8A6;
+  --color-kiwi-300: #B0DC73;
+  --color-kiwi-400: #93C645;
+  --color-kiwi-500: #78A830;
+  --color-kiwi-600: #5C8422;
+  --color-kiwi-700: #436118;
+  --color-kiwi-800: #2E4310;
+  --color-kiwi-900: #1B270A;
 
-  /* Queued-task "breathing" — amber (waiting), not the old purple. */
-  @keyframes breathing {
-    0%, 100% { background-color: rgba(232, 161, 83, 0.05); border-color: rgba(232, 161, 83, 0.22); }
-    50% { background-color: rgba(232, 161, 83, 0.15); border-color: rgba(232, 161, 83, 0.42); }
-  }
+  --color-charcoal-800: #27272A;
+  --color-charcoal-850: #202023;
+  --color-charcoal-900: #18181B;
+  --color-charcoal-950: #09090B;
+
+  --shadow-island: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 4px 12px -2px rgba(0, 0, 0, 0.03);
+  --shadow-island-hover: 0 8px 24px -4px rgba(0, 0, 0, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+  --shadow-popover: 0 12px 32px -4px rgba(28, 25, 23, 0.12), 0 4px 12px -2px rgba(28, 25, 23, 0.06);
+}
+
+:root {
+  --background: #F4F3EE;
+  --foreground: #1C1917;
+}
+
+/* Warm Minimal Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D0C2;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A08E;
+}
+
+/* Ambient Warm Canvas with gentle organic grain */
+body {
+  background-color: #F4F3EE;
+  color: #1C1917;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Plus Jakarta Sans", "Segoe UI", Roboto, sans-serif;
+  background-image: 
+    radial-gradient(at 90% 10%, rgba(147, 198, 69, 0.08) 0px, transparent 40%),
+    radial-gradient(at 10% 20%, rgba(249, 115, 22, 0.05) 0px, transparent 35%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Floating Island Sheet */
+.floating-island {
+  background: #FFFFFF;
+  border: 1px solid #EAE7DE;
+  border-radius: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 4px 12px -2px rgba(0, 0, 0, 0.025);
+}
+
+.island-sidebar {
+  background: #FAF9F6;
+  border: 1px solid #EAE7DE;
+  border-radius: 1.25rem;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Segmented Hardware Meter Ticks */
+.meter-tick {
+  height: 18px;
+  width: 7px;
+  border-radius: 2.5px;
+  transition: all 0.2s ease;
+}
+.meter-tick-active-emerald { background-color: #10B981; }
+.meter-tick-active-orange { background-color: #F97316; }
+.meter-tick-active-kiwi { background-color: #93C645; }
+.meter-tick-active-blue { background-color: #0EA5E9; }
+.meter-tick-inactive { background-color: #E6E2D8; }
+
+.badge-pulse {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.terminal-line {
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.6;
+}
+
+/* Bespoke Kiwi Custom Loaders Keyframes */
+@keyframes kiwi-spin {
+  100% { transform: rotate(360deg); }
+}
+@keyframes kiwi-dash {
+  0% { stroke-dasharray: 10, 200; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 90, 200; stroke-dashoffset: -35px; }
+  100% { stroke-dasharray: 90, 200; stroke-dashoffset: -125px; }
+}
+@keyframes kiwi-dash-rev {
+  0% { stroke-dasharray: 10, 180; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 60, 180; stroke-dashoffset: -25px; }
+  100% { stroke-dasharray: 60, 180; stroke-dashoffset: -100px; }
+}
+@keyframes kiwi-pulse {
+  0% { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(1.15); opacity: 1; }
+}
+@keyframes kiwi-wave {
+  0%, 100% { transform: scaleY(0.25); opacity: 0.4; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes kiwi-ping {
+  75%, 100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes kiwi-dash-micro {
+  0% { stroke-dasharray: 1, 150; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 85, 150; stroke-dashoffset: -30; }
+  100% { stroke-dasharray: 85, 150; stroke-dashoffset: -120; }
 }

@@ -31,6 +31,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { JobGraph } from "@/components/JobGraph";
+import { PlanApprovalCard } from "@/components/PlanApprovalCard";
+import { api, type JobPlan } from "@/lib/api";
 
 /**
  * How each blocked reason is presented. The split that matters is severity:
@@ -230,6 +232,15 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [jobPlan, setJobPlan] = useState<JobPlan | null>(null);
+
+  useEffect(() => {
+    if (taskId) {
+      api.getJobPlan(taskId).then(setJobPlan).catch(() => setJobPlan(null));
+    } else {
+      setJobPlan(null);
+    }
+  }, [taskId]);
 
   const drawerRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -651,6 +662,21 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
       })()}
 
       <div className="flex-1 flex flex-col overflow-y-auto p-4 sm:p-6 text-white gap-6">
+        {/* Plan Mode Review Card */}
+        {jobPlan && (jobPlan.requires_approval || jobPlan.plan_status === "AWAITING_APPROVAL" || currentJob?.status === "PLAN_REVIEW" || currentJob?.status === "AWAITING_PLAN_APPROVAL") && (
+          <PlanApprovalCard
+            plan={jobPlan}
+            onApproved={() => {
+              loadJob(taskId!);
+              api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+            }}
+            onRejected={() => {
+              loadJob(taskId!);
+              api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+            }}
+          />
+        )}
+
         {/* What is happening right now — and, when a finished job produced no
             record, what happened at all.
 
