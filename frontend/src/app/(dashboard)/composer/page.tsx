@@ -8,6 +8,14 @@ import {
   Sliders,
   FolderGit2,
   Zap,
+  Sparkles,
+  Bug,
+  TestTube2,
+  Cpu,
+  GitPullRequest,
+  CheckCircle2,
+  Lock,
+  Compass,
 } from "lucide-react";
 import {
   api,
@@ -22,6 +30,39 @@ import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
 import { Logo } from "@/components/Logo";
 import { Select } from "@/components/Select";
+
+const PRESET_GOALS = [
+  {
+    id: "bug",
+    icon: <Bug className="w-3.5 h-3.5 text-rose-600" />,
+    label: "Fix Bug / Error",
+    template: "Fix the bug in [FILE_PATH] where [SYMPTOM_OR_ERROR_MESSAGE]. Ensure edge cases are handled and add a regression test.",
+  },
+  {
+    id: "tests",
+    icon: <TestTube2 className="w-3.5 h-3.5 text-emerald-600" />,
+    label: "Add Unit Tests",
+    template: "Write comprehensive unit tests for [PACKAGE_OR_FILE] covering happy path, invalid inputs, and error handling with full test assertions.",
+  },
+  {
+    id: "refactor",
+    icon: <Cpu className="w-3.5 h-3.5 text-sky-600" />,
+    label: "Refactor Code",
+    template: "Refactor [FUNCTION_OR_MODULE] in [FILE_PATH] to improve readability and performance without changing existing external API behavior.",
+  },
+  {
+    id: "feature",
+    icon: <Sparkles className="w-3.5 h-3.5 text-amber-600" />,
+    label: "Add Feature",
+    template: "Implement [FEATURE_NAME] in [FILE_PATH]. Include input validation, error handling, and unit tests verifying the feature.",
+  },
+  {
+    id: "security",
+    icon: <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />,
+    label: "Security Hardening",
+    template: "Audit and harden [ENDPOINT_OR_HANDLER] against unauthorized access, sanitize inputs, and prevent potential injection vulnerabilities.",
+  },
+];
 
 function ComposerContent() {
   const router = useRouter();
@@ -168,43 +209,46 @@ function ComposerContent() {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto font-sans text-stone-900">
-      {/* Header with Hybrid Light Aura & Animated Hacking Mascot */}
-      <div className="relative overflow-hidden p-6 rounded-3xl border border-sand-200 bg-gradient-to-r from-sand-100/90 via-white to-kiwi-50/70 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-2xs group">
-        <div
-          className="absolute inset-0 opacity-[0.035] pointer-events-none"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          }}
-        />
-        <div className="absolute -top-12 -right-12 w-36 h-36 bg-kiwi-400/20 rounded-full blur-3xl group-hover:scale-110 transition-transform" />
-
-        <div className="relative z-10 flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-white border border-sand-200/90 shadow-2xs flex items-center justify-center shrink-0">
-            <Logo variant="full-color" pose="hacking" animated={true} className="w-8 h-8" />
+    <div className="space-y-4 max-w-4xl mx-auto font-sans text-stone-900 select-none">
+      
+      {/* Header Banner with Modern Swiss Aesthetics */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-sand-200/90 bg-white shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-sand-50 border border-sand-200/90 shadow-2xs flex items-center justify-center shrink-0">
+            <Logo variant="full-color" pose="hacking" animated={true} className="w-7 h-7" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono font-bold bg-kiwi-100 text-kiwi-900 px-2 py-0.5 rounded-full border border-kiwi-200">TASK COMPOSER</span>
-              <h1 className="text-lg font-bold text-stone-900 tracking-tight">Assign Work to AI Agent</h1>
+              <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-700 bg-sand-100 px-2 py-0.5 rounded border border-sand-200">
+                TASK COMPOSER
+              </span>
+              <span className="text-[11px] font-mono text-stone-400 font-semibold">
+                Autonomous Swarm Dispatch
+              </span>
             </div>
-            <p className="text-xs text-stone-600 mt-0.5">
-              Kiwi writes the code, verifies tests in an isolated container, and opens a ready-to-merge Pull Request.
+            <h1 className="text-lg font-bold text-stone-900 tracking-tight mt-0.5">
+              Compose Autonomous Swarm Task
+            </h1>
+            <p className="text-xs text-stone-500 mt-0.5">
+              Architects plan changes, worker agents edit code, and tests run inside isolated sandboxes.
             </p>
           </div>
         </div>
 
-        <button onClick={() => setPrompt("")} className="relative z-10 text-xs text-stone-400 hover:text-stone-700 font-medium cursor-pointer">
-          Reset Form
+        <button
+          onClick={() => setPrompt("")}
+          className="text-xs font-semibold text-stone-400 hover:text-stone-700 transition-colors self-end sm:self-center cursor-pointer"
+        >
+          Clear Form
         </button>
       </div>
 
-      {/* Platform Token Quota Health Strip */}
+      {/* Platform Quota Telemetry Strip */}
       {spend?.allowance && spend.allowance.length > 0 && (
-        <div className="p-3.5 rounded-2xl bg-white/90 backdrop-blur-xl border border-sand-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="p-3 rounded-xl bg-sand-50/80 border border-sand-200/90 flex flex-wrap items-center justify-between gap-2.5 text-xs shadow-2xs">
           <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-kiwi-600" />
-            <span className="font-bold text-stone-900">Kiwi Platform Quota:</span>
+            <Zap className="w-3.5 h-3.5 text-kiwi-600 fill-current" />
+            <span className="font-bold text-stone-900 text-xs">Platform Allowances:</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -217,10 +261,10 @@ function ComposerContent() {
               return (
                 <div
                   key={a.tier}
-                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 ${
+                  className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono flex items-center gap-1.5 ${
                     exhausted
                       ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
-                      : "bg-sand-50/80 border-sand-200 text-stone-700"
+                      : "bg-white border-sand-200 text-stone-700 shadow-2xs"
                   }`}
                 >
                   <span
@@ -241,61 +285,78 @@ function ComposerContent() {
             })}
           </div>
 
-          <a href="/models" className="text-[11px] text-kiwi-700 font-semibold hover:underline">
-            View All Models &rarr;
+          <a href="/models" className="text-[11px] text-stone-500 hover:text-stone-900 font-mono font-medium">
+            Models &rarr;
           </a>
         </div>
       )}
 
-      {/* Task Prompt Box */}
-      <div className="relative p-6 rounded-3xl border border-sand-200 bg-white/90 backdrop-blur-xl shadow-2xs space-y-4 group">
-        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
-          <div
-            className="absolute inset-0 opacity-[0.03]"
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-            }}
-          />
-        </div>
-        <div className="relative z-10">
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-bold text-stone-800">Task Objective</label>
-            <span className="text-xs text-kiwi-700 hover:underline font-medium cursor-pointer">
-              Import from GitHub Issue
-            </span>
+      {/* Main Task Composer Card */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-sand-200/90 bg-white shadow-2xs space-y-4">
+        
+        {/* Preset Objective Starters */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+              <span>Goal Starters</span>
+              <span className="text-[10px] font-mono text-stone-400 font-normal">(Click to prefill)</span>
+            </label>
           </div>
-          <div className="rounded-xl border border-sand-300 focus-within:border-kiwi-500 focus-within:ring-2 focus-within:ring-kiwi-100 bg-white transition-all shadow-sm">
+
+          <div className="flex flex-wrap gap-1.5">
+            {PRESET_GOALS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPrompt(p.template)}
+                className="px-2.5 py-1.5 rounded-xl border border-sand-200 bg-sand-50/70 hover:bg-sand-100 hover:border-sand-300 text-stone-700 text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                {p.icon}
+                <span>{p.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Task Objective Textarea */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-bold text-stone-900">Task Objective &amp; Requirements</label>
+            <span className="text-[11px] font-mono text-stone-400">Markdown supported</span>
+          </div>
+
+          <div className="rounded-xl border border-sand-200 focus-within:border-stone-900 bg-sand-50/40 focus-within:bg-white transition-all shadow-2xs">
             <textarea
               rows={4}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. Refactor the JWT authentication middleware in pkg/auth to use Ed25519 asymmetric verification and add race-condition unit tests in jwt_test.go"
-              className="w-full p-4 text-sm text-stone-900 placeholder-stone-400 font-sans resize-none outline-none bg-transparent leading-relaxed"
+              placeholder="e.g. Add an endpoint in pkg/api/health.go that returns 200 OK with server uptime, and add unit tests in health_test.go"
+              className="w-full p-3.5 text-xs text-stone-900 placeholder-stone-400 font-sans resize-none outline-none bg-transparent leading-relaxed"
             />
-            <div className="p-2.5 bg-sand-50/80 border-t border-sand-150 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="text-[11px] text-stone-500">
-                ✨ Tip: Mention files like <code className="font-mono text-stone-800 bg-sand-200/60 px-1 py-0.5 rounded">pkg/auth/jwt.go</code> for faster pinpoint changes
+            <div className="p-2.5 bg-sand-50/90 border-t border-sand-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-stone-500">
+                💡 Tip: Reference specific files like <code className="font-mono text-stone-800 bg-sand-200/70 px-1 py-0.5 rounded">pkg/auth/jwt.go</code> for pinpoint edits
               </span>
-              <span className="text-[11px] font-mono text-emerald-700 font-semibold flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Test command runs offline, with no network access
+              <span className="font-mono text-emerald-700 font-semibold flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Isolated Container Sandbox</span>
               </span>
             </div>
           </div>
         </div>
 
-        {/* Configuration Grid 1: Target Repository & Test Guard */}
+        {/* Configuration Row 1: Target Repository & Automated Verification */}
         {reposLoaded && repos.length === 0 ? (
-          <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/60 text-xs text-amber-900 flex items-center justify-between gap-3">
-            <span>No repositories connected yet — connect GitHub to assign a task.</span>
-            <a href="/integrations" className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold shrink-0">
+          <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/70 text-xs text-amber-900 flex items-center justify-between gap-3">
+            <span>No repositories connected yet — connect GitHub to assign tasks.</span>
+            <a href="/integrations" className="px-3 py-1.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold shrink-0 cursor-pointer">
               Connect GitHub
             </a>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
             <div>
-              <label className="block font-semibold text-stone-700 mb-1">Target Repository &amp; Branch</label>
+              <label className="block font-bold text-stone-800 mb-1">Target Repository &amp; Branch</label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <Select
@@ -320,29 +381,29 @@ function ComposerContent() {
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
                   placeholder="main"
-                  title="Branch (defaults to the repo's default branch)"
-                  className="w-24 px-3 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shrink-0 shadow-xs"
+                  title="Branch (defaults to repo default branch)"
+                  className="w-24 px-3 py-2 rounded-xl bg-sand-50/80 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-stone-900 transition-all font-medium shrink-0 shadow-2xs"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
-                <span>Automated Verification Guard</span>
-                <span className="text-stone-400 font-normal">Must pass 100%</span>
+              <label className="block font-bold text-stone-800 mb-1 flex items-center justify-between">
+                <span>Automated Test Guard</span>
+                <span className="text-[10px] font-mono text-stone-400 font-normal">Must pass 100%</span>
               </label>
               <input
                 type="text"
                 value={testCmd}
                 onChange={(e) => setTestCmd(e.target.value)}
                 placeholder="e.g. npm test, pytest, go test ./... (auto-detected if blank)"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-sand-50/90 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-kiwi-500 transition-all font-medium shadow-xs"
+                className="w-full px-3 py-2 rounded-xl bg-sand-50/80 hover:bg-white focus:bg-white border border-sand-200 text-stone-900 font-mono text-xs outline-none focus:border-stone-900 transition-all font-medium shadow-2xs"
               />
             </div>
           </div>
         )}
 
-        {/* Configuration Grid 2: TWO DEDICATED MODEL SELECTORS */}
+        {/* Configuration Row 2: DUAL MODEL PAIRING SELECTORS */}
         <ModelSelector
           architectModel={architectModel}
           workerModel={workerModel}
@@ -350,98 +411,148 @@ function ComposerContent() {
           onWorkerChange={setWorkerModel}
         />
 
-        {/* Configuration Grid 3: Execution Strategy, Spend Cap, Timeout & Mode */}
-        <div className="relative z-10 p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between border-b border-sand-150 pb-2">
-            <div className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-kiwi-700" />
-              <span className="text-xs font-bold text-stone-900">Execution Strategy & Safety Guardrails</span>
+        {/* Configuration Row 3: Execution Strategy & Guardrails */}
+        <div className="p-3.5 sm:p-4 rounded-xl bg-sand-50/60 border border-sand-200/90 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between border-b border-sand-200/80 pb-2">
+            <div className="flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-stone-700" />
+              <span className="text-xs font-bold text-stone-900">Execution Strategy &amp; Safety Guardrails</span>
             </div>
-            <span className="text-[11px] text-stone-500 font-mono">Plan First vs Direct Loop</span>
+            <span className="text-[10px] font-mono text-stone-400 uppercase tracking-wider">GUARDRAILS</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             {/* Strategy */}
             <div>
-              <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
-                <span>Execution Strategy</span>
-                <span className="text-[9px] font-mono text-indigo-700 font-bold bg-indigo-50 px-1 rounded">Interactive</span>
-              </label>
-              <div className="space-y-1">
-                <label className="flex items-center gap-1.5 cursor-pointer text-stone-800 text-[11px] font-medium p-1.5 rounded-lg hover:bg-sand-50">
-                  <input type="radio" name="strategy" checked={strategy === "direct"} onChange={() => setStrategy("direct")} className="accent-kiwi-600" />
-                  <span>⚡ Direct Execution</span>
+              <label className="block font-bold text-stone-800 mb-1.5">Execution Flow</label>
+              <div className="space-y-1.5">
+                <label
+                  onClick={() => setStrategy("plan")}
+                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                    strategy === "plan"
+                      ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
+                      : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <Compass className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Plan Mode (Approve)</span>
+                  </div>
+                  {strategy === "plan" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
-                <label className="flex items-center gap-1.5 cursor-pointer text-indigo-900 text-[11px] font-bold p-1.5 rounded-lg bg-indigo-50/70 border border-indigo-200/80">
-                  <input type="radio" name="strategy" checked={strategy === "plan"} onChange={() => setStrategy("plan")} className="accent-indigo-600" />
-                  <span>📋 Plan Mode (Approve)</span>
+
+                <label
+                  onClick={() => setStrategy("direct")}
+                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                    strategy === "direct"
+                      ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
+                      : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <Zap className="w-3.5 h-3.5 text-kiwi-600 fill-current" />
+                    <span>Direct Execution</span>
+                  </div>
+                  {strategy === "direct" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
               </div>
             </div>
 
             {/* Spend Cap */}
             <div>
-              <label className="block font-semibold text-stone-700 mb-1">Max Spend Hard-Cap</label>
+              <label className="block font-bold text-stone-800 mb-1.5 flex items-center justify-between">
+                <span>Max Spend Hard-Cap</span>
+                <span className="text-[10px] font-mono text-stone-400 font-normal">USD</span>
+              </label>
               <div className="flex items-center gap-1">
-                {[0.50, 1.00, 2.50].map((cap) => (
+                {[0.25, 0.50, 1.00, 2.50].map((cap) => (
                   <button
                     key={cap}
                     type="button"
                     onClick={() => setSpendCap(cap)}
-                    className={`px-2.5 py-1.5 rounded-lg font-mono font-bold text-[11px] transition-all ${
-                      spendCap === cap ? "bg-stone-900 text-white" : "bg-sand-100 hover:bg-sand-200 text-stone-700"
+                    className={`flex-1 py-1.5 rounded-lg font-mono font-bold text-[11px] transition-all cursor-pointer ${
+                      spendCap === cap
+                        ? "bg-stone-900 text-white shadow-2xs"
+                        : "bg-white border border-sand-200 hover:bg-sand-100 text-stone-700"
                     }`}
                   >
                     ${cap.toFixed(2)}
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-stone-400 mt-1 font-mono">Pauses safely if reached</p>
+              <p className="text-[10px] text-stone-400 mt-1 font-mono">Pauses safely if limit is reached</p>
             </div>
 
             {/* Target Action */}
             <div>
-              <label className="block font-semibold text-stone-700 mb-1">Target Action</label>
-              <div className="space-y-1">
-                <label className="flex items-center gap-1.5 cursor-pointer text-stone-800 text-[11px] font-medium p-1 rounded hover:bg-sand-50">
-                  <input type="radio" name="mode" checked={mode === "pr"} onChange={() => setMode("pr")} className="accent-kiwi-600" />
-                  <span>Open GitHub PR</span>
+              <label className="block font-bold text-stone-800 mb-1.5">Action on Pass</label>
+              <div className="space-y-1.5">
+                <label
+                  onClick={() => setMode("pr")}
+                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                    mode === "pr"
+                      ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
+                      : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <GitPullRequest className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Open Pull Request</span>
+                  </div>
+                  {mode === "pr" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
-                <label className="flex items-center gap-1.5 cursor-pointer text-stone-600 text-[11px] font-medium p-1 rounded hover:bg-sand-50">
-                  <input type="radio" name="mode" checked={mode === "dryrun"} onChange={() => setMode("dryrun")} className="accent-kiwi-600" />
-                  <span>🧪 Dry-Run (No Push)</span>
+
+                <label
+                  onClick={() => setMode("dryrun")}
+                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                    mode === "dryrun"
+                      ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
+                      : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <Lock className="w-3.5 h-3.5 text-stone-500" />
+                    <span>Dry-Run (No Push)</span>
+                  </div>
+                  {mode === "dryrun" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Pre-Flight Bar & Start Button */}
-        <div className="relative z-10 pt-3 border-t border-sand-200 space-y-3">
+        {/* Pre-Flight Status Bar & Launch Button */}
+        <div className="pt-3 border-t border-sand-200/80 space-y-3">
           {submitError && (
-            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
               <span>{submitError}</span>
             </div>
           )}
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-xs text-stone-500 font-mono">
-              <span>Mode: <strong className="text-indigo-700 font-bold">{strategy === "plan" ? "Plan Mode" : "Direct Autonomous"}</strong></span>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-stone-500 font-mono">
+              <span>Mode: <strong className="text-stone-900 font-bold">{strategy === "plan" ? "Plan Mode" : "Direct Swarm"}</strong></span>
               <span>•</span>
               <span>Cap: <strong className="text-stone-900 font-bold">${spendCap.toFixed(2)} USD</strong></span>
               <span>•</span>
-              <span>Target: <strong className="text-stone-900">{mode === "pr" ? "GitHub Pull Request" : "Dry-Run Local"}</strong></span>
+              <span>Target: <strong className="text-stone-900 font-bold">{mode === "pr" ? "GitHub Pull Request" : "Dry-Run Local"}</strong></span>
             </div>
 
             <button
               onClick={handleStart}
               disabled={isSubmitting || !prompt.trim() || !repo}
-              className="px-6 py-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-sm flex items-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+              className="px-6 py-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-sm flex items-center gap-2 transition-all active:scale-[0.98] disabled:opacity-40 cursor-pointer"
             >
-              {isSubmitting ? <KiwiMicroButtonLoader /> : <Play className="w-4 h-4 text-kiwi-400 fill-current" />}
-              <span>Start Task</span>
+              {isSubmitting ? (
+                <KiwiMicroButtonLoader />
+              ) : (
+                <Play className="w-3.5 h-3.5 text-kiwi-400 fill-current" />
+              )}
+              <span>Dispatch Swarm &rarr;</span>
             </button>
           </div>
         </div>
+
       </div>
     </div>
   );
@@ -454,4 +565,3 @@ export default function ComposerPage() {
     </Suspense>
   );
 }
-
