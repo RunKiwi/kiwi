@@ -34,7 +34,7 @@ interface FleetState {
   isLoading: boolean;
   error: string | null;
   
-  loadJobs: () => Promise<void>;
+  loadJobs: () => Promise<JobSummary[]>;
   loadJob: (jobId: string) => Promise<void>;
   loadDaemons: () => Promise<void>;
 }
@@ -60,8 +60,10 @@ export const useFleetStore = create<FleetState>((set, get) => ({
       const jobs = data.jobs || [];
       reportPullRequests(jobs);
       set({ jobs, isLoading: false, error: null });
+      return jobs;
     } catch (err) {
       set({ error: (err as Error).message || "Failed to load jobs", isLoading: false });
+      return [];
     }
   },
   
