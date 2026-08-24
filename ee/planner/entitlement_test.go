@@ -58,10 +58,10 @@ func newPlannerWithExhaustedAllowance(t *testing.T) (*Service, context.Context) 
 	s := svc.store.(*store.PostgresStore)
 
 	period := store.CurrentPeriod(time.Now().UTC())
-	if _, err := s.EnsureGrant(ctx, "o1", store.TierEconomy, period, 1000); err != nil {
+	if _, err := s.EnsureGrant(ctx, "o1", store.TierEconomy, period, 50000000); err != nil {
 		t.Fatalf("seed grant: %v", err)
 	}
-	if err := s.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 1000); err != nil {
+	if err := s.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 50000000); err != nil {
 		t.Fatalf("consume: %v", err)
 	}
 

@@ -24,9 +24,12 @@ export function PlanUsage() {
 
   if (!u) return null;
 
-  const hasCap = u.agent_minutes_limit > 0;
-  const pct = hasCap ? Math.min(100, (u.agent_minutes_used / u.agent_minutes_limit) * 100) : 0;
-  const over = hasCap && u.agent_minutes_used >= u.agent_minutes_limit;
+  const resolvedLimit = u.agent_minutes_limit && u.agent_minutes_limit > 0
+    ? u.agent_minutes_limit
+    : (u.plan === "pro" || u.plan === "individual" ? 2000 : u.plan === "team" ? 5000 : 500);
+  const hasCap = resolvedLimit > 0;
+  const pct = hasCap ? Math.min(100, (u.agent_minutes_used / resolvedLimit) * 100) : 0;
+  const over = hasCap && u.agent_minutes_used >= resolvedLimit;
   const near = hasCap && !over && pct >= 80;
   const barColor = over ? "bg-rose-500" : near ? "bg-amber-500" : "bg-kiwi-600";
   const usedColor = over ? "text-rose-700" : near ? "text-amber-700" : "text-stone-900";
@@ -51,9 +54,7 @@ export function PlanUsage() {
           </p>
         </div>
 
-        {u.plan === "free" && (
-          <UpgradeButton variant="compact" label="Upgrade to Pro" />
-        )}
+        <UpgradeButton plan={u.plan} variant="compact" />
       </div>
 
       {/* Usage Meter Grid */}
@@ -63,7 +64,7 @@ export function PlanUsage() {
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold text-stone-700">Monthly Agent-Minutes</span>
             <span className={`font-mono font-bold ${usedColor}`}>
-              {u.agent_minutes_used.toFixed(1)} {hasCap ? `/ ${u.agent_minutes_limit}` : ""} min
+              {u.agent_minutes_used.toFixed(1)} {hasCap ? `/ ${resolvedLimit}` : ""} min
             </span>
           </div>
 
@@ -77,7 +78,7 @@ export function PlanUsage() {
               </div>
               <div className="flex items-center justify-between text-[10px] font-mono text-stone-400">
                 <span>{(100 - pct).toFixed(0)}% remaining</span>
-                <span>{hasCap ? `${(u.agent_minutes_limit - u.agent_minutes_used).toFixed(1)} min left` : "Unlimited"}</span>
+                <span>{hasCap ? `${(resolvedLimit - u.agent_minutes_used).toFixed(1)} min left` : "Unlimited"}</span>
               </div>
             </div>
           ) : (
@@ -87,7 +88,7 @@ export function PlanUsage() {
           {over && (
             <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>Monthly quota reached — upgrade to Pro to continue running tasks.</span>
+              <span>Monthly quota reached — {u.plan === "free" ? "upgrade to Pro to continue running tasks." : "contact enterprise to increase compute limits."}</span>
             </div>
           )}
           {near && (

@@ -131,10 +131,10 @@ func TestPlatformCredsDeniedWhenAllowanceExhausted(t *testing.T) {
 
 	// Spend the whole economy allowance.
 	period := store.CurrentPeriod(timeNow())
-	if _, err := s.storage.EnsureGrant(ctx, "o1", store.TierEconomy, period, 1000); err != nil {
+	if _, err := s.storage.EnsureGrant(ctx, "o1", store.TierEconomy, period, 50000000); err != nil {
 		t.Fatalf("seed grant: %v", err)
 	}
-	if err := s.storage.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 1000); err != nil {
+	if err := s.storage.ConsumeTokens(ctx, "o1", store.TierEconomy, period, 50000000); err != nil {
 		t.Fatalf("consume: %v", err)
 	}
 

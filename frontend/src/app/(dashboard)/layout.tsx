@@ -191,7 +191,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
-  const limitMinutes = usage?.agent_minutes_limit ?? 500;
+  const limitMinutes = usage?.agent_minutes_limit && usage.agent_minutes_limit > 0
+    ? usage.agent_minutes_limit
+    : (plan === "pro" || plan === "individual" ? 2000 : plan === "team" ? 5000 : 500);
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
   const planReviewsCount = (jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.requires_plan_approval).length;
@@ -499,13 +501,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       },
       {
         id: "action-upgrade",
-        title: "Upgrade to Kiwi Pro",
-        subtitle: "Unlock 2,000 pooled minutes / seat, BYOC runners & priority",
+        title: plan === "free" ? "Upgrade to Kiwi Pro" : "Contact Kiwi Enterprise",
+        subtitle: plan === "free" ? "Unlock 2,000 pooled minutes / seat, BYOC runners & priority" : "Explore dedicated VPC, custom compute clusters & SLAs",
         category: "Actions",
-        href: "/settings",
+        href: plan === "free" ? "/settings" : undefined,
+        action: plan !== "free" ? () => {
+          if (typeof window !== "undefined") {
+            window.location.href = "mailto:support@runkiwi.dev?subject=Kiwi%20Enterprise%20Fleet%20Inquiry";
+          }
+        } : undefined,
         icon: <Zap className="w-3.5 h-3.5 text-amber-500 fill-current" />,
-        hint: "Upgrade",
-        keywords: "upgrade pro subscription payment tiers quota agent-minutes billing",
+        hint: plan === "free" ? "Upgrade" : "Enterprise",
+        keywords: "upgrade pro enterprise subscription payment tiers quota agent-minutes billing",
       },
       {
         id: "action-support",
@@ -881,9 +888,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }} />
               </div>
 
-              {/* Row 4: Full-width Upgrade Button */}
+              {/* Row 4: Full-width Upgrade / Enterprise Button */}
               <div className="pt-0.5">
-                <UpgradeButton variant="full" className="w-full justify-center py-1.5 text-[11px]" />
+                <UpgradeButton plan={plan} variant="full" className="w-full justify-center py-1.5 text-[11px]" />
               </div>
             </div>
           )}

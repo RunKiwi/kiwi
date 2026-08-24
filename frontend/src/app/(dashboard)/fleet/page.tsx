@@ -321,7 +321,7 @@ export default function FleetPage() {
                 </div>
                 <div>
                   <span className="text-stone-400 block text-[10px]">Dedicated VPC</span>
-                  <UpgradeButton variant="minimal" />
+                  <UpgradeButton plan={u?.plan || "free"} variant="minimal" />
                 </div>
               </div>
             </div>
@@ -445,9 +445,11 @@ export default function FleetPage() {
                 </div>
               </div>
 
-              <div>
-                <UpgradeButton label="Upgrade to Pro to Connect BYOC Runners" />
-              </div>
+              {u?.plan === "free" && (
+                <div>
+                  <UpgradeButton label="Upgrade to Pro to Connect BYOC Runners" />
+                </div>
+              )}
             </div>
           ) : (
             /* UNLOCKED PRO/ENTERPRISE BYOC SECTION */

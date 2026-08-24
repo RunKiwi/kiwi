@@ -180,8 +180,11 @@ function CommandCenterContent() {
     });
   }, [jobs, statusFilter]);
 
+  const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
-  const limitMinutes = usage?.agent_minutes_limit ?? 500;
+  const limitMinutes = usage?.agent_minutes_limit && usage.agent_minutes_limit > 0
+    ? usage.agent_minutes_limit
+    : (plan === "pro" || plan === "individual" ? 2000 : plan === "team" ? 5000 : 500);
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
   const activeWorkers = usage?.concurrent_jobs_running ?? (jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
@@ -226,19 +229,19 @@ function CommandCenterContent() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <p className="font-bold text-stone-900 capitalize text-sm">{usage?.plan || "Free"} Tier Active ({limitMinutes} Mins Cap)</p>
+              <p className="font-bold text-stone-900 capitalize text-sm">{plan} Tier Active ({limitMinutes} Mins Cap)</p>
               <span className="text-[9px] font-mono font-bold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200 uppercase">
                 {limitMinutes} MINS CAP
               </span>
             </div>
             <p className="text-stone-600 text-[11px] mt-0.5">
-              {usedMinutes.toFixed(1)} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {usage?.plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
+              {usedMinutes.toFixed(1)} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
             </p>
           </div>
         </div>
 
         <div className="relative z-10 flex items-center gap-2">
-          <UpgradeButton variant="full" />
+          <UpgradeButton plan={plan} variant="full" />
           <button
             onClick={() => setShowComposer(true)}
             className="px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-300 text-stone-800 font-semibold text-xs shadow-2xs transition-all cursor-pointer"
@@ -374,9 +377,9 @@ function CommandCenterContent() {
             <p className="text-xs text-stone-500 mt-0.5">Current usage across parallel agent workers, monthly AI tokens, and workspace cache.</p>
           </div>
           <div className="flex items-center gap-2">
-            <UpgradeButton variant="compact" />
+            <UpgradeButton plan={plan} variant="compact" />
             <span className="px-2.5 py-1 rounded-lg bg-sand-150 text-stone-800 text-[11px] font-mono font-bold uppercase">
-              PLAN: {usage?.plan || "FREE"} ({maxWorkers} WORKERS CAP)
+              PLAN: {plan.toUpperCase()} ({maxWorkers} WORKERS CAP)
             </span>
           </div>
         </div>
