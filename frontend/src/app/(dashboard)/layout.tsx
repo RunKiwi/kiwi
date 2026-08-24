@@ -689,7 +689,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* COLUMN 1: COLLAPSIBLE PRIMARY WORKSPACE & REPO ISLAND (~185px Expanded / 54px Collapsed on Desktop) */}
         <aside
           className={`island-sidebar p-3 hidden md:flex flex-col shrink-0 select-none shadow-island relative h-full overflow-hidden transition-all duration-200 ${
-            primaryCollapsed ? "w-14 items-center" : "w-52"
+            primaryCollapsed ? "w-14 items-center" : "w-48"
           }`}
         >
           {/* Workspace Context Header */}
@@ -967,8 +967,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </aside>
 
-        {/* COLUMN 2: PINNED SECONDARY CATEGORY SUB-RAIL (~208px) */}
-        <aside className="w-52 py-1.5 hidden md:flex flex-col shrink-0 text-xs select-none h-full overflow-hidden transition-all duration-200">
+        {/* COLUMN 2: PINNED SECONDARY CATEGORY SUB-RAIL (~176px) */}
+        <aside className="w-44 py-1.5 hidden md:flex flex-col shrink-0 text-xs select-none h-full overflow-hidden transition-all duration-200">
           <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 min-h-0">
             
             {/* Group 0: ACTION REQUIRED (Only show when > 0) */}
@@ -1010,9 +1010,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     pathname === "/" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
                   }`}
                 >
-                  <span className="flex items-center gap-1.5 min-w-0 pr-1 truncate">
+                  <span className="flex items-center gap-1.5 min-w-0 pr-1">
                     <LayoutGrid className="w-3.5 h-3.5 text-stone-700 shrink-0" />
-                    <span className="truncate">Tasks Dashboard</span>
+                    <span>Tasks</span>
                   </span>
                   <span className="text-[9px] font-bold font-mono bg-white text-stone-600 px-1.5 py-0.5 rounded-md border border-sand-200 shrink-0 whitespace-nowrap">
                     {activeTasksCount} {activeTasksCount === 1 ? "task" : "tasks"}
