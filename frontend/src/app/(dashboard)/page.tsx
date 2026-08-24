@@ -14,7 +14,7 @@ import {
   Ban,
   ChevronRight,
 } from "lucide-react";
-import { api, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
+import { api, DEFAULT_ARCHITECT_MODEL, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
 import { shortTime, formatCost, formatTokens } from "@/lib/datetime";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
@@ -67,7 +67,7 @@ function CommandCenterContent() {
   const [taskPrompt, setTaskPrompt] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [testCmd, setTestCmd] = useState("");
-  const [architectModel, setArchitectModel] = useState("claude-sonnet-5");
+  const [architectModel, setArchitectModel] = useState(DEFAULT_ARCHITECT_MODEL);
   const [workerModel, setWorkerModel] = useState(DEFAULT_WORKER_MODEL);
   // Quick-compose keeps the safe defaults; the full controls (plan mode, spend
   // cap, dry-run) live on the /composer page for anyone who wants to change them.

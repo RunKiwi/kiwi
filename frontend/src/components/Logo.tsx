@@ -24,7 +24,7 @@ export function Logo({
 }: LogoProps) {
   // Animation classes
   const getPoseAnimationClass = () => {
-    if (!animated && pose === "idle") return "";
+    if (!animated) return "";
     switch (pose) {
       case "dancing":
         return "animate-kiwi-dance";
@@ -37,7 +37,7 @@ export function Logo({
       case "guarding":
       case "idle":
       default:
-        return animated ? "animate-kiwi-bob" : "";
+        return "animate-kiwi-bob";
     }
   };
 

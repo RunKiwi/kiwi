@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  DEFAULT_ARCHITECT_MODEL,
   DEFAULT_WORKER_MODEL,
   formatTokens,
   modelClassLabel,
@@ -85,7 +86,7 @@ function ComposerContent() {
     searchParams.get("mode") === "dryrun" || searchParams.get("dry_run") === "true"
       ? "dryrun"
       : "pr";
-  const initialArchitect = searchParams.get("architect_model") || "claude-sonnet-5";
+  const initialArchitect = searchParams.get("architect_model") || DEFAULT_ARCHITECT_MODEL;
   const initialWorker = searchParams.get("worker_model") || searchParams.get("model") || DEFAULT_WORKER_MODEL;
   const sourceJobId = searchParams.get("job_id");
 
@@ -399,10 +400,13 @@ function ComposerContent() {
             {/* Strategy */}
             <div>
               <label className="block font-bold text-stone-800 mb-1.5">Execution Flow</label>
-              <div className="space-y-1.5">
-                <label
+              <div role="radiogroup" aria-label="Execution Flow" className="space-y-1.5">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={strategy === "plan"}
                   onClick={() => setStrategy("plan")}
-                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                  className={`w-full flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
                     strategy === "plan"
                       ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
                       : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
@@ -413,11 +417,14 @@ function ComposerContent() {
                     <span>Plan Approval (Recommended)</span>
                   </div>
                   {strategy === "plan" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
-                </label>
+                </button>
 
-                <label
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={strategy === "direct"}
                   onClick={() => setStrategy("direct")}
-                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                  className={`w-full flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
                     strategy === "direct"
                       ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
                       : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
@@ -428,7 +435,7 @@ function ComposerContent() {
                     <span>Autonomous Execution</span>
                   </div>
                   {strategy === "direct" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
-                </label>
+                </button>
               </div>
             </div>
 
@@ -460,10 +467,13 @@ function ComposerContent() {
             {/* Target Action */}
             <div>
               <label className="block font-bold text-stone-800 mb-1.5">Action on Pass</label>
-              <div className="space-y-1.5">
-                <label
+              <div role="radiogroup" aria-label="Action on Pass" className="space-y-1.5">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "pr"}
                   onClick={() => setMode("pr")}
-                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                  className={`w-full flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
                     mode === "pr"
                       ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
                       : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
@@ -474,11 +484,14 @@ function ComposerContent() {
                     <span>Open Pull Request</span>
                   </div>
                   {mode === "pr" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
-                </label>
+                </button>
 
-                <label
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "dryrun"}
                   onClick={() => setMode("dryrun")}
-                  className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                  className={`w-full flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
                     mode === "dryrun"
                       ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
                       : "bg-white/60 border-sand-200 text-stone-600 hover:bg-white"
@@ -489,7 +502,7 @@ function ComposerContent() {
                     <span>Dry-Run (No Push)</span>
                   </div>
                   {mode === "dryrun" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
-                </label>
+                </button>
               </div>
             </div>
           </div>

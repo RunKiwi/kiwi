@@ -200,7 +200,8 @@ export default function ModelsPage() {
       const matchesProvider =
         selectedProvider === "all" ||
         selectedProvider === "custom" ||
-        m.provider === selectedProvider;
+        m.provider === selectedProvider ||
+        (selectedProvider === "gemini" && m.provider === "google");
       return matchesQuery && matchesProvider;
     });
   }, [models, searchQuery, selectedProvider]);
@@ -647,12 +648,25 @@ export default function ModelsPage() {
 
       {/* ================= MODAL: REGISTER CUSTOM MODEL ================= */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white border border-sand-200 rounded-2xl max-w-md w-full p-6 shadow-popover space-y-4">
+        <div
+          className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setShowAddModal(false);
+              setError("");
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-model-title"
+            className="bg-white border border-sand-200 rounded-2xl max-w-md w-full p-6 shadow-popover space-y-4"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-sand-200">
               <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-stone-700" />
-                <h3 className="text-sm font-bold text-stone-900">Add Custom Model Endpoint</h3>
+                <h3 id="add-model-title" className="text-sm font-bold text-stone-900">Add Custom Model Endpoint</h3>
               </div>
               <button
                 onClick={() => {

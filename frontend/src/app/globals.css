@@ -380,3 +380,15 @@ body {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .pr-popover { animation: pr-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom left; }
+
+/* Reduced motion accessibility guard */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

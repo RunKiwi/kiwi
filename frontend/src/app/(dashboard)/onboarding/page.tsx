@@ -98,6 +98,7 @@ export default function OnboardingPage() {
 
   // Step 1: Check and poll for GitHub connection
   useEffect(() => {
+    if (ghConnected) return;
     const checkGH = async () => {
       try {
         const res = await client.listIntegrations();
@@ -117,7 +118,7 @@ export default function OnboardingPage() {
     checkGH();
     const interval = setInterval(checkGH, 3000);
     return () => clearInterval(interval);
-  }, [step]);
+  }, [ghConnected]);
 
   // Load repos when entering step 3
   useEffect(() => {

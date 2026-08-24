@@ -76,12 +76,14 @@ func (c *restGitHub) getDefaultBranch(ctx context.Context, owner, repo string) s
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if err != nil {
 		return "main"
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "main"
+	}
 	var res struct {
 		DefaultBranch string `json:"default_branch"`
 	}

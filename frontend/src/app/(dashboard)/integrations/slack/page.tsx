@@ -119,7 +119,7 @@ export default function SlackBindingsPage() {
       await api.deleteSlackBinding(id);
       await refresh();
     } catch (err) {
-      alert("Failed to delete binding: " + (err instanceof Error ? err.message : String(err)));
+      setError(err instanceof Error ? err.message : "Failed to delete channel binding");
     } finally {
       setDeletingId(null);
     }

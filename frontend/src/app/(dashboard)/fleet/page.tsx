@@ -104,16 +104,6 @@ export default function FleetPage() {
     }
   };
 
-  // Auto-mint a join token for BYOC when Pro/Enterprise loads and has BYOC fleets
-  useEffect(() => {
-    if (!isFree && usageLoaded && !token) {
-      const target = byocFleets[0]?.id;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      mintToken(target);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFree, usageLoaded, byocFleets.length]);
-
   const copyCommand = () => {
     const cmd = token?.value
       ? `curl -fsSL https://get.runkiwi.dev/install.sh | sh && kiwidaemon join --token ${token.value} --vpc-strict`

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useFleetStore } from "@/store/useFleetStore";
-import { client, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
+import { client, DEFAULT_ARCHITECT_MODEL, DEFAULT_WORKER_MODEL, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
 import { durationBetween, formatCost, formatTokens } from "@/lib/datetime";
 import { ThinkingOrb } from "@/components/ThinkingOrb";
 import { RunTimeline } from "@/components/RunTimeline";
@@ -288,14 +288,14 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
       summaryJob?.architect_model ||
       jobPlan?.architect_model ||
       currentJob?.tasks?.[0]?.architect_model ||
-      "claude-sonnet-5";
+      DEFAULT_ARCHITECT_MODEL;
     params.set("architect_model", archModel);
 
     const workerModel =
       j?.worker_model ||
       summaryJob?.worker_model ||
       currentJob?.tasks?.[0]?.model ||
-      "claude-haiku-4-5-20251001";
+      DEFAULT_WORKER_MODEL;
     params.set("worker_model", workerModel);
 
     const spendCap = j?.spend_cap_usd ?? summaryJob?.spend_cap_usd;
@@ -615,12 +615,13 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   // Verification / sandbox outcome
   let testOutcome = "—";
   let testOutcomeClass = "text-stone-500";
-  if (recordBody.verification?.duration_ms || isSucceeded) {
-    testOutcome = "PASSED";
-    testOutcomeClass = "text-emerald-700 font-bold";
-  } else if (isFailed) {
+  const finalOutcome = recordBody.verification?.final_outcome;
+  if (finalOutcome === "fail" || finalOutcome === "error" || isFailed) {
     testOutcome = "FAILED";
     testOutcomeClass = "text-rose-600 font-bold";
+  } else if (finalOutcome === "pass" || isSucceeded) {
+    testOutcome = "PASSED";
+    testOutcomeClass = "text-emerald-700 font-bold";
   } else if (isRunning) {
     testOutcome = "TESTING";
     testOutcomeClass = "text-amber-700 font-bold";

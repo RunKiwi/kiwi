@@ -1,7 +1,6 @@
-"use client";
-
 import React from "react";
 import { Zap, Building2, ShieldCheck } from "lucide-react";
+import { SUPPORT_EMAIL } from "@/lib/api";
 
 export interface UpgradeButtonProps {
   plan?: string;
@@ -47,7 +46,7 @@ export function UpgradeButton({
       ? "Hi Kiwi Team,\n\nWe are currently on Kiwi Pro and would like to learn more about Kiwi Enterprise (custom compute clusters, zero-knowledge VPC, dedicated SLAs).\n\nOrganization:\nTeam Size:\nContact Email:"
       : "Hi Kiwi Team,\n\nI would like to upgrade our account to the Kiwi Pro plan.\n\nOrganization:\nContact Email:");
 
-  const mailtoUrl = `mailto:support@runkiwi.dev?subject=${encodeURIComponent(resolvedSubject)}&body=${encodeURIComponent(resolvedBody)}`;
+  const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(resolvedSubject)}&body=${encodeURIComponent(resolvedBody)}`;
 
   const IconComponent = isEnterprise ? ShieldCheck : isPro ? Building2 : Zap;
   const iconColor = isEnterprise ? "text-purple-400" : isPro ? "text-amber-400" : "text-kiwi-400";

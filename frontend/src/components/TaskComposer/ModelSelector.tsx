@@ -207,6 +207,9 @@ function ModelPicker({
           options={options}
           searchable
           placeholder="Select a model…"
+          searchPlaceholder="Search by name or provider…"
+          emptyLabel="No matching models found."
+          detailPlaceholder="Select a model to view capabilities"
           ariaLabel={`${role} model`}
           renderDetail={(opt) => {
             const m = models.find((mm) => mm.model_id === opt.value);

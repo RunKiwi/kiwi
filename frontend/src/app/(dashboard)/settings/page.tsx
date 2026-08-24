@@ -16,7 +16,7 @@ import {
   Check,
   Gauge,
 } from "lucide-react";
-import { client, type ValidateResponse } from "@/lib/api";
+import { client, api, type ValidateResponse, type UsageResponse } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
 import { PlanComparison } from "@/components/PlanComparison";
 import { UpgradeButton } from "@/components/UpgradeButton";
@@ -30,6 +30,7 @@ import {
 
 export default function SettingsPage() {
   const [org, setOrg] = useState<ValidateResponse | null>(null);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [copiedOrgId, setCopiedOrgId] = useState(false);
   const [stats, setStats] = useState({ fleets: 0, daemons: 0, daemonsOnline: 0, jobs: 0, models: 0 });
 
@@ -42,6 +43,7 @@ export default function SettingsPage() {
     setNotifyOn(isNotificationEnabled());
     setPermission(getNotificationPermission());
     client.validate().then(setOrg).catch(() => {});
+    api.getUsage().then(setUsage).catch(() => {});
     Promise.all([
       client.listFleets().then((r) => r.fleets.length).catch(() => 0),
       client.listDaemons().then((d) => ({ total: d.length, online: d.filter((x) => x.online).length })).catch(() => ({ total: 0, online: 0 })),
@@ -169,7 +171,13 @@ export default function SettingsPage() {
           </div>
           <div className="relative z-10 mt-2">
             <div className="text-2xl font-bold font-mono text-stone-900">
-              {org?.plan === "free" ? "500 min" : org?.plan === "pro" || org?.plan === "individual" ? "2,000 min" : "Unlimited"}
+              {usage?.agent_minutes_limit === 0 || org?.plan === "enterprise"
+                ? "Unlimited"
+                : usage?.agent_minutes_limit
+                ? `${usage.agent_minutes_limit.toLocaleString()} min`
+                : org?.plan === "free"
+                ? "500 min"
+                : "2,000 min"}
             </div>
             <div className="text-[10px] text-stone-400 font-mono mt-0.5">
               {org?.plan === "free" ? "Pooled workspace allowance" : "Per seat / pooled allowance"}
@@ -198,7 +206,11 @@ export default function SettingsPage() {
           </div>
           <div className="relative z-10 mt-2">
             <div className="text-2xl font-bold font-mono text-stone-900">
-              {org?.plan === "free" ? "1 Task" : "20 Tasks"}
+              {usage?.max_concurrent_jobs != null
+                ? `${usage.max_concurrent_jobs} ${usage.max_concurrent_jobs === 1 ? "Task" : "Tasks"}`
+                : org?.plan === "free"
+                ? "1 Task"
+                : "20 Tasks"}
             </div>
             <div className="text-[10px] text-stone-400 font-mono mt-0.5">
               Parallel execution capacity

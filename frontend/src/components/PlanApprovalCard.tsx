@@ -55,7 +55,7 @@ export function PlanApprovalCard({
           </div>
           <div>
             <h4 className="text-xs font-bold text-indigo-950">Architect Execution Plan</h4>
-            <p className="text-[10px] text-stone-400 font-mono">Model: {plan.architect_model || "Claude 3.7 Sonnet"}</p>
+            <p className="text-[10px] text-stone-400 font-mono">Model: {plan.architect_model || "unknown"}</p>
           </div>
         </div>
         <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 flex items-center gap-1.5 shadow-2xs">
@@ -65,7 +65,7 @@ export function PlanApprovalCard({
       </div>
 
       <div className="p-3.5 rounded-xl bg-sand-50/80 text-stone-800 font-mono text-xs max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-sand-200 shadow-inner">
-        {plan.plan_markdown || "1. Analyze codebase dependencies\n2. Modify schema & implement handlers\n3. Run automated verification suite"}
+        {plan.plan_markdown || "No plan content was returned for this job."}
       </div>
 
       {error && (
@@ -90,8 +90,8 @@ export function PlanApprovalCard({
           <button
             type="button"
             onClick={handleApprove}
-            disabled={submitting}
-            className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer active:scale-[0.98]"
+            disabled={submitting || !plan.plan_markdown}
+            className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? <KiwiMicroButtonLoader /> : <Check className="w-3.5 h-3.5 text-kiwi-400" />}
             <span>Approve &amp; Execute Plan &rarr;</span>
