@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -124,8 +124,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const pathnameRef = useRef(pathname);
+  const jobsLengthRef = useRef(jobs.length);
 
   // Auto-close mobile drawer on navigation
+  // Update refs whenever pathname or jobs change
+  useEffect(() => {
+    pathnameRef.current = pathname;
+    jobsLengthRef.current = jobs.length;
+  }, [pathname, jobs.length]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setShowMobileMenu(false);
@@ -177,10 +185,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (typeof window !== "undefined") {
           const isCompleted = localStorage.getItem("kiwi_onboarding_completed");
           if (!isCompleted) {
-            if (repoList.length > 0 || jobs.length > 0) {
+            if (repoList.length > 0 || jobsLengthRef.current > 0) {
               // Existing account on a new device: auto-mark onboarding complete
               localStorage.setItem("kiwi_onboarding_completed", "1");
-            } else if (pathname === "/") {
+            } else if (pathnameRef.current === "/") {
               // Genuinely fresh new account: guide to onboarding
               router.push("/onboarding");
             }
@@ -188,7 +196,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
       })
       .catch(() => {});
-  }, [jobs.length, pathname, router]);
+  }, [router]);
 
   const handleLogout = () => {
     if (typeof window !== "undefined") {
