@@ -1121,13 +1121,13 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         </div>
 
         {/* ================= STICKY FOOTER ACTIONS ================= */}
-        <div className="p-4 border-t border-sand-200 bg-white flex items-center justify-between shrink-0">
+        <div className="p-3.5 sm:p-4 border-t border-sand-200/90 bg-white/95 backdrop-blur-md flex items-center justify-between shrink-0 shadow-2xs">
           <div>
             {canCancel ? (
               <button
                 onClick={() => act("Stopped", () => client.cancelJob(currentJob!.job_id))}
                 disabled={busy !== null}
-                className="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition-all disabled:opacity-40"
+                className="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition-all disabled:opacity-40 cursor-pointer"
               >
                 Cancel Task
               </button>
@@ -1144,15 +1144,15 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                 href={prResultUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="px-4 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs flex items-center gap-1.5 shadow-xs transition-all"
+                className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all active:scale-[0.98]"
               >
                 <GitPullRequest className="w-3.5 h-3.5 text-kiwi-400" />
-                <span>Review PR in GitHub</span>
+                <span>Review PR in GitHub &rarr;</span>
               </a>
             ) : (
               <button
                 onClick={onClose}
-                className="px-4 py-1.5 rounded-xl bg-sand-100 hover:bg-sand-150 text-stone-700 border border-sand-200 font-semibold text-xs transition-all"
+                className="px-4 py-1.5 rounded-xl bg-sand-50 hover:bg-sand-100 text-stone-700 border border-sand-200/90 font-semibold text-xs transition-all cursor-pointer shadow-2xs"
               >
                 Close
               </button>
