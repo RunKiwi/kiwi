@@ -70,6 +70,7 @@ Full documentation: **[docs.runkiwi.dev](https://docs.runkiwi.dev)**.
 ## Features
 
 - **Session-driven.** A task-long Architect plans and reviews while an agentic Implementer works the repo with real tools, verified each round in the sandbox until it passes. → [docs](https://docs.runkiwi.dev/session-mode)
+- **Plan Mode, opt-in.** Ask Kiwi to stop after the Architect's plan and wait for you to approve or reject it — with feedback — before any Implementer round touches your repo. Off by default; the session runs straight through otherwise.
 - **The test is a guard, not the goal.** Your task description is what Kiwi tries to achieve; the test command only proves nothing broke. A green suite alone isn't "done," and a run that changes no code is reported as a failure.
 - **Two-phase, isolated sandbox.** Dependencies install with network and no secrets; verification then runs offline. Model-generated code never has both a network and a credential at once. → [docs](https://docs.runkiwi.dev/sandbox)
 - **Zero setup.** No image, test command, or file list required — Kiwi reads what your repo declares and infers the rest, self-correcting a wrong runtime guess before you ever see an error.
@@ -85,6 +86,7 @@ Full documentation: **[docs.runkiwi.dev](https://docs.runkiwi.dev)**.
 | End-to-end seam: submit → plan → sandboxed Architect/Implementer session → PR | ✅ Live |
 | **Free tier: live in production** (`app.runkiwi.dev`) — per-org daemon, gVisor sandbox, agent-minute metering & abuse auto-suspend | ✅ Live |
 | Session loop — the only execution loop; the single-file loop it replaced has been removed | ✅ Live |
+| Plan Mode — opt-in human approve/reject gate before the Implementer runs | ✅ Live |
 | GitHub App — per-repo installation tokens minted per operation, `GIT_TOKEN` kept as fallback | ✅ Live |
 | Execution record — signed, hash-chained provenance per job | ✅ Live (set `KIWI_VER_SIGNING_KEY`) |
 | Dashboard, `kiwi` CLI, Node/Python SDKs, Linear + GitHub webhooks | ✅ Live |
