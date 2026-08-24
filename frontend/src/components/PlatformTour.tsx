@@ -307,21 +307,49 @@ export function PlatformTour() {
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden font-sans select-none pointer-events-auto">
-      {/* Dark backdrop with smooth fade */}
-      <div
-        className="fixed inset-0 bg-stone-950/50 backdrop-blur-xs transition-opacity duration-300 ease-out"
+      {/* SVG Masked Dimming Overlay: 0% blur, crystal clear cutout over target */}
+      <svg
+        className="fixed inset-0 w-full h-full pointer-events-auto z-40 transition-all duration-300"
         onClick={handleClose}
-      />
+      >
+        <defs>
+          <mask id="tour-spotlight-mask">
+            {/* White base = dimmed area */}
+            <rect x="0" y="0" width="100%" height="100%" fill="white" />
+            {/* Black rectangle = 100% transparent cutout hole for target element */}
+            {targetRect && (
+              <rect
+                x={Math.max(4, targetRect.left - 6)}
+                y={Math.max(4, targetRect.top - 6)}
+                width={targetRect.width + 12}
+                height={targetRect.height + 12}
+                rx="12"
+                ry="12"
+                fill="black"
+              />
+            )}
+          </mask>
+        </defs>
+        {/* Soft, non-blurred dark fill with masked cutout */}
+        <rect
+          x="0"
+          y="0"
+          width="100%"
+          height="100%"
+          fill="rgba(15, 15, 14, 0.40)"
+          mask="url(#tour-spotlight-mask)"
+        />
+      </svg>
 
-      {/* Target Element Spotlight Halo & Cutout */}
+      {/* Target Element Spotlight Ring & Pulse Halo */}
       {targetRect && (
         <div
-          className="fixed pointer-events-none transition-all duration-300 ease-out z-50 rounded-xl border-2 border-kiwi-400 ring-4 ring-kiwi-400/30 shadow-[0_0_0_9999px_rgba(15,15,14,0.45),0_0_24px_rgba(147,198,69,0.5)]"
+          className="fixed pointer-events-none transition-all duration-300 ease-out z-50 rounded-xl border-2 border-kiwi-400 ring-4 ring-kiwi-400/30 shadow-[0_0_20px_rgba(147,198,69,0.45)]"
           style={{
-            top: `${Math.max(4, targetRect.top - 4)}px`,
-            left: `${Math.max(4, targetRect.left - 4)}px`,
-            width: `${targetRect.width + 8}px`,
-            height: `${targetRect.height + 8}px`,
+            top: `${Math.max(4, targetRect.top - 6)}px`,
+            left: `${Math.max(4, targetRect.left - 6)}px`,
+            width: `${targetRect.width + 12}px`,
+            height: `${targetRect.height + 12}px`,
           }}
         />
       )}
