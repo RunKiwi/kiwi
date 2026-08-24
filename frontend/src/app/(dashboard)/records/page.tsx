@@ -54,9 +54,9 @@ export default function RecordsPage() {
             ZERO TRUST SECURITY
           </span>
         </div>
-        <h1 className="text-xl font-bold text-stone-900 tracking-tight">Cryptographic Audit Receipts</h1>
+        <h1 className="text-xl font-bold text-stone-900 tracking-tight">Audit Receipts</h1>
         <p className="text-xs text-stone-500 mt-0.5">
-          Tamper-evident, signed execution receipts (<code className="font-mono text-stone-700 font-semibold">pkg/ver</code>) guaranteeing that zero credentials egressed during execution and that 100% of test suites passed in isolated gVisor sandboxes.
+          Tamper-evident execution receipts signed with Ed25519, verifying zero credential egress and automated test outcomes.
         </p>
       </div>
 

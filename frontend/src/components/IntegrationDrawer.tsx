@@ -308,9 +308,8 @@ function IntegrationDrawerBody({
         <div className="flex items-start gap-3 p-3.5 rounded-2xl border border-sand-200 bg-sand-50/70 text-xs text-stone-600">
           <Lock className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
           <div className="leading-relaxed">
-            <span className="text-stone-900 font-bold">Encrypted & Sealed: </span>
-            Tokens are AES-encrypted at rest and sealed to daemon runtimes. They are never rendered
-            or returned to the browser.
+            <span className="text-stone-900 font-bold">Encrypted &amp; Sealed: </span>
+            Credentials are encrypted at rest and sealed to runner runtimes. They are never exposed in the browser.
           </div>
         </div>
 
@@ -423,9 +422,9 @@ function IntegrationDrawerBody({
             <div className="p-4 rounded-2xl border border-sand-200 bg-sand-50/60 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Fallback Personal Access Token</h3>
+                  <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider">Personal Access Token (PAT)</h3>
                   <p className="text-xs text-stone-400 mt-0.5">
-                    Only required if you cannot install the GitHub App.
+                    Alternative connection if you cannot install the GitHub App.
                   </p>
                 </div>
                 <button

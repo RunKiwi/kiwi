@@ -237,7 +237,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       },
       {
         id: "nav-dashboard",
-        title: "Task Dashboard",
+        title: "Tasks Dashboard",
         subtitle: "Kanban pipeline of all running and completed tasks",
         category: "Navigation",
         href: "/",
@@ -267,7 +267,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       },
       {
         id: "nav-spend",
-        title: "Cost & Velocity Analytics",
+        title: "Cost & Usage Analytics",
         subtitle: "Token utilization, execution time, and model spend metrics",
         category: "Navigation",
         href: "/spend",
@@ -277,8 +277,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       },
       {
         id: "nav-fleet",
-        title: "Private Runners & Fleet",
-        subtitle: "Manage private self-hosted daemons and BYOC clusters",
+        title: "Runners & Fleets",
+        subtitle: "Inspect runner capacity, active microVMs, and private BYOC nodes",
         category: "Navigation",
         href: "/fleet",
         icon: <Server className="w-3.5 h-3.5 text-emerald-600" />,
@@ -337,7 +337,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       },
       {
         id: "nav-records",
-        title: "Cryptographic Audit Records",
+        title: "Audit Receipts",
         subtitle: "Verifiable tamper-evident execution logs and task receipts",
         category: "Navigation",
         href: "/records",
@@ -689,7 +689,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* COLUMN 1: COLLAPSIBLE PRIMARY WORKSPACE & REPO ISLAND (~185px Expanded / 54px Collapsed on Desktop) */}
         <aside
           className={`island-sidebar p-3 hidden md:flex flex-col shrink-0 select-none shadow-island relative h-full overflow-hidden transition-all duration-200 ${
-            primaryCollapsed ? "w-14 items-center" : "w-48"
+            primaryCollapsed ? "w-14 items-center" : "w-52"
           }`}
         >
           {/* Workspace Context Header */}
@@ -707,7 +707,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="shrink-0 flex items-center justify-between px-1 mb-3 w-full">
               <div className="min-w-0 pr-1">
                 <p className="text-[11px] font-bold text-stone-900 truncate leading-tight">
-                  {org?.org_name || "Harsh KiwiWorks"}
+                  {org?.org_name || "My Workspace"}
                 </p>
                 <p className="text-[9px] font-mono text-stone-400 truncate mt-0.5">
                   #{org?.org_id ? org.org_id.slice(0, 10) : "org_default"}
@@ -861,36 +861,58 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* COMPUTE QUOTA & UPGRADE CARD */}
           {!primaryCollapsed && (
-            <div className="shrink-0 my-2 p-3 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-2.5 text-xs w-full">
+            <div className="shrink-0 my-2 p-3 rounded-2xl border border-sand-200/90 bg-white shadow-2xs space-y-2.5 text-xs w-full">
               {/* Row 1: Header */}
-              <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center justify-between gap-1">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Zap className="w-3.5 h-3.5 text-amber-500 fill-current shrink-0" />
-                  <span className="font-bold text-xs text-stone-900 truncate">Agent Compute</span>
+                  <span className="font-bold text-xs text-stone-900 truncate">Compute Quota</span>
                 </div>
-                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-500 bg-sand-100 px-1.5 py-0.5 rounded border border-sand-200">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-600 bg-sand-100 px-1.5 py-0.5 rounded border border-sand-200/80 shrink-0">
                   {plan}
                 </span>
               </div>
 
               {/* Row 2: Minutes counter and percentage used */}
               <div className="flex items-baseline justify-between font-mono">
-                <span className="text-sm font-bold text-stone-900">
-                  {usedMinutes.toFixed(1)} <span className="text-[11px] text-stone-400 font-normal">/ {limitMinutes}m</span>
-                </span>
-                <span className="text-[11px] text-amber-700 font-medium">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-sm font-bold text-stone-900 leading-none">
+                    {usedMinutes.toFixed(1)}
+                  </span>
+                  <span className="text-[11px] text-stone-400 font-normal">
+                    / {limitMinutes}m
+                  </span>
+                </div>
+                <span
+                  className={`text-[11px] font-medium ${
+                    percentUsed >= 90
+                      ? "text-rose-600 font-bold"
+                      : percentUsed >= 75
+                      ? "text-amber-700 font-semibold"
+                      : "text-stone-500"
+                  }`}
+                >
                   {percentUsed}% used
                 </span>
               </div>
 
               {/* Row 3: Progress Bar */}
-              <div className="w-full h-1.5 bg-sand-200 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }} />
+              <div className="w-full h-1.5 bg-sand-200/80 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    percentUsed >= 90
+                      ? "bg-rose-500"
+                      : percentUsed >= 75
+                      ? "bg-amber-500"
+                      : "bg-kiwi-500"
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(percentUsed, usedMinutes > 0 ? 2 : 0))}%` }}
+                />
               </div>
 
               {/* Row 4: Full-width Upgrade / Enterprise Button */}
               <div className="pt-0.5">
-                <UpgradeButton plan={plan} variant="full" className="w-full justify-center py-1.5 text-[11px]" />
+                <UpgradeButton plan={plan} variant="full" className="w-full justify-center py-1.5 text-[11px] font-bold rounded-xl" />
               </div>
             </div>
           )}
@@ -990,7 +1012,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <LayoutGrid className="w-3.5 h-3.5 text-stone-700 shrink-0" />
-                    <span className="truncate">Dashboard</span>
+                    <span className="truncate">Tasks Dashboard</span>
                   </span>
                   <span className="text-[9px] font-bold font-mono bg-white px-1.5 py-0.2 rounded-md border border-sand-200">{activeTasksCount} Active</span>
                 </Link>
@@ -1096,7 +1118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <Server className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/fleet") ? "text-stone-900" : "text-stone-400"}`} />
-                    <span className="truncate">Private Runners</span>
+                    <span className="truncate">Runners & Fleets</span>
                   </span>
                   <span className="text-[9px] font-mono text-stone-400 font-bold">{runnersCount}</span>
                 </Link>
@@ -1130,7 +1152,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <span className="flex items-center gap-1.5 min-w-0 pr-1">
                     <Link2 className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/integrations") ? "text-stone-900" : "text-stone-400"}`} />
-                    <span className="truncate">Integration</span>
+                    <span className="truncate">Integrations</span>
                   </span>
 
                   {/* Horizontally stacked micro-avatars that slightly expand on hover while staying stacked */}
@@ -1414,7 +1436,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }`}
                 >
                   <Server className="w-4 h-4 text-stone-600" />
-                  <span>Daemons &amp; Runners</span>
+                  <span>Runners &amp; Fleets</span>
                 </Link>
                 <Link
                   href="/spend"
@@ -1424,7 +1446,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }`}
                 >
                   <Receipt className="w-4 h-4 text-stone-600" />
-                  <span>Spend &amp; Tokens</span>
+                  <span>Cost &amp; Usage</span>
                 </Link>
                 <Link
                   href="/records"
@@ -1434,7 +1456,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }`}
                 >
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Audit Records</span>
+                  <span>Audit Receipts</span>
                 </Link>
                 <Link
                   href="/metrics"

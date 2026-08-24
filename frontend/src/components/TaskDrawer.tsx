@@ -739,7 +739,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                     </span>
                     <span className="flex items-center gap-1 text-stone-700 font-medium bg-sand-100/90 px-2 py-0.5 rounded-md border border-sand-200 text-[11px]">
                       <Hammer className="w-3 h-3 text-emerald-600" />
-                      <span>Worker: {workerModel.split("/").pop()}</span>
+                      <span>Implementer: {workerModel.split("/").pop()}</span>
                     </span>
                   </div>
                 ) : workerModel ? (

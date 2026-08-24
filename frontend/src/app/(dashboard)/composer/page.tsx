@@ -223,14 +223,14 @@ function ComposerContent() {
                 TASK COMPOSER
               </span>
               <span className="text-[11px] font-mono text-stone-400 font-semibold">
-                Autonomous Swarm Dispatch
+                Autonomous Task Dispatch
               </span>
             </div>
             <h1 className="text-lg font-bold text-stone-900 tracking-tight mt-0.5">
-              Compose Autonomous Swarm Task
+              Task Composer
             </h1>
             <p className="text-xs text-stone-500 mt-0.5">
-              Architects plan changes, worker agents edit code, and tests run inside isolated sandboxes.
+              Build features, fix bugs, or refactor code using paired Architect and Implementer models.
             </p>
           </div>
         </div>
@@ -436,7 +436,7 @@ function ComposerContent() {
                 >
                   <div className="flex items-center gap-1.5 text-xs">
                     <Compass className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Plan Mode (Approve)</span>
+                    <span>Plan Approval (Recommended)</span>
                   </div>
                   {strategy === "plan" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
@@ -451,7 +451,7 @@ function ComposerContent() {
                 >
                   <div className="flex items-center gap-1.5 text-xs">
                     <Zap className="w-3.5 h-3.5 text-kiwi-600 fill-current" />
-                    <span>Direct Execution</span>
+                    <span>Autonomous Execution</span>
                   </div>
                   {strategy === "direct" && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
                 </label>
@@ -531,7 +531,7 @@ function ComposerContent() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-stone-500 font-mono">
-              <span>Mode: <strong className="text-stone-900 font-bold">{strategy === "plan" ? "Plan Mode" : "Direct Swarm"}</strong></span>
+              <span>Mode: <strong className="text-stone-900 font-bold">{strategy === "plan" ? "Plan Mode" : "Autonomous Mode"}</strong></span>
               <span>•</span>
               <span>Cap: <strong className="text-stone-900 font-bold">${spendCap.toFixed(2)} USD</strong></span>
               <span>•</span>
@@ -548,7 +548,7 @@ function ComposerContent() {
               ) : (
                 <Play className="w-3.5 h-3.5 text-kiwi-400 fill-current" />
               )}
-              <span>Dispatch Swarm &rarr;</span>
+              <span>Launch Task &rarr;</span>
             </button>
           </div>
         </div>

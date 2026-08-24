@@ -51,7 +51,7 @@ export function PlanComparison({ currentPlan }: { currentPlan?: string | null })
 
             <div>
               <div className="text-3xl font-bold font-mono text-stone-900">$0</div>
-              <div className="text-xs text-stone-500 mt-1">Free forever for individuals & hobbyists</div>
+              <div className="text-xs text-stone-500 mt-1">Ideal for individual developers and open-source projects</div>
             </div>
 
             <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">
@@ -120,7 +120,7 @@ export function PlanComparison({ currentPlan }: { currentPlan?: string | null })
               <div className="text-3xl font-bold font-mono text-stone-900">
                 $18 <span className="text-xs font-normal text-stone-500">/ user / mo</span>
               </div>
-              <div className="text-xs text-stone-500 mt-1">High-throughput execution for engineering teams</div>
+              <div className="text-xs text-stone-500 mt-1">For engineering teams building and shipping code daily</div>
             </div>
 
             <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">

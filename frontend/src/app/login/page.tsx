@@ -88,10 +88,10 @@ export default function LoginPage() {
         </div>
 
         <h1 className="text-xl font-bold tracking-tight text-stone-900 mb-1">
-          Welcome to Kiwi
+          Log in to Kiwi
         </h1>
         <p className="text-stone-500 text-xs mb-6 max-w-xs leading-relaxed">
-          Sign in to plan tasks, build features, and ship verified pull requests with autonomous agents.
+          Autonomous agent platform for engineering teams to build, verify, and ship code safely.
         </p>
 
         {loadingProviders ? (
@@ -216,7 +216,7 @@ export default function LoginPage() {
       {/* Security & Infrastructure Footer */}
       <div className="mt-6 flex items-center justify-center gap-2 text-[10px] font-mono text-stone-400">
         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-        <span>Hardware-Isolated Fleets • Cryptographically Verifiable Audit Logs</span>
+        <span>Isolated gVisor MicroVMs • Cryptographic Audit Receipts</span>
       </div>
     </div>
   );

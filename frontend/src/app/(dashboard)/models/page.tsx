@@ -229,7 +229,7 @@ export default function ModelsPage() {
             </span>
           </h1>
           <p className="text-xs text-stone-500 mt-1 max-w-2xl leading-relaxed">
-            Foundation models available for agent execution, planning, and review. Built-in models draw from your platform quota; connect your own keys for unlimited throughput.
+            Explore available frontier, reasoning, and economy models, or connect custom OpenAI-compatible endpoints.
           </p>
         </div>
 
@@ -652,7 +652,7 @@ export default function ModelsPage() {
             <div className="flex items-center justify-between pb-3 border-b border-sand-200">
               <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-stone-700" />
-                <h3 className="text-sm font-bold text-stone-900">Register Custom Model</h3>
+                <h3 className="text-sm font-bold text-stone-900">Add Custom Model Endpoint</h3>
               </div>
               <button
                 onClick={() => {
