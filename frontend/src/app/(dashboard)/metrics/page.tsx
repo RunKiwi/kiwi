@@ -163,7 +163,7 @@ export default function MetricsPage() {
               </span>
             </div>
             <h1 className="text-lg font-bold text-stone-900 tracking-tight mt-0.5">
-              Production Telemetry &amp; SLO Monitors
+              Canary SLO Metrics
             </h1>
             <p className="text-xs text-stone-500 mt-0.5">
               Connect Datadog and Prometheus metrics. Kiwi Watchdogs verify p99 latency, error rates, and regressions after merging.
@@ -274,7 +274,7 @@ export default function MetricsPage() {
           </div>
 
           <div>
-            <label className="block font-bold text-stone-800 mb-1">Metric Metric Identifier</label>
+            <label className="block font-bold text-stone-800 mb-1">Metric Identifier</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -363,7 +363,7 @@ export default function MetricsPage() {
             className="px-4 py-2 rounded-xl border border-sand-200 bg-sand-50/90 hover:bg-sand-100 text-stone-800 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 shadow-2xs"
           >
             {testing ? <KiwiMicroButtonLoader /> : <Radar className="w-3.5 h-3.5 text-indigo-600" />}
-            <span>Test Query Connection</span>
+            <span>Test Query</span>
           </button>
 
           <button
@@ -373,7 +373,7 @@ export default function MetricsPage() {
             className="px-5 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 shadow-2xs"
           >
             {saving ? <KiwiMicroButtonLoader /> : <Plus className="w-3.5 h-3.5 text-kiwi-400 stroke-[2.5]" />}
-            <span>Save Metric Rule</span>
+            <span>Create SLO Metric</span>
           </button>
         </div>
       </div>

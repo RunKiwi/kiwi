@@ -35,10 +35,10 @@ export interface TourStep {
 const TOUR_STEPS: TourStep[] = [
   {
     id: "tasks-queue",
-    title: "Autonomous Swarm Queue",
-    subtitle: "Real-time task execution and testing",
+    title: "Task Execution Queue",
+    subtitle: "Real-time task execution and test verification",
     description:
-      "Your central execution board. Watch autonomous agent swarms plan changes, edit code, and verify tests inside isolated sandboxes with cryptographically verifiable audit receipts.",
+      "Your central workspace. Watch agents plan architectural changes, edit code, and verify test suites inside secure sandboxes with cryptographic audit receipts.",
     badge: "CORE ENGINE",
     targetQuery: '[data-tour="tasks-queue"]',
     preferredPlacement: "bottom",
@@ -48,10 +48,10 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: "nav-monitors",
-    title: "PR Watchdogs & Monitors",
+    title: "PR Watchdogs & Triage",
     subtitle: "Automated PR triage and continuous review",
     description:
-      "Kiwi can autonomously monitor pull requests across your repositories. When test failures or reviews occur, watchdogs automatically investigate, fix regressions, and pass CI.",
+      "Kiwi autonomously monitors pull requests across your repositories. When test failures or reviews occur, watchdogs investigate, fix regressions, and pass CI.",
     badge: "CONTINUOUS REVIEW",
     targetQuery: '[data-tour="nav-monitors"]',
     preferredPlacement: "right",
@@ -63,10 +63,10 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: "nav-fleet",
-    title: "Execution Fleets & Runners",
-    subtitle: "Ephemeral cloud sandboxes & BYOC private runners",
+    title: "Runners & Fleet Capacity",
+    subtitle: "Managed cloud microVMs & BYOC private runners",
     description:
-      "Run agents in managed Kiwi Cloud pools or connect your own private daemons inside your secure VPC using `kiwidaemon join`. Inspect CPU/RAM load and real-time hardware meters.",
+      "Run tasks in managed Kiwi Cloud pools or connect private runners inside your secure VPC using `kiwidaemon join`. Inspect CPU/RAM load and real-time hardware capacity.",
     badge: "HYBRID COMPUTE",
     targetQuery: '[data-tour="nav-fleet"]',
     preferredPlacement: "right",
@@ -78,10 +78,10 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: "nav-spend",
-    title: "Spend & Model Intelligence",
+    title: "Cost & Usage Analytics",
     subtitle: "Token quotas, model intelligence & spend caps",
     description:
-      "Track compute minutes and token usage in real time. Kiwi provides generous platform quotas for frontier models (Claude 3.7 Sonnet, GPT-4.5, Gemini 2.0) with strict spend cap protection.",
+      "Track agent-minutes and token usage in real time. Kiwi provides generous platform quotas for frontier models (Claude 3.7 Sonnet, GPT-4.5, Gemini 2.0) with strict spend cap protection.",
     badge: "TOKEN GOVERNANCE",
     targetQuery: '[data-tour="nav-spend"]',
     preferredPlacement: "right",
@@ -93,10 +93,10 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: "new-task-btn",
-    title: "Launch Autonomous Tasks",
-    subtitle: "Compose goals with Architect & Worker models",
+    title: "Launch Automated Tasks",
+    subtitle: "Compose goals with Architect & Implementer models",
     description:
-      "Ready to build? Click '+ New Task' or press ⌘K anywhere. Pair high-reasoning Architect models with lightning-fast Worker models to execute complex features.",
+      "Ready to build? Click '+ New Task' or press ⌘K anywhere. Pair high-reasoning Architect models with lightning-fast Implementer models to execute complex features.",
     badge: "TASK COMPOSER",
     targetQuery: '[data-tour="new-task-btn"]',
     preferredPlacement: "right",
@@ -104,7 +104,7 @@ const TOUR_STEPS: TourStep[] = [
     pose: "dancing",
     actionLabel: "Open Composer",
     actionHref: "/composer",
-    highlights: ["Architect + Worker pairing", "Human-in-the-loop plan review", "Instant GitHub branch creation"],
+    highlights: ["Architect + Implementer pairing", "Human-in-the-loop plan review", "Instant GitHub branch creation"],
   },
 ];
 

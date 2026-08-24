@@ -164,10 +164,10 @@ export default function FleetPage() {
             <span className="text-[10px] font-mono font-bold bg-kiwi-100 text-kiwi-800 border border-kiwi-200 px-2 py-0.5 rounded uppercase">
               FLEET RUNNERS
             </span>
-            <h1 className="text-xl font-bold text-stone-900 tracking-tight">Execution Fleets & Capacity</h1>
+            <h1 className="text-xl font-bold text-stone-900 tracking-tight">Runners &amp; Fleet Capacity</h1>
           </div>
           <p className="text-xs text-stone-500 mt-0.5">
-            Manage ephemeral runners hosted on Kiwi Cloud and private self-hosted daemons (BYOC) in your own VPC.
+            Monitor Kiwi Cloud microVMs and connect private VPC runners over encrypted mTLS.
           </p>
         </div>
 
@@ -292,9 +292,9 @@ export default function FleetPage() {
                       }`}
                     />
                   </span>
-                  <span className="font-bold text-stone-900 text-sm">Kiwi Shared Compute Pool</span>
+                  <span className="font-bold text-stone-900 text-sm">Kiwi Cloud (Managed Pool)</span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sand-100 text-stone-600 font-semibold border border-sand-200">
-                    Shared Free Runtime
+                    Managed Cloud MicroVMs
                   </span>
                 </div>
                 <span
@@ -405,7 +405,7 @@ export default function FleetPage() {
                 <Building2 className="w-3.5 h-3.5 text-indigo-700" />
               </div>
               <div>
-                <h3 className="text-xs font-bold text-stone-900">Self-Hosted Runners (BYOC — Private Cloud VPC)</h3>
+                <h3 className="text-xs font-bold text-stone-900">Private Runners (BYOC — Cloud VPC)</h3>
                 <p className="text-[11px] text-stone-500">
                   Private daemons executing inside your AWS VPC, GCP, or Kubernetes cluster. Zero code egress.
                 </p>
@@ -426,11 +426,11 @@ export default function FleetPage() {
 
               <div className="space-y-1">
                 <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full border border-amber-200">
-                  PRO & ENTERPRISE EXCLUSIVE
+                  PRO &amp; ENTERPRISE FEATURE
                 </span>
-                <h3 className="text-base font-bold text-stone-900">Self-Hosted Runners (BYOC) are Locked on Free Tier</h3>
+                <h3 className="text-base font-bold text-stone-900">Connect Private BYOC Runners (Pro)</h3>
                 <p className="text-xs text-stone-600 max-w-md mx-auto">
-                  Connect your private cloud infrastructure so autonomous AI agents run safely inside your own AWS/GCP VPC with zero data egress.
+                  Run tasks inside your AWS, GCP, or on-prem VPC using <code className="font-mono text-stone-800">kiwidaemon join</code>. Code never leaves your network.
                 </p>
               </div>
 

@@ -41,7 +41,7 @@ func repoRoot(t *testing.T) string {
 func TestApacheLicensedBinariesDoNotDependOnEE(t *testing.T) {
 	for _, bin := range ossBinaries {
 		t.Run(strings.TrimPrefix(bin, "./cmd/"), func(t *testing.T) {
-			cmd := exec.Command("go", "list", "-deps", bin)
+			cmd := exec.Command("go", "list", "-buildvcs=false", "-deps", bin)
 			// This test runs with the package directory as its working
 			// directory; the binaries are named relative to the repo root.
 			cmd.Dir = repoRoot(t)

@@ -128,8 +128,8 @@ export default function SpendPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-sand-200 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-stone-900">Compute, Cost &amp; Velocity Analytics</h1>
-          <p className="text-xs text-stone-500">Track dual-metering quotas, Kiwi platform token allowances, LLM provider invoices, and AST prompt caching.</p>
+          <h1 className="text-xl font-bold text-stone-900">Cost &amp; Usage Analytics</h1>
+          <p className="text-xs text-stone-500">Track monthly token allowances, custom API key spend, and compute runtimes across all tasks.</p>
         </div>
 
         {/* Subtab Toggle */}
@@ -169,7 +169,7 @@ export default function SpendPage() {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                   <Zap className="w-4 h-4 text-amber-500 fill-current" />
-                  Track 1: Compute Agent-Minutes Quota
+                  Included Platform Allowance
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   Monthly Reset
@@ -187,7 +187,7 @@ export default function SpendPage() {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                   <Receipt className="w-4 h-4 text-stone-700" />
-                  Track 2: BYOK Provider Invoiced Spend
+                  Custom API Keys (BYOK)
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                   Live Billing
@@ -363,7 +363,7 @@ export default function SpendPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold text-stone-900 flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-600" />
-                  AST Prompt Token Caching (90% Discount)
+                  Prompt Caching Efficiency (90% Discount)
                 </h3>
                 <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                   {caching?.cache_discount_rate != null ? `${(caching.cache_discount_rate * 100).toFixed(0)}% Hit Rate` : "No data yet"}

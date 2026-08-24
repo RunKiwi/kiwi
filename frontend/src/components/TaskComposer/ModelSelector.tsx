@@ -143,7 +143,7 @@ function ModelPicker({
               <Hammer className="w-3.5 h-3.5" />
             </div>
           )}
-          <span>{role === "architect" ? "Architect Model (Planning & Strategy)" : "Worker Model (Code Edits & Test Fixes)"}</span>
+          <span>{role === "architect" ? "Architect Model (Planning & Strategy)" : "Implementer Model (Code & Tests)"}</span>
         </label>
 
         {selectedModel && (

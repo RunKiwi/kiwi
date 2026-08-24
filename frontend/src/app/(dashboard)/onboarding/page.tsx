@@ -231,10 +231,10 @@ export default function OnboardingPage() {
               </span>
             </div>
             <h1 className="text-lg font-bold tracking-tight text-stone-900 mt-0.5">
-              Welcome to Kiwi Platform
+              Welcome to Kiwi
             </h1>
             <p className="text-xs text-stone-500 mt-0.5">
-              Set up your repository connection, model intelligence, and launch your first autonomous swarm.
+              Connect your repositories, configure model access, and launch your first automated task.
             </p>
           </div>
         </div>
@@ -243,7 +243,7 @@ export default function OnboardingPage() {
           onClick={() => handleCompleteAndLaunch("")}
           className="text-xs font-semibold text-stone-400 hover:text-stone-700 transition-colors shrink-0 self-end sm:self-center cursor-pointer"
         >
-          Skip to Dashboard &rarr;
+          Skip setup and open dashboard &rarr;
         </button>
       </div>
 
@@ -252,7 +252,7 @@ export default function OnboardingPage() {
         {[
           { num: 1, label: "Connect Codebase", icon: <FolderGit2 className="w-3.5 h-3.5" /> },
           { num: 2, label: "Model Intelligence", icon: <Key className="w-3.5 h-3.5" /> },
-          { num: 3, label: "First Swarm Task", icon: <Rocket className="w-3.5 h-3.5" /> },
+          { num: 3, label: "First Task", icon: <Rocket className="w-3.5 h-3.5" /> },
         ].map((s) => {
           const isCompleted = step > s.num;
           const isCurrent = step === s.num;
@@ -417,7 +417,7 @@ export default function OnboardingPage() {
               <h2 className="text-sm sm:text-base font-bold text-stone-900">Step 2: Model Intelligence &amp; Quotas</h2>
             </div>
             <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-              Choose how autonomous agent swarms access LLMs for code synthesis, architectural planning, and testing.
+              Choose how agents access frontier models for planning, code generation, and test verification.
             </p>
           </div>
 
@@ -434,7 +434,7 @@ export default function OnboardingPage() {
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-xs text-stone-900">
                   <Zap className="w-3.5 h-3.5 text-kiwi-600 fill-current" />
-                  <span>Kiwi Managed Allowance</span>
+                  <span>Kiwi Managed Frontier Allowance</span>
                 </div>
                 {!useByok && <CheckCircle2 className="w-4 h-4 text-kiwi-600" />}
               </div>
@@ -522,7 +522,7 @@ export default function OnboardingPage() {
         </div>
       )}
 
-      {/* STEP 3: LAUNCH FIRST SWARM TASK */}
+      {/* STEP 3: LAUNCH FIRST TASK */}
       {step === 3 && (
         <div className="p-4 sm:p-5 rounded-2xl bg-white border border-sand-200/90 shadow-2xs space-y-4 animate-in fade-in zoom-in-95 duration-200">
           <div>
@@ -533,7 +533,7 @@ export default function OnboardingPage() {
               <h2 className="text-sm sm:text-base font-bold text-stone-900">Step 3: Launch your First Task</h2>
             </div>
             <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-              Choose a starter template or prefill your goal to see the autonomous agent swarm plan, execute, and verify changes.
+              Choose a starter template or prefill your goal to see agents plan, execute, and verify changes.
             </p>
           </div>
 

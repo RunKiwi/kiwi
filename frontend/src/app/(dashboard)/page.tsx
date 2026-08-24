@@ -229,13 +229,13 @@ function CommandCenterContent() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <p className="font-bold text-stone-900 capitalize text-sm">{plan} Tier Active ({limitMinutes} Mins Cap)</p>
+              <p className="font-bold text-stone-900 capitalize text-sm">{plan} Tier Active ({limitMinutes} Agent-Minutes)</p>
               <span className="text-[9px] font-mono font-bold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200 uppercase">
                 {limitMinutes} MINS CAP
               </span>
             </div>
             <p className="text-stone-600 text-[11px] mt-0.5">
-              {usedMinutes.toFixed(1)} / {limitMinutes} agent minutes used ({percentUsed}%) • {maxWorkers} concurrent workers • {plan === "enterprise" ? "BYOC Private Fleet" : "Standard Fleet"}
+              {usedMinutes.toFixed(1)} / {limitMinutes} agent-minutes used ({percentUsed}%) • {maxWorkers} concurrent tasks • {plan === "enterprise" ? "BYOC Private Runners" : "Managed Cloud Fleet"}
             </p>
           </div>
         </div>
@@ -246,7 +246,7 @@ function CommandCenterContent() {
             onClick={() => setShowComposer(true)}
             className="px-3 py-1.5 rounded-xl bg-white hover:bg-sand-100 border border-sand-300 text-stone-800 font-semibold text-xs shadow-2xs transition-all cursor-pointer"
           >
-            + Assign Task
+            + New Task
           </button>
         </div>
       </div>
@@ -648,11 +648,11 @@ function CommandCenterContent() {
                       <span className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
                         <span className="text-[11px]">
-                          <strong>Architect execution plan ready:</strong> Requires your review & sign-off before code execution.
+                          <strong>Execution plan ready:</strong> Review and approve before agents write code.
                         </span>
                       </span>
                       <span className="text-[10px] font-mono font-bold text-indigo-800 bg-white px-2 py-0.5 rounded-md border border-indigo-200 shrink-0">
-                        Awaiting Sign-off
+                        Review Plan
                       </span>
                     </div>
                   )}
@@ -662,11 +662,11 @@ function CommandCenterContent() {
                       <span className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-amber-600 shrink-0" />
                         <span className="text-[11px]">
-                          <strong>Worker paused for clarification:</strong> Human confirmation needed to proceed.
+                          <strong>Agent paused for input:</strong> Reply with clarification to continue.
                         </span>
                       </span>
                       <span className="text-[10px] font-mono font-bold text-amber-800 bg-white px-2 py-0.5 rounded-md border border-amber-200 shrink-0">
-                        Input Required
+                        Input Needed
                       </span>
                     </div>
                   )}

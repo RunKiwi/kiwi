@@ -103,7 +103,7 @@ export default function SettingsPage() {
               </span>
             </h1>
             <p className="text-xs text-stone-600 mt-0.5 max-w-2xl leading-relaxed">
-              Manage your workspace subscription tier, monthly agent-minutes quota, concurrent task runner limits, and invoice records.
+              Manage subscription plans, monthly agent-minutes, concurrent runner limits, and billing invoices.
             </p>
           </div>
         </div>
@@ -376,7 +376,7 @@ export default function SettingsPage() {
             <h3 className="text-sm font-bold text-stone-900">Task Completion Notifications</h3>
           </div>
           <p className="text-xs text-stone-500 max-w-xl">
-            Receive native desktop notifications when tasks and review watchdogs complete so you don&apos;t have to keep the tab focused.
+            Get notified when tasks and PR watchdogs finish running, even when Kiwi is in the background.
           </p>
         </div>
 
