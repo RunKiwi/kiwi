@@ -46,6 +46,36 @@ func TestEnsureGrantSeedsOnceAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// A row's TokensGranted, once created, is authoritative — an admin may have
+// set it to something other than the plan default (a custom or reduced
+// grant), and every admission check calls EnsureGrant with the plan's current
+// default. That must not silently raise the row back to the default.
+func TestEnsureGrantDoesNotOverwriteAnExistingGrant(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed low (e.g. an admin-imposed reduced grant), then exhaust it.
+	if _, err := s.EnsureGrant(ctx, "o1", TierEconomy, "2026-08", 1000); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.ConsumeTokens(ctx, "o1", TierEconomy, "2026-08", 1000); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	// A later admission check passes the plan's (higher) default; the existing
+	// row must not be silently raised back up, un-exhausting the allowance.
+	g, err := s.EnsureGrant(ctx, "o1", TierEconomy, "2026-08", 1_000_000)
+	if err != nil {
+		t.Fatalf("EnsureGrant: %v", err)
+	}
+	if g.TokensGranted != 1000 {
+		t.Errorf("TokensGranted = %d, want 1000 (existing grant silently overwritten)", g.TokensGranted)
+	}
+	if !g.Exhausted() {
+		t.Error("grant should still be exhausted after a re-check with a higher plan default")
+	}
+}
+
 // A new calendar month is a fresh allowance without any scheduled job.
 func TestEnsureGrantIsPerPeriod(t *testing.T) {
 	s := newTestStore(t)

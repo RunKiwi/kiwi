@@ -68,6 +68,31 @@ func TestBillingWebhookUpgradesOrgOnValidSignature(t *testing.T) {
 	}
 }
 
+func TestBillingWebhookReactivatesSuspendedOrgOnCheckout(t *testing.T) {
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+	db := newBillingTestDB(t)
+	db.Create(&Organization{ID: "org1", Name: "Acme", Plan: "free", ActivationState: "suspended"})
+	db.Create(&OrgLimits{OrgID: "org1", MaxConcurrentJobs: 1})
+
+	body := `{"type":"checkout.session.completed","data":{"object":{"metadata":{"org_id":"org1","plan":"pro"}}}}`
+	rec := httptest.NewRecorder()
+	BillingWebhookHandler(db)(rec, stripeSigned(t, "whsec_test", body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var org Organization
+	db.First(&org, "id = ?", "org1")
+	if org.ActivationState != "active" {
+		t.Errorf("activation_state = %q, want active — a paying org must not stay suspended", org.ActivationState)
+	}
+	var count int64
+	db.Model(&ProvisioningRequest{}).Where("org_id = ?", "org1").Count(&count)
+	if count != 1 {
+		t.Errorf("provisioning requests = %d, want 1", count)
+	}
+}
+
 func TestBillingWebhookRejectsBadSignature(t *testing.T) {
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
 	db := newBillingTestDB(t)

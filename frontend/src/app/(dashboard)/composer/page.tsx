@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
+import { matchRepo } from "@/lib/matchRepo";
 import { Logo } from "@/components/Logo";
 import { Select } from "@/components/Select";
 
@@ -102,33 +103,6 @@ function ComposerContent() {
   const [spend, setSpend] = useState<SpendResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Helper to match repository URL from repo name, short name or full name
-  const matchRepo = (target: string, list: GithubRepo[]): string => {
-    if (!target) return "";
-    const clean = target.trim();
-    const normClean = clean.toLowerCase().replace(/\.git$/, "").replace(/^https?:\/\/github\.com\//, "").replace(/^git@github\.com:/, "");
-
-    const match = list.find((item) => {
-      const full = (item.full_name || "").toLowerCase().replace(/\.git$/, "");
-      const name = (item.name || "").toLowerCase();
-      const normUrl = (item.url || "").toLowerCase().replace(/\.git$/, "").replace(/^https?:\/\/github\.com\//, "").replace(/^git@github\.com:/, "");
-
-      return (
-        normUrl === normClean ||
-        full === normClean ||
-        name === normClean ||
-        normClean.endsWith("/" + name) ||
-        full.endsWith("/" + normClean) ||
-        normUrl.endsWith("/" + normClean) ||
-        (name.length > 0 && (normClean.includes(name) || full.includes(normClean)))
-      );
-    });
-    if (match) {
-      return match.url || `https://github.com/${match.full_name || match.name}`;
-    }
-    return clean.includes("://") || clean.includes("@") ? clean : `https://github.com/${clean}`;
-  };
 
   // If a source job_id is passed, fetch its full details to prefill any missing fields
   useEffect(() => {

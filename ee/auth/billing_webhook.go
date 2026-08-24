@@ -70,6 +70,10 @@ func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 			if plan != "" {
 				_ = UpdateOrgPlanAndLimits(db, orgID, plan)
 			}
+			if err := ActivateOrg(db, orgID); err != nil {
+				http.Error(w, "Failed to activate org", http.StatusInternalServerError)
+				return
+			}
 		case "customer.subscription.deleted", "customer.subscription.paused":
 			if err := SuspendOrg(db, orgID); err != nil {
 				http.Error(w, "Failed to suspend org", http.StatusInternalServerError)

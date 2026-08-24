@@ -419,18 +419,12 @@ func publishResultFrom(ctx context.Context, worktreePath string, spec agent.Work
 		return existing, "updated existing PR", nil
 	}
 
+	// spec.Ref may be empty or "HEAD" (no base branch pinned); leave it as-is
+	// and let CreatePR resolve the repo's actual default branch via the GitHub
+	// API. gitcache clones bare, which never populates refs/remotes/origin/HEAD,
+	// so a local git-based guess here always falls through to a hardcoded "main"
+	// — wrong for any repo whose default branch isn't literally "main".
 	base := spec.Ref
-	if base == "" || base == "HEAD" {
-		if symRef, err := runGit("rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
-			trimmed := strings.TrimPrefix(strings.TrimSpace(symRef), "origin/")
-			if trimmed != "" && trimmed != "HEAD" {
-				base = trimmed
-			}
-		}
-		if base == "" || base == "HEAD" {
-			base = "main"
-		}
-	}
 	title, body := prTitleAndBody(spec.Task)
 
 	pr, err := gh.CreatePR(ctx, owner, repo, base, branchName, title, body)

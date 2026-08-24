@@ -72,24 +72,20 @@ func (s *PostgresStore) EnsureGrant(ctx context.Context, orgID, tier, period str
 		return nil, err
 	}
 
+	// granted is only used to seed a brand-new row above (ON CONFLICT DO
+	// NOTHING). Once a row exists, its TokensGranted is authoritative and this
+	// call must not touch it — Allow/Consume pass the org's *current* plan
+	// default here on every admission check and metering event, so updating an
+	// existing row in place would silently overwrite a deliberately custom or
+	// reduced grant back up to the plan default. A plan upgrade that should
+	// raise the current period's allowance goes through
+	// auth.UpdateOrgPlanAndLimits instead, which updates org_token_grants
+	// explicitly as part of processing the upgrade.
 	var out OrgTokenGrant
 	if err := s.db.WithContext(ctx).
 		Where("org_id = ? AND tier = ? AND period = ?", orgID, tier, period).
 		First(&out).Error; err != nil {
 		return nil, err
-	}
-
-	// If the plan's allowance is higher than what was previously stored (e.g. upgraded to Pro or Enterprise),
-	// update TokensGranted in place without resetting usage.
-	if out.TokensGranted != Unlimited && (granted == Unlimited || granted > out.TokensGranted) {
-		if err := s.db.WithContext(ctx).Model(&OrgTokenGrant{}).
-			Where("org_id = ? AND tier = ? AND period = ?", orgID, tier, period).
-			Updates(map[string]interface{}{
-				"tokens_granted": granted,
-				"updated_at":     time.Now().UTC(),
-			}).Error; err == nil {
-			out.TokensGranted = granted
-		}
 	}
 
 	return &out, nil

@@ -415,6 +415,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				"architect_model":    w.ArchitectModel,
 				"test_cmd":           workerTestCmd(w, req),
 				"investigation_only": req.InvestigationOnly,
+				"dry_run":            req.DryRun,
 				"depends_on":         w.DependsOn,
 				"repo_url":           req.RepoURL,
 				"ref":                req.Ref,

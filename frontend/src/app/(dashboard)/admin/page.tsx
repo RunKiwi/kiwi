@@ -18,6 +18,7 @@ import {
   Zap,
   Search,
   RefreshCw,
+  Plus,
 } from "lucide-react";
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
 import { LoadingState } from "@/components/LoadingState";
@@ -38,6 +39,7 @@ export default function AdminPage() {
   const [grantModalOrg, setGrantModalOrg] = useState<AdminOrg | null>(null);
   const [grantAmount, setGrantAmount] = useState<number>(1000);
   const [submitting, setSubmitting] = useState(false);
+  const [creatingOrg, setCreatingOrg] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -104,6 +106,21 @@ export default function AdminPage() {
       alert("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleCreateOrg = async () => {
+    const name = prompt("Enter new organization name:");
+    if (!name) return;
+    setCreatingOrg(true);
+    try {
+      const org = await api.createAdminOrg(name);
+      setOrgs((prev) => [org, ...prev]);
+      if (stats) setStats({ ...stats, total_orgs: stats.total_orgs + 1 });
+    } catch (e) {
+      alert("Error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCreatingOrg(false);
     }
   };
 
@@ -245,6 +262,15 @@ export default function AdminPage() {
                 className="w-full pl-8 pr-3 py-2 rounded-xl border border-sand-200 bg-white text-xs focus:ring-1 focus:ring-stone-900"
               />
             </div>
+
+            <button
+              onClick={handleCreateOrg}
+              disabled={creatingOrg}
+              className="px-3 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs disabled:opacity-40"
+            >
+              {creatingOrg ? <KiwiMicroButtonLoader /> : <Plus className="w-3.5 h-3.5" />}
+              <span>Create Organization</span>
+            </button>
           </div>
 
           <div className="rounded-2xl border border-sand-200 bg-white overflow-hidden shadow-2xs">

@@ -56,6 +56,43 @@ func TestSubmitPlanPersistsJobRow(t *testing.T) {
 	}
 }
 
+// dry_run is a label the jobs list reads back (JobSummary.IsDryRun), not
+// something the session behaves differently for — but it has to actually
+// reach the task's Spec for that label to ever be true.
+func TestSubmitPlanThreadsDryRunOntoTaskSpec(t *testing.T) {
+	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org-1")
+	svc := NewService(s, &capturePlanner{}, nil)
+
+	res, err := svc.SubmitPlan(context.Background(), PlanRequest{
+		OrgID:   "org-1",
+		UserID:  "user-1",
+		Task:    "fix the thing",
+		RepoURL: "https://github.com/owner/repo",
+		DryRun:  true,
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	summaries, err := s.ListJobs(context.Background(), "org-1")
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	var got *store.JobSummary
+	for i := range summaries {
+		if summaries[i].JobID == res.JobID {
+			got = &summaries[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("job %s not found in ListJobs", res.JobID)
+	}
+	if !got.IsDryRun {
+		t.Error("IsDryRun = false, want true — dry_run never reached the task spec")
+	}
+}
+
 // A replayed submission must not create a second row or reset one that is
 // already accruing cost and minutes.
 func TestSubmitPlanJobRowIsIdempotent(t *testing.T) {
