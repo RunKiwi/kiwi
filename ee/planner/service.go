@@ -392,10 +392,11 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 				// spend without re-deriving it from the model id.
 				"planner_provider": prov,
 			},
-			Funding:          funding,
-			PlannerCostUSD:   totalCost,
-			PlannerTokensIn:  totalIn,
-			PlannerTokensOut: totalOut,
+			Funding:              funding,
+			PlannerCostUSD:       totalCost,
+			PlannerTokensIn:      totalIn,
+			PlannerTokensOut:     totalOut,
+			RequiresPlanApproval: req.PlanMode,
 		}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(job).Error; err != nil {
 			return fmt.Errorf("persist job: %w", err)
@@ -407,19 +408,20 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		for _, w := range plan.Workers {
 			taskID := jobID + "-" + w.ID
 			spec := map[string]interface{}{
-				"id":                 taskID,
-				"task":               w.Task,
-				"job_task":           req.Task,
-				"file":               w.File,
-				"model":              w.Model,
-				"architect_model":    w.ArchitectModel,
-				"test_cmd":           workerTestCmd(w, req),
-				"investigation_only": req.InvestigationOnly,
-				"dry_run":            req.DryRun,
-				"depends_on":         w.DependsOn,
-				"repo_url":           req.RepoURL,
-				"ref":                req.Ref,
-				"job_id":             jobID,
+				"id":                     taskID,
+				"task":                   w.Task,
+				"job_task":               req.Task,
+				"file":                   w.File,
+				"model":                  w.Model,
+				"architect_model":        w.ArchitectModel,
+				"test_cmd":               workerTestCmd(w, req),
+				"investigation_only":     req.InvestigationOnly,
+				"dry_run":                req.DryRun,
+				"requires_plan_approval": req.PlanMode,
+				"depends_on":             w.DependsOn,
+				"repo_url":               req.RepoURL,
+				"ref":                    req.Ref,
+				"job_id":                 jobID,
 			}
 			// Resolve the worker's OWN model. The job-level `funding` above
 			// describes the planner call; a task inherits nothing from it,

@@ -93,6 +93,53 @@ func TestSubmitPlanThreadsDryRunOntoTaskSpec(t *testing.T) {
 	}
 }
 
+// PlanMode has to reach two separate places: the Job row's
+// RequiresPlanApproval (read directly by the plan-review API and by
+// JobSummary) and the task's own spec map under "requires_plan_approval"
+// (round-tripped by ee/orchestrator.specFromQueuedTask into the
+// agent.WorkerSpec the daemon actually executes — see pkg/session's
+// RequiresPlanApproval gate). Without both, checking "Plan Mode" in the
+// composer silently does nothing: the task runs straight through and opens a
+// PR without ever pausing for human approval.
+func TestSubmitPlanThreadsPlanModeOntoJobAndTaskSpec(t *testing.T) {
+	s := newTestStore(t)
+	seedAdmissibleOrg(t, s, "org-1")
+	svc := NewService(s, &capturePlanner{}, nil)
+
+	res, err := svc.SubmitPlan(context.Background(), PlanRequest{
+		OrgID:    "org-1",
+		UserID:   "user-1",
+		Task:     "fix the thing",
+		RepoURL:  "https://github.com/owner/repo",
+		PlanMode: true,
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	var job store.Job
+	if err := s.DB().First(&job, "id = ?", res.JobID).Error; err != nil {
+		t.Fatalf("job row for %s: %v", res.JobID, err)
+	}
+	if !job.RequiresPlanApproval {
+		t.Error("Job.RequiresPlanApproval = false, want true — plan_mode never reached the job row")
+	}
+
+	var tasks []store.QueuedTask
+	if err := s.DB().Where("job_id = ?", res.JobID).Find(&tasks).Error; err != nil {
+		t.Fatalf("load tasks: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatal("no tasks created for job")
+	}
+	for _, tk := range tasks {
+		rpa, _ := tk.Spec["requires_plan_approval"].(bool)
+		if !rpa {
+			t.Errorf("task %s spec[requires_plan_approval] = %v, want true — the daemon would never pause for approval", tk.ID, tk.Spec["requires_plan_approval"])
+		}
+	}
+}
+
 // A replayed submission must not create a second row or reset one that is
 // already accruing cost and minutes.
 func TestSubmitPlanJobRowIsIdempotent(t *testing.T) {

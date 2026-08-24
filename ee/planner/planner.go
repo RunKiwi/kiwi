@@ -63,6 +63,14 @@ type PlanRequest struct {
 	// list reads back (store.QueuedTask.Spec["dry_run"], aggregated into
 	// JobSummary.IsDryRun) — it does not change what the session or daemon do.
 	DryRun bool `json:"dry_run,omitempty"`
+	// PlanMode gates the session behind a human approve/reject before any
+	// Implementer round runs (see pkg/session.Task.RequiresPlanApproval and
+	// ee/orchestrator/plan_api.go). It has to reach both the Job row
+	// (RequiresPlanApproval, read directly by the plan API and JobSummary) and
+	// the worker's spec map ("requires_plan_approval", round-tripped by
+	// specFromQueuedTask into agent.WorkerSpec for the daemon) — the two are
+	// separate copies of the same flag, not one derived from the other.
+	PlanMode bool `json:"plan_mode,omitempty"`
 	// ReferenceMode determines how prior job learnings are injected (""|"off"|"manual"|"auto").
 	ReferenceMode string `json:"reference_mode"`
 	// ReferenceJobIDs specifies the jobs to inject when ReferenceMode is "manual".
