@@ -171,8 +171,8 @@ func TestAdminAPIEndpoints(t *testing.T) {
 	}
 	var limits OrgLimits
 	db.First(&limits, "org_id = ?", "test-org-1")
-	if limits.MaxAgentMinutesPerMonth != 600 {
-		t.Errorf("expected 600 limits, got %f", limits.MaxAgentMinutesPerMonth)
+	if limits.MaxAgentMinutesPerMonth != 2500 {
+		t.Errorf("expected 2500 limits, got %f", limits.MaxAgentMinutesPerMonth)
 	}
 }
 

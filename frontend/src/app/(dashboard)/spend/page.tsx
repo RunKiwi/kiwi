@@ -100,8 +100,11 @@ export default function SpendPage() {
         { repo: "core-api", spend: 0, yield: 0 },
       ];
 
+  const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
-  const limitMinutes = usage?.agent_minutes_limit ?? 500;
+  const limitMinutes = usage?.agent_minutes_limit && usage.agent_minutes_limit > 0
+    ? usage.agent_minutes_limit
+    : (plan === "pro" || plan === "individual" ? 2000 : plan === "team" ? 5000 : 500);
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
   const totalCost = spend?.cost_usd ?? 0;

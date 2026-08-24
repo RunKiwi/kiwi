@@ -181,6 +181,9 @@ func (s *Server) handleSpend(w http.ResponseWriter, r *http.Request) {
 			granted, used := g.Tokens, int64(0)
 			if row, ok := rowByTier[g.Tier]; ok {
 				granted, used = row.TokensGranted, row.TokensUsed
+				if g.Tokens == store.Unlimited || (granted != store.Unlimited && g.Tokens > granted) {
+					granted = g.Tokens
+				}
 			}
 			b := AllowanceBucket{
 				Tier: g.Tier, Period: period,

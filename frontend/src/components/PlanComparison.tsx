@@ -57,7 +57,7 @@ export function PlanComparison({ currentPlan }: { currentPlan?: string | null })
             <ul className="space-y-2.5 text-xs text-stone-600 pt-2 border-t border-sand-150">
               <li className="flex items-center gap-2">
                 <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span><strong className="text-stone-900">200</strong> agent-minutes / month</span>
+                <span><strong className="text-stone-900">500</strong> agent-minutes / month</span>
               </li>
               <li className="flex items-center gap-2">
                 <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />

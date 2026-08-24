@@ -78,6 +78,20 @@ func (s *PostgresStore) EnsureGrant(ctx context.Context, orgID, tier, period str
 		First(&out).Error; err != nil {
 		return nil, err
 	}
+
+	// If the plan's allowance is higher than what was previously stored (e.g. upgraded to Pro or Enterprise),
+	// update TokensGranted in place without resetting usage.
+	if out.TokensGranted != Unlimited && (granted == Unlimited || granted > out.TokensGranted) {
+		if err := s.db.WithContext(ctx).Model(&OrgTokenGrant{}).
+			Where("org_id = ? AND tier = ? AND period = ?", orgID, tier, period).
+			Updates(map[string]interface{}{
+				"tokens_granted": granted,
+				"updated_at":     time.Now().UTC(),
+			}).Error; err == nil {
+			out.TokensGranted = granted
+		}
+	}
+
 	return &out, nil
 }
 

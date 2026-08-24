@@ -169,7 +169,7 @@ export default function SettingsPage() {
           </div>
           <div className="relative z-10 mt-2">
             <div className="text-2xl font-bold font-mono text-stone-900">
-              {org?.plan === "free" ? "200 min" : "2,000 min"}
+              {org?.plan === "free" ? "500 min" : org?.plan === "pro" || org?.plan === "individual" ? "2,000 min" : "Unlimited"}
             </div>
             <div className="text-[10px] text-stone-400 font-mono mt-0.5">
               {org?.plan === "free" ? "Pooled workspace allowance" : "Per seat / pooled allowance"}

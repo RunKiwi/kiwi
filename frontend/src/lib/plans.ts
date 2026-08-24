@@ -25,7 +25,7 @@ export const PLAN_TIERS: PlanTier[] = [
 export const PLAN_FEATURES: PlanFeature[] = [
   {
     name: "Agent-minutes/mo",
-    free: { value: "200" },
+    free: { value: "500" },
     pro: { value: "2000 / seat (pooled) + buy more" },
     enterprise: { value: "Custom" },
   },

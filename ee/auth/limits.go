@@ -46,48 +46,28 @@ func DefaultLimits(orgID string) *OrgLimits {
 // GetOrgLimits falls back to it for a free-plan org that has no explicit row.
 func FreeLimits(orgID string) *OrgLimits {
 	return &OrgLimits{
-		OrgID:             orgID,
-		MaxConcurrentJobs: 1,
-		MaxWorkersPerJob:  2,
-		// Raised from 0.50 to 2.00, 2026-08-13. The free-fleet daemon's own
-		// -session-budget flag defaulted to $5.00 and, until a bug in
-		// ee/provisioner's launchArgs was fixed the same day, that $5.00 was
-		// what every Free session actually ran under — never the org's real
-		// 0.50 cap, which was only enforced (inconsistently — see
-		// pkg/store.effectiveOrgLimits) at lease time against accumulated
-		// spend. Session mode's own round/timeout math was calibrated against
-		// that de facto $5 ceiling ("$5 buys three or four rounds" — see the
-		// TaskTimeoutSeconds comment below), not 0.50. Once the daemon-side bug
-		// was fixed, 0.50 became the real, binding cap for the first time — and
-		// separately, the Architect gained read_file/grep tool calls the same
-		// day, adding real exploration cost on top of an already-tight number.
-		// 2.00 is a deliberate step down from the de facto $5 Free had been
-		// running at, not a guess: real headroom for both, still 60% cheaper
-		// than what was actually happening in production for weeks.
-		MaxBudgetPerJob: 2.00,
-		// A real dollar value, not the 0 sentinel that GetOrgLimits rewrites at
-		// read time — this profile is also returned directly as a fallback, where
-		// 0 would read as a hard $0/month cap and block every submit. The Free
-		// compute lever is agent-minutes below, not the dollar budget.
+		OrgID:                   orgID,
+		MaxConcurrentJobs:       1,
+		MaxWorkersPerJob:        2,
+		MaxBudgetPerJob:         2.00,
 		MaxBudgetPerMonth:       500.00,
 		MaxAgentMinutesPerMonth: 500,
-		// Twenty minutes, raised from ten.
-		//
-		// Ten was chosen for the single-file loop, where it is close to
-		// unreachable: six Actor steps at $0.50 rarely take that long unless the
-		// test suite is slow, so the step and dollar rails bind first. Session
-		// mode has different economics — $5 buys three or four rounds, each with
-		// an Architect plan, an agentic Implementer and a review — and there the
-		// clock was binding, cutting off runs that still had budget to spend.
-		// (That "$5" is not a stale reference: see the MaxBudgetPerJob comment
-		// above — it is the number this was actually calibrated against.)
-		//
-		// Still short of the 1800 every other plan gets (DefaultLimits), because
-		// wall clock is what Free meters: this is 20 of the org's 500
-		// agent-minutes per month, so a month is ~25 maximum-length tasks rather
-		// than ~50.
-		TaskTimeoutSeconds: 1200,
-		MaxSandboxDiskMB:   512,
+		TaskTimeoutSeconds:      1200,
+		MaxSandboxDiskMB:        512,
+	}
+}
+
+// ProLimits returns the resource caps for a Pro-tier organization.
+func ProLimits(orgID string) *OrgLimits {
+	return &OrgLimits{
+		OrgID:                   orgID,
+		MaxConcurrentJobs:       20,
+		MaxWorkersPerJob:        8,
+		MaxBudgetPerJob:         10.00,
+		MaxBudgetPerMonth:       1000.00,
+		MaxAgentMinutesPerMonth: 2000,
+		TaskTimeoutSeconds:      1800,
+		MaxSandboxDiskMB:        2048,
 	}
 }
 
@@ -96,28 +76,50 @@ func GetOrgLimits(db *gorm.DB, orgID string) (*OrgLimits, error) {
 	var limits OrgLimits
 	if err := db.Where("org_id = ?", orgID).First(&limits).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// No explicit limits row: a free-plan org gets the Free profile, any
-			// other plan the generic defaults. This keeps the Free caps correct for
-			// orgs created before the profile was written at signup — no backfill
-			// needed for the fallback to be right.
+			// No explicit limits row: check plan profile.
 			var org Organization
-			if e := db.Select("plan").First(&org, "id = ?", orgID).Error; e == nil && org.Plan == "free" {
-				return FreeLimits(orgID), nil
+			if e := db.Select("plan").First(&org, "id = ?", orgID).Error; e == nil {
+				switch org.Plan {
+				case "pro", "individual":
+					return ProLimits(orgID), nil
+				case "free":
+					return FreeLimits(orgID), nil
+				}
 			}
 			return DefaultLimits(orgID), nil
 		}
 		return nil, fmt.Errorf("failed to fetch org limits: %w", err)
 	}
 
+	var org Organization
+	_ = db.Select("plan").First(&org, "id = ?", orgID).Error
+
 	// Apply individual defaults if specific fields are zero/empty
 	if limits.MaxConcurrentJobs <= 0 {
-		limits.MaxConcurrentJobs = 10
+		if org.Plan == "pro" || org.Plan == "individual" {
+			limits.MaxConcurrentJobs = 20
+		} else if org.Plan == "team" {
+			limits.MaxConcurrentJobs = 50
+		} else if org.Plan == "free" {
+			limits.MaxConcurrentJobs = 1
+		} else {
+			limits.MaxConcurrentJobs = 10
+		}
 	}
 	if limits.MaxBudgetPerJob <= 0 {
 		limits.MaxBudgetPerJob = 5.00
 	}
 	if limits.MaxBudgetPerMonth <= 0 {
 		limits.MaxBudgetPerMonth = 500.00
+	}
+	if limits.MaxAgentMinutesPerMonth <= 0 {
+		if org.Plan == "pro" || org.Plan == "individual" {
+			limits.MaxAgentMinutesPerMonth = 2000
+		} else if org.Plan == "team" {
+			limits.MaxAgentMinutesPerMonth = 5000
+		} else if org.Plan == "free" {
+			limits.MaxAgentMinutesPerMonth = 500
+		}
 	}
 	if limits.MaxWorkersPerJob <= 0 {
 		limits.MaxWorkersPerJob = 8

@@ -9,8 +9,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/ee/billing"
+	"github.com/ibreakthecloud/kiwi/ee/entitlement"
+	"github.com/ibreakthecloud/kiwi/pkg/store"
 	"gorm.io/gorm"
 )
 
@@ -28,7 +31,7 @@ func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Cannot read body", http.StatusBadRequest)
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}
 
@@ -41,28 +44,29 @@ func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 			Type string `json:"type"`
 			Data struct {
 				Object struct {
-					Metadata map[string]string `json:"metadata"`
+					Metadata struct {
+						OrgID string `json:"org_id"`
+						Plan  string `json:"plan"`
+					} `json:"metadata"`
 				} `json:"object"`
 			} `json:"data"`
 		}
+
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
 			return
 		}
 
-		orgID := payload.Data.Object.Metadata["org_id"]
+		orgID := payload.Data.Object.Metadata.OrgID
 		if orgID == "" {
-			http.Error(w, "Missing org_id in metadata", http.StatusBadRequest)
+			// Not a kiwi-managed checkout, ignore
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 
 		switch payload.Type {
-		case "checkout.session.completed", "customer.subscription.created":
-			if err := ActivateOrg(db, orgID); err != nil {
-				http.Error(w, "Failed to activate org", http.StatusInternalServerError)
-				return
-			}
-			plan := payload.Data.Object.Metadata["plan"]
+		case "checkout.session.completed", "customer.subscription.created", "customer.subscription.updated":
+			plan := payload.Data.Object.Metadata.Plan
 			if plan != "" {
 				_ = UpdateOrgPlanAndLimits(db, orgID, plan)
 			}
@@ -94,18 +98,38 @@ func UpdateOrgPlanAndLimits(db *gorm.DB, orgID, plan string) error {
 			updates["max_concurrent_jobs"] = 50
 			updates["max_budget_per_job"] = 20.0
 			updates["max_budget_per_month"] = 5000.0
+			updates["max_agent_minutes_per_month"] = 5000.0
 		case "pro", "individual": // "pro" is the current paid tier; "individual" kept for back-compat
 			updates["max_concurrent_jobs"] = 20
 			updates["max_budget_per_job"] = 10.0
 			updates["max_budget_per_month"] = 1000.0
+			updates["max_agent_minutes_per_month"] = 2000.0
 		default: // free
 			updates["max_concurrent_jobs"] = 1
-			updates["max_budget_per_job"] = 1.0
-			updates["max_budget_per_month"] = 10.0
+			updates["max_budget_per_job"] = 2.0
+			updates["max_budget_per_month"] = 500.0
+			updates["max_agent_minutes_per_month"] = 500.0
 		}
 		if err := tx.Table("org_limits").Where("org_id = ?", orgID).Updates(updates).Error; err != nil {
 			return err
 		}
+
+		// Also upgrade org_token_grants for the current period so that higher token allowances apply immediately
+		if tx.Migrator().HasTable("org_token_grants") {
+			currentPeriod := time.Now().UTC().Format("2006-01")
+			for _, g := range entitlement.PlanGrants(plan) {
+				if g.Tokens == store.Unlimited {
+					_ = tx.Table("org_token_grants").
+						Where("org_id = ? AND tier = ? AND period = ?", orgID, g.Tier, currentPeriod).
+						Update("tokens_granted", store.Unlimited).Error
+				} else {
+					_ = tx.Table("org_token_grants").
+						Where("org_id = ? AND tier = ? AND period = ? AND tokens_granted != ? AND tokens_granted < ?", orgID, g.Tier, currentPeriod, store.Unlimited, g.Tokens).
+						Update("tokens_granted", g.Tokens).Error
+				}
+			}
+		}
+
 		return nil
 	})
 }
