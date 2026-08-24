@@ -1050,9 +1050,7 @@ export const RECOMMENDED_MODELS: RecommendedModel[] = [
   { id: "gpt-4.1-mini", label: "GPT-4.1 mini", provider: "openai", note: "Fast & cheap" },
 ];
 
-// The task form's worker default: a fast, cheap Implementer. The Architect it
-// is paired with is chosen by the Control Plane, so the form does not carry a
-// second default that could drift from it.
+export const DEFAULT_ARCHITECT_MODEL = "claude-sonnet-5";
 export const DEFAULT_WORKER_MODEL = "claude-haiku-4-5-20251001";
 
 // How each provider id is written for a human. "OpenAI" does not survive CSS

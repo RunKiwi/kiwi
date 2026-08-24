@@ -68,7 +68,10 @@ func BillingWebhookHandler(db *gorm.DB) http.HandlerFunc {
 		case "checkout.session.completed", "customer.subscription.created", "customer.subscription.updated":
 			plan := payload.Data.Object.Metadata.Plan
 			if plan != "" {
-				_ = UpdateOrgPlanAndLimits(db, orgID, plan)
+				if err := UpdateOrgPlanAndLimits(db, orgID, plan); err != nil {
+					http.Error(w, "Failed to update org plan", http.StatusInternalServerError)
+					return
+				}
 			}
 			if err := ActivateOrg(db, orgID); err != nil {
 				http.Error(w, "Failed to activate org", http.StatusInternalServerError)

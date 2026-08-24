@@ -26,6 +26,12 @@ interface SelectProps {
   className?: string;
   /** Accessible name when there's no visible label. */
   ariaLabel?: string;
+  /** Placeholder for the search field. */
+  searchPlaceholder?: string;
+  /** Message shown when the filter matches nothing. */
+  emptyLabel?: string;
+  /** Message shown in the detail panel when no option is highlighted. */
+  detailPlaceholder?: string;
   /**
    * Renders a detail panel under the list for whichever option is currently
    * highlighted — by hover, by arrow key, or by being the current selection
@@ -48,6 +54,9 @@ export function Select({
   renderDetail,
   className = "",
   ariaLabel,
+  searchPlaceholder = "Search…",
+  emptyLabel = "No matches found.",
+  detailPlaceholder = "Select an option to view details",
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -212,7 +221,7 @@ export function Select({
                   setQuery(e.target.value);
                   setActive(0);
                 }}
-                placeholder="Search by name or provider…"
+                placeholder={searchPlaceholder}
                 className="bg-transparent outline-none border-0 text-xs text-stone-900 placeholder:text-stone-400 w-full font-medium"
               />
             </div>
@@ -221,7 +230,7 @@ export function Select({
           <div ref={listRef} className="flex flex-col gap-1 h-44 overflow-y-auto pr-1">
             {filtered.length === 0 ? (
               <div className="flex items-center justify-center h-full text-xs text-stone-400 font-mono bg-sand-50/50 rounded-xl border border-sand-150 p-4">
-                No matching models found.
+                {emptyLabel}
               </div>
             ) : (
               filtered.map((o, i) => {
@@ -282,7 +291,7 @@ export function Select({
                 renderDetail(filtered[active])
               ) : (
                 <div className="text-[10px] text-stone-400 font-mono text-center py-1">
-                  Select a model to view capabilities
+                  {detailPlaceholder}
                 </div>
               )}
             </div>

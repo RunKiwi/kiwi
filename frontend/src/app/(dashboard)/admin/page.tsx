@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   api,
@@ -29,11 +29,15 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [orgs, setOrgs] = useState<AdminOrg[]>([]);
   const [users, setUsers] = useState<AdminUserSearchRow[]>([]);
+  const [userTotal, setUserTotal] = useState(0);
   const [fleet, setFleet] = useState<AdminFleetStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState("");
   const [orgSearch, setOrgSearch] = useState("");
   
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Modals state
   const [planModalOrg, setPlanModalOrg] = useState<AdminOrg | null>(null);
   const [grantModalOrg, setGrantModalOrg] = useState<AdminOrg | null>(null);
@@ -57,6 +61,7 @@ export default function AdminPage() {
       if (s) setStats(s);
       setOrgs(o);
       setUsers(usrRes.users);
+      setUserTotal(usrRes.total);
       setFleet(fltRes);
     } catch {
       router.push("/");
@@ -71,14 +76,22 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  const handleSearchUsers = async (q: string) => {
+  const handleSearchUsers = (q: string) => {
     setUserSearch(q);
-    try {
-      const res = await api.searchAdminUsers(q);
-      setUsers(res.users);
-    } catch (e) {
-      console.error(e);
-    }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const seq = ++searchSeq.current;
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await api.searchAdminUsers(q);
+        if (seq !== searchSeq.current) return;
+        setUsers(res.users);
+        if (!q.trim()) {
+          setUserTotal(res.total);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }, 300);
   };
 
   const handleUpdatePlan = async (plan: string) => {
@@ -196,7 +209,7 @@ export default function AdminPage() {
 
         <div className="p-4 rounded-2xl border border-sand-200 bg-white shadow-2xs">
           <div className="text-[11px] font-medium text-stone-500">Global Users</div>
-          <div className="text-2xl font-bold text-stone-900 font-mono mt-1">{users.length}</div>
+          <div className="text-2xl font-bold text-stone-900 font-mono mt-1">{userTotal || users.length}</div>
           <div className="text-[10px] font-mono text-stone-400 mt-1">Cross-tenant roster</div>
         </div>
 
@@ -232,7 +245,7 @@ export default function AdminPage() {
           }`}
         >
           <Users className="w-3.5 h-3.5" />
-          <span>Global Users ({users.length})</span>
+          <span>Global Users ({userTotal || users.length})</span>
         </button>
 
         <button

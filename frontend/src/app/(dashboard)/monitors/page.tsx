@@ -81,20 +81,15 @@ export default function MonitorsPage() {
   };
 
   const handleDeleteOrCancel = async (id: string, isMonitoring: boolean) => {
-    const promptMsg = isMonitoring
-      ? "Are you sure you want to stop and delete this active PR watchdog?"
-      : "Delete this watchdog from your list?";
-    if (!window.confirm(promptMsg)) return;
+    if (!isMonitoring) return;
+    if (!window.confirm("Are you sure you want to stop and cancel this active PR watchdog?")) return;
 
     setCancellingId(id);
     try {
-      if (isMonitoring) {
-        await client.cancelMonitor(id);
-      }
-      setMonitors((prev) => prev.filter((m) => m.id !== id));
+      await client.cancelMonitor(id);
       await load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete monitor");
+      alert(err instanceof Error ? err.message : "Failed to cancel monitor");
     } finally {
       setCancellingId(null);
     }
@@ -482,19 +477,21 @@ export default function MonitorsPage() {
                         <span>{m.status}</span>
                       </span>
 
-                      {/* Delete / Cancel Button */}
-                      <button
-                        onClick={() => handleDeleteOrCancel(m.id, isMonitoring)}
-                        disabled={cancellingId === m.id}
-                        className="p-1 rounded-lg hover:bg-rose-50 text-stone-400 hover:text-rose-700 border border-sand-200 hover:border-rose-200 transition-all shadow-2xs cursor-pointer"
-                        title={isMonitoring ? "Cancel and Stop Watchdog" : "Delete Watchdog Record"}
-                      >
-                        {cancellingId === m.id ? (
-                          <KiwiMicroButtonLoader />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      {/* Cancel Button (only for active in-flight monitors) */}
+                      {isMonitoring && (
+                        <button
+                          onClick={() => handleDeleteOrCancel(m.id, isMonitoring)}
+                          disabled={cancellingId === m.id}
+                          className="p-1 rounded-lg hover:bg-rose-50 text-stone-400 hover:text-rose-700 border border-sand-200 hover:border-rose-200 transition-all shadow-2xs cursor-pointer"
+                          title="Cancel and Stop Watchdog"
+                        >
+                          {cancellingId === m.id ? (
+                            <KiwiMicroButtonLoader />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 

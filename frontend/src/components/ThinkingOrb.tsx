@@ -11,6 +11,7 @@ export interface ThinkingOrbProps {
   theme?: "kiwi" | "mono" | "default";
   glow?: boolean;
   "aria-hidden"?: boolean;
+  "aria-label"?: string;
 }
 
 export function ThinkingOrb({
@@ -19,8 +20,10 @@ export function ThinkingOrb({
   className = "",
   theme = "kiwi",
   glow = true,
-  "aria-hidden": ariaHidden = true,
+  "aria-hidden": ariaHiddenProp,
+  "aria-label": ariaLabel,
 }: ThinkingOrbProps) {
+  const ariaHidden = ariaHiddenProp !== undefined ? ariaHiddenProp : !ariaLabel;
   const basePreset = size <= 32 ? 20 : 64;
   const scale = size / basePreset;
 
@@ -53,7 +56,11 @@ export function ThinkingOrb({
   const showGlow = glow && theme !== "mono";
 
   return (
-    <div className={`relative inline-flex items-center justify-center ${className}`}>
+    <div
+      role={ariaLabel ? "img" : undefined}
+      aria-label={ariaLabel}
+      className={`relative inline-flex items-center justify-center ${className}`}
+    >
       {showGlow && (
         <div
           className="absolute rounded-full bg-lime-400/25 blur-xl pointer-events-none animate-pulse"

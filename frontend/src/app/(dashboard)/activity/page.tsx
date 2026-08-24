@@ -33,6 +33,7 @@ import { statusOf } from "@/lib/statusColors";
 import { Logo } from "@/components/Logo";
 
 const POLL_MS = 5000;
+const MAX_PROGRESS_FETCHES = 40;
 
 export default function ActivityPage() {
   const [fleets, setFleets] = useState<Fleet[]>([]);
@@ -44,7 +45,7 @@ export default function ActivityPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
 
   const load = useCallback(async () => {
     setIsRefreshing(true);
@@ -68,14 +69,23 @@ export default function ActivityPage() {
       setNow(Date.now());
 
       const inWindow = jobsInWindow(jb, defaultWindow(Date.now(), windowHours));
+      const toFetch = inWindow
+        .filter((j) => !isTerminalStatus(j.status))
+        .slice(0, MAX_PROGRESS_FETCHES);
       const entries = await Promise.all(
-        inWindow.map(async (job) => {
+        toFetch.map(async (job) => {
           const progress = await client.getJobProgress(job.job_id).catch(() => null);
           const steps = (progress?.tasks ?? []).flatMap((t) => t.steps ?? []);
           return [job.job_id, steps] as const;
         }),
       );
-      setStepsByJob(new Map(entries));
+      setStepsByJob((prev) => {
+        const next = new Map(prev);
+        for (const [id, steps] of entries) {
+          next.set(id, steps);
+        }
+        return next;
+      });
     } catch {
       // non-fatal
     } finally {

@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
     const target =
       process.env.KIWI_BACKEND_URL ||
       process.env.NEXT_PUBLIC_KIWI_API_URL ||
-      "https://api.runkiwi.dev";
+      "http://127.0.0.1:8080";
     return [
       {
         source: "/api/:path*",

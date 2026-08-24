@@ -104,17 +104,12 @@ export default function RecordsPage() {
         <h2 className="text-sm font-bold text-stone-900">Recent Verification Manifests</h2>
 
         {records.length === 0 ? (
-          <div className="p-6 rounded-2xl border border-sand-200 bg-sand-50/50 space-y-3 font-mono text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-kiwi-800 font-bold">LATEST RECORD: kw-verified-manifest</span>
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-bold">SIGNATURE VALID</span>
-            </div>
-            <div className="space-y-1.5 text-stone-700">
-              <p><span className="text-stone-400">HashRoot:</span> sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069</p>
-              <p><span className="text-stone-400">RunnerKey:</span> x25519:e4d909c290d0fb1ca068ffaddf22cbd0a149c080</p>
-              <p><span className="text-stone-400">DependencyGuard:</span> <span className="text-emerald-700 font-semibold">PASSED (No credentials exposed)</span></p>
-              <p><span className="text-stone-400">TestGuardStep:</span> <span className="text-emerald-700 font-semibold">PASSED (Egress blocked, 100% tests ok)</span></p>
-            </div>
+          <div className="p-8 rounded-2xl border border-sand-200 bg-white text-center space-y-2">
+            <ShieldCheck className="w-8 h-8 text-stone-300 mx-auto" />
+            <h3 className="text-xs font-bold text-stone-700">No Audit Receipts Yet</h3>
+            <p className="text-[11px] text-stone-400 max-w-sm mx-auto font-sans">
+              Cryptographic verification manifests and Ed25519-signed task receipts will appear here once tasks complete execution.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -125,16 +120,18 @@ export default function RecordsPage() {
                     <span className="font-bold text-stone-900">RECORD: #{job.job_id.slice(0, 8)}</span>
                     <span className="text-stone-500 font-sans">{job.repo}</span>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    {body.attestation || "SIGNATURE VALID"}
-                  </span>
+                  {body.attestation && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      {body.attestation}
+                    </span>
+                  )}
                 </div>
 
                 <div className="p-3 bg-sand-50 rounded-xl space-y-1 text-[11px] text-stone-700 border border-sand-200">
-                  <p><span className="text-stone-400">HashRoot:</span> {recordHash || body.prev_record_hash || "sha256:verified_root"}</p>
-                  <p><span className="text-stone-400">DaemonSignature:</span> {body.record_signature?.sig ? `${body.record_signature.sig.slice(0, 48)}...` : "ed25519:valid"}</p>
-                  <p><span className="text-stone-400">NetworkEgress:</span> <span className="text-emerald-700 font-semibold">{body.execution?.sandbox?.network === "blocked" ? "BLOCKED & ZERO LEAKS" : "ISOLATED"}</span></p>
-                  <p><span className="text-stone-400">Verification:</span> {body.verification?.final_outcome || "PASSED"}</p>
+                  <p><span className="text-stone-400">HashRoot:</span> {recordHash || body.prev_record_hash || "—"}</p>
+                  <p><span className="text-stone-400">DaemonSignature:</span> {body.record_signature?.sig ? `${body.record_signature.sig.slice(0, 48)}...` : "—"}</p>
+                  <p><span className="text-stone-400">NetworkEgress:</span> <span className="text-emerald-700 font-semibold">{body.execution?.sandbox?.network === "blocked" ? "BLOCKED & ZERO LEAKS" : (body.execution?.sandbox?.network || "ISOLATED")}</span></p>
+                  <p><span className="text-stone-400">Verification:</span> {body.verification?.final_outcome || "—"}</p>
                 </div>
               </div>
             ))}

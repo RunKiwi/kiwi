@@ -33,6 +33,12 @@ describe("matchRepo", () => {
     assert.strictEqual(got, "https://github.com/nowhere/app-thing");
   });
 
+  it("matches the exact full name even if another repo with the same short name appears earlier", () => {
+    const list = [repo("org-a/app"), repo("org-b/app")];
+    const got = matchRepo("org-b/app", list);
+    assert.strictEqual(got, "https://github.com/org-b/app");
+  });
+
   it("returns empty string for empty input", () => {
     assert.strictEqual(matchRepo("", []), "");
   });

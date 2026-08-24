@@ -108,7 +108,7 @@ export default function SpendPage() {
   const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
   const totalCost = spend?.cost_usd ?? 0;
-  const spendCap = 50.0;
+  const spendCap = (plan === "pro" || plan === "individual") ? 1000.0 : plan === "team" ? 5000.0 : plan === "enterprise" ? 10000.0 : 500.0;
   const spendPercent = Math.min(100, Math.round((totalCost / spendCap) * 100));
 
   const providerBreakdown = spend?.by_provider && spend.by_provider.length > 0

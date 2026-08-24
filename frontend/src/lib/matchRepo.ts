@@ -13,27 +13,30 @@ export function matchRepo(target: string, list: GithubRepo[]): string {
     return { item, full, name, normUrl };
   });
 
-  // Exact matches first — a loose substring match must never win over an
-  // exact one just because it happens to sit earlier in the list.
-  const exact = normalized.find(
-    ({ full, name, normUrl }) =>
-      normUrl === normClean ||
-      full === normClean ||
-      name === normClean ||
-      normClean.endsWith("/" + name) ||
-      full.endsWith("/" + normClean) ||
-      normUrl.endsWith("/" + normClean)
+  const resolve = (entry: (typeof normalized)[number]) =>
+    entry.item.url || `https://github.com/${entry.item.full_name || entry.item.name}`;
+
+  // Strict identity first: a full name or URL match always wins.
+  const strict = normalized.find(
+    ({ full, normUrl }) => normUrl === normClean || full === normClean,
   );
-  if (exact) {
-    return exact.item.url || `https://github.com/${exact.item.full_name || exact.item.name}`;
-  }
+  if (strict) return resolve(strict);
+
+  // Short-name / suffix matches only when exactly one repo qualifies.
+  const bySuffix = normalized.filter(
+    ({ full, name, normUrl }) =>
+      (name.length > 0 && (name === normClean || normClean.endsWith("/" + name))) ||
+      full.endsWith("/" + normClean) ||
+      normUrl.endsWith("/" + normClean),
+  );
+  if (bySuffix.length === 1) return resolve(bySuffix[0]);
 
   // Loose fallback: trust it only when exactly one connected repo matches,
   // so one repo's name being a substring of another's (acme/app vs
   // acme/app-backend) can't silently select the wrong repository.
   const loose = normalized.filter(({ full, name }) => name.length > 0 && (normClean.includes(name) || full.includes(normClean)));
   if (loose.length === 1) {
-    return loose[0].item.url || `https://github.com/${loose[0].item.full_name || loose[0].item.name}`;
+    return resolve(loose[0]);
   }
 
   return clean.includes("://") || clean.includes("@") ? clean : `https://github.com/${clean}`;
