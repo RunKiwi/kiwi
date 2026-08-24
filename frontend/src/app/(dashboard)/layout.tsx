@@ -35,6 +35,7 @@ import { SiGithub, SiDatadog, SiPrometheus } from "react-icons/si";
 import { FaSlack } from "react-icons/fa6";
 import { Logo } from "@/components/Logo";
 import { UpgradeButton } from "@/components/UpgradeButton";
+import { PlatformTour } from "@/components/PlatformTour";
 import { useFleetStore } from "@/store/useFleetStore";
 import Fuse from "fuse.js";
 
@@ -162,10 +163,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     api.listGithubRepos()
       .then((r) => {
-        setRepos(r.repos || []);
+        const repoList = r.repos || [];
+        setRepos(repoList);
+        if (typeof window !== "undefined") {
+          const isCompleted = localStorage.getItem("kiwi_onboarding_completed");
+          if (!isCompleted) {
+            if (repoList.length > 0 || jobs.length > 0) {
+              // Existing account on a new device: auto-mark onboarding complete
+              localStorage.setItem("kiwi_onboarding_completed", "1");
+            } else if (pathname === "/") {
+              // Genuinely fresh new account: guide to onboarding
+              router.push("/onboarding");
+            }
+          }
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [jobs.length, pathname, router]);
 
   const handleLogout = () => {
     if (typeof window !== "undefined") {
@@ -459,6 +473,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       // 6. Quick Actions
       {
+        id: "action-tour",
+        title: "Start Platform Tour",
+        subtitle: "Guided interactive walkthrough of swarm feeds, monitors, fleets, and spend",
+        category: "Actions",
+        action: () => {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("kiwi:start-tour"));
+          }
+        },
+        icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" />,
+        hint: "Tour",
+        keywords: "tour guide walkthrough tutorial onboarding demo spotlight intro help",
+      },
+      {
         id: "action-upgrade",
         title: "Upgrade to Kiwi Pro",
         subtitle: "Unlock 2,000 pooled minutes / seat, BYOC runners & priority",
@@ -620,6 +648,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <HelpCircle className="w-3.5 h-3.5 text-stone-500" />
             <span className="hidden md:inline">Support</span>
           </a>
+
+          {/* Guided Tour Trigger */}
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("kiwi:start-tour"));
+              }
+            }}
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl bg-white hover:bg-sand-100 border border-sand-200 text-stone-600 hover:text-stone-900 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+            title="Start Guided Platform Tour"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden md:inline">Tour</span>
+          </button>
         </div>
       </header>
 
@@ -687,7 +729,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
 
           {/* Primary Action: New Task Pill */}
-          <div className="shrink-0 mb-3 w-full">
+          <div className="shrink-0 mb-3 w-full" data-tour="new-task-btn">
             <Link
               href="/composer"
               className="w-full flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all active:scale-[0.98]"
@@ -955,6 +997,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="space-y-0.5">
                 <Link
                   href="/monitors"
+                  data-tour="nav-monitors"
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
                     pathname === "/monitors" || pathname.startsWith("/monitors/")
                       ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
@@ -999,6 +1042,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="space-y-0.5">
                 <Link
                   href="/spend"
+                  data-tour="nav-spend"
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
                     pathname === "/spend" || pathname.startsWith("/spend/")
                       ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
@@ -1012,6 +1056,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </Link>
                 <Link
                   href="/fleet"
+                  data-tour="nav-fleet"
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
                     pathname === "/fleet" || pathname.startsWith("/fleet/")
                       ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
@@ -1435,6 +1480,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </>
       )}
+
+      {/* Guided Interactive Platform Tour */}
+      <PlatformTour />
     </div>
   );
 }

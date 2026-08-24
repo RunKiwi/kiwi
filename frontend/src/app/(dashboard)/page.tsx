@@ -421,7 +421,7 @@ function CommandCenterContent() {
       <hr className="border-sand-200/80" />
 
       {/* 4. TASK EXECUTION QUEUE */}
-      <div className="space-y-3.5">
+      <div className="space-y-3.5" data-tour="tasks-queue">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-stone-900">Task Execution Queue</h2>
