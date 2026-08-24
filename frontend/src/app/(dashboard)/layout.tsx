@@ -29,6 +29,7 @@ import {
   GitPullRequest,
   Menu,
   X,
+  LineChart,
 } from "lucide-react";
 import { api, type UsageResponse, type ValidateResponse, type GithubRepo } from "@/lib/api";
 import { SiGithub, SiDatadog, SiPrometheus } from "react-icons/si";
@@ -341,6 +342,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />,
         hint: "/records",
         keywords: "records audit verifiable receipts cryptographic hashes ledger compliance security logs",
+      },
+      {
+        id: "nav-metrics",
+        title: "Telemetry & SLOs",
+        subtitle: "Configure Prometheus & Datadog post-merge regression monitors",
+        category: "Navigation",
+        href: "/metrics",
+        icon: <LineChart className="w-3.5 h-3.5 text-indigo-600" />,
+        hint: "/metrics",
+        keywords: "metrics telemetry slo prometheus datadog monitoring latency error rate p99 queries canary",
       },
       ...(isSuperAdmin
         ? [
@@ -1033,6 +1044,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <span className="truncate">Audit Receipts</span>
                   </span>
                 </Link>
+                <Link
+                  href="/metrics"
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all text-left ${
+                    pathname === "/metrics" || pathname.startsWith("/metrics/")
+                      ? "bg-sand-200/90 text-stone-900 shadow-2xs font-semibold"
+                      : "text-stone-600 hover:bg-sand-150 font-medium"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <LineChart className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/metrics") ? "text-indigo-700" : "text-indigo-600"}`} />
+                    <span className="truncate">Telemetry &amp; SLOs</span>
+                  </span>
+                </Link>
               </div>
             </div>
 
@@ -1404,6 +1428,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
                   <span>Audit Records</span>
+                </Link>
+                <Link
+                  href="/metrics"
+                  onClick={() => setShowMobileMenu(false)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all ${
+                    pathname.startsWith("/metrics") ? "bg-sand-200 text-stone-900 font-bold shadow-2xs" : "text-stone-700 hover:bg-sand-150"
+                  }`}
+                >
+                  <LineChart className="w-4 h-4 text-indigo-600" />
+                  <span>Telemetry &amp; SLOs</span>
                 </Link>
               </div>
 

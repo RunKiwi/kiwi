@@ -10,14 +10,13 @@ import {
   ArrowLeft,
   Hash,
   GitBranch,
-  Cpu,
   Terminal,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
 import { FaSlack } from "react-icons/fa6";
 import { KiwiMicroButtonLoader } from "@/components/KiwiLoaders";
+import { Logo } from "@/components/Logo";
 
 export default function SlackBindingsPage() {
   const [bindings, setBindings] = useState<SlackChannelBinding[]>([]);
@@ -107,331 +106,249 @@ export default function SlackBindingsPage() {
       setDefaultArchitectModel("");
       await refresh();
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create binding");
+      setCreateError(err instanceof Error ? err.message : "Failed to create Slack channel binding");
     } finally {
       setCreating(false);
     }
   }
 
   async function onDelete(id: string) {
-    if (!confirm("Are you sure you want to remove this channel mapping?")) return;
+    if (!confirm("Are you sure you want to remove this channel binding?")) return;
     setDeletingId(id);
     try {
       await api.deleteSlackBinding(id);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete binding");
+      alert("Failed to delete binding: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setDeletingId(null);
     }
   }
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-6 w-full font-sans text-stone-900">
-      {/* ================= HERO HEADER ================= */}
-      <div className="flex flex-col gap-3 pb-2 border-b border-sand-200">
+    <div className="max-w-4xl mx-auto flex flex-col gap-4 w-full font-sans text-stone-900 select-none">
+      
+      {/* Back Link */}
+      <div>
         <Link
           href="/integrations"
-          className="inline-flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-900 transition-colors w-fit font-medium"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to Integrations</span>
+          <span>Back to Integrations Hub</span>
         </Link>
+      </div>
 
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* Header Banner with Modern Swiss Styling */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-sand-200/90 bg-white shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-[#ECB22E]/10 border border-[#ECB22E]/30 shadow-2xs flex items-center justify-center shrink-0">
+            <FaSlack className="w-6 h-6 text-[#ECB22E]" />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-stone-900 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-[#ECB22E]/15 text-[#ECB22E] flex items-center justify-center border border-[#ECB22E]/30">
-                <FaSlack className="w-4 h-4" />
-              </div>
-              <span>Slack Channel Bindings</span>
-              <span className="text-xs font-mono font-bold bg-sand-100 text-stone-600 border border-sand-200 px-2 py-0.5 rounded-md">
-                {bindings.length} Mappings
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-[#ECB22E] bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                SLACK WORKSPACE ROUTING
               </span>
+            </div>
+            <h1 className="text-lg font-bold text-stone-900 tracking-tight mt-0.5">
+              Slack Channel-to-Repository Bindings
             </h1>
-            <p className="text-xs text-stone-500 mt-1 max-w-2xl leading-relaxed">
-              Bind Slack channels to GitHub repositories so <span className="font-mono bg-sand-100 text-stone-700 px-1 py-0.5 rounded">@kiwi</span> mentions in that channel automatically execute against the correct repository, branch, test suite, and models.
+            <p className="text-xs text-stone-500 mt-0.5">
+              Bind Slack channels directly to repositories. @mention Kiwi in any bound channel to launch autonomous tasks.
             </p>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 shadow-2xs font-mono">
           <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* ================= 3 KPI METRIC TILES ================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
-            <span>Configured Bindings</span>
-            <Hash className="w-4 h-4 text-stone-400" />
-          </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold font-mono text-stone-900">{bindings.length}</div>
-            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
-              {bindings.length > 0 ? "Active channel triggers" : "No channels bound yet"}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
-            <span>Slack Workspaces</span>
-            <FaSlack className="w-4 h-4 text-[#ECB22E]" />
-          </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold font-mono text-stone-900">{installations.length}</div>
-            <div className="text-[10px] text-stone-400 font-mono mt-0.5 truncate">
-              {installations.map((i) => i.team_name || i.team_id).join(", ") || "No team installed"}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
-            <span>Trigger Routing</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="mt-2">
-            <div className="text-2xl font-bold font-mono text-emerald-800">Direct</div>
-            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
-              Automatic PR dispatch from mentions
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= ADD CHANNEL BINDING FORM ================= */}
-      <div className="bg-white shadow-2xs border border-sand-200 rounded-2xl p-5 space-y-4">
+      {/* Main Bind Form */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-sand-200/90 bg-white shadow-2xs space-y-4">
         <div>
           <h2 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5 text-kiwi-600 stroke-[2.5]" />
-            <span>Map New Channel to Repository</span>
+            <Plus className="w-3.5 h-3.5 text-stone-700" />
+            <span>Create New Channel Binding</span>
           </h2>
           <p className="text-xs text-stone-500 mt-0.5">
-            When someone mentions the bot in this channel, tasks will target this repository.
+            Link a Slack Channel ID (e.g. C0123456789) to a GitHub repository URL.
           </p>
         </div>
 
-        <form onSubmit={onCreate} className="space-y-3.5 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-            <div>
-              <label className="block font-bold text-stone-700 mb-1">Slack Workspace</label>
-              {installations.length > 0 ? (
+        <form onSubmit={onCreate} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            {installations.length > 0 && (
+              <div>
+                <label className="block font-bold text-stone-800 mb-1">Slack Workspace Team ID</label>
                 <select
                   value={teamID}
                   onChange={(e) => setTeamID(e.target.value)}
-                  className="w-full bg-sand-50/80 border border-sand-200 rounded-xl px-3 py-2 text-xs font-semibold text-stone-900 focus:outline-none focus:border-stone-800 focus:bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/80 focus:bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
                   required
                 >
-                  {installations.map((i) => (
-                    <option key={i.team_id} value={i.team_id}>
-                      {i.team_name || i.team_id} ({i.team_id})
+                  {installations.map((inst) => (
+                    <option key={inst.team_id} value={inst.team_id}>
+                      {inst.team_name ? `${inst.team_name} (${inst.team_id})` : inst.team_id}
                     </option>
                   ))}
                 </select>
-              ) : (
-                <input
-                  placeholder="e.g. T0123456789"
-                  value={teamID}
-                  onChange={(e) => setTeamID(e.target.value)}
-                  className="w-full bg-sand-50/80 border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 focus:bg-white"
-                  required
-                />
-              )}
-            </div>
-
-            <div>
-              <label className="block font-bold text-stone-700 mb-1">Slack Channel ID</label>
-              <input
-                placeholder="e.g. C0123456789 or channel name"
-                value={channelID}
-                onChange={(e) => setChannelID(e.target.value)}
-                className="w-full bg-sand-50/80 border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 focus:bg-white"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-stone-700 mb-1">GitHub Repository URL</label>
-              <input
-                placeholder="https://github.com/owner/repo"
-                value={repoURL}
-                onChange={(e) => setRepoURL(e.target.value)}
-                className="w-full bg-sand-50/80 border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800 focus:bg-white"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Advanced / Optional Overrides */}
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-stone-500 hover:text-stone-900 text-xs font-semibold flex items-center gap-1 transition-colors"
-            >
-              <span>{showAdvanced ? "Hide Advanced Overrides" : "+ Show Advanced Overrides (Branch, Tests, Models)"}</span>
-              {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-
-            {showAdvanced && (
-              <div className="mt-3 p-3.5 rounded-xl bg-sand-50/60 border border-sand-200 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">Default Base Branch (Optional)</label>
-                    <input
-                      placeholder="main"
-                      value={defaultRef}
-                      onChange={(e) => setDefaultRef(e.target.value)}
-                      className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">Default Test Command (Optional)</label>
-                    <input
-                      placeholder="go test ./... or npm test"
-                      value={defaultTestCmd}
-                      onChange={(e) => setDefaultTestCmd(e.target.value)}
-                      className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">Worker Model Override (Optional)</label>
-                    <input
-                      placeholder="e.g. claude-3-5-sonnet-20241022"
-                      value={defaultModel}
-                      onChange={(e) => setDefaultModel(e.target.value)}
-                      className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-stone-700 mb-1">Architect Model Override (Optional)</label>
-                    <input
-                      placeholder="e.g. claude-3-7-sonnet"
-                      value={defaultArchitectModel}
-                      onChange={(e) => setDefaultArchitectModel(e.target.value)}
-                      className="w-full bg-white border border-sand-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-stone-800"
-                    />
-                  </div>
-                </div>
               </div>
             )}
+
+            <div>
+              <label className="block font-bold text-stone-800 mb-1">Slack Channel ID</label>
+              <input
+                value={channelID}
+                onChange={(e) => setChannelID(e.target.value)}
+                placeholder="C08ABCDEF12"
+                className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/80 focus:bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
+                required
+              />
+            </div>
+
+            <div className={installations.length > 0 ? "sm:col-span-2" : ""}>
+              <label className="block font-bold text-stone-800 mb-1">Target Repository URL</label>
+              <input
+                value={repoURL}
+                onChange={(e) => setRepoURL(e.target.value)}
+                placeholder="https://github.com/RunKiwi/kiwi"
+                className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/80 focus:bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
+                required
+              />
+            </div>
           </div>
 
-          <div className="pt-2 border-t border-sand-150 flex justify-end">
+          {/* Advanced defaults toggle */}
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-xs font-semibold text-stone-500 hover:text-stone-800 flex items-center gap-1 pt-1 cursor-pointer"
+          >
+            {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            <span>{showAdvanced ? "Hide Advanced Channel Defaults" : "Configure Default Branch, Tests & Models"}</span>
+          </button>
+
+          {showAdvanced && (
+            <div className="p-3.5 rounded-xl bg-sand-50/70 border border-sand-200 space-y-3 animate-in fade-in duration-150">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block font-bold text-stone-800 mb-1 flex items-center gap-1">
+                    <GitBranch className="w-3.5 h-3.5 text-stone-500" />
+                    <span>Default Git Branch / Ref</span>
+                  </label>
+                  <input
+                    value={defaultRef}
+                    onChange={(e) => setDefaultRef(e.target.value)}
+                    placeholder="main"
+                    className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-800 mb-1 flex items-center gap-1">
+                    <Terminal className="w-3.5 h-3.5 text-stone-500" />
+                    <span>Default Verification Command</span>
+                  </label>
+                  <input
+                    value={defaultTestCmd}
+                    onChange={(e) => setDefaultTestCmd(e.target.value)}
+                    placeholder="npm test / go test ./..."
+                    className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {createError && (
+            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 font-mono">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+              <span>{createError}</span>
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              disabled={creating || !teamID.trim() || !channelID.trim() || !repoURL.trim()}
-              className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all disabled:opacity-50"
+              disabled={creating || !channelID.trim() || !repoURL.trim()}
+              className="px-5 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
             >
               {creating ? <KiwiMicroButtonLoader /> : <Plus className="w-3.5 h-3.5 text-kiwi-400 stroke-[2.5]" />}
-              <span>Bind Channel</span>
+              <span>Save Channel Binding</span>
             </button>
           </div>
         </form>
-
-        {createError && (
-          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{createError}</span>
-          </div>
-        )}
       </div>
 
-      {/* ================= ACTIVE BINDINGS DIRECTORY ================= */}
-      <div className="space-y-3">
-        <h2 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
-          <Hash className="w-3.5 h-3.5 text-stone-500" />
-          <span>Active Channel Bindings ({bindings.length})</span>
-        </h2>
+      {/* Active Channel Bindings List */}
+      <div className="bg-white border border-sand-200/90 rounded-2xl shadow-2xs p-4 sm:p-5 space-y-3">
+        <div>
+          <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
+            <Hash className="w-3.5 h-3.5 text-stone-600" />
+            <span>Active Channel Bindings ({bindings.length})</span>
+          </h3>
+          <p className="text-xs text-stone-500 mt-0.5">
+            Channels where @Kiwi automatically maps requests to the assigned codebase.
+          </p>
+        </div>
 
         {loading ? (
-          <div className="p-8 text-stone-500 flex flex-col items-center justify-center gap-2 bg-white border border-sand-200 rounded-2xl shadow-2xs">
-            <KiwiMicroButtonLoader />
-            <span className="text-xs font-mono">Loading channel bindings...</span>
-          </div>
+          <div className="p-8 text-center text-xs font-mono text-stone-400">Loading channel bindings...</div>
         ) : bindings.length === 0 ? (
-          <div className="p-8 text-center text-stone-400 font-mono bg-white border border-sand-200 rounded-2xl shadow-2xs space-y-1">
-            <Hash className="w-6 h-6 text-stone-300 mx-auto" />
-            <p>No Slack channels bound to repositories yet.</p>
+          <div className="p-8 rounded-2xl border border-sand-200/90 bg-sand-50/40 text-center space-y-2.5 shadow-2xs">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-white border border-sand-200/90 shadow-2xs flex items-center justify-center">
+              <Logo variant="full-color" pose="sleeping" animated={true} className="w-7 h-7" />
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-stone-900 font-bold text-xs">No Channel Bindings Configured</div>
+              <p className="text-xs text-stone-500 max-w-xs mx-auto">
+                Bind a Slack channel above to trigger Kiwi tasks right inside your team chat.
+              </p>
+            </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="divide-y divide-sand-200/80 border border-sand-200/90 rounded-xl overflow-hidden shadow-2xs">
             {bindings.map((b) => (
               <div
                 key={b.id}
-                className="p-4 rounded-2xl bg-white border border-sand-200 shadow-2xs flex flex-col justify-between space-y-3 hover:border-sand-300 transition-all group"
+                className="p-3.5 bg-white hover:bg-sand-50/80 transition-colors flex items-center justify-between gap-3"
               >
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-lg bg-sand-100 border border-sand-200 flex items-center justify-center shrink-0">
-                        <Hash className="w-3.5 h-3.5 text-stone-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="font-mono text-xs font-bold text-stone-900 truncate block">
-                          {b.channel_id}
-                        </span>
-                        <span className="text-[10px] font-mono text-stone-400">Team: {b.team_id}</span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => onDelete(b.id)}
-                      disabled={deletingId === b.id}
-                      className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                      title="Remove channel binding"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-sand-50/70 border border-sand-200 font-mono text-[11px] text-stone-800 truncate">
-                    {b.repo_url}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-sand-150 flex items-center justify-between text-[10px] font-mono text-stone-500 flex-wrap gap-2">
+                <div className="min-w-0 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    {b.default_ref && (
-                      <span className="inline-flex items-center gap-1 bg-sand-100 px-1.5 py-0.5 rounded border border-sand-200">
-                        <GitBranch className="w-3 h-3 text-stone-500" />
-                        <span>{b.default_ref}</span>
-                      </span>
-                    )}
-                    {b.default_test_cmd && (
-                      <span className="inline-flex items-center gap-1 bg-sand-100 px-1.5 py-0.5 rounded border border-sand-200">
-                        <Terminal className="w-3 h-3 text-stone-500" />
-                        <span className="truncate max-w-[120px]">{b.default_test_cmd}</span>
-                      </span>
-                    )}
-                    {b.default_model && (
-                      <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-900 px-1.5 py-0.5 rounded border border-purple-200">
-                        <Cpu className="w-3 h-3 text-purple-600" />
-                        <span className="truncate max-w-[100px]">{b.default_model}</span>
-                      </span>
-                    )}
+                    <span className="font-mono text-xs font-bold text-stone-900 flex items-center gap-1">
+                      <Hash className="w-3.5 h-3.5 text-stone-500" />
+                      <span>{b.channel_id}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-stone-400">→</span>
+                    <span className="font-mono text-xs font-semibold text-stone-700 truncate">{b.repo_url}</span>
                   </div>
 
-                  <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-bold">
-                    Active
-                  </span>
+                  <div className="flex items-center gap-3 text-[10px] font-mono text-stone-400 flex-wrap">
+                    <span>Workspace: <strong className="text-stone-600">{b.team_id}</strong></span>
+                    {b.default_ref && <span>Ref: <strong className="text-stone-600">{b.default_ref}</strong></span>}
+                    {b.default_test_cmd && <span>Test: <strong className="text-stone-600">{b.default_test_cmd}</strong></span>}
+                  </div>
                 </div>
+
+                <button
+                  onClick={() => onDelete(b.id)}
+                  disabled={deletingId === b.id}
+                  className="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                  title="Remove binding"
+                >
+                  {deletingId === b.id ? <KiwiMicroButtonLoader /> : <Trash2 className="w-3.5 h-3.5" />}
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
+
     </div>
   );
 }
