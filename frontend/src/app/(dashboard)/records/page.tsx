@@ -7,15 +7,15 @@ import { useFleetStore } from "@/store/useFleetStore";
 import { LoadingState } from "@/components/LoadingState";
 
 export default function RecordsPage() {
-  const { jobs, loadJobs } = useFleetStore();
+  const { loadJobs } = useFleetStore();
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<{ job: JobSummary; recordHash: string | null; body: ExecutionRecordBody }[]>([]);
 
   useEffect(() => {
     async function loadData() {
       try {
-        await loadJobs();
-        const finishedJobs = (jobs || []).filter((j) => j.status === "SUCCEEDED" || j.status === "FAILED");
+        const fetchedJobs = await loadJobs();
+        const finishedJobs = (fetchedJobs || []).filter((j) => j.status === "SUCCEEDED" || j.status === "FAILED");
         const loaded: { job: JobSummary; recordHash: string | null; body: ExecutionRecordBody }[] = [];
 
         for (const job of finishedJobs.slice(0, 5)) {
@@ -34,7 +34,6 @@ export default function RecordsPage() {
       }
     }
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadJobs]);
 
   if (loading) {
