@@ -967,8 +967,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </aside>
 
-        {/* COLUMN 2: PINNED SECONDARY CATEGORY SUB-RAIL (~165px) */}
-        <aside className="w-44 py-1.5 hidden md:flex flex-col shrink-0 text-xs select-none h-full overflow-hidden transition-all duration-200">
+        {/* COLUMN 2: PINNED SECONDARY CATEGORY SUB-RAIL (~208px) */}
+        <aside className="w-52 py-1.5 hidden md:flex flex-col shrink-0 text-xs select-none h-full overflow-hidden transition-all duration-200">
           <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 min-h-0">
             
             {/* Group 0: ACTION REQUIRED (Only show when > 0) */}
@@ -987,14 +987,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     href="/?filter=plan"
                     className="w-full flex items-center justify-between px-2 py-1 rounded-xl text-[11px] font-bold text-indigo-950 hover:bg-indigo-100/80 transition-all text-left group"
                   >
-                    <span className="flex items-center gap-1.5 truncate">
+                    <span className="flex items-center gap-1.5 min-w-0 pr-1 truncate">
                       <span className="relative flex h-2 w-2 shrink-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600" />
                       </span>
                       <span className="truncate">Plan Reviews</span>
                     </span>
-                    <span className="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-100 border border-indigo-200 px-1.5 py-0.2 rounded-full">{planReviewsCount}</span>
+                    <span className="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-100 border border-indigo-200 px-1.5 py-0.2 rounded-full shrink-0 whitespace-nowrap">{planReviewsCount}</span>
                   </Link>
                 </div>
               </div>
@@ -1010,11 +1010,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     pathname === "/" ? "bg-sand-200/90 text-stone-900 shadow-2xs" : "text-stone-600 hover:bg-sand-150"
                   }`}
                 >
-                  <span className="flex items-center gap-1.5 truncate">
+                  <span className="flex items-center gap-1.5 min-w-0 pr-1 truncate">
                     <LayoutGrid className="w-3.5 h-3.5 text-stone-700 shrink-0" />
                     <span className="truncate">Tasks Dashboard</span>
                   </span>
-                  <span className="text-[9px] font-bold font-mono bg-white px-1.5 py-0.2 rounded-md border border-sand-200">{activeTasksCount} Active</span>
+                  <span className="text-[9px] font-bold font-mono bg-white text-stone-600 px-1.5 py-0.5 rounded-md border border-sand-200 shrink-0 whitespace-nowrap">
+                    {activeTasksCount} {activeTasksCount === 1 ? "task" : "tasks"}
+                  </span>
                 </Link>
 
                 <Link
@@ -1116,11 +1118,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       : "text-stone-600 hover:bg-sand-150 font-medium"
                   }`}
                 >
-                  <span className="flex items-center gap-1.5 truncate">
+                  <span className="flex items-center gap-1.5 min-w-0 pr-1 truncate">
                     <Server className={`w-3.5 h-3.5 shrink-0 ${pathname.startsWith("/fleet") ? "text-stone-900" : "text-stone-400"}`} />
                     <span className="truncate">Runners & Fleets</span>
                   </span>
-                  <span className="text-[9px] font-mono text-stone-400 font-bold">{runnersCount}</span>
+                  <span className="text-[9px] font-mono text-stone-400 font-bold shrink-0 whitespace-nowrap">{runnersCount}</span>
                 </Link>
                 <Link
                   href="/models"
