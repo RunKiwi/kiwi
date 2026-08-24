@@ -1,40 +1,69 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { CheckCircle2, ChevronRight, Loader2, AlertCircle, Key, FolderGit2, Rocket, Sparkles } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  CheckCircle2,
+  ChevronRight,
+  Loader2,
+  AlertCircle,
+  Key,
+  FolderGit2,
+  Rocket,
+  Sparkles,
+  Zap,
+  ArrowRight,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { client, type Integration, type GithubRepo } from "@/lib/api";
 import { capture } from "@/lib/analytics";
+import { Logo } from "@/components/Logo";
 
 const STARTER_TASKS = [
   {
     id: "healthz",
     title: "Add /healthz API endpoint",
-    description: "Add a /healthz endpoint returning 200 OK and uptime JSON to the server router",
-    task: "Add a /healthz endpoint returning 200 OK and server uptime to the Go HTTP server router",
+    description: "Add a /healthz endpoint returning 200 OK and server uptime to the HTTP server router",
+    task: "Add a /healthz endpoint returning 200 OK and server uptime JSON to the HTTP server router",
+    tag: "BACKEND",
   },
   {
     id: "sidebar",
     title: "Fix responsive drawer layout",
     description: "Fix responsive drawer z-index and flex layout wrapping on mobile viewports",
     task: "Fix responsive drawer z-index and flex layout wrapping on mobile viewports",
+    tag: "FRONTEND",
   },
   {
     id: "tests",
     title: "Add unit tests for utilities",
-    description: "Add unit tests for string formatting and error handling helpers",
-    task: "Add unit tests for string formatting and error handling helpers",
+    description: "Add unit tests for string formatting, date parsing, and error handling helpers",
+    task: "Add unit tests for string formatting, date parsing, and error handling helpers",
+    tag: "TESTING",
   },
 ];
 
-// The model providers offered at signup, and the credential name each key is
-// stored under. Kept as one table so the dropdown, the placeholder and the
-// saved credential name cannot drift apart — a key stored under a name the
-// backend never looks up connects nothing and reports success.
 const MODEL_PROVIDERS = [
-  { key: "anthropic", label: "Anthropic", credName: "ANTHROPIC_API_KEY", placeholder: "sk-ant-…" },
-  { key: "gemini", label: "Gemini", credName: "GEMINI_API_KEY", placeholder: "AIza…" },
-  { key: "openai", label: "OpenAI", credName: "OPENAI_API_KEY", placeholder: "sk-…" },
+  {
+    key: "anthropic",
+    label: "Anthropic Claude",
+    credName: "ANTHROPIC_API_KEY",
+    placeholder: "sk-ant-api03-…",
+    models: "Claude 3.7 Sonnet, Claude 3.5 Haiku",
+  },
+  {
+    key: "openai",
+    label: "OpenAI GPT-4",
+    credName: "OPENAI_API_KEY",
+    placeholder: "sk-proj-…",
+    models: "GPT-4.5, GPT-4o, o3-mini",
+  },
+  {
+    key: "gemini",
+    label: "Google Gemini",
+    credName: "GEMINI_API_KEY",
+    placeholder: "AIzaSy…",
+    models: "Gemini 2.0 Flash, Gemini 1.5 Pro",
+  },
 ];
 
 export default function OnboardingPage() {
@@ -49,44 +78,37 @@ export default function OnboardingPage() {
     return 1;
   });
 
+  const [ghConnected, setGhConnected] = useState(false);
   const [ghToken, setGhToken] = useState("");
+  const [useByok, setUseByok] = useState(false);
   const [modelProvider, setModelProvider] = useState("anthropic");
   const [modelKey, setModelKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [selectedStarter, setSelectedStarter] = useState(STARTER_TASKS[0].id);
-  // A prefilled task with no repository cannot be launched — the composer
-  // requires one — so step 3 picks the repo here rather than dropping the user
-  // on the dashboard with a half-filled form.
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [starterRepo, setStarterRepo] = useState("");
 
-  useEffect(() => {
-    if (step !== 3) return;
-    client.listGithubRepos()
-      .then(r => {
-        setRepos(r.repos);
-        setStarterRepo(prev => prev || r.repos[0]?.url || "");
-      })
-      .catch(() => {});
-  }, [step]);
-
-  // Persist step to localStorage whenever it changes
+  // Persist step to localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("kiwi_onboarding_step", String(step));
     }
   }, [step]);
 
-  // Step 1: Poll for GitHub connection
+  // Step 1: Check and poll for GitHub connection
   useEffect(() => {
-    if (step !== 1) return;
     const checkGH = async () => {
       try {
         const res = await client.listIntegrations();
         const gh = res.integrations.find((i: Integration) => i.key === "github");
-        if (gh?.connected && step === 1) {
-          setStep(2);
+        if (gh?.connected) {
+          setGhConnected(true);
+          const r = await client.listGithubRepos();
+          if (r.repos && r.repos.length > 0) {
+            setRepos(r.repos);
+            setStarterRepo((prev) => prev || r.repos[0]?.url || "");
+          }
         }
       } catch {
         /* best-effort */
@@ -97,9 +119,19 @@ export default function OnboardingPage() {
     return () => clearInterval(interval);
   }, [step]);
 
-  // Fetches the signed install link rather than navigating straight at the
-  // endpoint: it sits behind bearer auth and a top-level navigation carries no
-  // Authorization header.
+  // Load repos when entering step 3
+  useEffect(() => {
+    if (step === 3 && repos.length === 0) {
+      client
+        .listGithubRepos()
+        .then((r) => {
+          setRepos(r.repos || []);
+          setStarterRepo((prev) => prev || r.repos[0]?.url || "");
+        })
+        .catch(() => {});
+    }
+  }, [step, repos.length]);
+
   const handleInstallApp = async () => {
     setBusy(true);
     setErr("");
@@ -112,10 +144,10 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleConnectRepo = async () => {
+  const handleConnectPAT = async () => {
     const val = ghToken.trim();
     if (!val) {
-      setErr("Paste a GitHub PAT first.");
+      setErr("Please paste a valid GitHub Personal Access Token.");
       return;
     }
     setBusy(true);
@@ -123,35 +155,33 @@ export default function OnboardingPage() {
     try {
       await client.setCredential("GITHUB_TOKEN", "github", val);
       capture("repo_connected", { surface: "onboarding" });
-      const res = await client.listIntegrations();
-      const gh = res.integrations.find((i: Integration) => i.key === "github");
-      if (gh?.connected) {
-        setStep(2);
-      } else {
-        setStep(2); // Proceed to step 2 after credential saved
-      }
+      setGhConnected(true);
+      setStep(2);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to connect");
+      setErr(e instanceof Error ? e.message : "Failed to connect GitHub token");
     } finally {
       setBusy(false);
     }
   };
 
   const handleSaveModelKey = async () => {
-    const val = modelKey.trim();
-    if (!val) {
-      // Key entry is optional if user already has global key or wants to skip
+    if (!useByok) {
       capture("onboarding_step_skipped", { step: 2 });
       setStep(3);
       return;
     }
+
+    const val = modelKey.trim();
+    if (!val) {
+      setErr("Please enter a valid API key, or choose Kiwi Platform Allowance.");
+      return;
+    }
+
     setBusy(true);
     setErr("");
     try {
-      // Name and kind must match the Integrations catalog exactly, or the key is
-      // stored under something the backend never looks up. Every model provider
-      // is kind "llm"; the provider is carried by the credential name.
-      const secretName = MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.credName ?? "ANTHROPIC_API_KEY";
+      const secretName =
+        MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.credName ?? "ANTHROPIC_API_KEY";
       await client.setCredential(secretName, "llm", val);
       capture("model_key_added", { provider: modelProvider, surface: "onboarding" });
       setStep(3);
@@ -162,288 +192,425 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleLaunchStarter = (taskText: string, repoUrl = "") => {
+  const handleCompleteAndLaunch = (taskText: string, repoUrl = "") => {
     if (typeof window !== "undefined") {
       localStorage.setItem("kiwi_starter_task", taskText);
       localStorage.setItem("kiwi_starter_repo", repoUrl);
+      localStorage.setItem("kiwi_onboarding_completed", "1");
       localStorage.setItem("onboarded", "1");
       localStorage.removeItem("kiwi_onboarding_step");
     }
-    router.push("/");
+    // Launch Guided Platform Tour on Dashboard
+    router.push("/?tour=true");
   };
 
-  return (
-    <div className="p-8 max-w-3xl mx-auto min-h-[85vh] flex flex-col justify-center">
-      <div className="text-center mb-10">
-        <p className="eyebrow justify-center mb-3">
-          <span className="dot" /> Onboarding
-        </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-stone-900 mb-3">Welcome to Kiwi</h1>
-        <p className="text-stone-500 text-base max-w-xl mx-auto">
-          Set up your repository connection, model credentials, and launch your first swarm task in 3 simple steps.
-        </p>
-      </div>
+  const currentMascotPose =
+    step === 1 ? "vibing" : step === 2 ? "hacking" : "dancing";
 
-      <div className="space-y-6">
-        {/* Step 1: Connect Repository */}
-        <div
-          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
-            step === 1 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : step > 1 ? "border-emerald-200 bg-emerald-50" : "opacity-60"
-          }`}
-        >
-          <div className="flex items-start gap-4">
-            <div
-              className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step > 1 ? "bg-kiwi-500 text-white" : "bg-white border border-sand-300 text-stone-600"
-              }`}
-            >
-              {step > 1 ? <CheckCircle2 className="w-5 h-5" /> : "1"}
+  return (
+    <div className="min-h-screen py-8 px-4 sm:px-6 flex flex-col justify-center items-center font-sans text-stone-900 select-none">
+      <div className="w-full max-w-3xl space-y-6">
+        
+        {/* Onboarding Header Banner */}
+        <div className="relative overflow-hidden p-6 sm:p-7 rounded-2xl border border-sand-200/90 bg-white shadow-popover flex flex-col sm:flex-row items-center justify-between gap-5">
+          <div className="flex items-center gap-4 text-left">
+            <div className="w-14 h-14 rounded-2xl bg-sand-50 border border-sand-200/90 flex items-center justify-center shadow-2xs shrink-0">
+              <Logo
+                variant="full-color"
+                pose={currentMascotPose}
+                animated={true}
+                className="w-8 h-8"
+              />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
-                  <FolderGit2 className="w-5 h-5 text-stone-500" /> Connect your Repository
-                </h2>
-                {step > 1 && (
-                  <button type="button" onClick={() => setStep(1)} className="text-xs text-stone-400 hover:text-stone-700 underline">
-                    Edit
-                  </button>
-                )}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-700 bg-sand-100 px-2 py-0.5 rounded border border-sand-200">
+                  PLATFORM SETUP
+                </span>
+                <span className="text-xs font-mono text-stone-400 font-semibold">
+                  Step {step} of 3
+                </span>
               </div>
-              <p className="text-stone-500 text-sm mb-4">
-                Link your codebase so Kiwi agents can analyze, plan, and submit pull requests. Install the GitHub App and pick the repositories Kiwi may touch.
+              <h1 className="text-xl font-bold tracking-tight text-stone-900 mt-1">
+                Welcome to Kiwi Platform
+              </h1>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Set up your repository connection, model intelligence, and launch your first autonomous swarm.
               </p>
-              {step === 1 && (
-                <div className="flex flex-col gap-3 max-w-md pt-2">
+            </div>
+          </div>
+
+          <button
+            onClick={() => handleCompleteAndLaunch("")}
+            className="text-xs font-semibold text-stone-400 hover:text-stone-700 transition-colors shrink-0"
+          >
+            Skip to Dashboard &rarr;
+          </button>
+        </div>
+
+        {/* 3-Step Progress Header Stepper */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { num: 1, label: "Connect Codebase", icon: <FolderGit2 className="w-3.5 h-3.5" /> },
+            { num: 2, label: "Model Intelligence", icon: <Key className="w-3.5 h-3.5" /> },
+            { num: 3, label: "First Swarm Task", icon: <Rocket className="w-3.5 h-3.5" /> },
+          ].map((s) => {
+            const isCompleted = step > s.num;
+            const isCurrent = step === s.num;
+            return (
+              <button
+                key={s.num}
+                onClick={() => setStep(s.num)}
+                className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                  isCurrent
+                    ? "bg-white border-stone-900 shadow-2xs font-bold text-stone-900"
+                    : isCompleted
+                    ? "bg-sand-50/90 border-emerald-300/80 text-stone-800"
+                    : "bg-white/60 border-sand-200/70 text-stone-400 opacity-60"
+                }`}
+              >
+                <div
+                  className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-mono font-bold shrink-0 ${
+                    isCompleted
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      : isCurrent
+                      ? "bg-stone-900 text-white"
+                      : "bg-sand-100 text-stone-400"
+                  }`}
+                >
+                  {isCompleted ? <CheckCircle2 className="w-3.5 h-3.5" /> : s.num}
+                </div>
+                <div className="min-w-0 hidden sm:block">
+                  <p className="text-xs truncate">{s.label}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* STEP 1: CONNECT CODEBASE */}
+        {step === 1 && (
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-sand-200/90 shadow-2xs space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                    <FolderGit2 className="w-4 h-4 text-emerald-700" />
+                  </div>
+                  <h2 className="text-base font-bold text-stone-900">Step 1: Connect your Repository</h2>
+                </div>
+                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
+                  Link your codebase so Kiwi autonomous agents can read files, write features, and open verified pull requests.
+                </p>
+              </div>
+
+              {ghConnected && (
+                <span className="px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>CONNECTED</span>
+                </span>
+              )}
+            </div>
+
+            {ghConnected ? (
+              <div className="p-4 rounded-xl bg-sand-50/80 border border-sand-200 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-stone-900 truncate">
+                      GitHub App Connected ({repos.length} repositories authorized)
+                    </p>
+                    <p className="text-[11px] font-mono text-stone-500 truncate mt-0.5">
+                      Ready to execute autonomous tasks.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setStep(2)}
+                  className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <span>Continue to Step 2</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-kiwi-400" />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl border border-sand-200 bg-sand-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold text-stone-900">Install the official Kiwi GitHub App (Recommended)</p>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      Provides secure, scoped, auto-refreshing repository access for autonomous agents.
+                    </p>
+                  </div>
                   <button
                     onClick={handleInstallApp}
                     disabled={busy}
-                    className="flex items-center justify-center gap-2 btn-primary px-5 py-2.5 transition-colors disabled:opacity-50"
+                    className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-2 cursor-pointer shrink-0"
                   >
-                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    Install the GitHub App
-                  </button>
-                  <p className="text-xs text-stone-400">
-                    Access covers only the repositories you select, expires
-                    hourly, and you can revoke it from GitHub at any time.
-                  </p>
-
-                  <details className="pt-1">
-                    <summary className="text-xs text-stone-400 cursor-pointer hover:text-stone-700">
-                      Use a personal access token instead
-                    </summary>
-                    <div className="flex gap-2 pt-3">
-                    <input
-                      type="password"
-                      value={ghToken}
-                      onChange={(e) => setGhToken(e.target.value)}
-                      placeholder="github_pat_..."
-                      className="flex-1 field text-sm"
-                    />
-                    <button
-                      onClick={handleConnectRepo}
-                      disabled={busy}
-                      className="flex items-center justify-center gap-2 btn-primary px-5 py-2.5 transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                      Connect
-                    </button>
-                    </div>
-                  </details>
-                  {err && (
-                    <div className="flex items-center gap-2 text-rose-600 text-sm">
-                      <AlertCircle className="w-4 h-4 shrink-0" /> {err}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      capture("onboarding_step_skipped", { step: 1 });
-                      setStep(2);
-                    }}
-                    className="text-xs text-stone-400 hover:text-stone-700 text-left mt-1 underline"
-                  >
-                    Skip for now →
+                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>Install GitHub App &rarr;</span>
                   </button>
                 </div>
-              )}
+
+                <details className="text-xs group">
+                  <summary className="text-stone-500 hover:text-stone-900 cursor-pointer font-medium select-none">
+                    Or connect with a GitHub Personal Access Token (PAT)
+                  </summary>
+                  <div className="mt-3 p-3.5 rounded-xl border border-sand-200 bg-white space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={ghToken}
+                        onChange={(e) => setGhToken(e.target.value)}
+                        placeholder="github_pat_..."
+                        className="flex-1 px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/70 text-xs font-mono outline-none focus:border-stone-900 focus:bg-white transition-all"
+                      />
+                      <button
+                        onClick={handleConnectPAT}
+                        disabled={busy}
+                        className="px-4 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all cursor-pointer"
+                      >
+                        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Connect PAT"}
+                      </button>
+                    </div>
+                    {err && (
+                      <div className="flex items-center gap-1.5 text-rose-600 text-xs font-mono">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>{err}</span>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-sand-200/80 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  capture("onboarding_step_skipped", { step: 1 });
+                  setStep(2);
+                }}
+                className="text-stone-400 hover:text-stone-700 font-medium"
+              >
+                Skip this step for now &rarr;
+              </button>
+
+              <button
+                onClick={() => setStep(2)}
+                className="px-4 py-1.5 rounded-xl border border-sand-200 hover:bg-sand-100 text-stone-700 font-semibold text-xs transition-all flex items-center gap-1 cursor-pointer"
+              >
+                <span>Next: Models</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Step 2: Shared Model Credential */}
-        <div
-          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
-            step === 2 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : step > 2 ? "border-emerald-200 bg-emerald-50" : "opacity-60"
-          }`}
-        >
-          <div className="flex items-start gap-4">
-            <div
-              className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step > 2 ? "bg-kiwi-500 text-white" : step === 2 ? "bg-sky-600 text-white" : "bg-sand-200 text-stone-500"
-              }`}
-            >
-              {step > 2 ? <CheckCircle2 className="w-5 h-5" /> : "2"}
+        {/* STEP 2: MODEL CREDENTIALS & COMPUTE */}
+        {step === 2 && (
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-sand-200/90 shadow-2xs space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-sky-50 border border-sky-200">
+                  <Key className="w-4 h-4 text-sky-700" />
+                </div>
+                <h2 className="text-base font-bold text-stone-900">Step 2: Model Intelligence &amp; Quotas</h2>
+              </div>
+              <p className="text-xs text-stone-500 mt-1 leading-relaxed">
+                Choose how autonomous agent swarms access LLMs for code synthesis, architectural planning, and testing.
+              </p>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
-                  <Key className="w-5 h-5 text-stone-500" /> Model Credentials
-                </h2>
-                {step > 2 && (
-                  <button type="button" onClick={() => setStep(2)} className="text-xs text-stone-400 hover:text-stone-700 underline">
-                    Edit
-                  </button>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Option A: Managed Kiwi Allowance */}
+              <div
+                onClick={() => setUseByok(false)}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                  !useByok
+                    ? "border-kiwi-400 bg-kiwi-50/30 shadow-2xs"
+                    : "border-sand-200 bg-sand-50/50 hover:bg-sand-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+                    <Zap className="w-3.5 h-3.5 text-kiwi-600 fill-current" />
+                    <span>Kiwi Managed Allowance</span>
+                  </div>
+                  {!useByok && <CheckCircle2 className="w-4 h-4 text-kiwi-600" />}
+                </div>
+                <p className="text-xs text-stone-600 leading-relaxed">
+                  Use built-in platform quotas with zero configuration. Includes access to Claude 3.7 Sonnet, GPT-4.5, and Gemini 2.0.
+                </p>
+              </div>
+
+              {/* Option B: Bring Your Own Key (BYOK) */}
+              <div
+                onClick={() => setUseByok(true)}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                  useByok
+                    ? "border-sky-400 bg-sky-50/30 shadow-2xs"
+                    : "border-sand-200 bg-sand-50/50 hover:bg-sand-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-stone-900">
+                    <Key className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Bring Your Own Key (BYOK)</span>
+                  </div>
+                  {useByok && <CheckCircle2 className="w-4 h-4 text-sky-600" />}
+                </div>
+                <p className="text-xs text-stone-600 leading-relaxed">
+                  Use your own Anthropic, OpenAI, or Google AI key for unlimited token allowances and custom limits.
+                </p>
+              </div>
+            </div>
+
+            {useByok && (
+              <div className="p-4 rounded-xl bg-sand-50/70 border border-sand-200 space-y-3 animate-in fade-in duration-150">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <select
+                    value={modelProvider}
+                    onChange={(e) => setModelProvider(e.target.value)}
+                    className="px-3 py-2 rounded-xl border border-sand-200 bg-white text-xs font-semibold text-stone-800 outline-none"
+                  >
+                    {MODEL_PROVIDERS.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="password"
+                    value={modelKey}
+                    onChange={(e) => setModelKey(e.target.value)}
+                    placeholder={
+                      MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.placeholder
+                    }
+                    className="flex-1 px-3 py-2 rounded-xl border border-sand-200 bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all"
+                  />
+                </div>
+
+                {err && (
+                  <div className="flex items-center gap-1.5 text-rose-600 text-xs font-mono">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>{err}</span>
+                  </div>
                 )}
               </div>
-              <p className="text-stone-500 text-sm mb-4">
-                Kiwi provides access to hosted models with a daily quota, but you can also bring your own key. Add an Anthropic, Gemini or OpenAI key to bypass quotas and power the planner and worker agents.
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-sand-200/80 text-xs">
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className="text-stone-500 hover:text-stone-800 font-medium"
+              >
+                &larr; Back to Step 1
+              </button>
+
+              <button
+                onClick={handleSaveModelKey}
+                disabled={busy}
+                className="px-5 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>Save &amp; Continue</span>
+                <ChevronRight className="w-3.5 h-3.5 text-kiwi-400" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: LAUNCH FIRST SWARM TASK */}
+        {step === 3 && (
+          <div className="p-6 sm:p-7 rounded-2xl bg-white border border-sand-200/90 shadow-2xs space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200">
+                  <Rocket className="w-4 h-4 text-amber-700" />
+                </div>
+                <h2 className="text-base font-bold text-stone-900">Step 3: Launch your First Task</h2>
+              </div>
+              <p className="text-xs text-stone-500 mt-1 leading-relaxed">
+                Choose a starter template or prefill your goal to see the autonomous agent swarm plan, execute, and verify changes.
               </p>
-              {step === 2 && (
-                <div className="flex flex-col gap-3 max-w-md pt-2">
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={modelProvider}
-                      onChange={(e) => setModelProvider(e.target.value)}
-                      className="field text-sm w-36 py-2"
-                    >
-                      {MODEL_PROVIDERS.map((p) => (
-                        <option key={p.key} value={p.key}>{p.label}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="password"
-                      value={modelKey}
-                      onChange={(e) => setModelKey(e.target.value)}
-                      placeholder={MODEL_PROVIDERS.find((p) => p.key === modelProvider)?.placeholder}
-                      className="flex-1 field text-sm"
-                    />
-                  </div>
-                  {err && (
-                    <div className="flex items-center gap-2 text-rose-600 text-sm">
-                      <AlertCircle className="w-4 h-4 shrink-0" /> {err}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {STARTER_TASKS.map((t) => {
+                const isSelected = selectedStarter === t.id;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => setSelectedStarter(t.id)}
+                    className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
+                      isSelected
+                        ? "border-stone-900 bg-sand-50/90 shadow-2xs ring-1 ring-stone-900"
+                        : "border-sand-200 bg-white hover:border-sand-300"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-stone-500 bg-sand-100 px-1.5 py-0.2 rounded border border-sand-200">
+                          {t.tag}
+                        </span>
+                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-stone-900" />}
+                      </div>
+                      <p className="text-xs font-bold text-stone-900 leading-snug">{t.title}</p>
+                      <p className="text-[11px] text-stone-500 mt-1 line-clamp-2 leading-relaxed">
+                        {t.description}
+                      </p>
                     </div>
-                  )}
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={handleSaveModelKey}
-                      disabled={busy}
-                      className="flex items-center gap-2 btn-primary px-6 py-2.5 transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                      Save &amp; Continue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        capture("onboarding_step_skipped", { step: 2 });
-                        setStep(3);
-                      }}
-                      className="text-xs text-stone-500 hover:text-stone-900 transition-colors"
-                    >
-                      Skip (use default)
-                    </button>
                   </div>
-                </div>
-              )}
+                );
+              })}
+            </div>
+
+            {repos.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-800">Target Repository</label>
+                <select
+                  value={starterRepo}
+                  onChange={(e) => setStarterRepo(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/70 text-xs font-mono outline-none"
+                >
+                  {repos.map((r) => (
+                    <option key={r.full_name} value={r.url}>
+                      {r.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-sand-200/80 text-xs">
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                className="text-stone-500 hover:text-stone-800 font-medium"
+              >
+                &larr; Back to Step 2
+              </button>
+
+              <button
+                onClick={() => {
+                  const starterObj = STARTER_TASKS.find((s) => s.id === selectedStarter);
+                  handleCompleteAndLaunch(
+                    starterObj?.task || STARTER_TASKS[0].task,
+                    starterRepo
+                  );
+                }}
+                className="px-5 py-2.5 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-2 active:scale-[0.98] cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-kiwi-400" />
+                <span>Launch First Task &amp; Start Tour &rarr;</span>
+              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Step 3: Starter Task Launcher */}
-        <div
-          className={`bg-white shadow-2xs p-6 transition-all duration-300 ${
-            step === 3 ? "border-sand-200 shadow-[0_0_24px_-4px_rgba(147,198,69,0.35)] scale-[1.01]" : "opacity-60"
-          }`}
-        >
-          <div className="flex items-start gap-4">
-            <div
-              className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${
-                step === 3 ? "bg-kiwi-500 text-white" : "bg-sand-200 text-stone-500"
-              }`}
-            >
-              3
-            </div>
-            <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-medium text-stone-900 mb-1 flex items-center gap-2">
-                <Rocket className="w-5 h-5 text-[#93C645]" /> Launch Your First Task
-              </h2>
-              <p className="text-stone-500 text-sm mb-4">
-                Choose a starter goal template below to pre-fill the command center composer and kick off your first agent swarm.
-              </p>
-              {step === 3 && (
-                <div className="flex flex-col gap-4 pt-2">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {STARTER_TASKS.map((t) => {
-                      const isSelected = selectedStarter === t.id;
-                      return (
-                        <div
-                          key={t.id}
-                          onClick={() => setSelectedStarter(t.id)}
-                          className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all ${
-                            isSelected
-                              ? "border-[#93C645]/50 bg-[#93C645]/10 text-stone-900"
-                              : "border-sand-200 bg-sand-50 text-stone-500 hover:text-stone-800 hover:bg-sand-50"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 mb-1.5 font-semibold text-xs text-stone-900">
-                            <Sparkles className="w-3.5 h-3.5 text-[#93C645]" />
-                            {t.title}
-                          </div>
-                          <p className="text-[11px] leading-relaxed line-clamp-3">{t.description}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {repos.length > 0 ? (
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">
-                        Repository
-                      </span>
-                      <select
-                        value={starterRepo}
-                        onChange={e => setStarterRepo(e.target.value)}
-                        className="field text-sm max-w-md"
-                      >
-                        {repos.map(r => (
-                          <option key={r.full_name} value={r.url}>{r.full_name}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <p className="text-xs text-amber-400/90">
-                      No repositories yet. Connect GitHub in step 1, then pick one here.
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-3 pt-3">
-                    <button
-                      onClick={() => {
-                        const starterObj = STARTER_TASKS.find((s) => s.id === selectedStarter);
-                        handleLaunchStarter(starterObj?.task || STARTER_TASKS[0].task, starterRepo);
-                      }}
-                      disabled={!starterRepo}
-                      className="flex items-center gap-2 btn-primary px-6 py-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <span>Open in composer</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        capture("onboarding_step_skipped", { step: 3 });
-                        handleLaunchStarter("");
-                      }}
-                      className="text-xs text-stone-500 hover:text-stone-900 transition-colors"
-                    >
-                      Skip to dashboard
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

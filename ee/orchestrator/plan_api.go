@@ -140,7 +140,7 @@ func (s *Server) handleRejectJobPlan(w http.ResponseWriter, r *http.Request, job
 		http.Error(w, "failed to reject plan", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected", "planner_notified": true})
 }
 
 func (s *Server) handleJobSpendCap(w http.ResponseWriter, r *http.Request, orgID, jobID string) {
