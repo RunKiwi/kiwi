@@ -24,9 +24,10 @@ export function PlanUsage() {
 
   if (!u) return null;
 
-  const resolvedLimit = u.agent_minutes_limit && u.agent_minutes_limit > 0
-    ? u.agent_minutes_limit
-    : (u.plan === "pro" || u.plan === "individual" ? 2000 : u.plan === "team" ? 5000 : 500);
+  // agent_minutes_limit is always present and 0 means unlimited (see api.ts) —
+  // there is no "unset" case to guess a plan-based default for, and guessing
+  // one broke any plan (e.g. enterprise) not covered by the guess.
+  const resolvedLimit = u.agent_minutes_limit;
   const hasCap = resolvedLimit > 0;
   const pct = hasCap ? Math.min(100, (u.agent_minutes_used / resolvedLimit) * 100) : 0;
   const over = hasCap && u.agent_minutes_used >= resolvedLimit;

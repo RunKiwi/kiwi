@@ -182,9 +182,9 @@ export default function SlackBindingsPage() {
 
         <form onSubmit={onCreate} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            {installations.length > 0 && (
-              <div>
-                <label className="block font-bold text-stone-800 mb-1">Slack Workspace Team ID</label>
+            <div>
+              <label className="block font-bold text-stone-800 mb-1">Slack Workspace Team ID</label>
+              {installations.length > 0 ? (
                 <select
                   value={teamID}
                   onChange={(e) => setTeamID(e.target.value)}
@@ -197,8 +197,16 @@ export default function SlackBindingsPage() {
                     </option>
                   ))}
                 </select>
-              </div>
-            )}
+              ) : (
+                <input
+                  value={teamID}
+                  onChange={(e) => setTeamID(e.target.value)}
+                  placeholder="T0123456789"
+                  className="w-full px-3 py-2 rounded-xl border border-sand-200 bg-sand-50/80 focus:bg-white text-xs font-mono outline-none focus:border-stone-900 transition-all shadow-2xs"
+                  required
+                />
+              )}
+            </div>
 
             <div>
               <label className="block font-bold text-stone-800 mb-1">Slack Channel ID</label>
@@ -211,7 +219,7 @@ export default function SlackBindingsPage() {
               />
             </div>
 
-            <div className={installations.length > 0 ? "sm:col-span-2" : ""}>
+            <div className="sm:col-span-2">
               <label className="block font-bold text-stone-800 mb-1">Target Repository URL</label>
               <input
                 value={repoURL}
@@ -275,7 +283,7 @@ export default function SlackBindingsPage() {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              disabled={creating || !channelID.trim() || !repoURL.trim()}
+              disabled={creating || !teamID.trim() || !channelID.trim() || !repoURL.trim()}
               className="px-5 py-2 rounded-xl bg-charcoal-900 hover:bg-charcoal-800 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
             >
               {creating ? <KiwiMicroButtonLoader /> : <Plus className="w-3.5 h-3.5 text-kiwi-400 stroke-[2.5]" />}

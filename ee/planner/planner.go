@@ -59,6 +59,10 @@ type PlanRequest struct {
 	// InvestigationOnly hints the Architect that this task may be answerable
 	// without a code change. Currently set only by the Slack trigger path.
 	InvestigationOnly bool `json:"investigation_only,omitempty"`
+	// DryRun is threaded onto every worker spec purely as a label the jobs
+	// list reads back (store.QueuedTask.Spec["dry_run"], aggregated into
+	// JobSummary.IsDryRun) — it does not change what the session or daemon do.
+	DryRun bool `json:"dry_run,omitempty"`
 	// ReferenceMode determines how prior job learnings are injected (""|"off"|"manual"|"auto").
 	ReferenceMode string `json:"reference_mode"`
 	// ReferenceJobIDs specifies the jobs to inject when ReferenceMode is "manual".

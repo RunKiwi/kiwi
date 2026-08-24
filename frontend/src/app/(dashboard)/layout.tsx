@@ -32,6 +32,7 @@ import {
   LineChart,
 } from "lucide-react";
 import { api, type UsageResponse, type ValidateResponse, type GithubRepo } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { SiGithub, SiDatadog, SiPrometheus } from "react-icons/si";
 import { FaSlack } from "react-icons/fa6";
 import { Logo } from "@/components/Logo";
@@ -110,6 +111,7 @@ function UserAvatar({
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const { jobs, daemons, loadJobs, loadDaemons } = useFleetStore();
 
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -128,6 +130,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setShowMobileMenu(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (isAuthenticated === false) {
+      router.push("/login");
+    }
+  }, [isAuthenticated, router]);
 
   useEffect(() => {
     loadJobs().catch(() => {});
@@ -191,10 +199,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
-  const limitMinutes = usage?.agent_minutes_limit && usage.agent_minutes_limit > 0
-    ? usage.agent_minutes_limit
-    : (plan === "pro" || plan === "individual" ? 2000 : plan === "team" ? 5000 : 500);
-  const percentUsed = limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
+  // agent_minutes_limit is 0 = unlimited once usage has loaded (see api.ts) —
+  // there is no plan-based default to guess here, and guessing one broke any
+  // plan (e.g. enterprise) not covered by the guess.
+  const limitMinutes = usage?.agent_minutes_limit ?? 0;
+  const hasMinutesCap = usage != null && limitMinutes > 0;
+  const percentUsed = hasMinutesCap ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
   const planReviewsCount = (jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.requires_plan_approval).length;
   const needsAttentionCount = planReviewsCount;
@@ -578,9 +588,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setSelectedIndex(0);
   }, [cmdQuery, showCommandPalette]);
 
+  // Don't render the dashboard shell until we've confirmed authentication —
+  // otherwise a visitor with no/expired token briefly sees the full
+  // interactive UI before the redirect below fires.
+  if (isAuthenticated === null || isAuthenticated === false) {
+    return null;
+  }
+
   return (
     <div className="h-screen max-h-screen overflow-hidden p-2.5 sm:p-3 md:p-4 flex flex-col font-sans bg-[#F8F7F4] bg-dot-grid text-stone-900 selection:bg-kiwi-200">
-      
+
       {/* ================= TOP COMPACT NAVBAR ================= */}
       <header className="shrink-0 mb-2 px-2.5 sm:px-3 py-1.5 flex items-center justify-between gap-2 sm:gap-3 text-xs bg-sand-50/80 backdrop-blur-md rounded-xl sm:rounded-2xl border border-sand-200/80 shadow-2xs z-30 font-sans">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -635,7 +652,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <Zap className="w-3 h-3 text-amber-500 fill-current" />
             <span>
-              {usedMinutes.toFixed(1)} <span className="text-stone-400">/ {limitMinutes}m</span>
+              {usedMinutes.toFixed(1)} <span className="text-stone-400">/ {hasMinutesCap ? `${limitMinutes}m` : "Unlimited"}</span>
             </span>
           </Link>
 
@@ -880,7 +897,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     {usedMinutes.toFixed(1)}
                   </span>
                   <span className="text-[11px] text-stone-400 font-normal">
-                    / {limitMinutes}m
+                    / {hasMinutesCap ? `${limitMinutes}m` : "Unlimited"}
                   </span>
                 </div>
                 <span

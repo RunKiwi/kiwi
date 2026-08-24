@@ -259,6 +259,14 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [jobPlan, setJobPlan] = useState<JobPlan | null>(null);
+  // A getJobPlan response has to be checked against whichever task is open by
+  // the time it lands, not the one it was requested for — otherwise a slow
+  // response for a task the admin has since navigated away from can overwrite
+  // the plan currently on screen with a different job's.
+  const latestTaskIdRef = useRef(taskId);
+  useEffect(() => {
+    latestTaskIdRef.current = taskId;
+  }, [taskId]);
 
   const handleRerunWithEdits = () => {
     if (!currentJob && !summaryJob) return;
@@ -308,7 +316,13 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
 
   useEffect(() => {
     if (!taskId) return;
-    api.getJobPlan(taskId).then(setJobPlan).catch(() => setJobPlan(null));
+    api.getJobPlan(taskId)
+      .then((plan) => {
+        if (latestTaskIdRef.current === taskId) setJobPlan(plan);
+      })
+      .catch(() => {
+        if (latestTaskIdRef.current === taskId) setJobPlan(null);
+      });
   }, [taskId]);
 
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -905,11 +919,15 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
               plan={jobPlan}
               onApproved={() => {
                 loadJob(taskId!);
-                api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+                api.getJobPlan(taskId!).then((plan) => {
+                  if (latestTaskIdRef.current === taskId) setJobPlan(plan);
+                }).catch(() => {});
               }}
               onRejected={() => {
                 loadJob(taskId!);
-                api.getJobPlan(taskId!).then(setJobPlan).catch(() => {});
+                api.getJobPlan(taskId!).then((plan) => {
+                  if (latestTaskIdRef.current === taskId) setJobPlan(plan);
+                }).catch(() => {});
               }}
             />
           )}

@@ -72,6 +72,35 @@ func TestRestGitHub_CreatePR(t *testing.T) {
 	}
 }
 
+// TestRestGitHub_CreatePR_ResolvesDefaultBranch covers the repo whose default
+// branch isn't "main": with base left empty, CreatePR must ask the GitHub API
+// for the real default branch rather than guessing.
+func TestRestGitHub_CreatePR_ResolvesDefaultBranch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r":
+			json.NewEncoder(w).Encode(map[string]string{"default_branch": "trunk"})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/pulls":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["base"] != "trunk" {
+				t.Errorf("base = %q, want trunk (resolved from GitHub API, not hardcoded main)", body["base"])
+			}
+			json.NewEncoder(w).Encode(map[string]string{"html_url": "https://github.com/o/r/pull/1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	gh := &restGitHub{token: "token123", api: srv.URL}
+	if _, err := gh.CreatePR(context.Background(), "o", "r", "", "kiwi/j1", "title", "body"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type fakeGH struct {
 	called       bool
 	findCalled   bool
@@ -148,11 +177,17 @@ func TestPublishResult(t *testing.T) {
 	if !gh.called {
 		t.Error("gh client not called")
 	}
-	if gh.base != "main" {
-		t.Errorf("got base %q, want main", gh.base)
+	// spec.Ref is unset: publishResult must pass base through empty rather than
+	// guessing locally, so the real githubClient (restGitHub) resolves the
+	// repo's actual default branch via the GitHub API. gitcache clones bare,
+	// which never populates refs/remotes/origin/HEAD, so any local git-based
+	// guess here would silently hardcode "main" for repos that default to
+	// something else (master/develop/trunk).
+	if gh.base != "" {
+		t.Errorf("got base %q, want empty (left for CreatePR to resolve)", gh.base)
 	}
 
-	// Test 3: spec.Ref is "HEAD" - must resolve to main rather than passing "HEAD"
+	// Test 3: spec.Ref is "HEAD" - must still be passed through as-is, not resolved locally.
 	gh.called = false
 	spec.JobID = "job2"
 	spec.Ref = "HEAD"
@@ -164,8 +199,8 @@ func TestPublishResult(t *testing.T) {
 	if !gh.called {
 		t.Error("gh client not called for spec with Ref=HEAD")
 	}
-	if gh.base == "HEAD" || gh.base == "" {
-		t.Errorf("base must not be %q; expected a real branch name like main", gh.base)
+	if gh.base != "HEAD" {
+		t.Errorf("got base %q, want HEAD passed through for CreatePR to resolve", gh.base)
 	}
 
 	// Test 4: idempotency (PR already exists)
