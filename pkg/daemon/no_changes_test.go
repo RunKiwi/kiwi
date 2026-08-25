@@ -44,7 +44,7 @@ func TestPublishResult_UnchangedWorktreeIsAnError(t *testing.T) {
 
 	_, _, err := publishResult(context.Background(), dir,
 		agent.WorkerSpec{ID: "t1", JobID: "job_1", Task: "add an example"},
-		"tok", nil, "")
+		"", "tok", nil, "")
 
 	if err == nil {
 		t.Fatal("an unchanged worktree must not be reported as a delivered result")
@@ -77,7 +77,7 @@ func TestPublishResult_RealChangeIsNotTreatedAsNoChanges(t *testing.T) {
 
 	_, _, err := publishResult(context.Background(), dir,
 		agent.WorkerSpec{ID: "t1", JobID: "job_1", Task: "add an example"},
-		"tok", nil, "")
+		"", "tok", nil, "")
 
 	if errors.Is(err, errNoChanges) {
 		t.Error("a worktree with a new file was reported as unchanged")
