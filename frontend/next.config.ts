@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
       process.env.KIWI_BACKEND_URL ||
       process.env.NEXT_PUBLIC_KIWI_API_URL ||
       "http://127.0.0.1:8080";
-    return [
+    const proxyToBackend = [
       {
         source: "/api/:path*",
         destination: `${target}/api/:path*`,
@@ -36,6 +36,14 @@ const nextConfig: NextConfig = {
         destination: `${target}/auth/:path*`,
       },
     ];
+    // fallback (not the default afterFiles list a bare array would give) so
+    // Next's own dynamic page routes win first — e.g. app/(dashboard)/admin/
+    // orgs/[orgId]/page.tsx over the /admin/:path* proxy rule above. With the
+    // default ordering, dynamic routes are matched AFTER these rewrites, so
+    // that page (and its RSC navigation fetches) got silently proxied to the
+    // Go backend instead, which 401'd with "missing Authorization header" —
+    // a plain page navigation, not an api.ts call, carries no Bearer token.
+    return { fallback: proxyToBackend };
   },
 };
 
