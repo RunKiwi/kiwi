@@ -137,6 +137,39 @@ func (a *LLMArchitect) complete(ctx context.Context, prompt string) (string, err
 	return resp, err
 }
 
+// completeSpec calls complete and parses the result as a Spec, retrying once
+// with a corrective nudge if parseSpec finds no JSON object.
+//
+// A weak or free-tier model occasionally answers in prose, or — for a
+// reasoning-family model behind an OpenAI-compatible endpoint — spends its
+// whole turn thinking and returns an empty content string, which reads
+// exactly like empty prose to parseSpec. Either way the fix is the same:
+// tell the model plainly what went wrong and give it one more turn, rather
+// than losing every prior round's work to a single malformed response.
+func (a *LLMArchitect) completeSpec(ctx context.Context, prompt string) (Spec, error) {
+	resp, err := a.complete(ctx, prompt)
+	if err != nil {
+		return Spec{}, err
+	}
+	spec, err := parseSpec(resp)
+	if err == nil {
+		return spec, nil
+	}
+
+	retryPrompt := prompt + fmt.Sprintf(
+		"\n\nYour previous response could not be used: %s. Respond with ONLY the JSON object described above — no prose, no code fence, no explanation.",
+		err)
+	resp2, err2 := a.complete(ctx, retryPrompt)
+	if err2 != nil {
+		return Spec{}, err
+	}
+	spec2, err2 := parseSpec(resp2)
+	if err2 != nil {
+		return Spec{}, err
+	}
+	return spec2, nil
+}
+
 // exploreAndAnswer runs a bounded read-only tool loop, then returns the final
 // text turn — the same JSON response Plan/Review expect from Complete, just
 // arrived at after looking rather than guessing.
@@ -287,13 +320,9 @@ func (a *LLMArchitect) Plan(ctx context.Context, in PlanInput) (Spec, error) {
 	fmt.Fprintf(&b, "\n# Repository files\n%s\n", strings.Join(in.RepoMap, "\n"))
 	fmt.Fprintf(&b, "\nYou have at most %d rounds. Write the spec for round 1.\n", in.MaxRoundsBudget)
 
-	resp, err := a.complete(ctx, b.String())
+	spec, err := a.completeSpec(ctx, b.String())
 	if err != nil {
 		return Spec{}, fmt.Errorf("architect planning failed: %w", err)
-	}
-	spec, err := parseSpec(resp)
-	if err != nil {
-		return Spec{}, err
 	}
 	// An opening verdict of approve is nonsense — nothing has been done yet —
 	// and would silently deliver an empty pull request.
@@ -359,13 +388,9 @@ func (a *LLMArchitect) Review(ctx context.Context, in ReviewInput) (Spec, error)
 
 	fmt.Fprintf(&b, "\n%d round(s) remain after this one. Review and return your verdict.\n", in.RoundsRemaining)
 
-	resp, err := a.complete(ctx, b.String())
+	spec, err := a.completeSpec(ctx, b.String())
 	if err != nil {
 		return Spec{}, fmt.Errorf("architect review failed: %w", err)
-	}
-	spec, err := parseSpec(resp)
-	if err != nil {
-		return Spec{}, err
 	}
 
 	// The Architect is not permitted to approve work that does not exist or does

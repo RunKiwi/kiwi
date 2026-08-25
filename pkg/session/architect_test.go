@@ -167,6 +167,56 @@ func TestArchitectToolsDefsAreReadOnly(t *testing.T) {
 	}
 }
 
+// A weak or free-tier model occasionally answers in prose instead of JSON.
+// completeSpec must give it one corrective turn before failing the round.
+func TestPlanRetriesOnceOnUnparsableResponse(t *testing.T) {
+	calls := 0
+	mp := provider.NewMockProvider()
+	mp.CompleteFunc = func(system, user string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "Sure, here is my plan: I will fix the bug.", nil
+		}
+		if !strings.Contains(user, "could not be used") {
+			t.Errorf("retry prompt did not carry the corrective nudge: %q", user)
+		}
+		return `{"verdict":"proceed","objective":"fix it","acceptance_criteria":["x"]}`, nil
+	}
+	arch := &LLMArchitect{Provider: mp}
+
+	spec, err := arch.Plan(context.Background(), PlanInput{Task: "task", MaxRoundsBudget: 3})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("Complete called %d times, want 2 (initial + retry)", calls)
+	}
+	if spec.Objective != "fix it" {
+		t.Errorf("objective = %q, want the retry's response to win", spec.Objective)
+	}
+}
+
+// A second unparsable response must not be retried again — one corrective
+// turn is the budget, not a loop — and the surfaced error is the original
+// failure, not the retry's.
+func TestPlanFailsAfterOneFailedRetry(t *testing.T) {
+	calls := 0
+	mp := provider.NewMockProvider()
+	mp.CompleteFunc = func(system, user string) (string, error) {
+		calls++
+		return "still no JSON here", nil
+	}
+	arch := &LLMArchitect{Provider: mp}
+
+	_, err := arch.Plan(context.Background(), PlanInput{Task: "task", MaxRoundsBudget: 3})
+	if err == nil {
+		t.Fatal("expected an error after both attempts failed to parse")
+	}
+	if calls != 2 {
+		t.Fatalf("Complete called %d times, want 2 (initial + retry, then give up)", calls)
+	}
+}
+
 // TestReviewAllowsEmptyDiffOnlyWhenBothInvestigationOnlyAndNoDiffExpected
 // covers the actual safeguard: an empty-diff approval must survive Review
 // only when the CALLER flagged the task InvestigationOnly and THIS round's

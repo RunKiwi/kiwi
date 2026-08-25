@@ -156,7 +156,11 @@ func parseSpec(resp string) (Spec, error) {
 	start := strings.IndexByte(resp, '{')
 	end := strings.LastIndexByte(resp, '}')
 	if start == -1 || end == -1 || start >= end {
-		return Spec{}, fmt.Errorf("no JSON object in architect response")
+		preview := resp
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return Spec{}, fmt.Errorf("no JSON object in architect response (%d chars): %q", len(resp), preview)
 	}
 	var s Spec
 	if err := json.Unmarshal([]byte(resp[start:end+1]), &s); err != nil {

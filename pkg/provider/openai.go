@@ -120,6 +120,11 @@ type openaiResponse struct {
 			Content string `json:"content"`
 			// Refusal is populated instead of Content when the model declines.
 			Refusal string `json:"refusal"`
+			// Reasoning is a reasoning-family model's thinking, returned
+			// alongside Content by OpenRouter — except some models leave
+			// Content empty and put the whole answer here instead. See the
+			// fallback below.
+			Reasoning string `json:"reasoning"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -221,7 +226,11 @@ func (p *OpenAIProvider) chat(ctx context.Context, model, system, user string, m
 	if choice.Message.Refusal != "" {
 		return "", "refusal", nil
 	}
-	return choice.Message.Content, choice.FinishReason, nil
+	answer := choice.Message.Content
+	if answer == "" {
+		answer = choice.Message.Reasoning
+	}
+	return answer, choice.FinishReason, nil
 }
 
 // GetCodeEdit is the Actor: propose the complete corrected file.

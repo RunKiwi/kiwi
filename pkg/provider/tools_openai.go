@@ -52,6 +52,11 @@ type openaiToolResponse struct {
 			Content   string           `json:"content"`
 			Refusal   string           `json:"refusal"`
 			ToolCalls []openaiToolCall `json:"tool_calls"`
+			// Reasoning carries a reasoning-family model's thinking, which
+			// OpenRouter returns alongside Content — except that for some
+			// models Content comes back empty while the whole answer landed
+			// here instead. See the fallback where Turn.Text is built.
+			Reasoning string `json:"reasoning"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -211,7 +216,15 @@ func (c *openaiConversation) Send(ctx context.Context, text string, results []To
 		ToolCalls: choice.Message.ToolCalls,
 	})
 
-	turn := Turn{Text: choice.Message.Content}
+	answer := choice.Message.Content
+	if answer == "" {
+		// A reasoning model that spent its whole answer in Reasoning instead
+		// of Content would otherwise return an empty turn — indistinguishable
+		// from prose that lost its JSON, but recoverable here instead of only
+		// at the corrective-retry level.
+		answer = choice.Message.Reasoning
+	}
+	turn := Turn{Text: answer}
 	for _, tc := range choice.Message.ToolCalls {
 		args := tc.Function.Arguments
 		if args == "" {

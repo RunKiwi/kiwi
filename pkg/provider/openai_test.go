@@ -135,6 +135,26 @@ func TestOpenAIRefusalIsReported(t *testing.T) {
 	}
 }
 
+// Some reasoning-family models behind an OpenAI-compatible endpoint (e.g.
+// OpenRouter) return their whole answer in the "reasoning" field and leave
+// "content" empty, with finish_reason "stop" — not "length", so the
+// truncation guard never fires. Without a fallback that reads as an empty
+// answer, which a caller like session.parseSpec cannot tell apart from a
+// model that just answered in prose.
+func TestOpenAIFallsBackToReasoningWhenContentIsEmpty(t *testing.T) {
+	body := `{"choices":[{"message":{"content":"","reasoning":"{\"verdict\":\"proceed\"}"},"finish_reason":"stop"}],"usage":{}}`
+	srv, op, _ := openaiTestServer(t, body, http.StatusOK)
+	defer srv.Close()
+
+	text, err := op.Complete(context.Background(), "sys", "user")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if text != `{"verdict":"proceed"}` {
+		t.Errorf("text = %q, want the reasoning field's content", text)
+	}
+}
+
 // The same guarantee the other two providers make: a response cut off at the
 // output limit is an error, never partial text passed off as a whole answer.
 func TestOpenAICompleteReportsTruncation(t *testing.T) {
