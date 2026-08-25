@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSandboxDrivers is a contract test that runs against any sandbox driver
@@ -185,5 +186,85 @@ func TestContainerName(t *testing.T) {
 	}
 	if a == b {
 		t.Errorf("two calls returned the same name %q — container names must be unique across concurrent orgs on the shared fleet", a)
+	}
+}
+
+// TestWatchProvisioning exercises the full provisioning watcher with a stub
+// Docker CLI, verifying that a valid State.StartedAt causes Result.ProvisionMs
+// to be positive, while an unstarted or removed container returns zero.
+func TestWatchProvisioning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping watchProvisioning test in short mode")
+	}
+
+	// Create a temporary directory for our stub docker script
+	tmpDir := t.TempDir()
+	stubDockerPath := filepath.Join(tmpDir, "docker")
+
+	tests := []struct {
+		name         string
+		stubScript   string
+		wantPositive bool
+		wantZero     bool
+	}{
+		{
+			name: "container started",
+			stubScript: `#!/bin/sh
+if [ "$1" = "inspect" ] && [ "$2" = "--format" ]; then
+    echo "2026-08-25T12:00:00.123456789Z"
+    exit 0
+fi
+exit 1
+`,
+			wantPositive: true,
+		},
+		{
+			name: "container not started yet",
+			stubScript: `#!/bin/sh
+if [ "$1" = "inspect" ] && [ "$2" = "--format" ]; then
+    echo "0001-01-01T00:00:00Z"
+    exit 0
+fi
+exit 1
+`,
+			wantZero: true,
+		},
+		{
+			name: "container removed",
+			stubScript: `#!/bin/sh
+if [ "$1" = "inspect" ] && [ "$2" = "--format" ]; then
+    exit 1
+fi
+exit 1
+`,
+			wantZero: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Write the stub script
+			if err := os.WriteFile(stubDockerPath, []byte(tt.stubScript), 0755); err != nil {
+				t.Fatalf("failed to write stub docker: %v", err)
+			}
+
+			// Temporarily prepend our stub to PATH
+			origPath := os.Getenv("PATH")
+			os.Setenv("PATH", tmpDir+":"+origPath)
+			defer os.Setenv("PATH", origPath)
+
+			// Call watchProvisioning with callStart far in the past so the stub's
+			// fixed timestamp will definitely be after it
+			ctx := context.Background()
+			callStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+			provisionMs := watchProvisioning(ctx, "test-container", callStart)
+
+			if tt.wantPositive && provisionMs <= 0 {
+				t.Errorf("expected positive ProvisionMs, got %d", provisionMs)
+			}
+			if tt.wantZero && provisionMs != 0 {
+				t.Errorf("expected zero ProvisionMs, got %d", provisionMs)
+			}
+		})
 	}
 }

@@ -144,6 +144,9 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	// column enumerating ecosystems that would drift from runtime.go's list.
 	sandboxProvisionMs := int64Ptr(box.ProvisionMs())
 	sandboxImage := deps.sandboxCfg.DockerImage
+	if sandboxImage == "" {
+		sandboxImage = "golang:1.25-alpine"
+	}
 	prog.add(ver.TaskEvent{Phase: "sandbox_provision", Outcome: "ok", DurationMs: box.ProvisionMs()})
 
 	// Verification joins the Implementer inside this container. Both were
