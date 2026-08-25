@@ -105,6 +105,16 @@ type ResultReq struct {
 	// provided" (nil, from an older daemon) from "explicitly zero" (0% cache hit).
 	CachedPromptTokens *int64 `json:"cached_prompt_tokens,omitempty"`
 	RawPromptTokens    *int64 `json:"raw_prompt_tokens,omitempty"`
+	// SandboxProvisionMs is how long the task's sandbox container took to
+	// start, measured independently of the task's own duration or outcome —
+	// see sandbox.Session.ProvisionMs. Same nil-vs-zero convention as the
+	// cache fields above.
+	SandboxProvisionMs *int64 `json:"sandbox_provision_ms,omitempty"`
+	// SandboxImage is the docker image the task's sandbox ran, e.g.
+	// "golang:1.25-alpine" — its own prefix names the ecosystem, so this
+	// doubles as ecosystem attribution without a second field to keep in
+	// sync with runtime.go's list.
+	SandboxImage string `json:"sandbox_image,omitempty"`
 }
 
 // RenewReq extends a task's lease while it is still running.

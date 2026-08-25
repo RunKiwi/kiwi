@@ -349,6 +349,12 @@ func (s *PostgresStore) CompleteTask(ctx context.Context, c TaskCompletion) (boo
 		if c.RawPromptTokens != nil {
 			updates["raw_prompt_tokens"] = *c.RawPromptTokens
 		}
+		if c.SandboxProvisionMs != nil {
+			updates["sandbox_provision_ms"] = *c.SandboxProvisionMs
+		}
+		if c.SandboxImage != "" {
+			updates["sandbox_image"] = c.SandboxImage
+		}
 		if c.ResultURL == "" {
 			updates["result_url"] = nil
 		} else {
@@ -585,6 +591,14 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		PlanStatus           string
 		SpendCapUSD          float64
 		IsDryRun             bool
+
+		// SandboxProvisionMs is the earliest task's own cold-start number, not a
+		// sum or average across the job's tasks: a continuation starts its own
+		// fresh sandbox session, so "how long did it take before work could
+		// start" is a per-task fact, and the card shows the one the job's
+		// original submission actually waited on.
+		SandboxProvisionMs int64
+		earliestTaskAt     time.Time
 	}
 
 	jobMap := make(map[string]*jobAgg)
@@ -612,6 +626,11 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 		agg.CostUSD += t.CostUSD
 		agg.TokensIn += t.TokensIn
 		agg.TokensOut += t.TokensOut
+
+		if agg.earliestTaskAt.IsZero() || t.CreatedAt.Before(agg.earliestTaskAt) {
+			agg.earliestTaskAt = t.CreatedAt
+			agg.SandboxProvisionMs = t.SandboxProvisionMs
+		}
 
 		// The overall goal + repo live on the task spec. Prefer the job-level
 		// "job_task" the planner stamps; fall back to the worker task text.
@@ -763,6 +782,7 @@ func (s *PostgresStore) ListJobs(ctx context.Context, orgID string) ([]JobSummar
 			PlanStatus:           agg.PlanStatus,
 			SpendCapUSD:          agg.SpendCapUSD,
 			IsDryRun:             agg.IsDryRun,
+			SandboxProvisionMs:   agg.SandboxProvisionMs,
 		})
 	}
 

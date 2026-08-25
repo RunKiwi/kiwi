@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestListJobsSurfacesTaskAndRepo(t *testing.T) {
@@ -72,6 +73,45 @@ func TestListJobsFallsBackToWorkerTask(t *testing.T) {
 	}
 	if jobs[0].Repo != "" {
 		t.Errorf("Repo = %q, want empty when no repo_url", jobs[0].Repo)
+	}
+}
+
+// A continuation starts its own fresh sandbox session, so the job's cold
+// start is the ORIGINAL task's number — not a sum, not the newest task's —
+// otherwise a thread with several rounds would report an ever-growing (or
+// arbitrarily overwritten) number that no longer answers "how long did this
+// job wait before work could start."
+func TestListJobsUsesEarliestTasksSandboxProvisionMs(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now().Add(-time.Hour)
+	if err := s.db.Create(&QueuedTask{
+		ID: "job3-w1", OrgID: "org1", JobID: "job3",
+		CreatedAt:          base,
+		SandboxProvisionMs: 250,
+		Spec:               map[string]interface{}{"task": "original"},
+	}).Error; err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+	if err := s.db.Create(&QueuedTask{
+		ID: "job3-w2", OrgID: "org1", JobID: "job3",
+		CreatedAt:          base.Add(10 * time.Minute), // a later continuation
+		SandboxProvisionMs: 9000,
+		Spec:               map[string]interface{}{"task": "continuation"},
+	}).Error; err != nil {
+		t.Fatalf("create continuation task: %v", err)
+	}
+
+	jobs, err := s.ListJobs(ctx, "org1")
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if got, want := jobs[0].SandboxProvisionMs, int64(250); got != want {
+		t.Errorf("SandboxProvisionMs = %d, want %d (the earliest task's own number)", got, want)
 	}
 }
 

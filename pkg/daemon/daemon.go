@@ -613,6 +613,15 @@ type taskResult struct {
 	// path must still support nil for any non-session code path.
 	cachedPromptTokens *int64
 	rawPromptTokens    *int64
+	// sandboxProvisionMs is how long this task's sandbox container took to
+	// start, independent of how long the task itself then ran — see
+	// sandbox.Session.ProvisionMs. Same nil-vs-zero convention as the
+	// cache-usage fields above: nil on any path that never got as far as
+	// starting a sandbox (e.g. no API key for the model).
+	sandboxProvisionMs *int64
+	// sandboxImage is the docker image the task's sandbox ran, e.g.
+	// "golang:1.25-alpine" — empty on any path that never started one.
+	sandboxImage string
 }
 
 // effectiveRef resolves what ref to check out, with no I/O of its own so the
@@ -1156,6 +1165,8 @@ func (d *Daemon) reportResult(ctx context.Context, taskID, leaseID string, out t
 		PlanSpecJSON:       out.planSpecJSON,
 		CachedPromptTokens: out.cachedPromptTokens,
 		RawPromptTokens:    out.rawPromptTokens,
+		SandboxProvisionMs: out.sandboxProvisionMs,
+		SandboxImage:       out.sandboxImage,
 	}
 	// Attest the telemetry with the daemon's own signing key. In BYOC this key
 	// lives only in the customer's cloud, so the execution half of the record is

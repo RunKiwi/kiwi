@@ -471,6 +471,8 @@ func (s *Server) handleDaemonResult(w http.ResponseWriter, r *http.Request) {
 		TokensOut:          tokensOut,
 		CachedPromptTokens: req.CachedPromptTokens,
 		RawPromptTokens:    req.RawPromptTokens,
+		SandboxProvisionMs: req.SandboxProvisionMs,
+		SandboxImage:       req.SandboxImage,
 	})
 	if err != nil {
 		log.Printf("[daemon] complete task %s: %v", req.TaskID, err)

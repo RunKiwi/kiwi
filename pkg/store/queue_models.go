@@ -114,8 +114,15 @@ type QueuedTask struct {
 	// (InputTokens + CacheReadTokens + CacheWriteTokens, per
 	// pkg/daemon/session_store.go) so every existing reader of TokensIn is
 	// unaffected; these two are additive detail for cache-discount reporting.
-	CachedPromptTokens int64      `gorm:"not null;default:0" json:"cached_prompt_tokens"`
-	RawPromptTokens    int64      `gorm:"not null;default:0" json:"raw_prompt_tokens"`
+	CachedPromptTokens int64 `gorm:"not null;default:0" json:"cached_prompt_tokens"`
+	RawPromptTokens    int64 `gorm:"not null;default:0" json:"raw_prompt_tokens"`
+	// SandboxProvisionMs is how long this task's sandbox container took to
+	// start (see sandbox.Session.ProvisionMs); SandboxImage is the image it
+	// ran, whose own prefix ("golang:", "node:", "python:", ...) doubles as
+	// ecosystem attribution for an admin breakdown, without a second column
+	// enumerating ecosystems that would drift from pkg/daemon/runtime.go's list.
+	SandboxProvisionMs int64      `gorm:"not null;default:0" json:"sandbox_provision_ms"`
+	SandboxImage       string     `gorm:"not null;default:''" json:"sandbox_image"`
 	MeteredAt          *time.Time `json:"metered_at"`
 	CreatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"created_at"`
 	UpdatedAt          time.Time  `gorm:"not null;default:current_timestamp" json:"updated_at"`

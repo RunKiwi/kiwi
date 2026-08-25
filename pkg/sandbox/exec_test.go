@@ -83,7 +83,7 @@ func TestSandboxDrivers(t *testing.T) {
 // translate to `--network none`, and its absence must never silently add
 // network access.
 func TestBuildDockerArgs_NetworkNone(t *testing.T) {
-	on, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{NetworkNone: true}, "alpine")
+	on, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{NetworkNone: true}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestBuildDockerArgs_NetworkNone(t *testing.T) {
 		t.Errorf("NetworkNone=true must add `--network none`, got %q", strings.Join(on, " "))
 	}
 
-	off, envFile2, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{}, "alpine")
+	off, envFile2, err := buildDockerArgs("/tmp/test", "ls", nil, &SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildDockerArgs_Runtime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, tt.cfg, "alpine")
+			args, envFile, err := buildDockerArgs("/tmp/test", "ls", nil, tt.cfg, "alpine", "kiwi-sbx-test")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -144,5 +144,46 @@ func TestBuildDockerArgs_Runtime(t *testing.T) {
 				t.Errorf("expected no --runtime flag, got %q", argsStr)
 			}
 		})
+	}
+}
+
+// The heart of the cold-start measurement: Docker reports the Go zero time
+// for a container that has not started yet, and that must read as "not
+// started" — not as a real (garbage) instant a naive parse would accept.
+func TestParseContainerStartedAt(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"not started yet", "0001-01-01T00:00:00Z\n", false},
+		{"real timestamp", "2026-08-25T12:00:00.123456789Z\n", true},
+		{"malformed", "not-a-timestamp", false},
+		{"empty", "", false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := parseContainerStartedAt(tt.raw)
+			if ok != tt.want {
+				t.Errorf("parseContainerStartedAt(%q) ok = %v, want %v", tt.raw, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainerName(t *testing.T) {
+	a, err := containerName()
+	if err != nil {
+		t.Fatalf("containerName: %v", err)
+	}
+	b, err := containerName()
+	if err != nil {
+		t.Fatalf("containerName: %v", err)
+	}
+	if !strings.HasPrefix(a, "kiwi-sbx-") {
+		t.Errorf("containerName() = %q, want kiwi-sbx- prefix", a)
+	}
+	if a == b {
+		t.Errorf("two calls returned the same name %q — container names must be unique across concurrent orgs on the shared fleet", a)
 	}
 }

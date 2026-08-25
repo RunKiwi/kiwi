@@ -35,7 +35,17 @@ type Session struct {
 	// container is the running container's name, empty in local mode.
 	container string
 	closed    bool
+	// provisionMs is how long the backing container took to reach
+	// State.Running. Unlike RunCommand's one-shot path this needs no polling
+	// trick: `docker run -d` already blocks until the container has started
+	// (it does not wait for the command inside to finish, since nothing runs
+	// synchronously in detached mode), so timing the call that starts it is
+	// exactly the number. Zero in local mode, where nothing is provisioned.
+	provisionMs int64
 }
+
+// ProvisionMs reports how long the session's container took to start.
+func (s *Session) ProvisionMs() int64 { return s.provisionMs }
 
 // SessionOpts tunes a Session.
 type SessionOpts struct {
@@ -103,11 +113,13 @@ func NewSession(ctx context.Context, dir string, cfg *SandboxConfig, opts Sessio
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+	callStart := time.Now()
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("start sandbox session: %v: %s", err, strings.TrimSpace(out.String()))
 	}
 
 	s.container = name
+	s.provisionMs = time.Since(callStart).Milliseconds()
 	return s, nil
 }
 

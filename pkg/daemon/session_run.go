@@ -136,6 +136,15 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			log.Printf("Task %s: could not remove the sandbox container: %v", spec.ID, cerr)
 		}
 	}()
+	// Recorded once, here, rather than read from box wherever a taskResult is
+	// built below: box.ProvisionMs() is fixed the moment the container starts
+	// and every return path below wants the same number. sandboxImage travels
+	// with it so an admin breakdown can bucket by ecosystem (the image's own
+	// prefix — "golang:", "node:", "python:" — names it) without a second
+	// column enumerating ecosystems that would drift from runtime.go's list.
+	sandboxProvisionMs := int64Ptr(box.ProvisionMs())
+	sandboxImage := deps.sandboxCfg.DockerImage
+	prog.add(ver.TaskEvent{Phase: "sandbox_provision", Outcome: "ok", DurationMs: box.ProvisionMs()})
 
 	// Verification joins the Implementer inside this container. Both were
 	// already running the same image, mounts and offline network policy; the
@@ -251,6 +260,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			planSpecJSON:       string(specJSON),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	}
 
@@ -281,11 +292,15 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	}
 
 	if out, matched := investigationOutcome(res); matched {
 		out.events = prog.all()
+		out.sandboxProvisionMs = sandboxProvisionMs
+		out.sandboxImage = sandboxImage
 		return out
 	}
 
@@ -296,6 +311,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	}
 	if gitToken == "" {
@@ -304,6 +321,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	}
 
@@ -319,6 +338,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	case perr != nil:
 		return taskResult{
@@ -326,6 +347,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 			events:             prog.all(),
 			cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 			rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+			sandboxProvisionMs: sandboxProvisionMs,
+			sandboxImage:       sandboxImage,
 		}
 	}
 	if detail == "" {
@@ -338,6 +361,8 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		events:             prog.all(),
 		cachedPromptTokens: int64Ptr(res.Usage.CacheReadTokens + res.Usage.CacheWriteTokens),
 		rawPromptTokens:    int64Ptr(res.Usage.InputTokens),
+		sandboxProvisionMs: sandboxProvisionMs,
+		sandboxImage:       sandboxImage,
 	}
 }
 

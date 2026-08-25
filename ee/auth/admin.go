@@ -867,10 +867,24 @@ func handleAdminMetricsFleet(db *gorm.DB, w http.ResponseWriter, r *http.Request
 	for _, d := range daemons {
 		activeContainers += d.ActiveContainers
 	}
+
+	coldStart, err := loadColdStartMetrics(db)
+	if err != nil {
+		// Cold-start telemetry is a nice-to-have on top of the daemon counts
+		// above, which are the numbers this page has always depended on — a
+		// failure here must not blank out the rest of the fleet tab.
+		coldStart = coldStartMetrics{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_daemons":     len(daemons),
-		"active_containers": activeContainers,
+		"total_daemons":           len(daemons),
+		"active_containers":       activeContainers,
+		"avg_cold_start_ms":       coldStart.AvgMs,
+		"cold_start_samples":      coldStart.Samples,
+		"cold_start_daily":        coldStart.Daily,
+		"cold_start_by_fleet":     coldStart.ByFleet,
+		"cold_start_by_ecosystem": coldStart.ByEco,
 	})
 }
 

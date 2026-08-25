@@ -34,6 +34,9 @@ import { Logo } from "@/components/Logo";
 
 const POLL_MS = 5000;
 const MAX_PROGRESS_FETCHES = 40;
+// A card only earns the cold-start badge under this bar — the point is to
+// call out a genuinely fast sandbox, not to print a number on every card.
+const FAST_PROVISION_MS = 2000;
 
 export default function ActivityPage() {
   const [fleets, setFleets] = useState<Fleet[]>([]);
@@ -433,6 +436,16 @@ export default function ActivityPage() {
                   </div>
 
                   <div className="flex items-center gap-2.5 shrink-0">
+                    {!!job.sandbox_provision_ms && job.sandbox_provision_ms < FAST_PROVISION_MS && (
+                      <span
+                        title={`Sandbox ready in ${job.sandbox_provision_ms}ms`}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200"
+                      >
+                        <Zap className="w-2.5 h-2.5" />
+                        {job.sandbox_provision_ms}ms
+                      </span>
+                    )}
+
                     <span
                       className="px-2 py-0.5 rounded-md text-[9px] font-mono font-bold uppercase border"
                       style={{
