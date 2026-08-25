@@ -110,6 +110,31 @@ func (s *Service) wakeFleetHost() {
 	}()
 }
 
+// ColdStartFreeTier ensures a free-tier org's per-org daemon is provisioned
+// and the shared fleet host is awake, for any caller that hands an org new
+// queued work outside SubmitPlan's own admission path — where this same pair
+// of calls already runs, gated on org.Plan == "free", right after the work
+// lands in the queue.
+//
+// Plan-mode approval is exactly such a caller: a task pauses in
+// TaskPlanReview for a human to review, which can sit for far longer than
+// the fleet's 30-minute idle TTL, and approving it re-queues a continuation
+// directly (ee/orchestrator's handleApproveJobPlan) without going through
+// SubmitPlan again. Without this, the continuation queues onto a host that
+// already stopped and nothing tells the cloud API to start it back up — the
+// task then just waits until ExpireStaleQueuedTasks kills it.
+func (s *Service) ColdStartFreeTier(ctx context.Context, orgID string) {
+	var org auth.Organization
+	if err := s.store.DB().WithContext(ctx).First(&org, "id = ?", orgID).Error; err != nil {
+		return
+	}
+	if org.Plan != "free" {
+		return
+	}
+	s.ensureFreeDaemon(ctx, orgID)
+	s.wakeFleetHost()
+}
+
 func (s *Service) ensureFreeDaemon(ctx context.Context, orgID string) {
 	idBytes := make([]byte, 8)
 	rand.Read(idBytes)

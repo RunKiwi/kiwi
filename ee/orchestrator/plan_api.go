@@ -128,6 +128,13 @@ func (s *Server) handleApproveJobPlan(w http.ResponseWriter, r *http.Request, jo
 		return
 	}
 
+	// The task just paused in review may have sat far longer than the fleet's
+	// idle TTL — approval is a real submit in every sense that matters to the
+	// fleet host, and SubmitPlan's own cold-start (ensureFreeDaemon +
+	// wakeFleetHost) never runs on this path. Without it, a stopped host
+	// never restarts and the continuation just waits to be expired.
+	s.planner.ColdStartFreeTier(r.Context(), job.OrgID)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "approved", "resumed_phase": "actor"})
 }
 
