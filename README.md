@@ -70,7 +70,7 @@ Full documentation: **[docs.runkiwi.dev](https://docs.runkiwi.dev)**.
 ## Features
 
 - **Session-driven.** A task-long Architect plans and reviews while an agentic Implementer works the repo with real tools, verified each round in the sandbox until it passes. → [docs](https://docs.runkiwi.dev/session-mode)
-- **Plan Mode, opt-in.** Ask Kiwi to stop after the Architect's plan and wait for you to approve or reject it — with feedback — before any Implementer round touches your repo. Off by default; the session runs straight through otherwise.
+- **Plan Mode, opt-in.** Ask Kiwi to stop after the Architect's plan and wait for you before any Implementer round touches your repo. Approve to proceed; reject with feedback and the Architect revises the plan and stops for review again — cancel the job to end the loop outright. Off by default; the session runs straight through otherwise.
 - **The test is a guard, not the goal.** Your task description is what Kiwi tries to achieve; the test command only proves nothing broke. A green suite alone isn't "done," and a run that changes no code is reported as a failure.
 - **Two-phase, isolated sandbox.** Dependencies install with network and no secrets; verification then runs offline. Model-generated code never has both a network and a credential at once. → [docs](https://docs.runkiwi.dev/sandbox)
 - **Zero setup.** No image, test command, or file list required — Kiwi reads what your repo declares and infers the rest, self-correcting a wrong runtime guess before you ever see an error.

@@ -38,16 +38,46 @@ func TestApproveJobPlan(t *testing.T) {
 	require.NotNil(t, j.PlanAcceptedAt)
 }
 
-func TestRejectJobPlan(t *testing.T) {
+func TestRejectJobPlanAndRequestRevision(t *testing.T) {
 	s := newTestStore(t)
-	newPlanTestJob(t, s, "job-p3")
-	require.NoError(t, s.SetJobPlanPendingReview(context.Background(), "job-p3", "plan text"))
-	require.NoError(t, s.RejectJobPlan(context.Background(), "job-p3", "use CockroachDB leases instead"))
-	j, err := s.GetJob(context.Background(), "job-p3")
+	newPlanTestJob(t, s, "job-p5")
+	require.NoError(t, s.SetJobPlanPendingReview(context.Background(), "job-p5", "plan text"))
+
+	continuation := &QueuedTask{
+		ID:         "job-p5-c1",
+		OrgID:      "org-1",
+		JobID:      "job-p5",
+		Origin:     OriginPlanRevision,
+		Status:     TaskQueued,
+		RootTaskID: "job-p5-c1",
+		Spec:       map[string]interface{}{"revision_feedback": "use CockroachDB leases instead"},
+	}
+	require.NoError(t, s.RejectJobPlanAndRequestRevision(context.Background(), "job-p5", "use CockroachDB leases instead", continuation))
+
+	j, err := s.GetJob(context.Background(), "job-p5")
 	require.NoError(t, err)
-	require.Equal(t, "rejected", j.PlanStatus)
-	require.Equal(t, "FAILED", j.Status)
+	require.Equal(t, "", j.PlanStatus, "must reset, not settle on a terminal status, so the daemon's next SetJobPlanPendingReview can fire")
+	require.Equal(t, "RUNNING", j.Status)
 	require.Equal(t, "use CockroachDB leases instead", j.PlanRejectedReason)
+
+	tasks, err := s.GetJobTasks(context.Background(), "org-1", "job-p5")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, OriginPlanRevision, tasks[0].Origin)
+}
+
+func TestRejectJobPlanAndRequestRevisionConflictWhenNotPendingReview(t *testing.T) {
+	s := newTestStore(t)
+	newPlanTestJob(t, s, "job-p6")
+	// Never entered pending_review.
+	continuation := &QueuedTask{ID: "job-p6-c1", OrgID: "org-1", JobID: "job-p6", Origin: OriginPlanRevision, RootTaskID: "job-p6-c1"}
+
+	err := s.RejectJobPlanAndRequestRevision(context.Background(), "job-p6", "feedback", continuation)
+	require.ErrorIs(t, err, ErrPlanStatusConflict)
+
+	tasks, terr := s.GetJobTasks(context.Background(), "org-1", "job-p6")
+	require.NoError(t, terr)
+	require.Empty(t, tasks, "no continuation must be created on conflict")
 }
 
 func TestSetJobSpendCap(t *testing.T) {

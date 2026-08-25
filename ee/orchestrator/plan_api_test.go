@@ -180,35 +180,116 @@ func TestHandleApproveJobPlanConflictWhenNotPendingReview(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w.Code)
 }
 
-func TestHandleRejectJobPlan(t *testing.T) {
+func TestHandleRejectJobPlanEnqueuesRevisionContinuation(t *testing.T) {
 	s, mux := newTestPlanServer(t)
-	seedJobPendingReview(t, s, "org-1", "job-4")
+	seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-4", "task-4a")
 
-	body, _ := json.Marshal(map[string]string{"feedback": "wrong approach"})
+	body, _ := json.Marshal(map[string]string{"feedback": "use CockroachDB leases instead"})
 	req := authedRequest(t, http.MethodPost, "/api/v1/jobs/job-4/plan/reject", bytes.NewReader(body), "org-1")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
-		Status          string `json:"status"`
-		PlannerNotified bool   `json:"planner_notified"`
+		Status       string `json:"status"`
+		ResumedPhase string `json:"resumed_phase"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, "rejected", resp.Status)
-	require.True(t, resp.PlannerNotified)
+	require.Equal(t, "revising", resp.Status)
+	require.Equal(t, "plan", resp.ResumedPhase)
 
 	j, err := s.storage.GetJob(req.Context(), "job-4")
 	require.NoError(t, err)
-	require.Equal(t, "rejected", j.PlanStatus)
-	require.Equal(t, "FAILED", j.Status)
-	require.Equal(t, "wrong approach", j.PlanRejectedReason)
+	require.Equal(t, "", j.PlanStatus, "reset, not terminal, so the re-plan's PLAN_REVIEW report can land")
+	require.Equal(t, "RUNNING", j.Status)
+	require.Equal(t, "use CockroachDB leases instead", j.PlanRejectedReason)
+
+	tasks, err := s.storage.GetJobTasks(req.Context(), "org-1", "job-4")
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	var continuation *store.QueuedTask
+	for i := range tasks {
+		if tasks[i].Origin == store.OriginPlanRevision {
+			continuation = &tasks[i]
+		}
+	}
+	require.NotNil(t, continuation)
+	require.NotNil(t, continuation.ParentTaskID)
+	require.Equal(t, "task-4a", *continuation.ParentTaskID)
+	require.Equal(t, "task-4a", continuation.RootTaskID)
+	require.Equal(t, store.TaskQueued, continuation.Status)
+	require.Equal(t, "use CockroachDB leases instead", continuation.Spec["revision_feedback"])
+	require.Equal(t, true, continuation.Spec["requires_plan_approval"], "a revised plan must stop for review again")
+}
+
+func TestHandleApproveJobPlanAfterRevisionDropsFeedbackFromSpec(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-4c", "task-4c")
+
+	// Reject with feedback: creates a revision continuation.
+	body, _ := json.Marshal(map[string]string{"feedback": "use CockroachDB leases instead"})
+	req := authedRequest(t, http.MethodPost, "/api/v1/jobs/job-4c/plan/reject", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	tasks, err := s.storage.GetJobTasks(context.Background(), "org-1", "job-4c")
+	require.NoError(t, err)
+	var revision *store.QueuedTask
+	for i := range tasks {
+		if tasks[i].Origin == store.OriginPlanRevision {
+			revision = &tasks[i]
+		}
+	}
+	require.NotNil(t, revision)
+
+	// Simulate the daemon re-planning and reporting PLAN_REVIEW again on the
+	// revision task, exactly as it did on the original.
+	require.NoError(t, s.storage.SetJobPlanPendingReview(context.Background(), "job-4c", "# Revised plan"))
+	require.NoError(t, s.db.Model(&store.QueuedTask{}).Where("id = ?", revision.ID).Update("status", store.TaskPlanReview).Error)
+
+	// Approve the revised plan.
+	body, _ = json.Marshal(map[string]string{"user_comment": "looks right now"})
+	req = authedRequest(t, http.MethodPost, "/api/v1/jobs/job-4c/plan/approve", bytes.NewReader(body), "org-1")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	tasks, err = s.storage.GetJobTasks(context.Background(), "org-1", "job-4c")
+	require.NoError(t, err)
+	var approved *store.QueuedTask
+	for i := range tasks {
+		if tasks[i].Origin == store.OriginPlanApproved {
+			approved = &tasks[i]
+		}
+	}
+	require.NotNil(t, approved)
+	require.NotNil(t, approved.ParentTaskID)
+	require.Equal(t, revision.ID, *approved.ParentTaskID)
+	_, hasFeedback := approved.Spec["revision_feedback"]
+	require.False(t, hasFeedback, "approving a revised plan must not carry the feedback forward — it would make the session re-plan forever instead of implementing")
+}
+
+func TestHandleRejectJobPlanRequiresFeedback(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-4b", "task-4b")
+
+	body, _ := json.Marshal(map[string]string{"feedback": "  "})
+	req := authedRequest(t, http.MethodPost, "/api/v1/jobs/job-4b/plan/reject", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	j, err := s.storage.GetJob(req.Context(), "job-4b")
+	require.NoError(t, err)
+	require.Equal(t, "pending_review", j.PlanStatus, "a rejected-without-feedback request must not change anything")
 }
 
 func TestHandleRejectJobPlanConflictWhenNotPendingReview(t *testing.T) {
 	s, mux := newTestPlanServer(t)
-	job := seedJobPendingReview(t, s, "org-1", "job-rejected-twice")
-	require.NoError(t, s.storage.RejectJobPlan(context.Background(), job.ID, "first reason"))
+	job := seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-rejected-twice", "task-rt")
+	require.NoError(t, s.storage.ApproveJobPlan(context.Background(), job.ID))
 
 	body, _ := json.Marshal(map[string]string{"feedback": "second reason"})
 	req := authedRequest(t, http.MethodPost, "/api/v1/jobs/job-rejected-twice/plan/reject", bytes.NewReader(body), "org-1")

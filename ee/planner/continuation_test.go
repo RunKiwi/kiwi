@@ -119,6 +119,21 @@ func TestContinuationReplacesTheTaskAndInheritsTheRest(t *testing.T) {
 	}
 }
 
+// revision_feedback means "re-plan instead of resuming" (see
+// pkg/session.Task.RevisionFeedback). A parent paused at PLAN_REVIEW after a
+// rejection carries it; any continuation off of it — a PR comment, a fork —
+// must not inherit it, or the session would keep re-planning against stale
+// feedback instead of acting on the new instruction.
+func TestContinuationDropsRevisionFeedback(t *testing.T) {
+	parent := parentTask()
+	parent.Spec["revision_feedback"] = "use CockroachDB leases instead"
+	task := buildContinuationTask(parent, "rename the handler", 1, "")
+
+	if _, ok := task.Spec["revision_feedback"]; ok {
+		t.Error("continuation must not inherit revision_feedback from its parent")
+	}
+}
+
 // The spec is copied, not shared. A map handed straight through would let a
 // later write to the continuation's spec mutate the parent's stored row.
 func TestContinuationDoesNotShareTheParentsSpecMap(t *testing.T) {

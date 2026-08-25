@@ -910,7 +910,7 @@ export const client = {
       body: JSON.stringify({ user_comment: comment || "" }),
     }),
   rejectJobPlan: (jobId: string, feedback: string) =>
-    fetchApi<{ status: string; planner_notified: boolean }>(`/api/v1/jobs/${jobId}/plan/reject`, {
+    fetchApi<{ status: string; resumed_phase: string }>(`/api/v1/jobs/${jobId}/plan/reject`, {
       method: "POST",
       body: JSON.stringify({ feedback }),
     }),

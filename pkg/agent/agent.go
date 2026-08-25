@@ -121,6 +121,10 @@ type WorkerSpec struct {
 	// RequiresPlanApproval, when set, makes the session stop after Round 0
 	// planning and report PLAN_REVIEW instead of running the Implementer.
 	RequiresPlanApproval bool `json:"requires_plan_approval,omitempty"`
+	// RevisionFeedback, when set, is a human's reason for rejecting the last
+	// plan. It makes the session re-plan (folding the feedback into the
+	// Architect's prompt) instead of resuming into the round loop.
+	RevisionFeedback string `json:"revision_feedback,omitempty"`
 }
 
 // WorkerResult is the outcome of one worker.

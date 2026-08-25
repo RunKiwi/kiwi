@@ -7,6 +7,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -94,6 +95,19 @@ func (s *Server) handleApproveJobPlan(w http.ResponseWriter, r *http.Request, jo
 		rootTaskID = parent.ID
 	}
 
+	// Copy rather than share parent.Spec: if the plan being approved is
+	// itself a revision (parent.Origin == OriginPlanRevision), its spec
+	// still carries "revision_feedback" from the reject step, and handing
+	// that through verbatim would make this continuation re-plan again
+	// instead of resuming into the round loop. Copying also avoids the
+	// aliasing hazard buildContinuationTask warns about: a later write to
+	// the continuation's spec must not mutate the parent's stored row.
+	spec := make(map[string]interface{}, len(parent.Spec))
+	for k, v := range parent.Spec {
+		spec[k] = v
+	}
+	delete(spec, "revision_feedback")
+
 	continuation := &store.QueuedTask{
 		ID:           generateTaskID(),
 		OrgID:        job.OrgID,
@@ -102,7 +116,7 @@ func (s *Server) handleApproveJobPlan(w http.ResponseWriter, r *http.Request, jo
 		RootTaskID:   rootTaskID,
 		Origin:       store.OriginPlanApproved,
 		Status:       store.TaskQueued,
-		Spec:         parent.Spec, // same worker-spec: same repo, model, test command, SessionID
+		Spec:         spec, // same worker-spec: same repo, model, test command, SessionID
 		FleetID:      parent.FleetID,
 	}
 	if err := s.storage.ApproveJobPlanAndEnqueue(r.Context(), job.ID, continuation); err != nil {
@@ -127,20 +141,73 @@ func (s *Server) handleRejectJobPlan(w http.ResponseWriter, r *http.Request, job
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
-	if len(body.Feedback) > 255 {
+	feedback := strings.TrimSpace(body.Feedback)
+	if feedback == "" {
+		http.Error(w, "feedback is required: it becomes the Architect's revision instruction", http.StatusBadRequest)
+		return
+	}
+	if len(feedback) > 255 {
 		http.Error(w, "feedback exceeds 255 character limit", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.storage.RejectJobPlan(r.Context(), job.ID, body.Feedback); err != nil {
-		if err == store.ErrPlanStatusConflict {
-			http.Error(w, "plan rejection conflict: plan is not in pending_review state", http.StatusConflict)
-			return
-		}
-		http.Error(w, "failed to reject plan", http.StatusInternalServerError)
+	// Same lookup as approve: the task the daemon reported PLAN_REVIEW on is
+	// the most recent one on the job's root thread.
+	tasks, err := s.storage.GetJobTasks(r.Context(), job.OrgID, job.ID)
+	if err != nil || len(tasks) == 0 {
+		http.Error(w, "could not locate the paused task", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "rejected", "planner_notified": true})
+	var parent *store.QueuedTask
+	for i := range tasks {
+		if tasks[i].Status == store.TaskPlanReview {
+			parent = &tasks[i]
+		}
+	}
+	if parent == nil {
+		http.Error(w, "no plan-review task found for this job", http.StatusConflict)
+		return
+	}
+
+	rootTaskID := parent.RootTaskID
+	if rootTaskID == "" {
+		rootTaskID = parent.ID
+	}
+
+	// Same worker-spec as the parent — same repo, model, test command,
+	// SessionID — plus the feedback, which is what makes the daemon re-plan
+	// instead of resuming into the round loop (see session.Task.RevisionFeedback).
+	spec := make(map[string]interface{}, len(parent.Spec)+2)
+	for k, v := range parent.Spec {
+		spec[k] = v
+	}
+	spec["revision_feedback"] = feedback
+	// Forced, not inherited: this task exists because a human is mid-review,
+	// so the revised plan must stop for review again too, regardless of what
+	// the parent's spec happened to carry.
+	spec["requires_plan_approval"] = true
+
+	continuation := &store.QueuedTask{
+		ID:           generateTaskID(),
+		OrgID:        job.OrgID,
+		JobID:        job.ID,
+		ParentTaskID: &parent.ID,
+		RootTaskID:   rootTaskID,
+		Origin:       store.OriginPlanRevision,
+		Status:       store.TaskQueued,
+		Spec:         spec,
+		FleetID:      parent.FleetID,
+	}
+	if err := s.storage.RejectJobPlanAndRequestRevision(r.Context(), job.ID, feedback, continuation); err != nil {
+		if err == store.ErrPlanStatusConflict {
+			http.Error(w, "plan rejection conflict: plan is not in pending_review state or was already resolved", http.StatusConflict)
+			return
+		}
+		http.Error(w, "failed to reject plan and enqueue revision", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "revising", "resumed_phase": "plan"})
 }
 
 func (s *Server) handleJobSpendCap(w http.ResponseWriter, r *http.Request, orgID, jobID string) {

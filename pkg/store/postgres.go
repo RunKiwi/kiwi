@@ -148,20 +148,27 @@ func (s *PostgresStore) ApproveJobPlanAndEnqueue(ctx context.Context, jobID stri
 	})
 }
 
-func (s *PostgresStore) RejectJobPlan(ctx context.Context, jobID, reason string) error {
-	res := s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND plan_status = ?", jobID, "pending_review").Updates(map[string]interface{}{
-		"plan_status":          "rejected",
-		"plan_rejected_reason": reason,
-		"status":               "FAILED",
-		"updated_at":           time.Now(),
+func (s *PostgresStore) RejectJobPlanAndRequestRevision(ctx context.Context, jobID, reason string, continuation *QueuedTask) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&Job{}).Where("id = ? AND plan_status = ?", jobID, "pending_review").Updates(map[string]interface{}{
+			// Reset, not a terminal value: the daemon re-plans and reports
+			// PLAN_REVIEW again, and SetJobPlanPendingReview only fires from "".
+			"plan_status":          "",
+			"plan_rejected_reason": reason,
+			"status":               "RUNNING",
+			"updated_at":           time.Now(),
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrPlanStatusConflict
+		}
+		if continuation.Status == "" {
+			continuation.Status = TaskQueued
+		}
+		return tx.Create(continuation).Error
 	})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrPlanStatusConflict
-	}
-	return nil
 }
 
 func (s *PostgresStore) SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error {

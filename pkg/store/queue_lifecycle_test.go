@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func seedTask(t *testing.T, s *PostgresStore, id, org, job, status string) {
@@ -57,6 +59,27 @@ func TestCancelJob(t *testing.T) {
 	if got := statusOfTask(t, s, "j1-c"); got.Status != TaskSucceeded {
 		t.Errorf("a finished task must not be cancelled, got %s", got.Status)
 	}
+}
+
+// A job parked in Plan Mode review has no QUEUED or LEASED task — its one
+// task is PLAN_REVIEW, which CancelJob must also treat as cancellable, or a
+// plan a human never approves nor rejects can never be closed out either.
+func TestCancelJobCancelsPlanReviewTask(t *testing.T) {
+	s := newTestStore(t)
+	newPlanTestJob(t, s, "job-cancel-pr")
+	require.NoError(t, s.SetJobPlanPendingReview(context.Background(), "job-cancel-pr", "plan text"))
+	seedTask(t, s, "job-cancel-pr-t1", "org-1", "job-cancel-pr", TaskPlanReview)
+
+	n, err := s.CancelJob(context.Background(), "org-1", "job-cancel-pr", "cancelled by user")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	require.Equal(t, TaskCancelled, statusOfTask(t, s, "job-cancel-pr-t1").Status)
+
+	j, err := s.GetJob(context.Background(), "job-cancel-pr")
+	require.NoError(t, err)
+	require.Equal(t, "CANCELLED", j.Status)
+	require.Equal(t, "", j.PlanStatus, "must clear, or a stale PlanApprovalCard keeps showing after cancel")
 }
 
 // Cancellation is org-scoped: another tenant's job id changes nothing and does
