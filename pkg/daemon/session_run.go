@@ -327,7 +327,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 	}
 
 	gh := &restGitHub{token: gitToken}
-	prURL, detail, perr := publishResultFrom(ctx, deps.worktreePath, spec, gitToken, gh, "", baseSHA)
+	prURL, detail, perr := publishResultFrom(ctx, deps.worktreePath, spec, res.Summary, gitToken, gh, "", baseSHA)
 	switch {
 	case errors.Is(perr, errNoChanges):
 		// The reviewer is instructed never to approve an empty diff, and refuses

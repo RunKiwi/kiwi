@@ -157,14 +157,14 @@ func TestPublishResult(t *testing.T) {
 	// and report SUCCEEDED with no pull request. Nothing was produced, so it is
 	// an error — the caller distinguishes it from a delivery failure via
 	// errors.Is(err, errNoChanges).
-	pr, detail, err := publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	pr, detail, err := publishResult(context.Background(), workDir, spec, "", "tok", gh, bareDir)
 	if !errors.Is(err, errNoChanges) {
 		t.Fatalf("an unchanged worktree must report errNoChanges, got err=%v detail=%q", err, detail)
 	}
 
 	// Test 2: with changes
 	os.WriteFile(filepath.Join(workDir, "test.txt"), []byte("data"), 0644)
-	pr, detail, err = publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	pr, detail, err = publishResult(context.Background(), workDir, spec, "", "tok", gh, bareDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestPublishResult(t *testing.T) {
 	spec.JobID = "job2"
 	spec.Ref = "HEAD"
 	os.WriteFile(filepath.Join(workDir, "test_head.txt"), []byte("head test"), 0644)
-	pr, detail, err = publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	pr, detail, err = publishResult(context.Background(), workDir, spec, "", "tok", gh, bareDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestPublishResult(t *testing.T) {
 	gh.called = false
 	gh.existingOpen = "https://github.com/owner/repo/pull/123"
 	os.WriteFile(filepath.Join(workDir, "test2.txt"), []byte("data2"), 0644)
-	pr, detail, err = publishResult(context.Background(), workDir, spec, "tok", gh, bareDir)
+	pr, detail, err = publishResult(context.Background(), workDir, spec, "", "tok", gh, bareDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestPublishResult_PushFailureIsError(t *testing.T) {
 	// Point the push at a non-existent path so it fails deterministically offline.
 	badRemote := filepath.Join(tmp, "does-not-exist.git")
 
-	_, _, err := publishResult(context.Background(), workDir, spec, "secretTOKEN", &fakeGH{}, badRemote)
+	_, _, err := publishResult(context.Background(), workDir, spec, "", "secretTOKEN", &fakeGH{}, badRemote)
 	if err == nil {
 		t.Fatal("expected an error when push fails, got nil (would be reported as false SUCCEEDED)")
 	}

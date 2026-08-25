@@ -137,7 +137,7 @@ func TestPublishFromBaseDeliversAlreadyCommittedWork(t *testing.T) {
 
 	_, _, err := publishResultFrom(context.Background(), dir,
 		agent.WorkerSpec{ID: "t1", JobID: "job_1", Task: "add a thing"},
-		"tok", &fakeGH{}, bare, base)
+		"", "tok", &fakeGH{}, bare, base)
 	if err != nil {
 		t.Fatalf("already-committed work must be deliverable: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPublishWithoutBaseKeepsTheNoChangesGuarantee(t *testing.T) {
 	dir := gitRepo(t)
 	_, _, err := publishResultFrom(context.Background(), dir,
 		agent.WorkerSpec{ID: "t1", JobID: "job_1", Task: "add a thing"},
-		"tok", &fakeGH{}, "", "")
+		"", "tok", &fakeGH{}, "", "")
 	if !errors.Is(err, errNoChanges) {
 		t.Fatalf("expected errNoChanges, got %v", err)
 	}
@@ -163,7 +163,7 @@ func TestPublishFromBaseStillRefusesAnUntouchedRepo(t *testing.T) {
 
 	_, _, err := publishResultFrom(context.Background(), dir,
 		agent.WorkerSpec{ID: "t1", JobID: "job_1", Task: "add a thing"},
-		"tok", &fakeGH{}, "", base)
+		"", "tok", &fakeGH{}, "", base)
 	if !errors.Is(err, errNoChanges) {
 		t.Fatalf("expected errNoChanges, got %v", err)
 	}
