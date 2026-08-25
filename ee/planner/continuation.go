@@ -64,6 +64,12 @@ func buildContinuationTask(parent *store.QueuedTask, instruction string, comment
 	// Dependencies belonged to the original plan's DAG. A continuation waits
 	// for nothing: every task it could have depended on has already run.
 	delete(spec, "depends_on")
+	// revision_feedback means "re-plan instead of resuming into the round
+	// loop" (see pkg/session.Task.RevisionFeedback). A parent paused at
+	// PLAN_REVIEW after a rejection still carries it; any continuation must
+	// not inherit it, or the new instruction above would never be acted on —
+	// the session would just keep re-planning against stale feedback.
+	delete(spec, "revision_feedback")
 
 	root := parent.RootTaskID
 	if root == "" {

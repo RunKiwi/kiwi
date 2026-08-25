@@ -114,7 +114,13 @@ type Store interface {
 	// continuation task. It returns ErrPlanStatusConflict if the plan is not
 	// in pending_review state or if a duplicate approval is attempted.
 	ApproveJobPlanAndEnqueue(ctx context.Context, jobID string, continuation *QueuedTask) error
-	RejectJobPlan(ctx context.Context, jobID, reason string) error
+	// RejectJobPlanAndRequestRevision atomically records why a plan was
+	// rejected and creates the continuation task that re-plans with that
+	// feedback. plan_status resets to "" (not a terminal status) so the
+	// daemon's next SetJobPlanPendingReview can fire once it re-plans. It
+	// returns ErrPlanStatusConflict under the same conditions as
+	// ApproveJobPlanAndEnqueue.
+	RejectJobPlanAndRequestRevision(ctx context.Context, jobID, reason string, continuation *QueuedTask) error
 	// SetJobSpendCap updates a job's per-job spend cap. orgID scopes the
 	// update so an org-scoped caller cannot touch another org's job by ID.
 	SetJobSpendCap(ctx context.Context, orgID, jobID string, capUSD float64) error

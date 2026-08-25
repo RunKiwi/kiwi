@@ -540,7 +540,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const tasks = currentJob?.tasks ?? [];
   // What is actionable depends on where the job is. Offering "stop" on a
   // finished job or "retry" on a running one invites a click that does nothing.
-  const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED");
+  const canCancel = tasks.some(t => t.status === "QUEUED" || t.status === "LEASED" || t.status === "PLAN_REVIEW");
   const canRetry = tasks.some(t => t.status === "FAILED" || t.status === "CANCELLED");
 
   const act = async (

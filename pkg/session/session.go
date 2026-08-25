@@ -86,8 +86,15 @@ type Task struct {
 	// running further. A later run of the same SessionID with this task's
 	// checkpoint already at round 1 (the normal resumeFrom>0 path) proceeds
 	// straight into the round loop without re-planning, because the approved
-	// spec is already in that checkpoint.
+	// spec is already in that checkpoint — unless RevisionFeedback is set,
+	// see below.
 	RequiresPlanApproval bool
+	// RevisionFeedback is set when a human rejected the plan from a prior
+	// Round 0 and asked for changes. Its presence means: re-plan even though
+	// a checkpoint already exists, instead of taking the normal
+	// resumeFrom>0 shortcut into the round loop — there is no completed
+	// round to review, only a rejected plan to revise.
+	RevisionFeedback string
 }
 
 // Config tunes the session's rails. Zero values get defaults.
@@ -489,7 +496,10 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	// Baseline and planning happen once per session. A resumed run already has
 	// both — the Architect's spec is in the checkpoint — and re-planning would
 	// pay for a frontier-model call to reproduce an answer already written down.
-	if resumeFrom > 0 {
+	// RevisionFeedback overrides this: it means a human rejected that spec
+	// before any round ran, so there is no completed round to resume into —
+	// only a rejected plan to revise, which takes the Round 0 path below.
+	if resumeFrom > 0 && task.RevisionFeedback == "" {
 		// A session resumed at its last round has already spent that many
 		// rounds, so a fixed ceiling would leave a continuation with nothing to
 		// spend: a task that concluded at round 4 of 4 would resume and halt
@@ -522,8 +532,13 @@ func (r *Runner) Run(ctx context.Context, task Task) (Result, error) {
 	// control plane used to do without ever seeing the repository.
 	r.activity("architect: planning the work")
 	start = time.Now()
+	planTask := task.Description
+	if task.RevisionFeedback != "" {
+		planTask = fmt.Sprintf("%s\n\n--- Plan Revision Requested ---\nA human reviewer rejected your previous plan with this feedback:\n%s\n\nRevise your plan to address it.",
+			task.Description, task.RevisionFeedback)
+	}
 	spec, err := r.Architect.Plan(ctx, PlanInput{
-		Task:              task.Description,
+		Task:              planTask,
 		RepoMap:           tree,
 		TestCmd:           task.TestCmd,
 		InvestigationOnly: task.InvestigationOnly,

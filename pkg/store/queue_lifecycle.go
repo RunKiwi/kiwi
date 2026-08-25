@@ -30,7 +30,10 @@ func (s *PostgresStore) CancelJob(ctx context.Context, orgID, jobID, reason stri
 	now := time.Now()
 
 	res := s.db.WithContext(ctx).Model(&QueuedTask{}).
-		Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskQueued, TaskLeased}).
+		// PLAN_REVIEW is included: a job parked in Plan Mode review has no
+		// QUEUED or LEASED task, only this one, and without it a plan a human
+		// never approves nor rejects could never be cancelled either.
+		Where("org_id = ? AND job_id = ? AND status IN ?", orgID, jobID, []string{TaskQueued, TaskLeased, TaskPlanReview}).
 		Updates(map[string]interface{}{
 			"status": TaskCancelled,
 			// Clear the lease so the expiry sweeper cannot pick this row up and
@@ -48,7 +51,16 @@ func (s *PostgresStore) CancelJob(ctx context.Context, orgID, jobID, reason stri
 
 	if res.RowsAffected > 0 {
 		s.db.WithContext(ctx).Model(&Job{}).Where("id = ? AND org_id = ?", jobID, orgID).
-			Updates(map[string]interface{}{"status": "CANCELLED", "updated_at": now})
+			Updates(map[string]interface{}{
+				"status": "CANCELLED",
+				// Reset even for a job that was never in Plan Mode (already ""):
+				// otherwise a job cancelled mid plan-review keeps plan_status
+				// "pending_review" forever, and the dashboard's PlanApprovalCard
+				// checks plan_status alone, not job status, to decide whether to
+				// render.
+				"plan_status": "",
+				"updated_at":  now,
+			})
 	}
 	return int(res.RowsAffected), nil
 }

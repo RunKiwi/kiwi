@@ -235,6 +235,7 @@ func (d *Daemon) executeSession(ctx context.Context, spec agent.WorkerSpec, cred
 		RepoContext:          repoCtx,
 		Learnings:            spec.Learnings,
 		RequiresPlanApproval: spec.RequiresPlanApproval,
+		RevisionFeedback:     spec.RevisionFeedback,
 	})
 
 	if res.PlanPendingReview {

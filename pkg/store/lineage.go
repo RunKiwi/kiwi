@@ -29,6 +29,11 @@ const (
 	// (ParentTaskID/RootTaskID) so the daemon resumes the exact session that
 	// was paused, rather than starting a fresh one.
 	OriginPlanApproved = "plan_approved"
+	// OriginPlanRevision marks a continuation created by rejecting a Plan
+	// Mode review with feedback. Same lineage mechanism as OriginPlanApproved
+	// — same SessionID, same worker spec — except the daemon re-plans (see
+	// pkg/session.Task.RevisionFeedback) instead of resuming the round loop.
+	OriginPlanRevision = "plan_revision"
 	// OriginSlack marks a continuation that came from a Slack thread reply —
 	// distinct from OriginPRComment (a GitHub PR review comment), which a
 	// Slack-triggered continuation is not, even though buildContinuationTask

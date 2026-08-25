@@ -47,6 +47,7 @@ type fakeArchitect struct {
 	planErr      error
 	reviews      []Spec
 	seen         []ReviewInput
+	planSeen     []PlanInput
 	usage        provider.ToolUsage
 	costPer      float64
 	plannedCalls int
@@ -55,8 +56,9 @@ type fakeArchitect struct {
 
 func (a *fakeArchitect) Usage() provider.ToolUsage { return a.usage }
 
-func (a *fakeArchitect) Plan(context.Context, PlanInput) (Spec, error) {
+func (a *fakeArchitect) Plan(_ context.Context, in PlanInput) (Spec, error) {
 	a.plannedCalls++
+	a.planSeen = append(a.planSeen, in)
 	a.usage.Add(provider.ToolUsage{CostUSD: a.costPer})
 	if a.planErr != nil {
 		return Spec{}, a.planErr
