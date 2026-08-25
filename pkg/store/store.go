@@ -55,6 +55,10 @@ type JobSummary struct {
 	PlanStatus           string  `json:"plan_status,omitempty"`
 	SpendCapUSD          float64 `json:"spend_cap_usd,omitempty"`
 	IsDryRun             bool    `json:"is_dry_run,omitempty"`
+	// SandboxProvisionMs is the job's earliest task's own cold-start number
+	// (see sandbox.Session.ProvisionMs) — how long the sandbox took to
+	// become ready before work could start. Zero means unmeasured.
+	SandboxProvisionMs int64 `json:"sandbox_provision_ms,omitempty"`
 }
 
 // TaskCompletion wraps the arguments for ending a task's lease.
@@ -65,6 +69,11 @@ type TaskCompletion struct {
 	// CachedPromptTokens and RawPromptTokens are pointers to distinguish
 	// unavailable (nil) from explicitly zero.
 	CachedPromptTokens, RawPromptTokens *int64
+	// SandboxProvisionMs is how long the task's sandbox container took to
+	// start. Same nil-vs-zero convention as the fields above.
+	SandboxProvisionMs *int64
+	// SandboxImage is the docker image the sandbox ran, e.g. "golang:1.25-alpine".
+	SandboxImage string
 }
 
 // Store defines the data access interface for the control plane.

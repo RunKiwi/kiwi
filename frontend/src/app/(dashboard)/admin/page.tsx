@@ -3,6 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+import {
   api,
   type AdminStats,
   type AdminOrg,
@@ -467,6 +478,61 @@ export default function AdminPage() {
                 });
               })()}
             </div>
+          </div>
+
+          <div className="md:col-span-2 p-5 rounded-2xl border border-sand-200 bg-white shadow-2xs space-y-3">
+            <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-500" />
+              Sandbox Cold Start (Last 30 Days{fleet?.cold_start_samples ? `, ${fleet.cold_start_samples} runs` : ""})
+            </h3>
+            {!fleet?.cold_start_daily?.length ? (
+              <p className="text-xs font-mono text-stone-400 py-2">No sandbox provisioning data recorded yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2 space-y-2">
+                  <h4 className="text-[10px] font-mono uppercase tracking-wide text-stone-400">Daily Average</h4>
+                  <div className="h-48 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={fleet.cold_start_daily}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0efe9" />
+                        <XAxis dataKey="label" stroke="#a8a29e" fontSize={10} />
+                        <YAxis stroke="#a8a29e" fontSize={11} unit="ms" />
+                        <Tooltip formatter={(v: unknown) => [`${Number(Array.isArray(v) ? v[0] : v ?? 0).toFixed(0)}ms`, "avg"]} />
+                        <Area type="monotone" dataKey="avg_ms" stroke="#D97706" fill="#D97706" fillOpacity={0.15} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <h4 className="text-[10px] font-mono uppercase tracking-wide text-stone-400">By Fleet Type</h4>
+                    <div className="h-20 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={fleet.cold_start_by_fleet ?? []} layout="vertical">
+                          <XAxis type="number" hide />
+                          <YAxis type="category" dataKey="label" stroke="#a8a29e" fontSize={9} width={90} />
+                          <Tooltip formatter={(v: unknown) => [`${Number(Array.isArray(v) ? v[0] : v ?? 0).toFixed(0)}ms`, "avg"]} />
+                          <Bar dataKey="avg_ms" fill="#4D7C0F" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="text-[10px] font-mono uppercase tracking-wide text-stone-400">By Ecosystem</h4>
+                    <div className="h-20 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={fleet.cold_start_by_ecosystem ?? []} layout="vertical">
+                          <XAxis type="number" hide />
+                          <YAxis type="category" dataKey="label" stroke="#a8a29e" fontSize={9} width={90} />
+                          <Tooltip formatter={(v: unknown) => [`${Number(Array.isArray(v) ? v[0] : v ?? 0).toFixed(0)}ms`, "avg"]} />
+                          <Bar dataKey="avg_ms" fill="#0369A1" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -332,6 +332,8 @@ export interface JobSummary {
   pr_number?: number;
   stage?: number;
   is_dry_run?: boolean;
+  /** How long this job's sandbox took to start, in ms. 0/undefined = unmeasured. */
+  sandbox_provision_ms?: number;
 }
 
 export interface JobsListResponse {
@@ -1007,6 +1009,18 @@ export interface AdminFleetStats {
   queue_depth: number;
   avg_cold_start_ms: number;
   imds_blocked_count: number;
+  /** Rows the avg/breakdowns below are drawn from (last 30 days). */
+  cold_start_samples?: number;
+  cold_start_daily?: ColdStartPoint[];
+  cold_start_by_fleet?: ColdStartPoint[];
+  cold_start_by_ecosystem?: ColdStartPoint[];
+}
+
+/** One bucket of a cold-start breakdown — a day, a fleet type, or an ecosystem. */
+export interface ColdStartPoint {
+  label: string;
+  avg_ms: number;
+  samples: number;
 }
 
 export const api = client;

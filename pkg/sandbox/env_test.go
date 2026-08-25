@@ -22,7 +22,7 @@ import (
 func TestBuildDockerArgs_MultiLineEnvValueSurvives(t *testing.T) {
 	task := "Add a cookie consent popup.\n1. Inspect the repo structure.\n2. Add the dependency."
 
-	args, envFile, err := buildDockerArgs("/tmp/x", "echo hi", []string{"TASK=" + task}, &SandboxConfig{}, "alpine")
+	args, envFile, err := buildDockerArgs("/tmp/x", "echo hi", []string{"TASK=" + task}, &SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("buildDockerArgs: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestBuildDockerArgs_SecretValuesNeverEnterArgv(t *testing.T) {
 
 	args, _, err := buildDockerArgs("/tmp/x", "echo hi",
 		[]string{"ANTHROPIC_API_KEY=" + secret, "GITHUB_TOKEN=ghp_hunter2"},
-		&SandboxConfig{}, "alpine")
+		&SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("buildDockerArgs: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestBuildDockerArgs_SecretValuesNeverEnterArgv(t *testing.T) {
 // swallows the next argument and corrupts the whole command line.
 func TestBuildDockerArgs_SkipsEntriesWithoutAName(t *testing.T) {
 	args, _, err := buildDockerArgs("/tmp/x", "echo hi",
-		[]string{"NO_EQUALS_SIGN", "=novalue", "GOOD=1"}, &SandboxConfig{}, "alpine")
+		[]string{"NO_EQUALS_SIGN", "=novalue", "GOOD=1"}, &SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("buildDockerArgs: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestBuildDockerArgs_SkipsEntriesWithoutAName(t *testing.T) {
 // must not be truncated at the first one.
 func TestBuildDockerArgs_ValuesWithEqualsAreNotSplit(t *testing.T) {
 	args, _, err := buildDockerArgs("/tmp/x", "echo hi",
-		[]string{"DSN=host=db user=postgres password=a=b=c"}, &SandboxConfig{}, "alpine")
+		[]string{"DSN=host=db user=postgres password=a=b=c"}, &SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("buildDockerArgs: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBuildDockerArgs_ValuesWithEqualsAreNotSplit(t *testing.T) {
 
 // No environment means no -e flags at all.
 func TestBuildDockerArgs_EmptyEnvAddsNothing(t *testing.T) {
-	args, _, err := buildDockerArgs("/tmp/x", "echo hi", nil, &SandboxConfig{}, "alpine")
+	args, _, err := buildDockerArgs("/tmp/x", "echo hi", nil, &SandboxConfig{}, "alpine", "kiwi-sbx-test")
 	if err != nil {
 		t.Fatalf("buildDockerArgs: %v", err)
 	}

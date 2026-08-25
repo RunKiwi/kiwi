@@ -56,6 +56,7 @@ const PHASE_LABEL: Record<string, string> = {
   test: "Test",
   clone: "Cloning repository",
   install: "Installing dependencies",
+  sandbox_provision: "Sandbox ready",
   round_start: "Round started",
   session_end: "Session ended",
   implementer: "Implementer",
