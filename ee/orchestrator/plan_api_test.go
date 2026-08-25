@@ -166,6 +166,30 @@ func TestHandleApproveJobPlanEnqueuesContinuation(t *testing.T) {
 	require.Equal(t, "claude-3-5-haiku", continuation.Spec["model"])
 }
 
+// Approving a plan resumes a task that may have been paused for review far
+// longer than the free-tier fleet's idle TTL — the same cold-start every
+// other free-tier admission path gets (see planner.TestSubmitPlanColdStarts
+// AFreeOrgRegardlessOfCaller for the sibling case this mirrors) must run
+// here too, or the continuation queues onto a host nothing ever restarts.
+func TestHandleApproveJobPlanColdStartsAFreeOrg(t *testing.T) {
+	s, mux := newTestPlanServer(t)
+	require.NoError(t, s.db.AutoMigrate(&auth.ProvisioningRequest{}))
+	seedFreeOrg(t, s, "org-1")
+	seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-cold", "task-cold-a")
+
+	body, _ := json.Marshal(map[string]string{"user_comment": "looks right"})
+	req := authedRequest(t, http.MethodPost, "/api/v1/jobs/job-cold/plan/approve", bytes.NewReader(body), "org-1")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var provCount int64
+	s.db.Model(&auth.ProvisioningRequest{}).
+		Where("org_id = ? AND type = 'provision' AND status = 'pending'", "org-1").
+		Count(&provCount)
+	require.Equal(t, int64(1), provCount, "approving a free-tier org's plan must cold-start its daemon")
+}
+
 func TestHandleApproveJobPlanConflictWhenNotPendingReview(t *testing.T) {
 	s, mux := newTestPlanServer(t)
 	job := seedJobPendingReviewWithLeasedTask(t, s, "org-1", "job-not-pending", "task-np")
