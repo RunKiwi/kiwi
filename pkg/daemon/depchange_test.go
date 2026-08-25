@@ -129,6 +129,34 @@ func TestInstallStep_ReinstallDoesNotUseTheFrozenCommand(t *testing.T) {
 	}
 }
 
+// --legacy-peer-deps unblocks the frozen install (ERESOLVE against a
+// lockfile the repo already committed) but must not survive onto the
+// resolving install: that call writes the lockfile the PR ships, and a
+// lockfile npm resolved by ignoring peer constraints is one a plain
+// `npm ci` on the user's own machine can reject.
+func TestInstallStep_LegacyPeerDepsOnlyOnFrozenInstall(t *testing.T) {
+	for _, lockfile := range []string{"package-lock.json", ""} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if lockfile != "" {
+			if err := os.WriteFile(filepath.Join(dir, lockfile), []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		locked := installStepFor(dir, true)
+		if locked == nil || !strings.Contains(locked.Command, "--legacy-peer-deps") {
+			t.Errorf("lockfile=%q: frozen install should carry --legacy-peer-deps, got %+v", lockfile, locked)
+		}
+		reinstall := installStepFor(dir, false)
+		if reinstall == nil || strings.Contains(reinstall.Command, "--legacy-peer-deps") {
+			t.Errorf("lockfile=%q: resolving install must not carry --legacy-peer-deps, got %+v", lockfile, reinstall)
+		}
+	}
+}
+
 // Go needs the stronger form: `go mod download` fetches what go.mod already
 // names, but an edited go.mod needs the new requirement resolved and its go.sum
 // hashes written, which only `go mod tidy` does.

@@ -102,11 +102,23 @@ func installStepFor(dir string, locked bool) *installStep {
 	case has("yarn.lock"):
 		return &installStep{pick("yarn install --frozen-lockfile", "yarn install"), "yarn.lock"}
 	case has("package-lock.json"):
-		return &installStep{pick("npm ci", "npm install"), "package-lock.json"}
+		// --legacy-peer-deps on the frozen (pre-loop) install only: npm 7+
+		// makes a peer-dependency conflict already baked into the committed
+		// lockfile a hard ERESOLVE error instead of the npm 6 warning. Real
+		// repositories hit this constantly (a lockfile pinned before a peer's
+		// major bump), and it fails Phase A outright with no way for the
+		// Implementer to route around it — the flag restores the
+		// warn-and-continue behaviour npm's own error message recommends.
+		// The resolving form (after the Actor edits package.json) stays
+		// plain: it writes the lockfile the PR commits, and that file must
+		// resolve under an ordinary `npm ci` on the user's own machine.
+		return &installStep{pick("npm ci --legacy-peer-deps", "npm install"), "package-lock.json"}
 	case has("package.json"):
 		// No lockfile to be reproducible against, so a plain install is the
-		// only option; `npm ci` would refuse outright.
-		return &installStep{"npm install", "package.json"}
+		// only option; `npm ci` would refuse outright. Same split as above:
+		// the flag only unblocks the initial install, not the one that
+		// writes the lockfile the PR ships.
+		return &installStep{pick("npm install --legacy-peer-deps", "npm install"), "package.json"}
 
 	case has("go.mod"):
 		// `go mod download` fetches what go.mod already names but does not add a

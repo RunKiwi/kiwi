@@ -27,8 +27,8 @@ func TestInferInstall_NpmCiFromLockfile(t *testing.T) {
 	if step == nil {
 		t.Fatal("expected an install step")
 	}
-	if step.Command != "npm ci" {
-		t.Errorf("got %q, want npm ci", step.Command)
+	if step.Command != "npm ci --legacy-peer-deps" {
+		t.Errorf("got %q, want npm ci --legacy-peer-deps", step.Command)
 	}
 }
 
@@ -41,8 +41,8 @@ func TestInferInstall_LockfileDecidesThePackageManager(t *testing.T) {
 	}{
 		{[]string{"package.json", "pnpm-lock.yaml"}, "pnpm install --frozen-lockfile"},
 		{[]string{"package.json", "yarn.lock"}, "yarn install --frozen-lockfile"},
-		{[]string{"package.json", "package-lock.json"}, "npm ci"},
-		{[]string{"package.json"}, "npm install"}, // nothing to be reproducible against
+		{[]string{"package.json", "package-lock.json"}, "npm ci --legacy-peer-deps"},
+		{[]string{"package.json"}, "npm install --legacy-peer-deps"}, // nothing to be reproducible against
 	}
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
