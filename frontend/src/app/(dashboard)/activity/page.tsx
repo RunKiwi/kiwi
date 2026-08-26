@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
+import { FaSlack } from "react-icons/fa6";
 import { client, type Fleet, type Daemon, type JobSummary, type RecordStep } from "@/lib/api";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { ActivityTimeline, type ActivityLaneData, type ActivityBar } from "@/components/ActivityTimeline";
@@ -47,6 +48,7 @@ export default function ActivityPage() {
   const [windowHours, setWindowHours] = useState<number>(2);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [slackOnly, setSlackOnly] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
 
@@ -193,9 +195,11 @@ export default function ActivityPage() {
         (statusFilter === "succeeded" && j.status?.toUpperCase() === "SUCCEEDED") ||
         (statusFilter === "failed" && (j.status?.toUpperCase() === "FAILED" || j.status?.toUpperCase() === "CANCELLED"));
 
-      return matchesQuery && matchesStatus;
+      const matchesOrigin = !slackOnly || j.latest_origin === "slack";
+
+      return matchesQuery && matchesStatus && matchesOrigin;
     });
-  }, [jobs, searchQuery, statusFilter]);
+  }, [jobs, searchQuery, statusFilter, slackOnly]);
 
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-4 w-full font-sans text-stone-900 select-none">
@@ -381,6 +385,19 @@ export default function ActivityPage() {
                 </button>
               ))}
             </div>
+
+            <button
+              onClick={() => setSlackOnly((v) => !v)}
+              aria-pressed={slackOnly}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                slackOnly
+                  ? "bg-[#4A154B] text-white border-[#4A154B] shadow-2xs"
+                  : "bg-sand-100 text-stone-600 border-sand-200 hover:text-stone-900"
+              }`}
+            >
+              <FaSlack className="w-3 h-3" aria-hidden="true" />
+              Slack only
+            </button>
           </div>
         </div>
 
@@ -436,6 +453,14 @@ export default function ActivityPage() {
                   </div>
 
                   <div className="flex items-center gap-2.5 shrink-0">
+                    {job.latest_origin === "slack" && (
+                      <span
+                        title="Started from Slack"
+                        className="flex items-center justify-center w-5 h-5 rounded-md bg-[#4A154B]/10 border border-[#4A154B]/25"
+                      >
+                        <FaSlack className="w-2.5 h-2.5 text-[#4A154B]" aria-hidden="true" />
+                      </span>
+                    )}
                     {!!job.sandbox_provision_ms && job.sandbox_provision_ms < FAST_PROVISION_MS && (
                       <span
                         title={`Sandbox ready in ${job.sandbox_provision_ms}ms`}

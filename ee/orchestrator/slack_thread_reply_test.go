@@ -251,6 +251,9 @@ func TestHandleSlackInteractivityNewTaskUsesTheBoundChannelsConfiguredModel(t *t
 	if got := tasks[0].Spec["model"]; got != "claude-3-5-haiku-20241022" {
 		t.Fatalf("Spec[model] = %v, want the channel binding's configured model", got)
 	}
+	if tasks[0].Origin != store.OriginSlack {
+		t.Errorf("Origin = %q, want %q — a \"new\" task started from a Slack thread button is still Slack-initiated", tasks[0].Origin, store.OriginSlack)
+	}
 }
 
 // Regression test for the silent-failure bug: with no GEMINI platform key

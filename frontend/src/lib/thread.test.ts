@@ -125,6 +125,24 @@ describe("threadSummary", () => {
     assert.equal(s.continued, false);
   });
 
+  // Regression: continuations used to be counted by checking
+  // origin === "pr_comment" specifically, so a thread whose only follow-up
+  // came from a Slack reply (origin "slack") silently reported continued:
+  // false and hid the "N Execution Runs" badge on /tasks/[id], even though
+  // the "View thread" link that led there only appears for a thread with
+  // more than one run.
+  it("counts a Slack-originated follow-up as a continuation", () => {
+    const s = threadSummary(
+      buildThread([
+        task("t1", {}, 30),
+        task("t2", { parent_task_id: "t1", root_task_id: "t1", origin: "slack" }, 5),
+      ]),
+    );
+    assert.equal(s.runs, 2);
+    assert.equal(s.continued, true);
+    assert.equal(s.latestOrigin, "slack");
+  });
+
   it("survives an empty thread", () => {
     const s = threadSummary([]);
     assert.equal(s.runs, 0);

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { FaSlack } from "react-icons/fa6";
 import {
   FolderGit2,
   GitPullRequest,
@@ -176,6 +177,10 @@ function CommandCenterContent() {
     let waiting = 0;
     let prReady = 0;
     let failed = 0;
+    // Slack is an origin, not a status — a job can be Running and from Slack
+    // at once — so it's counted independently rather than joining the
+    // mutually-exclusive else-if chain below.
+    let slack = 0;
 
     for (const job of effectiveJobs) {
       const isFailed = job.status === "FAILED" || job.plan_status === "rejected";
@@ -190,6 +195,8 @@ function CommandCenterContent() {
       else if (isWaitingUser) waiting++;
       else if (isRunning) running++;
       else if (isPrReady) prReady++;
+
+      if (job.latest_origin === "slack") slack++;
     }
 
     return {
@@ -199,6 +206,7 @@ function CommandCenterContent() {
       waiting,
       prReady,
       failed,
+      slack,
     };
   }, [effectiveJobs]);
 
@@ -217,6 +225,7 @@ function CommandCenterContent() {
       if (statusFilter === "waiting") return isWaitingUser;
       if (statusFilter === "pr_created" || statusFilter === "succeeded") return isPrReady;
       if (statusFilter === "failed") return isFailed;
+      if (statusFilter === "slack") return job.latest_origin === "slack";
       return true;
     });
   }, [effectiveJobs, statusFilter]);
@@ -539,6 +548,19 @@ function CommandCenterContent() {
               <AlertCircle className={`w-3 h-3 ${statusFilter === "failed" ? "text-rose-400" : "text-rose-600"}`} />
               <span>Failed ({statusCounts.failed})</span>
             </button>
+            {statusCounts.slack > 0 && (
+              <button
+                onClick={() => setStatusFilter("slack")}
+                className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === "slack"
+                    ? "bg-[#4A154B] text-white shadow-2xs"
+                    : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
+                }`}
+              >
+                <FaSlack className={`w-3 h-3 ${statusFilter === "slack" ? "text-white" : "text-[#4A154B]"}`} aria-hidden="true" />
+                <span>Slack ({statusCounts.slack})</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -665,6 +687,12 @@ function CommandCenterContent() {
                       {job.is_dry_run && (
                         <span className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-sky-50 text-sky-800 border border-sky-200 uppercase">
                           DRY-RUN
+                        </span>
+                      )}
+                      {job.latest_origin === "slack" && (
+                        <span className="flex items-center gap-1 px-1.5 py-0.2 rounded font-mono text-[9px] font-bold bg-[#4A154B]/10 text-[#4A154B] border border-[#4A154B]/25 uppercase">
+                          <FaSlack className="w-2.5 h-2.5" aria-hidden="true" />
+                          Slack
                         </span>
                       )}
                     </div>

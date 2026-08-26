@@ -140,7 +140,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 		defaults := slackBindingDefaults(binding, inst.OrgID, testCmd)
 		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
 			OrgID: inst.OrgID, UserID: userID, Task: instruction, RepoURL: repoURL, Ref: defaults.ref, TestCmd: defaults.testCmd,
-			Model: defaults.model, ArchitectModel: defaults.architectModel,
+			Model: defaults.model, ArchitectModel: defaults.architectModel, Origin: store.OriginSlack,
 		})
 		if err != nil {
 			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
@@ -275,7 +275,7 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 		defaults := slackBindingDefaults(binding, inst.OrgID, "")
 		result, err := s.planner.SubmitPlan(ctx, planner.PlanRequest{
 			OrgID: inst.OrgID, Task: instruction, RepoURL: repoURL, Ref: defaults.ref, TestCmd: defaults.testCmd,
-			Model: defaults.model, ArchitectModel: defaults.architectModel,
+			Model: defaults.model, ArchitectModel: defaults.architectModel, Origin: store.OriginSlack,
 		})
 		if err != nil {
 			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
