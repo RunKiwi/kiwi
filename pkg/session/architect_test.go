@@ -70,6 +70,61 @@ func TestArchitectExploresBeforeAnswering(t *testing.T) {
 	}
 }
 
+// When the Architect has tools, a parse failure must not restart exploration
+// from scratch for the retry — that hands a weak model a fresh tool budget
+// and no memory of why the first attempt failed, which is how the same model
+// produces the same unparsed prose twice. The retry goes through Complete
+// instead, which is also the one call shape a provider can constrain to valid
+// JSON syntax without that fighting with tool-calling (see openai.go/
+// gemini.go's jsonMode on Complete).
+func TestArchitectPlanRetryDoesNotReexploreWithTools(t *testing.T) {
+	tp := newToolCapableProvider(func(n int, text string, results []provider.ToolResult) (provider.Turn, error) {
+		return provider.Turn{Text: "the model rambled without ever producing JSON"}, nil
+	})
+	tp.MockProvider.CompleteFunc = func(system, user string) (string, error) {
+		return `{"verdict":"proceed","objective":"recovered via retry","acceptance_criteria":["x"]}`, nil
+	}
+
+	arch := &LLMArchitect{Provider: tp, Tools: NewArchitectTools(t.TempDir())}
+	spec, err := arch.Plan(context.Background(), PlanInput{Task: "task", MaxRoundsBudget: 3})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if spec.Objective != "recovered via retry" {
+		t.Errorf("objective = %q, want the Complete() retry to have supplied the spec", spec.Objective)
+	}
+	if len(tp.MockToolRunner.Started) != 1 {
+		t.Errorf("expected exactly one exploration conversation, got %d — the retry re-explored instead of calling Complete", len(tp.MockToolRunner.Started))
+	}
+}
+
+// If the corrective retry also fails to parse, the error must describe the
+// retry's own response, not silently repeat the first attempt's — otherwise a
+// caller debugging "no JSON object" sees a stale preview from a response that
+// isn't the one that actually decided the failure.
+func TestArchitectPlanRetryFailureNamesTheSecondResponse(t *testing.T) {
+	calls := 0
+	mp := provider.NewMockProvider()
+	mp.CompleteFunc = func(system, user string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "the model rambled without ever producing JSON, attempt one", nil
+		}
+		return "distinctive-second-attempt-text, still no braces", nil
+	}
+	arch := &LLMArchitect{Provider: mp, Tools: NewArchitectTools(t.TempDir())}
+	_, err := arch.Plan(context.Background(), PlanInput{Task: "task", MaxRoundsBudget: 3})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if calls != 2 {
+		t.Fatalf("expected the retry to run, got %d complete() calls", calls)
+	}
+	if !strings.Contains(err.Error(), "distinctive-second-attempt-text") {
+		t.Errorf("error should describe the retry's own response, got: %v", err)
+	}
+}
+
 // A provider that cannot hold a tool conversation must not turn a valid
 // submit into a failure — the same "decline, don't reject" stance
 // architectModelFor takes for the model default.

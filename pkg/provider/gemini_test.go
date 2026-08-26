@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,30 @@ func TestGeminiComplete(t *testing.T) {
 	}
 	if in, out := gp.LastUsage(); in != 10 || out != 5 {
 		t.Errorf("usage = %d/%d, want 10/5", in, out)
+	}
+}
+
+// A weak or free-tier model is the one most likely to ramble in prose instead
+// of answering, which is exactly what Complete's callers (the Architect, the
+// planner) cannot parse. responseMimeType makes that a wire-level constraint
+// instead of a prompt request, so it must be requested regardless of model.
+func TestGeminiCompleteRequestsJSONMimeType(t *testing.T) {
+	var got geminiRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{}"}]},"finishReason":"STOP"}],"usageMetadata":{}}`))
+	}))
+	defer srv.Close()
+	gp := NewGeminiProviderWithModels("gk-123", "gemini-2.0-flash", "gemini-2.0-flash")
+	gp.baseURL = srv.URL
+	gp.http = srv.Client()
+
+	if _, err := gp.Complete(context.Background(), "system", "user"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if got.GenerationConfig.ResponseMIMEType != "application/json" {
+		t.Errorf("responseMimeType = %q, want application/json", got.GenerationConfig.ResponseMIMEType)
 	}
 }
 

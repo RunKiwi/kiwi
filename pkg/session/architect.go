@@ -146,6 +146,15 @@ func (a *LLMArchitect) complete(ctx context.Context, prompt string) (string, err
 // exactly like empty prose to parseSpec. Either way the fix is the same:
 // tell the model plainly what went wrong and give it one more turn, rather
 // than losing every prior round's work to a single malformed response.
+//
+// The retry deliberately calls Provider.Complete directly instead of
+// a.complete: re-entering exploreAndAnswer would hand the model a fresh tool
+// budget and no memory of why the first attempt failed, which is how the
+// same weak model produces the same unparsed prose twice. Complete also has
+// no tools attached, so it is the one call shape where the provider can force
+// wire-level JSON syntax (see openai.go/gemini.go's jsonMode) without that
+// constraint having to coexist with tool-calling — the corrective retry is
+// exactly the turn where that guarantee matters most.
 func (a *LLMArchitect) completeSpec(ctx context.Context, prompt string) (Spec, error) {
 	resp, err := a.complete(ctx, prompt)
 	if err != nil {
@@ -159,13 +168,14 @@ func (a *LLMArchitect) completeSpec(ctx context.Context, prompt string) (Spec, e
 	retryPrompt := prompt + fmt.Sprintf(
 		"\n\nYour previous response could not be used: %s. Respond with ONLY the JSON object described above — no prose, no code fence, no explanation.",
 		err)
-	resp2, err2 := a.complete(ctx, retryPrompt)
+	resp2, err2 := a.Provider.Complete(ctx, architectSystem, retryPrompt)
+	a.record()
 	if err2 != nil {
-		return Spec{}, err
+		return Spec{}, fmt.Errorf("retry after %w: %w", err, err2)
 	}
 	spec2, err2 := parseSpec(resp2)
 	if err2 != nil {
-		return Spec{}, err
+		return Spec{}, fmt.Errorf("retry after %w: %w", err, err2)
 	}
 	return spec2, nil
 }

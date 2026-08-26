@@ -23,7 +23,7 @@ func TestOpenAIChat_EmptyBodyIsNotReportedAsADecodeFailure(t *testing.T) {
 	srv, op, _ := openaiTestServer(t, "", http.StatusOK)
 	defer srv.Close()
 
-	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100)
+	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100, false)
 	if err == nil {
 		t.Fatal("expected an error for a 200 with no body")
 	}
@@ -52,7 +52,7 @@ func TestOpenAIChat_TruncatedBodyReportsTheReadFailure(t *testing.T) {
 	op.baseURL = srv.URL
 	op.http = srv.Client()
 
-	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100)
+	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100, false)
 	if err == nil {
 		t.Fatal("expected an error for a truncated body")
 	}
@@ -85,7 +85,7 @@ func TestOpenAIChat_DeadlineDuringBodyNamesTheDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
-	_, _, err := op.chat(ctx, "gpt-4.1-mini", "sys", "user", 100)
+	_, _, err := op.chat(ctx, "gpt-4.1-mini", "sys", "user", 100, false)
 	if err == nil {
 		t.Fatal("expected an error when the deadline lands mid-body")
 	}
@@ -159,7 +159,7 @@ func TestOpenAIChat_MalformedJSONStillDecodesAsSuch(t *testing.T) {
 	srv, op, _ := openaiTestServer(t, "<html>502 Bad Gateway</html>", http.StatusOK)
 	defer srv.Close()
 
-	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100)
+	_, _, err := op.chat(context.Background(), "gpt-4.1-mini", "sys", "user", 100, false)
 	if err == nil {
 		t.Fatal("expected an error for a non-JSON body")
 	}
