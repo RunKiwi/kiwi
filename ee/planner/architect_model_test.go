@@ -7,6 +7,7 @@ package planner
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
@@ -211,7 +212,7 @@ func TestArchitectDefaultHonoursOperatorOverride(t *testing.T) {
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "ANTHROPIC_API_KEY")
 	t.Setenv("KIWI_ARCHITECT_MODEL", "claude-sonnet-5")
 
-	got := s.architectModelFor(context.Background(), PlanRequest{
+	got, _ := s.architectModelFor(context.Background(), PlanRequest{
 		OrgID: "org1", Model: "claude-haiku-4-5-20251001",
 	})
 	if got != "claude-sonnet-5" {
@@ -233,7 +234,7 @@ func TestArchitectDefaultDeclinesOnFundingMismatch(t *testing.T) {
 	t.Setenv("KIWI_PLATFORM_ANTHROPIC_API_KEY", "sk-ant-platform")
 	seedKiwiCatalogModel(t, st, "claude-haiku-4-5-20251001", "anthropic", store.TierEconomy)
 
-	got := s.architectModelFor(context.Background(), PlanRequest{
+	got, _ := s.architectModelFor(context.Background(), PlanRequest{
 		OrgID: "org1", Model: "claude-haiku-4-5-20251001",
 	})
 	if got != "" {
@@ -259,6 +260,118 @@ func TestArchitectDefaultNeverBreaksAnOtherwiseValidSubmit(t *testing.T) {
 	}
 }
 
+// The scenario this whole redesign targets: a zero-config Slack trigger whose
+// Implementer landed on defaultWorkerModelFor's Kiwi-funded economy pick used
+// to get NO Architect split at all, because the only default Architect
+// candidate (DefaultArchitectModel, BYOK Anthropic) failed the funding-parity
+// check against a Kiwi-funded Implementer. A Kiwi-funded frontier model is
+// the fix: same payer as the Implementer, so the split actually happens.
+func TestArchitectPrefersKiwiFundedFrontierWhenWorkerIsKiwiFunded(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+	seedKiwiCatalogModel(t, st, "frontier-model", "openrouter", store.TierFrontier)
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "frontier-model").Update("output_cost_per_m", 3.00).Error; err != nil {
+		t.Fatalf("price frontier-model: %v", err)
+	}
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...", Model: "kimi-k2",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["architect_model"] != "frontier-model" {
+		t.Errorf("architect_model = %v, want the Kiwi-funded frontier model, not the BYOK default", task.Spec["architect_model"])
+	}
+}
+
+// Exhausted quota on the Kiwi-funded frontier tier must not silently look
+// like "nothing to buy" — the org should be told, not left guessing why a
+// task ran with no Architect split.
+func TestSubmitPlanWarnsWhenKiwiFundedFrontierAllowanceIsExhausted(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+	seedKiwiCatalogModel(t, st, "frontier-model", "openrouter", store.TierFrontier)
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "frontier-model").Update("output_cost_per_m", 3.00).Error; err != nil {
+		t.Fatalf("price frontier-model: %v", err)
+	}
+	period := store.CurrentPeriod(time.Now().UTC())
+	if _, err := st.EnsureGrant(ctx, "o1", store.TierFrontier, period, 1); err != nil {
+		t.Fatalf("seed frontier grant: %v", err)
+	}
+	if err := st.ConsumeTokens(ctx, "o1", store.TierFrontier, period, 1); err != nil {
+		t.Fatalf("exhaust frontier grant: %v", err)
+	}
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...", Model: "kimi-k2",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["architect_model"] != nil && task.Spec["architect_model"] != "" {
+		t.Errorf("architect_model = %v, want empty — the frontier allowance is exhausted", task.Spec["architect_model"])
+	}
+	if res.Warning == "" {
+		t.Error("expected SubmitResult.Warning to explain the degraded Architect, got empty")
+	}
+}
+
+// An org that opted into store.ModelSourceBYOK must never land on a
+// Kiwi-funded default, even when a cheaper Kiwi-funded candidate exists and
+// the org's allowance for it is untouched — the preference means "never run
+// on Kiwi's dime by default," not "prefer BYOK only once Kiwi is exhausted."
+func TestSubmitPlanHonoursByokModelSourcePreference(t *testing.T) {
+	svc, ctx := newPlannerWithKiwiModel(t)
+	st := svc.store.(*store.PostgresStore)
+	seedCredential(t, st, "o1", "ANTHROPIC_API_KEY")
+	if err := st.DB().Model(&store.CatalogModel{}).
+		Where("model_id = ?", "kimi-k2").Update("output_cost_per_m", 0.60).Error; err != nil {
+		t.Fatalf("price kimi-k2: %v", err)
+	}
+	if err := st.SetModelSource(ctx, "o1", store.ModelSourceBYOK); err != nil {
+		t.Fatalf("SetModelSource: %v", err)
+	}
+
+	res, err := svc.SubmitPlan(ctx, PlanRequest{
+		OrgID: "o1", FleetID: store.SharedFreeFleet,
+		Task: "fix the thing", RepoURL: "https://github.com/acme/api",
+		TestCmd: "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+	var task store.QueuedTask
+	if err := st.DB().First(&task, "id = ?", res.TaskIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Spec["model"] != DefaultWorkerModel {
+		t.Errorf("model = %v, want the BYOK default %q — the org opted out of Kiwi-funded defaults", task.Spec["model"], DefaultWorkerModel)
+	}
+}
+
 // The other way a default can break a working submit: an org running their own
 // Gemini key has no reason to have connected an Anthropic one, and the key
 // check that admission runs is against the ARCHITECT's provider. A default that
@@ -268,7 +381,7 @@ func TestArchitectDefaultDeclinesWithoutAKeyForItsOwnProvider(t *testing.T) {
 	s := NewService(newTestStore(t), nil, nil)
 	seedCredential(t, s.store.(*store.PostgresStore), "org1", "GEMINI_API_KEY")
 
-	got := s.architectModelFor(context.Background(), PlanRequest{
+	got, _ := s.architectModelFor(context.Background(), PlanRequest{
 		OrgID: "org1", Model: "gemini-flash-latest",
 	})
 	if got != "" {

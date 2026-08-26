@@ -15,6 +15,7 @@ import {
   Copy,
   Check,
   Gauge,
+  Coins,
 } from "lucide-react";
 import { client, api, type ValidateResponse, type UsageResponse } from "@/lib/api";
 import { PlanUsage } from "@/components/PlanUsage";
@@ -38,12 +39,18 @@ export default function SettingsPage() {
   const [notifyOn, setNotifyOn] = useState(false);
   const [permission, setPermission] = useState<string>("default");
 
+  // Default model source: which payer a submit with no explicit worker
+  // model falls back to (a channel-unbound Slack trigger, most commonly).
+  const [modelSource, setModelSourceState] = useState<"kiwi" | "byok">("kiwi");
+  const [modelSourceSaving, setModelSourceSaving] = useState(false);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNotifyOn(isNotificationEnabled());
     setPermission(getNotificationPermission());
     client.validate().then(setOrg).catch(() => {});
     api.getUsage().then(setUsage).catch(() => {});
+    api.getModelSource().then((r) => setModelSourceState(r.default_model_source === "byok" ? "byok" : "kiwi")).catch(() => {});
     Promise.all([
       client.listFleets().then((r) => r.fleets.length).catch(() => 0),
       client.listDaemons().then((d) => ({ total: d.length, online: d.filter((x) => x.online).length })).catch(() => ({ total: 0, online: 0 })),
@@ -62,6 +69,20 @@ export default function SettingsPage() {
     } else {
       setNotificationEnabled(false);
       setNotifyOn(false);
+    }
+  };
+
+  const handleSetModelSource = async (source: "kiwi" | "byok") => {
+    if (source === modelSource || modelSourceSaving) return;
+    const previous = modelSource;
+    setModelSourceState(source);
+    setModelSourceSaving(true);
+    try {
+      await api.setModelSource(source);
+    } catch {
+      setModelSourceState(previous);
+    } finally {
+      setModelSourceSaving(false);
     }
   };
 
@@ -377,6 +398,43 @@ export default function SettingsPage() {
               Request Invoice PDF
             </a>
           </div>
+        </div>
+      </div>
+
+      {/* ================= DEFAULT MODEL SOURCE SETTING ================= */}
+      <div className="bg-white border border-sand-200 rounded-2xl shadow-2xs p-5 sm:p-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <Coins className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-bold text-stone-900">Default Model Source</h3>
+          </div>
+          <p className="text-xs text-stone-500 max-w-xl">
+            Which model a task runs on when nothing else names one — a Slack trigger in an unbound channel, most
+            commonly. Kiwi-funded needs no key of your own; your own key never touches Kiwi&apos;s allowance.
+          </p>
+        </div>
+
+        <div className="flex items-center rounded-xl border border-sand-200 bg-sand-50 p-1 shrink-0">
+          <button
+            type="button"
+            disabled={modelSourceSaving}
+            onClick={() => handleSetModelSource("kiwi")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+              modelSource === "kiwi" ? "bg-white text-stone-900 shadow-2xs border border-sand-200" : "text-stone-500 hover:text-stone-800"
+            }`}
+          >
+            Kiwi-funded
+          </button>
+          <button
+            type="button"
+            disabled={modelSourceSaving}
+            onClick={() => handleSetModelSource("byok")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+              modelSource === "byok" ? "bg-white text-stone-900 shadow-2xs border border-sand-200" : "text-stone-500 hover:text-stone-800"
+            }`}
+          >
+            Your own key
+          </button>
         </div>
       </div>
 

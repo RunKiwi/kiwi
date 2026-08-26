@@ -146,7 +146,11 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 			return
 		}
-		s.recordSlackThreadTask(ctx, inst.OrgID, teamID, channelID, threadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Starting a new, unrelated task — job `%s`.", result.JobID))
+		newStatus := fmt.Sprintf("Starting a new, unrelated task — job `%s`.", result.JobID)
+		if result.Warning != "" {
+			newStatus += " " + result.Warning
+		}
+		s.recordSlackThreadTask(ctx, inst.OrgID, teamID, channelID, threadTS, firstOf(result.TaskIDs), token, newStatus)
 
 	default: // ambiguous
 		if _, err := s.slackClient.PostInteractiveButtons(ctx, token, channelID, threadTS,
@@ -277,6 +281,10 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 			return
 		}
-		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Starting a new task — job `%s`.", result.JobID))
+		newTaskStatus := fmt.Sprintf("Starting a new task — job `%s`.", result.JobID)
+		if result.Warning != "" {
+			newTaskStatus += " " + result.Warning
+		}
+		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, newTaskStatus)
 	}
 }

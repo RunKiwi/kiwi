@@ -66,6 +66,13 @@ type SubmitResult struct {
 	JobID      string   `json:"job_id"`
 	TaskIDs    []string `json:"task_ids"`
 	Summary    string   `json:"summary"`
+	// Warning is set only when a model default had to degrade because a
+	// Kiwi-funded candidate was available but the org's allowance for it is
+	// exhausted — see defaultWorkerModelFor and architectModelFor. Empty in
+	// every other case, including "no Kiwi-funded candidate exists at all,"
+	// which is a normal deployment fact rather than something happening to
+	// this org's usage.
+	Warning string `json:"warning,omitempty"`
 }
 
 // SubmitPlan runs the planner, persists an immutable content-addressed
@@ -166,14 +173,21 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 	// An unset Model must never reach admission, entitlement, or the daemon —
 	// see defaultWorkerModelFor. Applied before architectModelFor, which needs
 	// a real Model to decide whether an Architect split is worth buying at all.
+	var modelWarning string
 	if req.Model == "" {
-		req.Model = s.defaultWorkerModelFor(ctx, req.OrgID, req.FleetID)
+		req.Model, modelWarning = s.defaultWorkerModelFor(ctx, req.OrgID, req.FleetID)
 	}
 
 	// Choose the Architect before anything reads it. An unset field used to mean
 	// "run the Implementer's model", which silently collapsed the two-model
-	// split — see architectModelFor.
-	req.ArchitectModel = s.architectModelFor(ctx, req)
+	// split — see architectModelFor. Worker's warning wins if both fire, since
+	// a worker degrading is the bigger deal and duplicating both would just be
+	// noise for the same underlying "your plan's Kiwi-funded quota is spent."
+	var archWarning string
+	req.ArchitectModel, archWarning = s.architectModelFor(ctx, req)
+	if modelWarning == "" {
+		modelWarning = archWarning
+	}
 
 	// Nothing is decomposed and no model is called here: the Architect plans
 	// inside the daemon, on the customer's key, in their own cloud. The
@@ -568,6 +582,7 @@ func (s *Service) SubmitPlan(ctx context.Context, req PlanRequest) (*SubmitResul
 		JobID:      jobID,
 		TaskIDs:    taskIDs,
 		Summary:    plan.Summary,
+		Warning:    modelWarning,
 	}, nil
 }
 

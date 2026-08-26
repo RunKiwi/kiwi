@@ -99,6 +99,8 @@ type Store interface {
 	ActiveTaskInThread(ctx context.Context, orgID, rootTaskID string) (*QueuedTask, error)
 	PRCommentMode(ctx context.Context, orgID string) (string, error)
 	SetPRCommentMode(ctx context.Context, orgID, mode string) error
+	ModelSource(ctx context.Context, orgID string) (string, error)
+	SetModelSource(ctx context.Context, orgID, source string) error
 
 	// Tenancy & Limits
 	GetOrganization(ctx context.Context, id string) (*Organization, error)

@@ -62,7 +62,20 @@ const DefaultWorkerModel = "claude-haiku-4-5-20251001"
 // fallback for everything the catalog lookup does not cover: no OpenRouter
 // platform key on this deployment, no economy-tier OpenRouter model
 // discovered yet, or the org's Kiwi-token allowance is exhausted.
-func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID string) string {
+// The returned warning is non-empty only when a Kiwi-funded candidate exists
+// but the org's tier allowance is exhausted — the case worth telling the org
+// about, as opposed to "no OpenRouter platform key on this deployment" or "no
+// qualifying model in the catalog yet," which are deployment facts, not
+// something happening to this org's usage.
+func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID string) (model, warning string) {
+	// An org that opted into store.ModelSourceBYOK skips the Kiwi-funded
+	// cascade entirely — this is the one place that matters: architectModelFor
+	// never sees a Kiwi-funded req.Model to build a split on top of, so it
+	// falls through to its own BYOK default without needing this preference
+	// checked a second time.
+	if src, serr := s.store.ModelSource(ctx, orgID); serr == nil && src == store.ModelSourceBYOK {
+		return DefaultWorkerModel, ""
+	}
 	// requireEntitlement returns nil for two different reasons: the pick is
 	// genuinely fine, OR Kiwi holds no platform key for the provider at all
 	// (service.go's "nothing to fund, the org can run this on their own
@@ -72,15 +85,16 @@ func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID stri
 	// nothing of its own, so a missing platform key must fall through to
 	// DefaultWorkerModel, not be accepted as an unusable pick.
 	if _, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); !ok {
-		return DefaultWorkerModel
+		return DefaultWorkerModel, ""
 	}
 	candidate, ok, err := s.store.CheapestKiwiFundedModel(ctx, orgID, provider.ProviderOpenRouter, store.TierEconomy)
 	if err == nil && ok {
 		if s.requireEntitlement(ctx, orgID, fleetID, candidate) == nil {
-			return candidate
+			return candidate, ""
 		}
+		return DefaultWorkerModel, "Kiwi-funded models are at capacity for your plan right now — this task ran on the default instead."
 	}
-	return DefaultWorkerModel
+	return DefaultWorkerModel, ""
 }
 
 // architectModelFor decides which model plans and reviews this request.
@@ -104,42 +118,69 @@ func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID stri
 // In every case the answer is to return empty and let the daemon fall back to
 // the Implementer's model — the behaviour before this function existed. A
 // weaker Architect is a worse run; a rejected submit is no run at all.
-func (s *Service) architectModelFor(ctx context.Context, req PlanRequest) string {
+//
+// The returned warning is non-empty only for the one case worth telling the
+// org about: a Kiwi-funded frontier candidate exists but the org's tier
+// allowance is exhausted. Every other empty-model case (no operator/explicit
+// choice needed, no catalog candidate, funding mismatch, missing key) is a
+// normal "nothing to buy" outcome, not something happening to this org's
+// usage.
+func (s *Service) architectModelFor(ctx context.Context, req PlanRequest) (model, warning string) {
 	if req.ArchitectModel != "" {
-		return req.ArchitectModel
+		return req.ArchitectModel, ""
 	}
+	if req.Model == "" {
+		return "", ""
+	}
+	implFunding, err := s.fundingFor(ctx, req.OrgID, req.Model)
+	if err != nil {
+		return "", ""
+	}
+
+	// No operator override and a Kiwi-funded Implementer: prefer a Kiwi-funded
+	// frontier model over the BYOK default below. Same payer as the
+	// Implementer (no funding-mismatch refusal possible), no extra provider
+	// key required — the case that matters most is a zero-config Slack
+	// trigger, whose Implementer already landed on defaultWorkerModelFor's
+	// Kiwi-funded economy pick.
+	if os.Getenv("KIWI_ARCHITECT_MODEL") == "" && implFunding == store.FundingKiwi {
+		candidate, ok, cerr := s.store.CheapestKiwiFundedModel(ctx, req.OrgID, provider.ProviderOpenRouter, store.TierFrontier)
+		if cerr == nil && ok && candidate != req.Model {
+			if s.requireEntitlement(ctx, req.OrgID, req.FleetID, candidate) == nil {
+				return candidate, ""
+			}
+			return "", "Kiwi-funded Architect models are at capacity for your plan right now — this task ran without a separate planning/review model."
+		}
+		return "", ""
+	}
+
 	candidate := os.Getenv("KIWI_ARCHITECT_MODEL")
 	if candidate == "" {
 		candidate = DefaultArchitectModel
 	}
 	// Nothing to buy: the default IS the Implementer, so the two-model split
 	// would cost an extra resolution to arrive back where it started.
-	if candidate == "" || candidate == req.Model || req.Model == "" {
-		return ""
-	}
-
-	implFunding, err := s.fundingFor(ctx, req.OrgID, req.Model)
-	if err != nil {
-		return ""
+	if candidate == "" || candidate == req.Model {
+		return "", ""
 	}
 	archFunding, err := s.fundingFor(ctx, req.OrgID, candidate)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	if implFunding != archFunding {
-		return ""
+		return "", ""
 	}
 	if err := s.requireEntitlement(ctx, req.OrgID, req.FleetID, candidate); err != nil {
-		return ""
+		return "", ""
 	}
 	// Kiwi supplies the key for a Kiwi-funded model, so there is nothing for the
 	// org to have connected. Otherwise the key has to already be there.
 	if archFunding != store.FundingKiwi {
 		if err := s.requireProviderKey(ctx, req.OrgID, s.providerOf(ctx, req.OrgID, candidate)); err != nil {
-			return ""
+			return "", ""
 		}
 	}
-	return candidate
+	return candidate, ""
 }
 
 // providerOf resolves the provider that serves a model, preferring the catalog
