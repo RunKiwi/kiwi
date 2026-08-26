@@ -590,10 +590,10 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   const totalRan = durationBetween(started || submitted, endpoint);
 
   // Overall status classification
-  const isAwaitingApproval = jobPlan?.plan_status === "pending_review";
   const isFailed = tasksList.some((t) => t.status === "FAILED") || jobPlan?.plan_status === "rejected";
-  const isSucceeded = tasksList.length > 0 && tasksList.every((t) => t.status === "SUCCEEDED");
   const isCancelled = tasksList.length > 0 && tasksList.every((t) => t.status === "CANCELLED");
+  const isAwaitingApproval = !isFailed && !isCancelled && (jobPlan?.plan_status === "pending_review" || currentJob?.status === "PLAN_REVIEW" || currentJob?.status === "AWAITING_PLAN_APPROVAL");
+  const isSucceeded = tasksList.length > 0 && tasksList.every((t) => t.status === "SUCCEEDED");
   const isRunning = tasksList.some((t) => t.status === "LEASED" || t.status === "RUNNING");
   const isQueued = tasksList.some((t) => t.status === "QUEUED");
 
@@ -601,7 +601,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
   if (isAwaitingApproval) {
     statusBadge = { text: "AWAITING APPROVAL", bg: "bg-indigo-50 text-indigo-800 border-indigo-200" };
   } else if (isRunning) {
-    statusBadge = { text: "RUNNING", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    statusBadge = { text: "RUNNING", bg: "bg-sky-50 text-sky-800 border-sky-200" };
   } else if (isSucceeded) {
     statusBadge = { text: "SUCCEEDED", bg: "bg-emerald-50 text-emerald-800 border-emerald-200" };
   } else if (isFailed) {
@@ -624,7 +624,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
     testOutcomeClass = "text-emerald-700 font-bold";
   } else if (isRunning) {
     testOutcome = "TESTING";
-    testOutcomeClass = "text-amber-700 font-bold";
+    testOutcomeClass = "text-sky-700 font-bold";
   }
 
   // Model names
@@ -697,9 +697,9 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                     isAwaitingApproval
                       ? "bg-indigo-50 text-indigo-900 border-indigo-200"
                       : isRunning
-                      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                      ? "bg-sky-50 text-sky-900 border-sky-200"
                       : isSucceeded
-                      ? "bg-purple-50 text-purple-900 border-purple-200"
+                      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
                       : isFailed
                       ? "bg-rose-50/80 text-rose-900 border-rose-200"
                       : isCancelled
@@ -915,7 +915,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
         {/* ================= MAIN CONTENT PANELS ================= */}
         <div className="flex-1 flex flex-col overflow-y-auto p-5 bg-sand-50/40 gap-5">
           {/* Plan Mode Review Box */}
-          {jobPlan && jobPlan.plan_status === "pending_review" && (
+          {jobPlan && jobPlan.plan_status === "pending_review" && !isFailed && !isCancelled && (
             <PlanApprovalCard
               plan={jobPlan}
               onApproved={() => {

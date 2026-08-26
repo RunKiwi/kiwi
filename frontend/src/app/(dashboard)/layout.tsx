@@ -214,7 +214,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const hasMinutesCap = usage != null && limitMinutes > 0;
   const percentUsed = hasMinutesCap ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0;
 
-  const planReviewsCount = (jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.requires_plan_approval).length;
+  const planReviewsCount = (jobs || []).filter((j) => (j.status === "PLAN_REVIEW" || j.status === "AWAITING_PLAN_APPROVAL" || j.plan_status === "pending_review") && j.status !== "FAILED" && j.status !== "CANCELLED" && j.status !== "SUCCEEDED").length;
   const needsAttentionCount = planReviewsCount;
   const activeTasksCount = (jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length;
   const runnersCount = (daemons || []).length;
@@ -834,7 +834,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                             const repoName = r.full_name || r.name || "repo";
                             const shortName = r.full_name.includes("/") ? r.full_name.split("/")[1] : (r.name || r.full_name);
                             const repoJobs = (jobs || []).filter((j) => j.repo === repoName);
-                            const hasAction = repoJobs.some((j) => j.status === "PLAN_REVIEW");
+                            const hasAction = repoJobs.some((j) => (j.status === "PLAN_REVIEW" || j.status === "AWAITING_PLAN_APPROVAL" || j.plan_status === "pending_review") && j.status !== "FAILED" && j.status !== "CANCELLED" && j.status !== "SUCCEEDED");
                             const isRunning = repoJobs.some((j) => j.status === "LEASED" || j.status === "RUNNING");
                             const prCount = repoJobs.filter((j) => j.pr_urls && j.pr_urls.length > 0).length;
 
@@ -854,12 +854,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> action
                                   </span>
                                 ) : isRunning ? (
-                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> run
+                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-sky-700 bg-sky-50 border border-sky-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" /> run
                                   </span>
                                 ) : prCount > 0 ? (
-                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-purple-700 bg-purple-50 border border-purple-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
-                                    <GitPullRequest className="w-2.5 h-2.5 text-purple-600 shrink-0" />
+                                  <span className="h-4.5 px-1.5 rounded-full text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 inline-flex items-center gap-1 shrink-0 whitespace-nowrap leading-none">
+                                    <GitPullRequest className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
                                     <span>{prCount} PR</span>
                                   </span>
                                 ) : (
