@@ -43,6 +43,7 @@ export default function SettingsPage() {
   // model falls back to (a channel-unbound Slack trigger, most commonly).
   const [modelSource, setModelSourceState] = useState<"kiwi" | "byok">("kiwi");
   const [modelSourceSaving, setModelSourceSaving] = useState(false);
+  const [modelSourceLoaded, setModelSourceLoaded] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -50,7 +51,10 @@ export default function SettingsPage() {
     setPermission(getNotificationPermission());
     client.validate().then(setOrg).catch(() => {});
     api.getUsage().then(setUsage).catch(() => {});
-    api.getModelSource().then((r) => setModelSourceState(r.default_model_source === "byok" ? "byok" : "kiwi")).catch(() => {});
+    api.getModelSource().then((r) => {
+      setModelSourceState(r.default_model_source === "byok" ? "byok" : "kiwi");
+      setModelSourceLoaded(true);
+    }).catch(() => {});
     Promise.all([
       client.listFleets().then((r) => r.fleets.length).catch(() => 0),
       client.listDaemons().then((d) => ({ total: d.length, online: d.filter((x) => x.online).length })).catch(() => ({ total: 0, online: 0 })),
@@ -77,6 +81,7 @@ export default function SettingsPage() {
     const previous = modelSource;
     setModelSourceState(source);
     setModelSourceSaving(true);
+    setModelSourceLoaded(true);
     try {
       await api.setModelSource(source);
     } catch {
@@ -417,7 +422,7 @@ export default function SettingsPage() {
         <div className="flex items-center rounded-xl border border-sand-200 bg-sand-50 p-1 shrink-0">
           <button
             type="button"
-            disabled={modelSourceSaving}
+            disabled={!modelSourceLoaded || modelSourceSaving}
             onClick={() => handleSetModelSource("kiwi")}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
               modelSource === "kiwi" ? "bg-white text-stone-900 shadow-2xs border border-sand-200" : "text-stone-500 hover:text-stone-800"
@@ -427,7 +432,7 @@ export default function SettingsPage() {
           </button>
           <button
             type="button"
-            disabled={modelSourceSaving}
+            disabled={!modelSourceLoaded || modelSourceSaving}
             onClick={() => handleSetModelSource("byok")}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
               modelSource === "byok" ? "bg-white text-stone-900 shadow-2xs border border-sand-200" : "text-stone-500 hover:text-stone-800"

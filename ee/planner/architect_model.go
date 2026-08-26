@@ -72,8 +72,9 @@ func (s *Service) defaultWorkerModelFor(ctx context.Context, orgID, fleetID stri
 	// cascade entirely — this is the one place that matters: architectModelFor
 	// never sees a Kiwi-funded req.Model to build a split on top of, so it
 	// falls through to its own BYOK default without needing this preference
-	// checked a second time.
-	if src, serr := s.store.ModelSource(ctx, orgID); serr == nil && src == store.ModelSourceBYOK {
+	// checked a second time. If the lookup errors, fail closed to BYOK: the
+	// alternative is offering a Kiwi-funded model an org actively opted out of.
+	if src, serr := s.store.ModelSource(ctx, orgID); serr != nil || src == store.ModelSourceBYOK {
 		return DefaultWorkerModel, ""
 	}
 	// requireEntitlement returns nil for two different reasons: the pick is

@@ -95,10 +95,9 @@ export function threadSummary(nodes: ThreadNode[]): ThreadSummary {
   // A run "continued" the thread if it wasn't the thread's own root — origin
   // alone under-counts: pr_comment and slack are the two origins a
   // continuation actually carries (see pkg/store/lineage.go), but a fork also
-  // adds a run to the same list without being either. Checking parent_task_id
-  // instead of enumerating origins is what keeps this correct as new origins
-  // are added, rather than needing a matching update here every time.
-  const continuations = nodes.filter((n) => !!n.task.parent_task_id).length;
+  // adds a run to the same list without being either. Exclude fork origin so
+  // only actual comment continuations count.
+  const continuations = nodes.filter((n) => !!n.task.parent_task_id && n.task.origin !== "fork").length;
   return {
     runs: nodes.length,
     continued: continuations > 0,
