@@ -381,6 +381,15 @@ body {
 }
 .pr-popover { animation: pr-pop-in 0.15s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: bottom left; }
 
+/* Running Task Animation: Top Edge Beam Shimmer */
+@keyframes beam-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.animate-beam {
+  animation: beam-shimmer 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* Reduced motion accessibility guard */
 @media (prefers-reduced-motion: reduce) {
   *,

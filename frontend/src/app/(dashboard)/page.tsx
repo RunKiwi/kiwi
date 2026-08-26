@@ -13,8 +13,12 @@ import {
   Hammer,
   Ban,
   ChevronRight,
+  AlertCircle,
+  AlertTriangle,
+  RotateCcw,
+  Loader2,
 } from "lucide-react";
-import { api, DEFAULT_ARCHITECT_MODEL, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats } from "@/lib/api";
+import { api, DEFAULT_ARCHITECT_MODEL, DEFAULT_WORKER_MODEL, type UsageResponse, type GithubRepo, type SpendResponse, type SandboxCacheStats, type JobSummary } from "@/lib/api";
 import { shortTime, formatCost, formatTokens } from "@/lib/datetime";
 import { TaskDrawer } from "@/components/TaskDrawer";
 import { ModelSelector } from "@/components/TaskComposer/ModelSelector";
@@ -79,6 +83,8 @@ function CommandCenterContent() {
 
   // Status Filter
   const [statusFilter, setStatusFilter] = useState(searchParams.get("filter") || "all");
+
+  const effectiveJobs = useMemo(() => jobs || [], [jobs]);
 
   // Initial load for static metadata like GitHub repos
   useEffect(() => {
@@ -164,21 +170,56 @@ function CommandCenterContent() {
     }
   };
 
-  const filteredJobs = useMemo(() => {
-    const list = jobs || [];
-    return list.filter((job) => {
-      const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval;
-      const isWaitingUser = job.status === "WAITING_USER";
-      const isRunning = job.status === "LEASED" || job.status === "RUNNING";
-      const isPrReady = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+  const statusCounts = useMemo(() => {
+    let running = 0;
+    let planReview = 0;
+    let waiting = 0;
+    let prReady = 0;
+    let failed = 0;
 
+    for (const job of effectiveJobs) {
+      const isFailed = job.status === "FAILED" || job.plan_status === "rejected";
+      const isCancelled = job.status === "CANCELLED";
+      const isPrReady = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+      const isPlanReview = !isFailed && !isCancelled && !isPrReady && (job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.plan_status === "pending_review");
+      const isWaitingUser = job.status === "WAITING_USER" && !isFailed && !isCancelled && !isPrReady;
+      const isRunning = (job.status === "LEASED" || job.status === "RUNNING") && !isPlanReview && !isFailed && !isCancelled && !isPrReady;
+
+      if (isFailed) failed++;
+      else if (isPlanReview) planReview++;
+      else if (isWaitingUser) waiting++;
+      else if (isRunning) running++;
+      else if (isPrReady) prReady++;
+    }
+
+    return {
+      all: effectiveJobs.length,
+      running,
+      planReview,
+      waiting,
+      prReady,
+      failed,
+    };
+  }, [effectiveJobs]);
+
+  const filteredJobs = useMemo(() => {
+    const list = effectiveJobs;
+    return list.filter((job) => {
+      const isFailed = job.status === "FAILED" || job.plan_status === "rejected";
+      const isCancelled = job.status === "CANCELLED";
+      const isPrReady = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+      const isPlanReview = !isFailed && !isCancelled && !isPrReady && (job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.plan_status === "pending_review");
+      const isWaitingUser = job.status === "WAITING_USER" && !isFailed && !isCancelled && !isPrReady;
+      const isRunning = (job.status === "LEASED" || job.status === "RUNNING") && !isPlanReview && !isFailed && !isCancelled && !isPrReady;
+
+      if (statusFilter === "running") return isRunning;
       if (statusFilter === "plan") return isPlanReview;
       if (statusFilter === "waiting") return isWaitingUser;
-      if (statusFilter === "running") return isRunning;
-      if (statusFilter === "pr_created") return isPrReady;
+      if (statusFilter === "pr_created" || statusFilter === "succeeded") return isPrReady;
+      if (statusFilter === "failed") return isFailed;
       return true;
     });
-  }, [jobs, statusFilter]);
+  }, [effectiveJobs, statusFilter]);
 
   const plan = usage?.plan || "free";
   const usedMinutes = usage?.agent_minutes_used ?? 0;
@@ -433,36 +474,70 @@ function CommandCenterContent() {
           <div className="flex flex-wrap items-center gap-1 text-xs">
             <button
               onClick={() => setStatusFilter("all")}
-              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all ${
-                statusFilter === "all" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all cursor-pointer ${
+                statusFilter === "all"
+                  ? "bg-stone-900 text-white shadow-2xs"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
               }`}
             >
-              All ({(jobs || []).length})
+              All ({statusCounts.all})
             </button>
             <button
               onClick={() => setStatusFilter("running")}
-              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
-                statusFilter === "running" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === "running"
+                  ? "bg-stone-900 text-white shadow-2xs"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
               }`}
             >
-              Running ({(jobs || []).filter((j) => j.status === "LEASED" || j.status === "RUNNING").length})
+              <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === "running" ? "bg-sky-400" : "bg-sky-500"} ${statusCounts.running > 0 ? "animate-pulse" : ""}`} />
+              <span>Running ({statusCounts.running})</span>
             </button>
             <button
               onClick={() => setStatusFilter("plan")}
-              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1 border border-indigo-200/80 ${
-                statusFilter === "plan" ? "bg-indigo-600 text-white shadow-2xs" : "text-indigo-900 bg-indigo-50 hover:bg-indigo-100"
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === "plan"
+                  ? "bg-stone-900 text-white shadow-2xs"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
               }`}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-              <span>📋 Plan Review ({(jobs || []).filter((j) => j.status === "PLAN_REVIEW" || j.status === "AWAITING_PLAN_APPROVAL" || j.requires_plan_approval).length})</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === "plan" ? "bg-indigo-400" : "bg-indigo-500"}`} />
+              <span>📋 Plan Review ({statusCounts.planReview})</span>
             </button>
+            {statusCounts.waiting > 0 && (
+              <button
+                onClick={() => setStatusFilter("waiting")}
+                className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === "waiting"
+                    ? "bg-stone-900 text-white shadow-2xs"
+                    : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === "waiting" ? "bg-amber-400" : "bg-amber-500"} animate-ping`} />
+                <span>Input Needed ({statusCounts.waiting})</span>
+              </button>
+            )}
             <button
               onClick={() => setStatusFilter("pr_created")}
-              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
-                statusFilter === "pr_created" ? "bg-stone-900 text-white shadow-2xs" : "text-stone-600 hover:bg-sand-150"
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === "pr_created"
+                  ? "bg-stone-900 text-white shadow-2xs"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
               }`}
             >
-              PR Ready ({(jobs || []).filter((j) => j.status === "SUCCEEDED" || (j.pr_urls && j.pr_urls.length > 0)).length})
+              <CheckCircle2 className={`w-3 h-3 ${statusFilter === "pr_created" ? "text-emerald-400" : "text-emerald-600"}`} />
+              <span>PR Ready ({statusCounts.prReady})</span>
+            </button>
+            <button
+              onClick={() => setStatusFilter("failed")}
+              className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === "failed"
+                  ? "bg-stone-900 text-white shadow-2xs"
+                  : "text-stone-600 hover:text-stone-900 hover:bg-sand-150"
+              }`}
+            >
+              <AlertCircle className={`w-3 h-3 ${statusFilter === "failed" ? "text-rose-400" : "text-rose-600"}`} />
+              <span>Failed ({statusCounts.failed})</span>
             </button>
           </div>
         </div>
@@ -486,12 +561,26 @@ function CommandCenterContent() {
               <Logo variant="full-color" pose="sleeping" animated={true} className="w-8 h-8" />
             </div>
             <div className="relative z-10 space-y-1">
-              <p className="text-xs font-bold text-stone-800">Queue is quiet and resting</p>
+              <p className="text-xs font-bold text-stone-800">
+                {statusFilter === "all"
+                  ? "Queue is quiet and resting"
+                  : `No ${statusFilter === "pr_created" ? "PR ready" : statusFilter === "plan" ? "plan review" : statusFilter} tasks`}
+              </p>
               <p className="text-[11px] text-stone-500 max-w-sm mx-auto">
-                No active tasks match this filter. Assign a new programming objective or run an automated refactor.
+                {statusFilter === "all"
+                  ? "No active tasks match this filter. Assign a new programming objective or run an automated refactor."
+                  : `There are currently no tasks matching the "${statusFilter === "pr_created" ? "PR ready" : statusFilter}" filter.`}
               </p>
             </div>
-            <div className="relative z-10 pt-1">
+            <div className="relative z-10 pt-1 flex items-center justify-center gap-2 flex-wrap">
+              {statusFilter !== "all" && (
+                <button
+                  onClick={() => setStatusFilter("all")}
+                  className="px-3.5 py-2 rounded-xl bg-sand-100 hover:bg-sand-200 text-stone-800 font-semibold text-xs border border-sand-200 shadow-2xs transition-all cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <span>Clear Filter (Show All)</span>
+                </button>
+              )}
               <button
                 onClick={() => setShowComposer(true)}
                 className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs shadow-2xs transition-all cursor-pointer inline-flex items-center gap-1.5"
@@ -504,12 +593,12 @@ function CommandCenterContent() {
         ) : (
           <div className="space-y-3.5">
             {filteredJobs.map((job) => {
-              const isPlanReview = job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.requires_plan_approval || job.plan_status === "pending_review";
-              const isWaitingInput = job.status === "WAITING_USER";
-              const isRunning = job.status === "LEASED" || job.status === "RUNNING";
-              const isSucceeded = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
-              const isCancelled = job.status === "CANCELLED";
               const isFailed = job.status === "FAILED" || job.plan_status === "rejected";
+              const isCancelled = job.status === "CANCELLED";
+              const isSucceeded = job.status === "SUCCEEDED" || (job.pr_urls && job.pr_urls.length > 0);
+              const isPlanReview = !isFailed && !isCancelled && !isSucceeded && (job.status === "PLAN_REVIEW" || job.status === "AWAITING_PLAN_APPROVAL" || job.plan_status === "pending_review");
+              const isWaitingInput = job.status === "WAITING_USER" && !isFailed && !isCancelled && !isSucceeded;
+              const isRunning = (job.status === "LEASED" || job.status === "RUNNING") && !isPlanReview && !isFailed && !isCancelled && !isSucceeded;
 
               const prLink = (job.pr_urls && job.pr_urls.length > 0 ? job.pr_urls[0] : null) ||
                 (job.repo && job.pr_number ? `https://github.com/${job.repo}/pull/${job.pr_number}` : null);
@@ -523,22 +612,36 @@ function CommandCenterContent() {
               let stage = 1;
               if (isSucceeded) stage = 4;
               else if (isRunning) stage = 3;
-              else if (isPlanReview || isWaitingInput) stage = 2;
+              else if (isFailed && job.plan_status !== "rejected") stage = 3;
+              else if (isPlanReview || isWaitingInput || (isFailed && job.plan_status === "rejected")) stage = 2;
 
               return (
                 <div
                   key={job.job_id}
                   onClick={() => setActiveDrawerTaskId(job.job_id)}
-                  className={`p-4 sm:p-5 rounded-xl border transition-all cursor-pointer shadow-2xs group bg-white ${
-                    isPlanReview
+                  className={`relative overflow-hidden p-4 sm:p-5 rounded-xl border transition-all cursor-pointer shadow-2xs group bg-white ${
+                    isFailed
+                      ? "border-rose-200/90 bg-gradient-to-r from-rose-50/25 via-white to-white hover:border-rose-300 hover:shadow-xs"
+                      : isPlanReview
                       ? "border-indigo-300/80 bg-gradient-to-r from-indigo-50/25 via-white to-white hover:border-indigo-400 hover:shadow-xs"
                       : isWaitingInput
                       ? "border-amber-300/80 bg-gradient-to-r from-amber-50/25 via-white to-white hover:border-amber-400 hover:shadow-xs"
+                      : isSucceeded
+                      ? "border-emerald-200/90 bg-gradient-to-r from-emerald-50/20 via-white to-white hover:border-emerald-300 hover:shadow-xs"
                       : isRunning
-                      ? "border-sand-200/90 hover:border-emerald-400 hover:shadow-xs"
+                      ? "border-sky-200/90 bg-gradient-to-r from-sky-50/20 via-white to-white hover:border-sky-300 hover:shadow-xs"
+                      : isCancelled
+                      ? "border-sand-200/90 bg-sand-50/40 hover:border-stone-400 hover:shadow-xs"
                       : "border-sand-200/90 hover:border-stone-400/90 hover:shadow-xs"
                   }`}
                 >
+                  {/* Top Edge Gradient Beam Shimmer (Option 1) */}
+                  {isRunning && (
+                    <div className="absolute top-0 left-0 right-0 h-[2px] overflow-hidden rounded-t-xl bg-sky-100/50 pointer-events-none">
+                      <div className="w-1/2 h-full bg-gradient-to-r from-transparent via-sky-500 to-transparent animate-beam" />
+                    </div>
+                  )}
+
                   {/* Header Row */}
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -573,34 +676,34 @@ function CommandCenterContent() {
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 shadow-2xs transition-all"
+                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1 shadow-2xs transition-all"
                         >
-                          <GitPullRequest className="w-3 h-3 text-purple-600" />
+                          <GitPullRequest className="w-3 h-3 text-emerald-600" />
                           <span>#{job.pr_number || "PR"}</span>
                         </a>
                       )}
 
                       <span
                         className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border flex items-center gap-1.5 ${
-                          isPlanReview
+                          isFailed
+                            ? "text-rose-900 bg-rose-50 border-rose-200"
+                            : isPlanReview
                             ? "text-indigo-800 bg-indigo-50 border-indigo-200"
                             : isWaitingInput
                             ? "text-amber-800 bg-amber-50 border-amber-200"
                             : isRunning
-                            ? "text-emerald-800 bg-emerald-50 border-emerald-200"
+                            ? "text-sky-900 bg-sky-50 border-sky-200"
                             : isSucceeded
-                            ? "text-purple-900 bg-purple-50 border-purple-200"
+                            ? "text-emerald-900 bg-emerald-50 border-emerald-200"
                             : isCancelled
                             ? "text-stone-600 bg-sand-100 border-sand-200"
-                            : isFailed
-                            ? "text-rose-900 bg-rose-50 border-rose-200"
                             : "text-amber-800 bg-amber-50 border-amber-200"
                         }`}
                       >
                         {isRunning && (
                           <span className="relative flex h-1.5 w-1.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-600" />
                           </span>
                         )}
                         {isPlanReview && (
@@ -615,11 +718,13 @@ function CommandCenterContent() {
                             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-600" />
                           </span>
                         )}
-                        {isCancelled && <Ban className="w-3 h-3 text-stone-400" />}
-                        {isFailed && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
-                        {isSucceeded && <CheckCircle2 className="w-3 h-3 text-purple-600" />}
+                        {isFailed && <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />}
+                        {isCancelled && <Ban className="w-3 h-3 text-stone-400 shrink-0" />}
+                        {isSucceeded && <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />}
                         <span>
-                          {isPlanReview
+                          {isFailed
+                            ? "FAILED"
+                            : isPlanReview
                             ? "ACTION: PLAN READY"
                             : isWaitingInput
                             ? "ACTION: INPUT NEEDED"
@@ -629,8 +734,6 @@ function CommandCenterContent() {
                             ? "PR READY"
                             : isCancelled
                             ? "CANCELLED"
-                            : isFailed
-                            ? "FAILED"
                             : job.status || "QUEUED"}
                         </span>
                       </span>
@@ -643,6 +746,21 @@ function CommandCenterContent() {
                   </h3>
 
                   {/* Actionable Callout Banners */}
+                  {isFailed && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-rose-50/90 border border-rose-200 flex items-center justify-between text-xs text-rose-950 shadow-2xs">
+                      <span className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span className="text-[11px]">
+                          <strong>Execution halted:</strong> {job.plan_status === "rejected" ? "Plan was rejected during review." : "Automated tests or agent execution encountered an error."}
+                        </span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-rose-800 bg-white px-2 py-0.5 rounded-md border border-rose-200 shrink-0 flex items-center gap-1">
+                        <RotateCcw className="w-2.5 h-2.5" />
+                        <span>Inspect Error</span>
+                      </span>
+                    </div>
+                  )}
+
                   {isPlanReview && (
                     <div className="mb-3 p-2.5 rounded-xl bg-indigo-50/90 border border-indigo-200 flex items-center justify-between text-xs text-indigo-950 shadow-2xs">
                       <span className="flex items-center gap-2">
@@ -678,7 +796,7 @@ function CommandCenterContent() {
                       className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
                         stage >= 1
                           ? isRunning && stage === 1
-                            ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
+                            ? "bg-sky-50/90 border-sky-300 text-sky-950 font-bold shadow-[0_0_12px_rgba(14,165,233,0.22)] ring-1 ring-sky-300/70"
                             : "bg-white border-sand-200 text-stone-800 font-semibold"
                           : "text-stone-400 border-transparent"
                       }`}
@@ -686,7 +804,7 @@ function CommandCenterContent() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            stage >= 1 ? "bg-emerald-500" : "bg-stone-300"
+                            stage >= 1 ? (isRunning && stage === 1 ? "bg-sky-500" : "bg-emerald-500") : "bg-stone-300"
                           }`}
                         />
                         <span className="truncate">1. Plan</span>
@@ -695,7 +813,7 @@ function CommandCenterContent() {
                         {stage > 1 || isSucceeded || isFailed ? (
                           <span className="text-emerald-600">✓</span>
                         ) : isRunning && stage === 1 ? (
-                          <span className="text-indigo-600">⟳</span>
+                          <Loader2 className="w-3 h-3 animate-spin text-sky-600" />
                         ) : (
                           <span className="text-stone-300 font-normal">—</span>
                         )}
@@ -709,10 +827,12 @@ function CommandCenterContent() {
                           ? "bg-indigo-100 border-indigo-300 text-indigo-950 font-bold shadow-2xs"
                           : isFailed && job.plan_status === "rejected"
                           ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
+                          : isRunning && stage === 2
+                          ? "bg-sky-50/90 border-sky-300 text-sky-950 font-bold shadow-[0_0_12px_rgba(14,165,233,0.22)] ring-1 ring-sky-300/70"
                           : stage >= 2
-                          ? isRunning && stage === 2
-                            ? "bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"
-                            : "bg-white border-sand-200 text-stone-800 font-semibold"
+                          ? "bg-white border-sand-200 text-stone-800 font-semibold"
+                          : isFailed && job.plan_status !== "rejected"
+                          ? "bg-white border-sand-200 text-stone-800 font-semibold"
                           : "text-stone-400 border-transparent"
                       }`}
                     >
@@ -723,10 +843,10 @@ function CommandCenterContent() {
                               ? "bg-indigo-600"
                               : isFailed && job.plan_status === "rejected"
                               ? "bg-rose-500"
-                              : stage > 2 || isSucceeded
+                              : stage > 2 || isSucceeded || (isFailed && job.plan_status !== "rejected")
                               ? "bg-emerald-500"
-                              : stage === 2
-                              ? "bg-indigo-500"
+                              : stage === 2 && isRunning
+                              ? "bg-sky-500"
                               : "bg-stone-300"
                           }`}
                         />
@@ -736,34 +856,34 @@ function CommandCenterContent() {
                       </div>
                       <span className="text-[10px] shrink-0 font-bold">
                         {isFailed && job.plan_status === "rejected" ? (
-                          <span className="text-rose-600">✕</span>
+                          <span className="text-rose-600">✕ Rejected</span>
                         ) : isPlanReview ? (
                           <span className="text-indigo-600 text-[9px] font-bold">Action</span>
                         ) : stage > 2 || isSucceeded || (isFailed && job.plan_status !== "rejected") ? (
                           <span className="text-emerald-600">✓</span>
                         ) : isRunning && stage === 2 ? (
-                          <span className="text-indigo-600">⟳</span>
+                          <Loader2 className="w-3 h-3 animate-spin text-sky-600" />
                         ) : (
                           <span className="text-stone-300 font-normal">—</span>
                         )}
                       </span>
                     </div>
 
-                    {/* 3. Code & Test */}
+                    {/* 3. Code & Test (Option 2: Stage Glow & Spinner) */}
                     <div
-                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
+                      className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-all ${
                         isWaitingInput
                           ? "bg-amber-100 border-amber-300 text-amber-950 font-bold shadow-2xs"
                           : isFailed && job.plan_status !== "rejected"
                           ? "bg-rose-50 border-rose-200 text-rose-800 font-bold"
                           : isRunning && stage === 3
-                          ? "bg-emerald-50 border-emerald-300 text-emerald-950 font-bold animate-pulse"
+                          ? "bg-sky-50/90 border-sky-300 text-sky-950 font-bold shadow-[0_0_12px_rgba(14,165,233,0.22)] ring-1 ring-sky-300/70"
                           : stage >= 3
-                          ? isSucceeded
-                            ? "bg-white border-sand-200 text-stone-800 font-semibold"
-                            : "bg-white border-sand-200 text-stone-800 font-semibold"
+                          ? "bg-white border-sand-200 text-stone-800 font-semibold"
                           : isCancelled
                           ? "bg-sand-100/60 border-sand-200 text-stone-500"
+                          : isFailed && job.plan_status === "rejected"
+                          ? "text-stone-400 border-transparent opacity-40"
                           : "text-stone-400 border-transparent"
                       }`}
                     >
@@ -775,7 +895,7 @@ function CommandCenterContent() {
                               : isFailed && job.plan_status !== "rejected"
                               ? "bg-rose-500"
                               : isRunning && stage === 3
-                              ? "bg-emerald-600"
+                              ? "bg-sky-600"
                               : isSucceeded || stage > 3
                               ? "bg-emerald-500"
                               : isCancelled
@@ -787,13 +907,13 @@ function CommandCenterContent() {
                       </div>
                       <span className="text-[10px] shrink-0 font-bold">
                         {isFailed && job.plan_status !== "rejected" ? (
-                          <span className="text-rose-600">✕</span>
+                          <span className="text-rose-600">✕ Failed</span>
                         ) : isWaitingInput ? (
                           <span className="text-amber-700 text-[9px]">Input</span>
                         ) : isSucceeded ? (
                           <span className="text-emerald-600">✓</span>
                         ) : isRunning && stage === 3 ? (
-                          <span className="text-emerald-600">⟳</span>
+                          <Loader2 className="w-3 h-3 animate-spin text-sky-600" />
                         ) : isCancelled ? (
                           <span className="text-stone-400 font-normal">⊘</span>
                         ) : (
@@ -806,21 +926,23 @@ function CommandCenterContent() {
                     <div
                       className={`px-2 py-1.5 rounded-lg border flex items-center justify-between transition-colors ${
                         isSucceeded
-                          ? "bg-purple-50 border-purple-200 text-purple-900 font-bold"
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-bold"
+                          : isFailed
+                          ? "text-stone-400 border-transparent opacity-40"
                           : "text-stone-400 border-transparent"
                       }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            isSucceeded ? "bg-purple-600" : "bg-stone-300"
+                            isSucceeded ? "bg-emerald-600" : "bg-stone-300"
                           }`}
                         />
                         <span className="truncate">{job.is_dry_run ? "4. Dry-Run" : "4. PR Ready"}</span>
                       </div>
                       <span className="text-[10px] shrink-0 font-bold">
                         {isSucceeded ? (
-                          <span className="text-purple-700">✓</span>
+                          <span className="text-emerald-700">✓</span>
                         ) : isCancelled ? (
                           <span className="text-stone-300 font-normal">⊘</span>
                         ) : (
@@ -876,13 +998,24 @@ function CommandCenterContent() {
                     </div>
 
                     <div>
-                      {isPlanReview ? (
+                      {isFailed ? (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setActiveDrawerTaskId(job.job_id);
                           }}
-                          className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Inspect Error &rarr;</span>
+                        </button>
+                      ) : isPlanReview ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveDrawerTaskId(job.job_id);
+                          }}
+                          className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                         >
                           <span>Review & Approve Plan &rarr;</span>
                         </button>
@@ -892,7 +1025,7 @@ function CommandCenterContent() {
                             e.stopPropagation();
                             setActiveDrawerTaskId(job.job_id);
                           }}
-                          className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                         >
                           <span>Provide Input &rarr;</span>
                         </button>
@@ -902,9 +1035,9 @@ function CommandCenterContent() {
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all"
+                          className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                         >
-                          <GitPullRequest className="w-3 h-3 text-purple-200" />
+                          <GitPullRequest className="w-3 h-3 text-emerald-200" />
                           <span>View PR &rarr;</span>
                         </a>
                       ) : (
