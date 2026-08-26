@@ -115,9 +115,19 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		binding = nil
 	}
 	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, binding)
+
+	// fetchSlackContext and resolveSlackRepo can together make several
+	// bounded-but-not-instant completer calls, and can exhaust this
+	// trigger's own budget doing so. Everything from here on reports an
+	// outcome to the user (a reaction, a reply, the triggered-task row), so
+	// it must not silently fail on a context that already expired getting
+	// here — see replyCtx.
+	ctx, cancel := replyCtx(ctx)
+	defer cancel()
+
 	if ambiguousReply != "" {
 		if s.slackClient != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, ambiguousReply)
+			s.postSlackReply(ctx, token, channelID, replyThreadTS, ambiguousReply)
 		}
 		return
 	}
@@ -154,7 +164,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	})
 	if err != nil {
 		if s.slackClient != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, channelID, replyThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 		}
 		return
 	}
@@ -165,10 +175,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	}
 	statusTS := ""
 	if s.slackClient != nil {
-		statusTS, err = s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, statusText)
-		if err != nil {
-			log.Printf("[slackapp] posting status message for job %s: %v", result.JobID, err)
-		}
+		statusTS, _ = s.postSlackReply(ctx, token, channelID, replyThreadTS, statusText)
 	}
 
 	row := &store.SlackTriggeredTask{
@@ -178,6 +185,21 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	if err := s.storage.CreateSlackTriggeredTask(ctx, row); err != nil {
 		log.Printf("[slackapp] persist triggered-task row for job %s: %v", result.JobID, err)
 	}
+}
+
+// postSlackReply posts and logs on failure. Every Slack reply in this
+// package — including the ambiguous-repo fallback that exists specifically
+// to tell the user something went wrong — used to call slackClient.PostMessage
+// directly and discard the error, so a post that failed (an expired context,
+// a revoked token, a rate limit) left no trace anywhere a human could see it.
+// That silence, not just the context-expiry bug replyCtx fixes, is what made
+// the original incident look like Kiwi never responded at all.
+func (s *Server) postSlackReply(ctx context.Context, token, channelID, threadTS, text string) (string, error) {
+	ts, err := s.slackClient.PostMessage(ctx, token, channelID, threadTS, text)
+	if err != nil {
+		log.Printf("[slackapp] posting reply to channel %s thread %s: %v", channelID, threadTS, err)
+	}
+	return ts, err
 }
 
 func firstOf(ids []string) string {

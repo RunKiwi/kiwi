@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
@@ -27,6 +28,58 @@ const fixedLookback = 10
 const escalatedLookback = 50
 
 type completeFunc func(ctx context.Context, system, user string) (string, error)
+
+// slackCompleterTimeout bounds a single completion call slackCompleter's
+// completeFunc makes. Without it, a slow frontier model (a "thinking"
+// reasoning model, picked because it's the cheapest Kiwi-funded frontier
+// candidate, can easily run past a minute) can consume the entirety of
+// handleSlackTrigger's own 60s budget (slack_webhook.go) on one call, and
+// worse, leave no time — and a context already past its deadline — to post
+// even the fallback "not sure" reply, which is what silently swallowed the
+// reply in the incident this constant fixes. 15s leaves room for the up to
+// two or three completer calls one trigger can make (context sufficiency,
+// repo inference, thread-reply classification, investigation hint) inside
+// that 60s budget, while still failing an individual slow call fast enough
+// that something can be reported back.
+const slackCompleterTimeout = 15 * time.Second
+
+// boundCompleter wraps a completeFunc so every call gets its own bounded
+// sub-context, independent of (but derived from, so it still respects) the
+// caller's own deadline or cancellation.
+func boundCompleter(inner completeFunc) completeFunc {
+	return func(ctx context.Context, system, user string) (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, slackCompleterTimeout)
+		defer cancel()
+		return inner(ctx, system, user)
+	}
+}
+
+// replyTimeout bounds the fresh context replyCtx substitutes in — long
+// enough for a couple of Slack API calls and a DB write, short enough that a
+// caller which is itself context-bound (a webhook goroutine, ultimately)
+// doesn't hang past its own request lifetime for no reason.
+const replyTimeout = 10 * time.Second
+
+// replyCtx returns ctx unchanged when it's still live, or a fresh
+// short-lived context when it has already expired or been cancelled.
+//
+// One or more slackCompleter calls (bound individually by slackCompleterTimeout,
+// but there can be several in one trigger — context sufficiency, repo
+// inference, thread-reply classification) can together still exhaust the
+// caller's own budget (handleSlackTrigger's 60s in slack_webhook.go). Posting
+// a reply on that same, by-then-expired context — including the "not sure
+// which repository" fallback that exists specifically to tell the user
+// something went wrong — fails immediately and silently, since PostMessage's
+// error is not otherwise surfaced anywhere a human sees it. The caller should
+// switch to this context for everything from the point it might report an
+// outcome (a reaction, a reply, persisting the triggered-task row) onward, so
+// a request that ran out of time upstream can still leave a visible trace.
+func replyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), replyTimeout)
+}
 
 // slackCompleter builds a Control-Plane-side LLM call for these calls
 // (context sufficiency, repo inference, thread-reply classification), which
@@ -54,7 +107,7 @@ func (s *Server) slackCompleter(ctx context.Context) (completeFunc, error) {
 		if key, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); ok && key != "" {
 			if spec, ok := provider.SpecFor(provider.ProviderOpenRouter); ok {
 				p := provider.NewOpenAICompatibleProvider(key, or, or, spec.BaseURL, spec.ID)
-				return p.Complete, nil
+				return boundCompleter(p.Complete), nil
 			}
 		}
 	}
@@ -68,7 +121,7 @@ func (s *Server) slackCompleter(ctx context.Context) (completeFunc, error) {
 		return nil, fmt.Errorf("no platform key configured for Slack inference")
 	}
 	p := provider.NewGeminiProviderWithModels(key, model, model)
-	return p.Complete, nil
+	return boundCompleter(p.Complete), nil
 }
 
 // assembleContext judges one window of history against the sufficiency
