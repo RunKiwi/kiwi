@@ -109,9 +109,20 @@ type openaiRequest struct {
 	// The two output-ceiling fields are mutually exclusive and which one the API
 	// accepts depends on the model — see isReasoningModel. Both are omitempty so
 	// exactly one is ever sent.
-	MaxTokens           int      `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64 `json:"temperature,omitempty"`
+	MaxTokens           int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64              `json:"temperature,omitempty"`
+	ResponseFormat      *openaiResponseFormat `json:"response_format,omitempty"`
+}
+
+// openaiResponseFormat forces the wire-level JSON syntax check that a cheap
+// or free-tier model otherwise skips by rambling in prose instead of
+// answering. It's a request to the endpoint, not a prompt instruction, so it
+// holds even when the model would ignore "respond only with JSON". Every
+// caller of Complete already puts "JSON object" in its system prompt, which
+// this mode requires be present somewhere in the messages.
+type openaiResponseFormat struct {
+	Type string `json:"type"`
 }
 
 type openaiResponse struct {
@@ -158,13 +169,16 @@ func isReasoningModel(model string) bool {
 }
 
 // chat issues one chat/completions call and returns the text plus finish reason.
-func (p *OpenAIProvider) chat(ctx context.Context, model, system, user string, maxTokens int) (string, string, error) {
+func (p *OpenAIProvider) chat(ctx context.Context, model, system, user string, maxTokens int, jsonMode bool) (string, string, error) {
 	reqBody := openaiRequest{
 		Model: model,
 		Messages: []openaiMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
+	}
+	if jsonMode {
+		reqBody.ResponseFormat = &openaiResponseFormat{Type: "json_object"}
 	}
 	if isReasoningModel(model) {
 		// Reasoning tokens are drawn from this same ceiling, so it has to cover
@@ -243,7 +257,7 @@ func (p *OpenAIProvider) GetCodeEdit(ctx context.Context, task, fileName, codeCo
 	user := fmt.Sprintf("Task: %s\n\nFile: %s\n\nCurrent contents:\n```\n%s\n```\n\nBuild/test output:\n%s",
 		task, fileName, codeContent, buildOutput)
 
-	text, finish, err := p.chat(ctx, p.actorModel, system, user, 16000)
+	text, finish, err := p.chat(ctx, p.actorModel, system, user, 16000, false)
 	if err != nil {
 		return "", fmt.Errorf("%s actor request failed: %w", p.name, err)
 	}
@@ -266,7 +280,7 @@ func (p *OpenAIProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	// a reasoning model spends this budget on thinking before it writes the
 	// verdict, and a Critic that runs out of budget mid-thought returns nothing —
 	// which parseVerdict reads as a rejection, silently stalling the loop.
-	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000)
+	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000, false)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("%s critic request failed: %w", p.name, err)
 	}
@@ -302,7 +316,7 @@ func (p *OpenAIProvider) SelectMetric(ctx context.Context, intent string, option
 	}
 	user := fmt.Sprintf("Task: %s\n\nConfigured metrics:\n%s", intent, optionsText)
 
-	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000)
+	text, finish, err := p.chat(ctx, p.criticModel, system, user, 8000, false)
 	if err != nil {
 		return "", fmt.Errorf("%s select metric request failed: %w", p.name, err)
 	}
@@ -322,7 +336,7 @@ func (p *OpenAIProvider) SelectMetric(ctx context.Context, intent string, option
 // structured output.
 func (p *OpenAIProvider) Complete(ctx context.Context, system, user string) (string, error) {
 	budget := CompletionBudget()
-	text, finish, err := p.chat(ctx, p.actorModel, system, user, budget)
+	text, finish, err := p.chat(ctx, p.actorModel, system, user, budget, true)
 	if err != nil {
 		return "", fmt.Errorf("%s completion request failed: %w", p.name, err)
 	}

@@ -230,6 +230,36 @@ func TestOpenAIChatModelsUseMaxTokens(t *testing.T) {
 	}
 }
 
+// A weak or free-tier model is the one most likely to ramble in prose instead
+// of answering, which is exactly what Complete's callers (the Architect, the
+// planner) cannot parse. json_object mode makes that a wire-level constraint
+// instead of a prompt request, so it must be requested regardless of model.
+func TestOpenAICompleteRequestsJSONObjectMode(t *testing.T) {
+	srv, op, got := openaiTestServer(t, chatResponse(`{"ok":true}`, "stop", 1, 1), http.StatusOK)
+	defer srv.Close()
+
+	if _, err := op.Complete(context.Background(), "s", "u"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if got.ResponseFormat == nil || got.ResponseFormat.Type != "json_object" {
+		t.Errorf("response_format = %+v, want json_object", got.ResponseFormat)
+	}
+}
+
+// GetCodeEdit's answer is a fenced code block, not JSON — forcing json_object
+// mode here would make every actor call fail.
+func TestOpenAIGetCodeEditDoesNotForceJSONMode(t *testing.T) {
+	srv, op, got := openaiTestServer(t, chatResponse("```go\npackage x\n```", "stop", 1, 1), http.StatusOK)
+	defer srv.Close()
+
+	if _, err := op.GetCodeEdit(context.Background(), "task", "x.go", "old", "out"); err != nil {
+		t.Fatalf("GetCodeEdit: %v", err)
+	}
+	if got.ResponseFormat != nil {
+		t.Errorf("response_format = %+v, want none for a code-block answer", got.ResponseFormat)
+	}
+}
+
 func TestIsReasoningModel(t *testing.T) {
 	for _, m := range []string{"gpt-5", "gpt-5-mini", "GPT-5-nano", "o1-preview", "o3-mini", "o4-mini"} {
 		if !isReasoningModel(m) {

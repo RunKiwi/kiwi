@@ -69,6 +69,11 @@ type geminiRequest struct {
 	GenerationConfig  struct {
 		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 		Temperature     float64 `json:"temperature,omitempty"`
+		// ResponseMIMEType forces syntactically valid JSON at the wire level,
+		// so a cheap/free model that would otherwise ramble in prose instead
+		// of answering can't — the constraint holds even when it would ignore
+		// a prompt instruction to respond with JSON only.
+		ResponseMIMEType string `json:"responseMimeType,omitempty"`
 	} `json:"generationConfig"`
 }
 
@@ -88,13 +93,16 @@ type geminiResponse struct {
 }
 
 // generate issues one generateContent call and returns the concatenated text.
-func (p *GeminiProvider) generate(ctx context.Context, model, system, user string, maxTokens int) (string, string, error) {
+func (p *GeminiProvider) generate(ctx context.Context, model, system, user string, maxTokens int, jsonMode bool) (string, string, error) {
 	reqBody := geminiRequest{
 		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: system}}},
 		Contents:          []geminiContent{{Role: "user", Parts: []geminiPart{{Text: user}}}},
 	}
 	reqBody.GenerationConfig.MaxOutputTokens = maxTokens
 	reqBody.GenerationConfig.Temperature = 0.2
+	if jsonMode {
+		reqBody.GenerationConfig.ResponseMIMEType = "application/json"
+	}
 
 	b, err := json.Marshal(reqBody)
 	if err != nil {
@@ -158,7 +166,7 @@ func (p *GeminiProvider) GetCodeEdit(ctx context.Context, task, fileName, codeCo
 	user := fmt.Sprintf("Task: %s\n\nFile: %s\n\nCurrent contents:\n```\n%s\n```\n\nBuild/test output:\n%s",
 		task, fileName, codeContent, buildOutput)
 
-	text, finish, err := p.generate(ctx, p.actorModel, system, user, 8192)
+	text, finish, err := p.generate(ctx, p.actorModel, system, user, 8192, false)
 	if err != nil {
 		return "", fmt.Errorf("gemini actor request failed: %w", err)
 	}
@@ -177,7 +185,7 @@ func (p *GeminiProvider) ReviewEdit(ctx context.Context, task, fileName, oldCont
 	user := fmt.Sprintf("Task: %s\n\nFile: %s\n\nOriginal:\n```\n%s\n```\n\nProposed:\n```\n%s\n```\n\nBuild/test output that motivated the change:\n%s",
 		task, fileName, oldContent, newContent, buildOutput)
 
-	text, finish, err := p.generate(ctx, p.criticModel, system, user, 2000)
+	text, finish, err := p.generate(ctx, p.criticModel, system, user, 2000, false)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("gemini critic request failed: %w", err)
 	}
@@ -209,7 +217,7 @@ func (p *GeminiProvider) SelectMetric(ctx context.Context, intent string, option
 	}
 	user := fmt.Sprintf("Task: %s\n\nConfigured metrics:\n%s", intent, optionsText)
 
-	text, finish, err := p.generate(ctx, p.criticModel, system, user, 500)
+	text, finish, err := p.generate(ctx, p.criticModel, system, user, 500, false)
 	if err != nil {
 		return "", fmt.Errorf("gemini select metric request failed: %w", err)
 	}
@@ -228,7 +236,7 @@ func (p *GeminiProvider) SelectMetric(ctx context.Context, intent string, option
 // multi-file edits, which are not shaped like GetCodeEdit's single-file fix.
 func (p *GeminiProvider) Complete(ctx context.Context, system, user string) (string, error) {
 	budget := CompletionBudget()
-	text, finish, err := p.generate(ctx, p.actorModel, system, user, budget)
+	text, finish, err := p.generate(ctx, p.actorModel, system, user, budget, true)
 	if err != nil {
 		return "", fmt.Errorf("gemini complete request failed: %w", err)
 	}
