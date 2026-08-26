@@ -28,24 +28,29 @@ const escalatedLookback = 50
 
 type completeFunc func(ctx context.Context, system, user string) (string, error)
 
-// slackCompleter builds a cheap Control-Plane-side LLM call for these calls
+// slackCompleter builds a Control-Plane-side LLM call for these calls
 // (context sufficiency, repo inference, thread-reply classification), which
 // all run on the Control Plane rather than a customer's daemon and so need
 // their own key rather than the org's.
 //
-// The cheapest Kiwi-funded OpenRouter model in the catalog is tried first —
-// picked at call time, not hardcoded, so a discovery refresh that finds a
-// cheaper economy-tier model routes here automatically. No org is in play
-// for this call (it is a Control-Plane operating cost, not billed to any
-// org's allowance), so the lookup reads the global catalog and skips the
-// per-org entitlement check SubmitPlan's equivalent runs. Gemini is the
-// fallback for a deployment with no OpenRouter platform key configured, or
-// whose catalog has not discovered a qualifying model yet — the operator
-// override (KIWI_SLACK_INFERENCE_MODEL) still applies there, not to the
-// catalog pick, since overriding an already-cheapest model would only ever
-// make this call more expensive.
+// The cheapest Kiwi-funded OpenRouter *frontier*-tier model in the catalog is
+// tried first — picked at call time, not hardcoded, so a discovery refresh
+// that finds a cheaper qualifying model routes here automatically. Economy
+// tier was the original choice and is wrong for this call: these three
+// decisions gate whether a task runs at all (wrong repo, false-ambiguous,
+// misclassified continue/fork/new), so a few cents of margin isn't worth
+// picking the weakest model in the catalog — see the resolveSlackRepo
+// incident where the cheapest economy model (mistral-nemo) returned
+// low-confidence or unparseable output for an unambiguous "repo is
+// runkiwi/docs" message. No org is in play for this call (it is a
+// Control-Plane operating cost, not billed to any org's allowance), so the
+// lookup reads the global catalog and skips the per-org entitlement check
+// SubmitPlan's equivalent runs. Gemini is the fallback for a deployment with
+// no OpenRouter platform key configured, or whose catalog has not discovered
+// a qualifying frontier model yet — the operator override
+// (KIWI_SLACK_INFERENCE_MODEL) still applies there, not to the catalog pick.
 func (s *Server) slackCompleter(ctx context.Context) (completeFunc, error) {
-	if or, ok, err := s.storage.CheapestKiwiFundedModel(ctx, store.GlobalCatalogOrg, provider.ProviderOpenRouter, store.TierEconomy); err == nil && ok {
+	if or, ok, err := s.storage.CheapestKiwiFundedModel(ctx, store.GlobalCatalogOrg, provider.ProviderOpenRouter, store.TierFrontier); err == nil && ok {
 		if key, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); ok && key != "" {
 			if spec, ok := provider.SpecFor(provider.ProviderOpenRouter); ok {
 				p := provider.NewOpenAICompatibleProvider(key, or, or, spec.BaseURL, spec.ID)
