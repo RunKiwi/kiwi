@@ -68,8 +68,8 @@ func TestUnknownPlanFallsBackToFree(t *testing.T) {
 }
 
 func TestTokensForTier(t *testing.T) {
-	if got := TokensFor("free", store.TierFrontier); got != 50_000 {
-		t.Errorf("TokensFor(free, frontier) = %d, want 50000", got)
+	if got := TokensFor("free", store.TierFrontier); got != 100_000 {
+		t.Errorf("TokensFor(free, frontier) = %d, want 100000", got)
 	}
 	// An ungrantable tier yields zero, never a positive default.
 	if got := TokensFor("free", store.TierUnknown); got != 0 {

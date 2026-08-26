@@ -22,16 +22,26 @@ type Grant struct {
 // planGrants is the single source of truth for what each plan gets per calendar
 // month, mirroring the shape of auth.FreeLimits.
 //
-// Worst-case exposure at blended rates is roughly $1/month for a fully
-// consuming Free org and roughly $30/month for a Pro one. The Free number is
-// the one that scales with signups and is the one to watch. These are expected
-// to be tuned once a month of real consumption has been metered; they live here
-// so that tuning is a one-line change.
+// Worst-case exposure at blended rates is roughly $1.15/month for a fully
+// consuming Free org (was ~$1 before the Free frontier grant below went
+// 50k -> 100k tokens; the extra 50k at a ~$2-3/M blended frontier rate is
+// ~$0.10-0.15) and roughly $30/month for a Pro one. The Free number is the
+// one that scales with signups and is the one to watch. These are expected
+// to be tuned once a month of real consumption has been metered; they live
+// here so that tuning is a one-line change.
 var planGrants = map[string][]Grant{
 	"free": {
 		{Tier: store.TierFree, Tokens: 10_000_000},
 		{Tier: store.TierEconomy, Tokens: 1_000_000},
-		{Tier: store.TierFrontier, Tokens: 50_000},
+		// 100_000, not the original 50_000: architectModelFor now actually
+		// spends this tier for a zero-config Slack trigger's Architect (it
+		// used to sit unused — a Kiwi-funded Implementer got no Architect
+		// split at all, see ee/planner/architect_model.go), so this is real
+		// new draw against a previously-idle allowance. Sized to keep the
+		// same economy:frontier ratio (10:1) the Pro plan already runs, not
+		// picked from observed usage — re-tune once real consumption is
+		// metered.
+		{Tier: store.TierFrontier, Tokens: 100_000},
 	},
 	"pro": {
 		{Tier: store.TierFree, Tokens: 50_000_000},
