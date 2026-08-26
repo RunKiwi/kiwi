@@ -99,6 +99,62 @@ func TestSlackCompleterFallsBackToGeminiWithoutAnOpenRouterKey(t *testing.T) {
 	}
 }
 
+// Regression test for the incident where a slow frontier reasoning model
+// (deepseek-r1-class) ran past handleSlackTrigger's own 60s budget with no
+// per-call bound at all, leaving the user with total silence. boundCompleter
+// must give every call its own deadline rather than trusting the caller's.
+func TestBoundCompleterCapsEachCallWithItsOwnDeadline(t *testing.T) {
+	var gotDeadline time.Time
+	var gotOK bool
+	inner := func(ctx context.Context, system, user string) (string, error) {
+		gotDeadline, gotOK = ctx.Deadline()
+		return "ok", nil
+	}
+
+	wrapped := boundCompleter(inner)
+	before := time.Now()
+	if _, err := wrapped(context.Background(), "sys", "user"); err != nil {
+		t.Fatalf("wrapped completer: %v", err)
+	}
+	after := time.Now()
+
+	if !gotOK {
+		t.Fatal("inner call received a context with no deadline at all")
+	}
+	if gotDeadline.Before(before.Add(slackCompleterTimeout-time.Second)) || gotDeadline.After(after.Add(slackCompleterTimeout+time.Second)) {
+		t.Errorf("deadline %v is not ~%v out from the call, got window [%v, %v]", gotDeadline, slackCompleterTimeout, before, after)
+	}
+}
+
+// Regression test: posting a reply on a context that already expired
+// upstream (fetchSlackContext/resolveSlackRepo's completer calls exhausting
+// handleSlackTrigger's 60s budget) fails PostMessage silently, since its
+// error return isn't otherwise surfaced anywhere a human sees it — the exact
+// mechanism behind the incident where a Slack trigger produced zero visible
+// response, not even the "not sure which repository" fallback.
+func TestReplyCtxSubstitutesAFreshContextOnlyWhenTheOriginalIsDead(t *testing.T) {
+	live := context.Background()
+	got, cancel := replyCtx(live)
+	cancel()
+	if got != live {
+		t.Error("replyCtx replaced a still-live context; it must pass it through unchanged")
+	}
+
+	dead, dcancel := context.WithCancel(context.Background())
+	dcancel()
+	got, cancel = replyCtx(dead)
+	defer cancel()
+	if got == dead {
+		t.Fatal("replyCtx passed through an already-cancelled context instead of substituting one")
+	}
+	if got.Err() != nil {
+		t.Error("the substitute context is itself already done")
+	}
+	if _, ok := got.Deadline(); !ok {
+		t.Error("the substitute context has no deadline of its own")
+	}
+}
+
 func TestAssembleSlackContextUsesFixedLookbackWhenSufficient(t *testing.T) {
 	history := []string{"U1: the login page 500s on bad passwords", "U2: seeing it in prod too"}
 	complete := func(ctx context.Context, system, user string) (string, error) {

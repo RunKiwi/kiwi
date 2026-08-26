@@ -110,6 +110,13 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 		}
 	}
 
+	// The classification call above is bounded (slackCompleterTimeout) but
+	// not instant, and can exhaust this trigger's own budget — see replyCtx.
+	// Everything below reports an outcome, so it must not silently fail on
+	// an already-expired context.
+	ctx, cancel := replyCtx(ctx)
+	defer cancel()
+
 	switch verdict {
 	case verdictContinue:
 		sessionID := ""
@@ -120,7 +127,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 			OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction, SessionID: sessionID, Origin: store.OriginSlack,
 		})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
 			return
 		}
 		s.recordSlackThreadTask(ctx, inst.OrgID, teamID, channelID, threadTS, task.ID, token, "Continuing…")
@@ -128,7 +135,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 	case verdictFork:
 		result, err := s.planner.SubmitFork(ctx, planner.ForkInput{OrgID: inst.OrgID, UserID: userID, ParentTask: &parent, Instruction: instruction})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't fork that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't fork that task: %s", err.Error()))
 			return
 		}
 		s.recordSlackThreadTask(ctx, inst.OrgID, teamID, channelID, threadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Forking into a new attempt — job `%s`.", result.JobID))
@@ -143,7 +150,7 @@ func (s *Server) handleSlackThreadReply(ctx context.Context, teamID, channelID, 
 			Model: defaults.model, ArchitectModel: defaults.architectModel, Origin: store.OriginSlack,
 		})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, channelID, threadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 			return
 		}
 		newStatus := fmt.Sprintf("Starting a new, unrelated task — job `%s`.", result.JobID)
@@ -196,10 +203,7 @@ func slackBindingDefaults(binding *store.SlackChannelBinding, orgID, testCmdOver
 }
 
 func (s *Server) recordSlackThreadTask(ctx context.Context, orgID, teamID, channelID, threadTS, taskID, token, statusText string) {
-	statusTS, err := s.slackClient.PostMessage(ctx, token, channelID, threadTS, statusText)
-	if err != nil {
-		log.Printf("[slackapp] posting status message: %v", err)
-	}
+	statusTS, _ := s.postSlackReply(ctx, token, channelID, threadTS, statusText)
 	row := &store.SlackTriggeredTask{OrgID: orgID, TeamID: teamID, ChannelID: channelID, ThreadTS: threadTS, QueuedTaskID: taskID, StatusMessageTS: statusTS, LastStatus: "running"}
 	if err := s.storage.CreateSlackTriggeredTask(ctx, row); err != nil {
 		log.Printf("[slackapp] persist triggered-task row for task %s: %v", taskID, err)
@@ -258,14 +262,14 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 	case "slack_thread_continue":
 		task, err := s.planner.SubmitContinuation(ctx, planner.ContinuationInput{OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction, Origin: store.OriginSlack})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't continue that task: %s", err.Error()))
 			return
 		}
 		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, task.ID, token, "Continuing…")
 	case "slack_thread_fork":
 		result, err := s.planner.SubmitFork(ctx, planner.ForkInput{OrgID: inst.OrgID, ParentTask: &parent, Instruction: instruction})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't fork that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't fork that task: %s", err.Error()))
 			return
 		}
 		s.recordSlackThreadTask(ctx, inst.OrgID, in.TeamID, in.ChannelID, existing.ThreadTS, firstOf(result.TaskIDs), token, fmt.Sprintf("Forking — job `%s`.", result.JobID))
@@ -278,7 +282,7 @@ func (s *Server) handleSlackInteractivity(ctx context.Context, formBody []byte) 
 			Model: defaults.model, ArchitectModel: defaults.architectModel, Origin: store.OriginSlack,
 		})
 		if err != nil {
-			s.slackClient.PostMessage(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
+			s.postSlackReply(ctx, token, in.ChannelID, existing.ThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 			return
 		}
 		newTaskStatus := fmt.Sprintf("Starting a new task — job `%s`.", result.JobID)
