@@ -708,6 +708,16 @@ export const client = {
   validate: () => fetchApi<ValidateResponse>("/auth/validate"),
   getUsage: () => fetchApi<UsageResponse>("/api/v1/usage"),
 
+  // default_model_source: which payer a submit with no explicit worker model
+  // falls back to — "kiwi" (Kiwi-funded catalog default) or "byok" (the
+  // org's own key). See ee/planner/architect_model.go.
+  getModelSource: () => fetchApi<{ default_model_source: string }>("/api/v1/org/model-source"),
+  setModelSource: (source: "kiwi" | "byok") =>
+    fetchApi<{ default_model_source: string }>("/api/v1/org/model-source", {
+      method: "PATCH",
+      body: JSON.stringify({ default_model_source: source }),
+    }),
+
   getSpend: (from?: string, to?: string, funding?: string) => {
     const f = from || new Date(Date.now() - 30 * 86400000).toISOString();
     const t = to || new Date().toISOString();

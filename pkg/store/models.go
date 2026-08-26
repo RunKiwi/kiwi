@@ -16,9 +16,14 @@ type Organization struct {
 	// PRCommentMode selects what a review comment on a Kiwi pull request does:
 	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
 	// mention, so Kiwi acts only when it is spoken to.
-	PRCommentMode string    `gorm:"not null;default:mention" json:"pr_comment_mode"`
-	AutoRemediate bool      `gorm:"not null;default:false" json:"auto_remediate"`
-	CreatedAt     time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
+	PRCommentMode string `gorm:"not null;default:mention" json:"pr_comment_mode"`
+	AutoRemediate bool   `gorm:"not null;default:false" json:"auto_remediate"`
+	// DefaultModelSource is which payer defaultWorkerModelFor/architectModelFor
+	// reach for when nothing else names a model: "kiwi" (prefer a Kiwi-funded
+	// catalog model) or "byok" (go straight to the org's own key defaults).
+	// See ModelSourceKiwi/ModelSourceBYOK in pkg/store/model_source.go.
+	DefaultModelSource string    `gorm:"not null;default:kiwi" json:"default_model_source"`
+	CreatedAt          time.Time `gorm:"not null;default:current_timestamp" json:"created_at"`
 }
 
 // CanRun returns true if the organization is active and allowed to run tasks.

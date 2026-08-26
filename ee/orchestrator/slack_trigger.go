@@ -158,10 +158,13 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		return
 	}
 
+	statusText := fmt.Sprintf("Working on it — job `%s`.", result.JobID)
+	if result.Warning != "" {
+		statusText += " " + result.Warning
+	}
 	statusTS := ""
 	if s.slackClient != nil {
-		statusTS, err = s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS,
-			fmt.Sprintf("Working on it — job `%s`.", result.JobID))
+		statusTS, err = s.slackClient.PostMessage(ctx, token, channelID, replyThreadTS, statusText)
 		if err != nil {
 			log.Printf("[slackapp] posting status message for job %s: %v", result.JobID, err)
 		}

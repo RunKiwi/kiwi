@@ -30,8 +30,12 @@ type Organization struct {
 	// PRCommentMode selects what a review comment on a Kiwi pull request does:
 	// off | mention | any. See pkg/store/pr_comment_mode.go; the default is
 	// mention, so Kiwi acts only when it is spoken to.
-	PRCommentMode string    `gorm:"not null;default:mention" json:"pr_comment_mode"`
-	CreatedAt     time.Time `json:"created_at"`
+	PRCommentMode string `gorm:"not null;default:mention" json:"pr_comment_mode"`
+	// DefaultModelSource: "kiwi" (prefer a Kiwi-funded catalog model in
+	// defaultWorkerModelFor/architectModelFor) or "byok" (go straight to the
+	// org's own key defaults). See pkg/store/model_source.go.
+	DefaultModelSource string    `gorm:"not null;default:kiwi" json:"default_model_source"`
+	CreatedAt          time.Time `json:"created_at"`
 	// AbuseStrikes counts recent abuse signals within AbuseStrikeWindow; the org
 	// is auto-suspended once it reaches the threshold. It decays (resets) when a
 	// strike arrives after the window, and is cleared on suspend. See
