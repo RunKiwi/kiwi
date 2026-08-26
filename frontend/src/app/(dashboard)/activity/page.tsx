@@ -459,6 +459,7 @@ export default function ActivityPage() {
                         className="flex items-center justify-center w-5 h-5 rounded-md bg-[#4A154B]/10 border border-[#4A154B]/25"
                       >
                         <FaSlack className="w-2.5 h-2.5 text-[#4A154B]" aria-hidden="true" />
+                        <span className="sr-only">Started from Slack</span>
                       </span>
                     )}
                     {!!job.sandbox_provision_ms && job.sandbox_provision_ms < FAST_PROVISION_MS && (
