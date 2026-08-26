@@ -34,12 +34,16 @@ const (
 	// — same SessionID, same worker spec — except the daemon re-plans (see
 	// pkg/session.Task.RevisionFeedback) instead of resuming the round loop.
 	OriginPlanRevision = "plan_revision"
-	// OriginSlack marks a continuation that came from a Slack thread reply —
-	// distinct from OriginPRComment (a GitHub PR review comment), which a
-	// Slack-triggered continuation is not, even though buildContinuationTask
-	// treats both the same way otherwise. The dashboard badges the two
-	// differently (see page.tsx's latest_origin check), so the label is not
-	// merely cosmetic there.
+	// OriginSlack marks any task that started from Slack — a fresh @mention,
+	// a "new" unrelated task started from an existing thread, or a
+	// continuation of one. A fork started from Slack still gets OriginFork,
+	// not this — a fork's defining fact is that it shares its parent's
+	// branch, which matters more than which surface asked for it, and
+	// OriginFork already carries the lineage a UI needs to render that.
+	// OriginSlack is distinct from OriginPRComment (a GitHub PR review
+	// comment), which a Slack-triggered continuation is not, even though
+	// buildContinuationTask treats both the same way otherwise. The frontend
+	// badges the two differently, so the label is not merely cosmetic.
 	OriginSlack = "slack"
 	// OriginPostMergeRemediation marks a continuation task auto-spawned by a
 	// Post-Merge Verification REGRESSION verdict, not a real PR comment — it

@@ -1,5 +1,6 @@
 "use client";
 
+import { FaSlack } from "react-icons/fa6";
 import type { ThreadNode } from "@/lib/thread";
 
 /**
@@ -20,6 +21,7 @@ const ORIGIN_LABEL: Record<string, string> = {
   submit: "submitted",
   pr_comment: "comment",
   fork: "fork",
+  slack: "Slack",
   postmerge_remediation: "auto-fix",
 };
 
@@ -70,9 +72,12 @@ export function ThreadRail({
                   <span className="block truncate text-[12px] text-stone-800">
                     {node.task.task || node.task.id}
                   </span>
-                  <span className="block text-[11px] text-stone-400">
-                    {ORIGIN_LABEL[node.task.origin ?? "submit"] ?? "run"}
-                    {node.task.status === "LEASED" ? " · running" : ""}
+                  <span className="flex items-center gap-1 text-[11px] text-stone-400">
+                    {node.task.origin === "slack" && <FaSlack className="w-2.5 h-2.5 text-[#4A154B] shrink-0" aria-hidden="true" />}
+                    <span>
+                      {ORIGIN_LABEL[node.task.origin ?? "submit"] ?? "run"}
+                      {node.task.status === "LEASED" ? " · running" : ""}
+                    </span>
                   </span>
                 </span>
               </button>

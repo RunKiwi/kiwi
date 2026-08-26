@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { FaSlack } from "react-icons/fa6";
 import { useRouter } from "next/navigation";
 import { useFleetStore } from "@/store/useFleetStore";
 import { client, DEFAULT_ARCHITECT_MODEL, DEFAULT_WORKER_MODEL, type BlockedReason, type JobTask, type ExecutionRecordResponse, type ExecutionRecordBody, type Job, type JobProgressTask, type RecordStep, type RecordWorker } from "@/lib/api";
@@ -717,6 +718,12 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                     {currentJob.tasks.length} {currentJob.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                 )}
+                {(currentJob?.tasks.some((t) => t.origin === "slack") ?? false) && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider bg-[#4A154B]/10 text-[#4A154B] border border-[#4A154B]/25 shrink-0">
+                    <FaSlack className="w-2.5 h-2.5" aria-hidden="true" />
+                    Slack
+                  </span>
+                )}
               </div>
 
               <h2 id="drawer-heading" className="text-sm font-bold text-stone-900 line-clamp-2 mt-1">
@@ -769,7 +776,7 @@ export function TaskDrawer({ taskId, onClose, onRerunWithEdits }: TaskDrawerProp
                   <span className="text-stone-400">• {[...modelsUsed].map((m) => m.split("/").pop()).join(", ")}</span>
                 ) : null}
 
-                {(currentJob?.tasks.some((t) => t.origin === "pr_comment") ?? false) && taskId && (
+                {(currentJob?.tasks.some((t) => t.origin === "pr_comment" || t.origin === "slack") ?? false) && taskId && (
                   <Link
                     href={`/tasks/${taskId}`}
                     className="text-sky-700 hover:underline font-sans ml-1"

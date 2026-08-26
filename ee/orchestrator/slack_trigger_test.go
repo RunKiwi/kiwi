@@ -56,6 +56,9 @@ func TestHandleSlackTriggerSubmitsAPlanWhenChannelIsBound(t *testing.T) {
 	if tasks[0].Spec["repo_url"] != "https://github.com/acme/widget" {
 		t.Fatalf("got spec %+v", tasks[0].Spec)
 	}
+	if tasks[0].Origin != store.OriginSlack {
+		t.Errorf("Origin = %q, want %q — every task a Slack @mention creates must be attributable to Slack", tasks[0].Origin, store.OriginSlack)
+	}
 
 	var rows []store.SlackTriggeredTask
 	s.db.WithContext(ctx).Where("org_id = ?", "org_1").Find(&rows)

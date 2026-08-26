@@ -1,5 +1,6 @@
 "use client";
 
+import { FaSlack } from "react-icons/fa6";
 import type { JobTask } from "@/lib/api";
 
 /**
@@ -30,6 +31,7 @@ function statusLabel(status: string): { text: string; className: string } {
 export function RunDetail({ task, children }: { task: JobTask; children?: React.ReactNode }) {
   const status = statusLabel(task.status);
   const fromComment = task.origin === "pr_comment";
+  const fromSlack = task.origin === "slack";
 
   return (
     <section className="min-w-0 flex-1 pl-4">
@@ -38,6 +40,12 @@ export function RunDetail({ task, children }: { task: JobTask; children?: React.
         <span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${status.className}`}>
           {status.text}
         </span>
+        {fromSlack && (
+          <span className="flex items-center gap-1 rounded border border-[#4A154B]/40 bg-[#4A154B]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[#ecd9ee]">
+            <FaSlack className="w-2.5 h-2.5" aria-hidden="true" />
+            Slack
+          </span>
+        )}
         {task.result_url && (
           <a
             href={task.result_url}
@@ -50,10 +58,10 @@ export function RunDetail({ task, children }: { task: JobTask; children?: React.
         )}
       </header>
 
-      {fromComment && (
-        <blockquote className="mb-3 border-l-2 border-blue-500/50 pl-3 text-[12px] text-zinc-400">
+      {(fromComment || fromSlack) && (
+        <blockquote className={`mb-3 border-l-2 pl-3 text-[12px] text-zinc-400 ${fromSlack ? "border-[#4A154B]/60" : "border-blue-500/50"}`}>
           {task.task}
-          <span className="mt-0.5 block text-[11px] text-zinc-600">from a review comment</span>
+          <span className="mt-0.5 block text-[11px] text-zinc-600">{fromSlack ? "from Slack" : "from a review comment"}</span>
         </blockquote>
       )}
 

@@ -144,6 +144,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		Ref:               defaults.ref,
 		TestCmd:           defaults.testCmd, // empty is fine: pkg/daemon infers it (see infer.go)
 		InvestigationOnly: isInvestigation,
+		Origin:            store.OriginSlack,
 		// Empty leaves both up to SubmitPlan's own default resolution — the
 		// runtime Kiwi-funded catalog auto-pick for Model (defaultWorkerModelFor)
 		// and the architect split default for ArchitectModel. A channel that

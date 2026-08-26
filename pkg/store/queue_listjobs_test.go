@@ -50,6 +50,33 @@ func TestListJobsSurfacesTaskAndRepo(t *testing.T) {
 	}
 }
 
+// The frontend's Dashboard/Activity Slack filters and badges read
+// JobSummary.LatestOrigin (handleJobsList serves this struct straight off
+// ListJobs), so a task's Origin surviving all the way to that field is what
+// makes them work at all, not just a cosmetic detail.
+func TestListJobsSurfacesSlackAsTheLatestOrigin(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.EnqueueTask(ctx, &QueuedTask{
+		ID: "job1-w1", OrgID: "org1", JobID: "job1", Origin: OriginSlack,
+		Spec: map[string]interface{}{"task": "fix the login bug"},
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	jobs, err := s.ListJobs(ctx, "org1")
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if got, want := jobs[0].LatestOrigin, OriginSlack; got != want {
+		t.Errorf("LatestOrigin = %q, want %q", got, want)
+	}
+}
+
 func TestListJobsFallsBackToWorkerTask(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
