@@ -17,14 +17,14 @@ func f64(v float64) *float64 { return &v }
 func iPtr(v int) *int        { return &v }
 func bPtr(v bool) *bool      { return &v }
 
-func seedSelectableOpenRouterEconomyModel(t *testing.T, s *Server, modelID string, outputCostPerM float64) {
+func seedSelectableOpenRouterModel(t *testing.T, s *Server, modelID, tier string, outputCostPerM float64) {
 	t.Helper()
 	now := time.Now().UTC()
 	if err := s.storage.UpsertCatalogModel(context.Background(), &store.CatalogModel{
 		OrgID: store.GlobalCatalogOrg, ModelID: modelID, Provider: "openrouter",
 		InputCostPerM: f64(0.10), OutputCostPerM: f64(outputCostPerM),
 		ContextLength: iPtr(128000), SupportsTools: bPtr(true), Modality: "text->text",
-		Tier: store.TierEconomy, KiwiProvided: true, Selectable: true,
+		Tier: tier, KiwiProvided: true, Selectable: true,
 		// Well past CheapestKiwiFundedModel's catalogMaturityWindow
 		// (pkg/store/model_catalog.go) — these tests are about tier/provider
 		// selection, not catalog freshness, so a just-seeded FirstSeenAt would
@@ -43,7 +43,7 @@ func TestSlackCompleterSucceedsOnOpenRouterAloneWhenCatalogHasAModel(t *testing.
 	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
 	// Deliberately no KIWI_PLATFORM_GEMINI_API_KEY: proves the catalog path
 	// does not fall through to (or require) Gemini.
-	seedSelectableOpenRouterEconomyModel(t, s, "cheap-router-model", 0.50)
+	seedSelectableOpenRouterModel(t, s, "cheap-router-model", store.TierFrontier, 0.50)
 
 	complete, err := s.slackCompleter(context.Background())
 	if err != nil {
@@ -56,12 +56,12 @@ func TestSlackCompleterSucceedsOnOpenRouterAloneWhenCatalogHasAModel(t *testing.
 
 // The cheapest qualifying candidate is chosen, not merely a qualifying one —
 // same guarantee pkg/store's TestCheapestKiwiFundedModelPicksLowestOutputCost
-// makes at the store layer, exercised here through the actual call site.
+// makes at the store layer.
 func TestSlackCompleterPicksTheCheapestCatalogCandidate(t *testing.T) {
 	s := newTestServer(t)
 	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
-	seedSelectableOpenRouterEconomyModel(t, s, "pricier-model", 1.80)
-	seedSelectableOpenRouterEconomyModel(t, s, "cheapest-model", 0.20)
+	seedSelectableOpenRouterModel(t, s, "pricier-model", store.TierEconomy, 1.80)
+	seedSelectableOpenRouterModel(t, s, "cheapest-model", store.TierEconomy, 0.20)
 
 	got, ok, err := s.storage.CheapestKiwiFundedModel(context.Background(), store.GlobalCatalogOrg, "openrouter", store.TierEconomy)
 	if err != nil || !ok {
@@ -88,7 +88,7 @@ func TestSlackCompleterFailsWhenNothingIsConfigured(t *testing.T) {
 func TestSlackCompleterFallsBackToGeminiWithoutAnOpenRouterKey(t *testing.T) {
 	s := newTestServer(t)
 	t.Setenv("KIWI_PLATFORM_GEMINI_API_KEY", "sk-gemini-platform")
-	seedSelectableOpenRouterEconomyModel(t, s, "cheap-router-model", 0.50)
+	seedSelectableOpenRouterModel(t, s, "cheap-router-model", store.TierFrontier, 0.50)
 
 	complete, err := s.slackCompleter(context.Background())
 	if err != nil {
