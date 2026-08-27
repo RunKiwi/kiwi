@@ -97,6 +97,17 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	if rawInstruction == "" {
 		return
 	}
+
+	// Ack immediately, before any inference work starts. fetchSlackContext
+	// and resolveSlackRepo can together take up to ~30s (each makes
+	// slackCompleterTimeout-bounded calls), and the eyes reaction used to be
+	// added only on the way to SubmitPlan — so the ambiguous-repo case, the
+	// most common failure, left the user with zero acknowledgment for the
+	// entire request. Using ctx here rather than the post-replyCtx one below
+	// is deliberate: this call happens before any of that latency, while ctx
+	// is still fresh.
+	s.ackSlackTrigger(ctx, token, channelID, messageTS)
+
 	// Context assembly cares about the ORIGINAL threadTS, not replyThreadTS:
 	// an empty threadTS means "no thread exists yet", which is exactly what
 	// tells fetchSlackContext to pull channel history instead of trying to
@@ -126,14 +137,11 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	defer cancel()
 
 	if ambiguousReply != "" {
+		s.failSlackTrigger(ctx, token, channelID, messageTS)
 		if s.slackClient != nil {
 			s.postSlackReply(ctx, token, channelID, replyThreadTS, ambiguousReply)
 		}
 		return
-	}
-
-	if s.slackClient != nil {
-		s.slackClient.AddReaction(ctx, token, channelID, messageTS, "eyes")
 	}
 
 	// An inline test:"..." token outranks the channel's default, the same
@@ -163,6 +171,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 		ArchitectModel: defaults.architectModel,
 	})
 	if err != nil {
+		s.failSlackTrigger(ctx, token, channelID, messageTS)
 		if s.slackClient != nil {
 			s.postSlackReply(ctx, token, channelID, replyThreadTS, fmt.Sprintf("Couldn't start that task: %s", err.Error()))
 		}
@@ -200,6 +209,34 @@ func (s *Server) postSlackReply(ctx context.Context, token, channelID, threadTS,
 		log.Printf("[slackapp] posting reply to channel %s thread %s: %v", channelID, threadTS, err)
 	}
 	return ts, err
+}
+
+// ackSlackTrigger reacts to the triggering message immediately on receipt —
+// the earliest point handleSlackTrigger knows it's actually going to attempt
+// something, before any LLM inference work starts.
+func (s *Server) ackSlackTrigger(ctx context.Context, token, channelID, messageTS string) {
+	if s.slackClient == nil {
+		return
+	}
+	if err := s.slackClient.AddReaction(ctx, token, channelID, messageTS, "eyes"); err != nil {
+		log.Printf("[slackapp] adding eyes reaction: %v", err)
+	}
+}
+
+// failSlackTrigger swaps the eyes ack for an x once resolution has failed
+// (ambiguous repo, or SubmitPlan itself erroring) — so the reaction left on
+// the message doesn't keep reading as "still working" once it isn't, on a
+// thread that may also carry an explanatory reply from postSlackReply.
+func (s *Server) failSlackTrigger(ctx context.Context, token, channelID, messageTS string) {
+	if s.slackClient == nil {
+		return
+	}
+	if err := s.slackClient.RemoveReaction(ctx, token, channelID, messageTS, "eyes"); err != nil {
+		log.Printf("[slackapp] removing eyes reaction: %v", err)
+	}
+	if err := s.slackClient.AddReaction(ctx, token, channelID, messageTS, "x"); err != nil {
+		log.Printf("[slackapp] adding x reaction: %v", err)
+	}
 }
 
 func firstOf(ids []string) string {
