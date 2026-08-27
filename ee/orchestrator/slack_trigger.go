@@ -114,7 +114,7 @@ func (s *Server) handleSlackTrigger(ctx context.Context, teamID, channelID, thre
 	if binding != nil && binding.OrgID != inst.OrgID {
 		binding = nil
 	}
-	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, binding)
+	repoURL, ambiguousReply := s.resolveSlackRepo(ctx, inst.OrgID, text, instruction, binding)
 
 	// fetchSlackContext and resolveSlackRepo can together make several
 	// bounded-but-not-instant completer calls, and can exhaust this
