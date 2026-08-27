@@ -82,6 +82,83 @@ func TestSlackCompleterFailsWhenNothingIsConfigured(t *testing.T) {
 	}
 }
 
+// Regression test for the incident where the cheapest Kiwi-funded frontier
+// candidate was deepseek-r1 — a slow reasoning model that reliably ate its
+// full boundCompleter budget and starved every completer call in the Slack
+// path. slackCompleter must skip a reasoning-named candidate for a cheaper
+// non-reasoning one further down the cost-ordered list, not just take
+// whatever is cheapest.
+func TestSlackCompleterSkipsAReasoningNamedCandidateForACheaperNonReasoningOne(t *testing.T) {
+	s := newTestServer(t)
+	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
+	seedSelectableOpenRouterModel(t, s, "deepseek/deepseek-r1-0528", store.TierFrontier, 2.15)
+	seedSelectableOpenRouterModel(t, s, "z-ai/glm-4.5", store.TierFrontier, 2.20)
+
+	candidates, err := s.storage.CheapestKiwiFundedModels(context.Background(), store.GlobalCatalogOrg, "openrouter", store.TierFrontier, slackCompleterCandidateLimit)
+	if err != nil {
+		t.Fatalf("CheapestKiwiFundedModels: %v", err)
+	}
+	got, ok := pickNonReasoningCandidate(candidates)
+	if !ok {
+		t.Fatal("expected a non-reasoning candidate to be found")
+	}
+	if got != "z-ai/glm-4.5" {
+		t.Fatalf("got %q, want the cheaper reasoning candidate skipped in favor of glm-4.5", got)
+	}
+}
+
+// If every candidate within the fetch limit looks like a reasoning model,
+// pickNonReasoningCandidate must report that rather than silently returning
+// one anyway — the caller (slackCompleter) falls to Gemini in that case.
+func TestPickNonReasoningCandidateReportsFalseWhenEveryCandidateIsReasoning(t *testing.T) {
+	_, ok := pickNonReasoningCandidate([]string{"deepseek/deepseek-r1-0528", "qwen/qwen3-235b-a22b-thinking-2507"})
+	if ok {
+		t.Fatal("expected no non-reasoning candidate to be found")
+	}
+}
+
+func TestLooksLikeSlowReasoningModelMatchesKnownReasoningNamingConventions(t *testing.T) {
+	reasoning := []string{
+		"deepseek/deepseek-r1-0528", "deepseek/deepseek-reasoner",
+		"qwen/qwen3-235b-a22b-thinking-2507", "qwen/qwq-32b",
+		"openai/o1-preview", "openai/o3-mini", "openai/o4-mini",
+	}
+	for _, m := range reasoning {
+		if !looksLikeSlowReasoningModel(m) {
+			t.Errorf("looksLikeSlowReasoningModel(%q) = false, want true", m)
+		}
+	}
+
+	notReasoning := []string{
+		"z-ai/glm-4.5", "moonshotai/kimi-k2", "anthropic/claude-3-5-haiku", "openai/gpt-4o",
+	}
+	for _, m := range notReasoning {
+		if looksLikeSlowReasoningModel(m) {
+			t.Errorf("looksLikeSlowReasoningModel(%q) = true, want false", m)
+		}
+	}
+}
+
+// End-to-end version of the skip: when every frontier candidate the fetch
+// limit surfaces looks like a reasoning model, slackCompleter must fall
+// through to Gemini rather than settle for the least-bad reasoning model —
+// the whole point is that none of them fit the latency budget this call has.
+func TestSlackCompleterFallsBackToGeminiWhenEveryFrontierCandidateIsReasoning(t *testing.T) {
+	s := newTestServer(t)
+	t.Setenv("KIWI_PLATFORM_OPENROUTER_API_KEY", "sk-or-platform")
+	t.Setenv("KIWI_PLATFORM_GEMINI_API_KEY", "sk-gemini-platform")
+	seedSelectableOpenRouterModel(t, s, "deepseek/deepseek-r1-0528", store.TierFrontier, 2.15)
+	seedSelectableOpenRouterModel(t, s, "qwen/qwen3-235b-a22b-thinking-2507", store.TierFrontier, 2.30)
+
+	complete, err := s.slackCompleter(context.Background())
+	if err != nil {
+		t.Fatalf("slackCompleter: %v", err)
+	}
+	if complete == nil {
+		t.Fatal("expected a non-nil completeFunc from the Gemini fallback")
+	}
+}
+
 // A qualifying catalog model exists but Kiwi holds no OpenRouter key to pay
 // for it (platform_keys.go's own rule): slackCompleter must fall through to
 // Gemini rather than trying to build a provider with no key.

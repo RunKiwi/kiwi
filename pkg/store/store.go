@@ -193,6 +193,7 @@ type Store interface {
 	GetCatalogModel(ctx context.Context, orgID, modelID string) (*CatalogModel, error)
 	ResolveModel(ctx context.Context, orgID, modelID string) (Resolution, error)
 	CheapestKiwiFundedModel(ctx context.Context, orgID, providerID, tier string) (string, bool, error)
+	CheapestKiwiFundedModels(ctx context.Context, orgID, providerID, tier string, limit int) ([]string, error)
 	MarkCatalogMissing(ctx context.Context, orgID, providerID string, seen []string, at time.Time) error
 
 	// Daemons: Data Plane runner identity. A daemon's Ed25519 key is its

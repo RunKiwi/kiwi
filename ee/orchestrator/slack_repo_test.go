@@ -6,6 +6,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +48,57 @@ func TestInferRepoReportsAmbiguousOnLowConfidence(t *testing.T) {
 	}
 	if !ambiguous {
 		t.Fatal("expected ambiguous=true on low confidence")
+	}
+}
+
+// Regression test for the incident where a user named the repo in one
+// message ("docs repo is runkiwi/docs on github") and then, in a later
+// message in the same thread, only said "work on this" — resolveSlackRepo
+// passed the bare current message to inferRepo instead of the context-
+// assembled instruction fetchSlackContext already builds from thread
+// history, so the repo the user had already stated was invisible to the
+// model and every such follow-up came back ambiguous.
+func TestPickRepoFromCandidatesSeesThreadHistoryInInstructionNotBareMention(t *testing.T) {
+	names := []string{"runkiwi/docs", "runkiwi/kiwi"}
+	nameToURL := map[string]string{
+		"runkiwi/docs": "https://github.com/runkiwi/docs",
+		"runkiwi/kiwi": "https://github.com/runkiwi/kiwi",
+	}
+	var gotUser string
+	complete := func(ctx context.Context, system, user string) (string, error) {
+		gotUser = user
+		if strings.Contains(user, "docs repo is runkiwi/docs") {
+			return `{"repo": "runkiwi/docs", "confidence": "high"}`, nil
+		}
+		return `{"repo": "", "confidence": "low"}`, nil
+	}
+	instruction := "Context from the conversation:\nU1: docs repo is runkiwi/docs on github\n\nInstruction: work on this"
+
+	repoURL, ambiguousReply := pickRepoFromCandidates(context.Background(), complete, names, nameToURL, instruction)
+	if ambiguousReply != "" {
+		t.Fatalf("got ambiguousReply %q, want the repo named earlier in the thread to resolve it", ambiguousReply)
+	}
+	if repoURL != "https://github.com/runkiwi/docs" {
+		t.Fatalf("got repoURL %q, want runkiwi/docs", repoURL)
+	}
+	if !strings.Contains(gotUser, "docs repo is runkiwi/docs") {
+		t.Fatalf("completer prompt %q did not include the thread history", gotUser)
+	}
+}
+
+// The bare mention alone, with no thread history folded in, must still
+// report ambiguous rather than guess — this is what the fix above must NOT
+// regress: it's the completer input that changed (bare text vs.
+// context-assembled instruction), not the "only high confidence auto-picks"
+// rule itself.
+func TestPickRepoFromCandidatesStillAmbiguousWithNoRepoSignalAtAll(t *testing.T) {
+	names := []string{"runkiwi/docs", "runkiwi/kiwi"}
+	nameToURL := map[string]string{"runkiwi/docs": "https://github.com/runkiwi/docs"}
+	complete := func(ctx context.Context, system, user string) (string, error) {
+		return `{"repo": "", "confidence": "low"}`, nil
+	}
+	repoURL, ambiguousReply := pickRepoFromCandidates(context.Background(), complete, names, nameToURL, "work on this")
+	if ambiguousReply == "" || repoURL != "" {
+		t.Fatalf("got repoURL=%q ambiguousReply=%q, want ambiguous with no repo resolved", repoURL, ambiguousReply)
 	}
 }
