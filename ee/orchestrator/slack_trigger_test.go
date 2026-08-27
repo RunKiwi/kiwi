@@ -5,9 +5,15 @@
 package orchestrator
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/ibreakthecloud/kiwi/ee/auth"
+	"github.com/ibreakthecloud/kiwi/ee/slackapp"
 	"github.com/ibreakthecloud/kiwi/pkg/store"
 )
 
@@ -195,6 +201,71 @@ func TestHandleSlackTriggerHonorsInlineTestCmdOverride(t *testing.T) {
 	// of the task — it must not reach the Architect as if it were the ask.
 	if got := tasks[0].Spec["task"]; got != "fix the broken link" {
 		t.Fatalf("task = %v, want the test: token stripped out", got)
+	}
+}
+
+// Regression test: the eyes ack must land before any inference work starts
+// (previously it only fired on the way to SubmitPlan, so the ambiguous-repo
+// case — no binding, no GitHub connection, resolved with zero completer
+// calls — got no acknowledgment at all), and a failed resolution must swap
+// it for an x rather than leave "eyes" sitting on the message.
+func TestHandleSlackTriggerAcksImmediatelyAndSwapsToFailureReactionOnAmbiguousRepo(t *testing.T) {
+	s := newTestServer(t)
+	ctx := t.Context()
+
+	if err := s.db.WithContext(ctx).Create(&auth.Organization{ID: "org_1", Plan: "pro"}).Error; err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	_ = s.storage.UpsertSlackInstallation(ctx, &store.SlackInstallation{TeamID: "T1", OrgID: "org_1"})
+	_ = s.storage.SetSlackBotToken(ctx, "T1", "xoxb-test")
+	// Deliberately no channel binding and no GitHub installation: resolveSlackRepo
+	// hits its "no GitHub connection" ambiguous branch with zero completer
+	// calls, so this test is fast and deterministic rather than depending on
+	// slackCompleter's fallback chain.
+
+	type call struct {
+		method string
+		emoji  string
+	}
+	var calls []call
+	s.slackClient = slackapp.New(
+		slackapp.WithBaseURL("https://slack.com/api"),
+		slackapp.WithHTTPClient(&http.Client{
+			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				var body map[string]interface{}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/reactions.add"):
+					calls = append(calls, call{"reactions.add", fmt.Sprint(body["name"])})
+				case strings.HasSuffix(r.URL.Path, "/reactions.remove"):
+					calls = append(calls, call{"reactions.remove", fmt.Sprint(body["name"])})
+				case strings.HasSuffix(r.URL.Path, "/chat.postMessage"):
+					calls = append(calls, call{"chat.postMessage", ""})
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"ok":true,"ts":"100.002"}`)),
+				}, nil
+			}),
+		}),
+	)
+
+	s.handleSlackTrigger(ctx, "T1", "C1", "", "100.001", "U1", "<@U0BOT> fix the login bug")
+
+	want := []call{
+		{"reactions.add", "eyes"},
+		{"reactions.remove", "eyes"},
+		{"reactions.add", "x"},
+		{"chat.postMessage", ""},
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("got %d Slack API calls %+v, want %+v", len(calls), calls, want)
+	}
+	for i, c := range calls {
+		if c != want[i] {
+			t.Fatalf("call %d = %+v, want %+v (full sequence: %+v)", i, c, want[i], calls)
+		}
 	}
 }
 
