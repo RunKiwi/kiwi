@@ -65,7 +65,19 @@ func inferRepo(ctx context.Context, complete completeFunc, repoNames []string, i
 // override, then channel binding, then LLM inference, then disambiguation.
 // A non-empty ambiguousReply means the caller must reply with it and NOT
 // submit a task.
-func (s *Server) resolveSlackRepo(ctx context.Context, orgID, text string, binding *store.SlackChannelBinding) (repoURL, ambiguousReply string) {
+//
+// text and instruction are deliberately different inputs. text is the raw
+// current message: inlineRepoOverride's explicit "repo:owner/name" token is
+// only ever honored from the message actually being acted on, not from
+// something said earlier in the thread. instruction is the context-assembled
+// task description built by fetchSlackContext, which — unlike text — folds
+// in prior thread history. A user who names the repo in one message ("docs
+// repo is runkiwi/docs") and only says "work on this" in the @mention that
+// follows has zero repo signal in text alone; inferRepo needs instruction to
+// ever see the message that actually answers the question. Passing text here
+// instead was a real bug: repo inference silently ignored thread history it
+// had already fetched for a completely different purpose.
+func (s *Server) resolveSlackRepo(ctx context.Context, orgID, text, instruction string, binding *store.SlackChannelBinding) (repoURL, ambiguousReply string) {
 	if override, ok := inlineRepoOverride(text); ok {
 		return "https://github.com/" + override, ""
 	}
@@ -98,7 +110,16 @@ func (s *Server) resolveSlackRepo(ctx context.Context, orgID, text string, bindi
 	if cerr != nil {
 		return "", "Couldn't determine which repository this is about — bind this channel to a repository under Integrations."
 	}
-	picked, ambiguous, err := inferRepo(ctx, complete, names, text)
+	return pickRepoFromCandidates(ctx, complete, names, nameToURL, instruction)
+}
+
+// pickRepoFromCandidates is resolveSlackRepo's I/O-free tail: given repos
+// already fetched from the GitHub App and a completer already built, decide.
+// Split out so "the completer sees instruction, not the bare mention" is
+// testable without a live githubApp client, which s.githubApp — a concrete
+// *githubapp.Client, not an interface — otherwise makes impossible to fake.
+func pickRepoFromCandidates(ctx context.Context, complete completeFunc, names []string, nameToURL map[string]string, instruction string) (repoURL, ambiguousReply string) {
+	picked, ambiguous, err := inferRepo(ctx, complete, names, instruction)
 	if err != nil || ambiguous || picked == "" {
 		return "", fmt.Sprintf("Not sure which repository this is about — try mentioning it explicitly, e.g. `repo:%s`, or bind this channel under Integrations.", firstOf(names))
 	}

@@ -86,10 +86,11 @@ func replyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 // all run on the Control Plane rather than a customer's daemon and so need
 // their own key rather than the org's.
 //
-// The cheapest Kiwi-funded OpenRouter *frontier*-tier model in the catalog is
-// tried first — picked at call time, not hardcoded, so a discovery refresh
-// that finds a cheaper qualifying model routes here automatically. Economy
-// tier was the original choice and is wrong for this call: these three
+// The cheapest Kiwi-funded OpenRouter *frontier*-tier model in the catalog
+// that doesn't look like a slow reasoning model (looksLikeSlowReasoningModel)
+// is tried first — picked at call time, not hardcoded, so a discovery
+// refresh that finds a cheaper qualifying model routes here automatically.
+// Economy tier was the original choice and is wrong for this call: these three
 // decisions gate whether a task runs at all (wrong repo, false-ambiguous,
 // misclassified continue/fork/new), so a few cents of margin isn't worth
 // picking the weakest model in the catalog — see the resolveSlackRepo
@@ -102,12 +103,64 @@ func replyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 // no OpenRouter platform key configured, or whose catalog has not discovered
 // a qualifying frontier model yet — the operator override
 // (KIWI_SLACK_INFERENCE_MODEL) still applies there, not to the catalog pick.
+// slackCompleterCandidateLimit is how many cheapest frontier candidates
+// slackCompleter fetches before giving up on OpenRouter and falling to
+// Gemini. Wide enough to reliably contain at least one non-reasoning model
+// alongside the reasoning-named ones a catalog refresh can surface (5
+// candidates at the time this was written split 3 reasoning / 2 not), not a
+// promise every catalog will have one within this window.
+const slackCompleterCandidateLimit = 5
+
+// looksLikeSlowReasoningModel flags model ids that follow common
+// "reasoning"/"thinking" naming conventions across OpenRouter providers —
+// DeepSeek's -r1/-reasoner suffix, Qwen's -thinking/QwQ line, OpenAI's
+// o1/o3/o4 series. These models spend a variable, often long, hidden
+// deliberation budget before answering, which is fundamentally at odds with
+// slackCompleterTimeout's 15s bound: a prod incident traced to Cloud Logging
+// showed the then-cheapest Kiwi-funded frontier candidate, deepseek-r1,
+// reliably eating its full 15s budget on every completer call, discarding
+// thread history fetchSlackContext had already gathered and leaving repo
+// inference nothing to work with. Name matching is a heuristic, not a
+// promise — a reasoning model with no recognizable naming convention (e.g.
+// minimax-m1, seen in the same catalog) will still slip through.
+func looksLikeSlowReasoningModel(modelID string) bool {
+	m := strings.ToLower(modelID)
+	for _, marker := range []string{"-r1", "/r1", "thinking", "reasoner", "qwq", "-o1", "/o1", "-o3", "/o3", "-o4", "/o4"} {
+		if strings.Contains(m, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// pickNonReasoningCandidate returns the first candidate — already ordered
+// cheapest-first by CheapestKiwiFundedModels — that doesn't look like a slow
+// reasoning model, or false if every candidate does.
+func pickNonReasoningCandidate(candidates []string) (string, bool) {
+	for _, c := range candidates {
+		if !looksLikeSlowReasoningModel(c) {
+			return c, true
+		}
+	}
+	return "", false
+}
+
 func (s *Server) slackCompleter(ctx context.Context) (completeFunc, error) {
-	if or, ok, err := s.storage.CheapestKiwiFundedModel(ctx, store.GlobalCatalogOrg, provider.ProviderOpenRouter, store.TierFrontier); err == nil && ok {
-		if key, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); ok && key != "" {
-			if spec, ok := provider.SpecFor(provider.ProviderOpenRouter); ok {
-				p := provider.NewOpenAICompatibleProvider(key, or, or, spec.BaseURL, spec.ID)
-				return boundCompleter(p.Complete), nil
+	if key, ok := provider.PlatformKeyFor(provider.ProviderOpenRouter); ok && key != "" {
+		if spec, ok := provider.SpecFor(provider.ProviderOpenRouter); ok {
+			candidates, err := s.storage.CheapestKiwiFundedModels(ctx, store.GlobalCatalogOrg, provider.ProviderOpenRouter, store.TierFrontier, slackCompleterCandidateLimit)
+			if err == nil {
+				if or, ok := pickNonReasoningCandidate(candidates); ok {
+					// Logged so the next latency incident is a one-line log
+					// grep, not an inference from gaps between SQL
+					// timestamps — that inference is exactly how the
+					// previous incident's model was identified, and it was
+					// only ever a best guess.
+					log.Printf("[slackapp] slackCompleter picked %s (candidates: %v)", or, candidates)
+					p := provider.NewOpenAICompatibleProvider(key, or, or, spec.BaseURL, spec.ID)
+					return boundCompleter(p.Complete), nil
+				}
+				log.Printf("[slackapp] every frontier candidate looked like a reasoning model, falling to Gemini (candidates: %v)", candidates)
 			}
 		}
 	}

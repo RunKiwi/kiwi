@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/ibreakthecloud/kiwi/pkg/provider"
@@ -225,38 +224,59 @@ func (s *PostgresStore) ResolveModel(ctx context.Context, orgID, modelID string)
 const catalogMaturityWindow = 21 * 24 * time.Hour
 
 func (s *PostgresStore) CheapestKiwiFundedModel(ctx context.Context, orgID, providerID, tier string) (string, bool, error) {
+	models, err := s.CheapestKiwiFundedModels(ctx, orgID, providerID, tier, 1)
+	if err != nil {
+		return "", false, err
+	}
+	if len(models) == 0 {
+		return "", false, nil
+	}
+	return models[0], true, nil
+}
+
+// CheapestKiwiFundedModels returns up to limit qualifying candidates,
+// cheapest first — the same selection CheapestKiwiFundedModel makes, for a
+// caller that needs to skip a candidate for a reason this query has no way
+// to express. slackCompleter is the reason this exists: it needs to skip a
+// candidate that looks like a slow reasoning model (see
+// looksLikeSlowReasoningModel), which cost and tier alone can't rule out.
+func (s *PostgresStore) CheapestKiwiFundedModels(ctx context.Context, orgID, providerID, tier string, limit int) ([]string, error) {
 	base := s.db.WithContext(ctx).
 		Where("org_id IN ? AND provider = ? AND tier = ? AND kiwi_provided = ? AND selectable = ? AND output_cost_per_m IS NOT NULL",
 			[]string{GlobalCatalogOrg, orgID}, providerID, tier, true, true).
 		Order("output_cost_per_m ASC, model_id ASC")
 
-	var m CatalogModel
-	err := base.Session(&gorm.Session{}).
+	var mature []CatalogModel
+	if err := base.Session(&gorm.Session{}).
 		Where("first_seen_at <= ?", time.Now().Add(-catalogMaturityWindow)).
-		Limit(1).First(&m).Error
-	if err == nil {
-		return m.ModelID, true, nil
+		Limit(limit).Find(&mature).Error; err != nil {
+		return nil, err
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", false, err
+	if len(mature) > 0 {
+		return catalogModelIDs(mature), nil
 	}
 
 	// No candidate cleared the maturity bar — most likely every row was
 	// (re)seeded together, per catalogMaturityWindow's doc comment, not that
-	// every model is genuinely brand new. Falling through to ok=false here
-	// would silently starve every Kiwi-funded pick for catalogMaturityWindow
-	// after every reseed; defaultWorkerModelFor's only fallback needs a key
-	// the org whose default this is doesn't have. Cost-only ranking is the
-	// pre-maturity-filter behavior, and it is still strictly better than
-	// handing the caller nothing.
-	err = base.Session(&gorm.Session{}).Limit(1).First(&m).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", false, nil
-		}
-		return "", false, err
+	// every model is genuinely brand new. Falling through to an empty slice
+	// here would silently starve every Kiwi-funded pick for
+	// catalogMaturityWindow after every reseed; defaultWorkerModelFor's only
+	// fallback needs a key the org whose default this is doesn't have.
+	// Cost-only ranking is the pre-maturity-filter behavior, and it is still
+	// strictly better than handing the caller nothing.
+	var all []CatalogModel
+	if err := base.Session(&gorm.Session{}).Limit(limit).Find(&all).Error; err != nil {
+		return nil, err
 	}
-	return m.ModelID, true, nil
+	return catalogModelIDs(all), nil
+}
+
+func catalogModelIDs(models []CatalogModel) []string {
+	ids := make([]string, len(models))
+	for i, m := range models {
+		ids[i] = m.ModelID
+	}
+	return ids
 }
 
 // MarkCatalogMissing records that a provider's refresh no longer lists a model,
